@@ -1,38 +1,40 @@
 // services/core/logic/engine3/paperScalpReaction.js
 //
-// Engine 3 — Strategy 1 canonical PAPER_ONLY price-reaction contract.
+// Engine 3 — Strategy 1 canonical PAPER_ONLY reaction contract.
 //
-// LONG-RUN OWNERSHIP CONTRACT
-// - Engine 26 owns WHERE: canonical Strategy 1 candidate + negotiated zone.
+// LONG-RUN STRATEGY 1 OWNERSHIP
+// - Engine 26 owns WHERE: candidate identity + exact negotiated zone + lifecycle.
 // - Engine 3 owns WHAT PRICE DID THERE.
 // - 1m is WATCH / DISPLAY ONLY. It never creates, flips, confirms, or invalidates
 //   canonical Engine 3 direction.
-// - 5m is the mature price-reaction evidence layer at the exact Engine 26 zone.
-// - 10m is the broader price-confirmation layer at the same exact Engine 26 zone.
+// - 5m is the primary mature reaction-direction evidence layer.
+// - Book-language reaction state is calculated ONLY against the exact Engine 26
+//   negotiated zone. No nearest EMA/wave/shelf/prior-high-low reference search.
+// - 10m is broader price confirmation of the 5m direction. Initial direction is
+//   established only when completed 5m + completed 10m agree.
 // - Engine 4 owns participation / volume confirmation.
 // - Engine 6 owns final PAPER permission.
-// - Engine 22, old fast-imbalance logic, generic nearest-reference logic, EMA10,
-//   EMA20, shelves, prior highs/lows, and other legacy references do NOT create
-//   the initial Strategy 1 Engine 3 direction.
 //
-// TRAVEL / PERSISTENCE CONTRACT
-// - Once Engine 3 has confirmed LONG/SHORT for the current Engine 26 lifecycle,
-//   that canonical direction is stable. 1m and 5m may continue to display fresh
-//   diagnostics but cannot flip the canonical direction.
-// - After price leaves the negotiated zone, completed 10m close vs 10m EMA10
-//   owns HOLD / RESET only:
-//     SHORT stays SHORT until completed 10m close > EMA10.
-//     LONG  stays LONG  until completed 10m close < EMA10.
-// - EMA10 never creates initial direction.
-// - A fresh Engine 26 candidate / zone lifecycle resets prior Engine 3 direction.
-//   Engine 26 midpoint completion therefore starts a new neutral reaction cycle.
+// TRAVEL / PERSISTENCE
+// - Once an established Strategy 1 direction leaves the negotiated zone, 1m/5m
+//   are diagnostic only and cannot flip canonical direction.
+// - SHORT remains SHORT until either Engine 26 starts a fresh lifecycle (target
+//   midpoint completion / new candidate) OR a completed 10m close is ABOVE EMA10.
+// - LONG remains LONG until either Engine 26 starts a fresh lifecycle OR a
+//   completed 10m close is BELOW EMA10.
+// - EMA10 NEVER creates the initial direction.
 //
-// CANONICAL REACTION LANGUAGE
-// The following states are evaluated ONLY against the Engine 26 negotiated zone:
+// BOOK-LANGUAGE STATES (exact Engine 26 negotiated zone only)
 // WICK_BELOW_AND_RECLAIM, DIP_BOUGHT_FAST, SELLERS_TRAPPED,
 // HELD_LEVEL, RECLAIMED_LEVEL, LOST_LEVEL, FAILED_RECLAIM,
 // ACCEPTING_VALUE, REJECTING_VALUE, BREAKOUT_HOLDING,
-// BREAKOUT_FAILING, CHOP_INSIDE_VALUE.
+// BREAKOUT_FAILING, CHOP_INSIDE_VALUE, NO_SIGNAL.
+//
+// IMPORTANT DESIGN RULE
+// A semantic state is descriptive evidence, NOT an automatic LONG/SHORT veto.
+// 5m direction comes from completed 5m price sequence. 10m confirmation comes
+// from completed 10m price sequence. Book state explains what happened at the
+// negotiated zone and remains visible on the timeline.
 //
 // Output path:
 // confluence.context.reaction.paperScalpReaction
@@ -41,7 +43,7 @@ import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 import { deriveCandleCompletionTruth } from "./candleCompletionTruth.js";
 import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
 
-const ENGINE = "engine3.paperScalpReaction.v6";
+const ENGINE = "engine3.paperScalpReaction.v7";
 const SOURCE = "engine3.strategy1.negotiatedZoneReaction";
 
 const TARGET_MODEL = {
@@ -49,23 +51,6 @@ const TARGET_MODEL = {
   targetPoints: 10,
   exitModel: "THREE_BLOCKS",
 };
-
-const LONG_STATES = new Set([
-  "WICK_BELOW_AND_RECLAIM",
-  "DIP_BOUGHT_FAST",
-  "SELLERS_TRAPPED",
-  "HELD_LEVEL",
-  "RECLAIMED_LEVEL",
-  "ACCEPTING_VALUE",
-  "BREAKOUT_HOLDING",
-]);
-
-const SHORT_STATES = new Set([
-  "LOST_LEVEL",
-  "FAILED_RECLAIM",
-  "REJECTING_VALUE",
-  "BREAKOUT_FAILING",
-]);
 
 function safeUpper(value, fallback = "NONE") {
   const text = String(value ?? "").trim();
@@ -112,21 +97,29 @@ function barClose(bar) {
   return barNumber(bar, "close", "c");
 }
 
+function barTime(bar) {
+  return bar?.time ?? bar?.t ?? bar?.tSec ?? null;
+}
+
+function getEngine22Direction(engine22WaveStrategy) {
+  return safeUpper(
+    engine22WaveStrategy?.currentLifecycleState?.confirmationContext?.direction ||
+      engine22WaveStrategy?.currentLifecycleState?.direction ||
+      engine22WaveStrategy?.waveOpportunity?.direction ||
+      engine22WaveStrategy?.direction ||
+      "NONE",
+    "NONE"
+  );
+}
+
 function normalizeZone(handoff = null) {
-  const sources = [
-    handoff?.zone,
-    handoff?.negotiatedZone,
-  ];
+  const sources = [handoff?.zone, handoff?.negotiatedZone];
 
   for (const source of sources) {
     if (!source || typeof source !== "object") continue;
 
-    const rawLo = validPrice(
-      source?.lo ?? source?.low ?? source?.zoneLo
-    );
-    const rawHi = validPrice(
-      source?.hi ?? source?.high ?? source?.zoneHi
-    );
+    const rawLo = validPrice(source?.lo ?? source?.low ?? source?.zoneLo);
+    const rawHi = validPrice(source?.hi ?? source?.high ?? source?.zoneHi);
 
     if (rawLo == null || rawHi == null) continue;
 
@@ -143,6 +136,7 @@ function normalizeZone(handoff = null) {
       type: source?.type ?? "NEGOTIATED",
       timeframe: source?.timeframe ?? "10m",
       source: source?.source ?? "ENGINE26",
+      sourcePath: source?.sourcePath ?? null,
       relation: source?.relation ?? null,
     };
   }
@@ -150,34 +144,54 @@ function normalizeZone(handoff = null) {
   return null;
 }
 
-function zonePosition(currentPrice, zone) {
+function resolveNegotiatedZonePosition({ currentPrice = null, zone = null } = {}) {
   const price = validPrice(currentPrice);
+
   if (price == null || !zone) {
     return {
       known: false,
       inside: false,
       position: "UNKNOWN",
+      currentPrice: price,
+      lo: zone?.lo ?? null,
+      hi: zone?.hi ?? null,
+      mid: zone?.mid ?? null,
     };
   }
 
   if (price < zone.lo) {
-    return { known: true, inside: false, position: "BELOW_ZONE" };
+    return {
+      known: true,
+      inside: false,
+      position: "BELOW_ZONE",
+      currentPrice: price,
+      lo: zone.lo,
+      hi: zone.hi,
+      mid: zone.mid,
+    };
   }
 
   if (price > zone.hi) {
-    return { known: true, inside: false, position: "ABOVE_ZONE" };
+    return {
+      known: true,
+      inside: false,
+      position: "ABOVE_ZONE",
+      currentPrice: price,
+      lo: zone.lo,
+      hi: zone.hi,
+      mid: zone.mid,
+    };
   }
 
-  return { known: true, inside: true, position: "INSIDE_ZONE" };
-}
-
-function getEngine22Direction(engine22WaveStrategy) {
-  return safeUpper(
-    engine22WaveStrategy?.currentLifecycleState?.direction ??
-      engine22WaveStrategy?.waveOpportunity?.direction ??
-      engine22WaveStrategy?.direction,
-    "NEUTRAL"
-  );
+  return {
+    known: true,
+    inside: true,
+    position: "INSIDE_ZONE",
+    currentPrice: price,
+    lo: zone.lo,
+    hi: zone.hi,
+    mid: zone.mid,
+  };
 }
 
 function identityValue(source, key) {
@@ -187,40 +201,11 @@ function identityValue(source, key) {
     : value;
 }
 
-function identityMatches(source, handoff) {
-  if (!source || !handoff) return false;
-
-  const keys = [
-    "symbol",
-    "laneId",
-    "strategyId",
-    "candidateId",
-    "zoneId",
-    "candidateIdentityVersion",
-  ];
-
-  for (const key of keys) {
-    const a = identityValue(source, key);
-    const b = identityValue(handoff, key);
-
-    // Missing diagnostic fields are allowed; published conflicts are not.
-    if (a != null && b != null && String(a) !== String(b)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function sameLifecycle({
-  previousCandidateId = null,
-  previousZoneId = null,
-  handoff = null,
-} = {}) {
+function sameLifecycle({ previousCandidateId = null, previousZoneId = null, handoff = null } = {}) {
   const currentCandidateId = identityValue(handoff, "candidateId");
   const currentZoneId = identityValue(handoff, "zoneId");
 
-  // Once the snapshot builder publishes previous identity, require exact match.
+  // If previous identity is published, a conflict is a hard lifecycle change.
   if (previousCandidateId != null && currentCandidateId != null) {
     if (String(previousCandidateId) !== String(currentCandidateId)) return false;
   }
@@ -229,35 +214,26 @@ function sameLifecycle({
     if (String(previousZoneId) !== String(currentZoneId)) return false;
   }
 
+  // If a previous directional state exists but neither previous identity field
+  // is available, we cannot safely prove a new lifecycle. Preserve backward
+  // compatibility, but publish a diagnostic reason code in the final object.
   return true;
 }
 
-function completedCandle(source, which = "current") {
-  const candle =
-    which === "prior"
-      ? source?.priorCandle
-      : source?.currentCandle;
-
-  const status =
-    which === "prior"
-      ? source?.priorCandleStatus
-      : source?.currentCandleStatus;
-
-  if (!candle || status !== "COMPLETED") return null;
-  return candle;
+function sourceIdentityFromHandoff(handoff) {
+  return {
+    symbol: handoff?.symbol ?? null,
+    laneId: handoff?.laneId ?? null,
+    strategyId: handoff?.strategyId ?? null,
+    candidateId: handoff?.candidateId ?? null,
+    zoneId: handoff?.zoneId ?? null,
+    setupClass: handoff?.setupClass ?? null,
+    setupGrade: handoff?.setupGrade ?? null,
+    identitySetupKey: handoff?.identitySetupKey ?? null,
+    candidateIdentityVersion: handoff?.candidateIdentityVersion ?? null,
+  };
 }
 
-
-/*
- * Evaluate price behavior at ONE reference only: the Engine 26 negotiated zone.
- *
- * This is intentionally deterministic and reference-specific. It does not scan
- * EMAs, wave levels, shelves, prior highs/lows, trigger levels, or any nearest
- * reference pool.
- *
- * The result exposes both a primary state and all raw book-language evidence so
- * the timeline can show exactly what Engine 3 is seeing.
- */
 function completedBarsForTimeframe({ bars = [], timeframe, evaluationTimeMs = null } = {}) {
   const truth = deriveCandleCompletionTruth({
     bars: Array.isArray(bars) ? bars : [],
@@ -267,18 +243,58 @@ function completedBarsForTimeframe({ bars = [], timeframe, evaluationTimeMs = nu
 
   return {
     truth,
-    completedBars: Array.isArray(truth.completedBars) ? truth.completedBars : [],
+    completedBars: Array.isArray(truth?.completedBars) ? truth.completedBars.filter(Boolean) : [],
   };
 }
 
-function barTouchesZone(bar, zone) {
-  if (!bar || !zone) return false;
-  const h = barHigh(bar);
-  const l = barLow(bar);
-  return h != null && l != null && h >= zone.lo && l <= zone.hi;
+/*
+ * Direction model intentionally matches the proven completed-candle direction
+ * model that already behaved correctly in the old 5m builder.
+ *
+ * It is NOT by itself canonical Engine 3 direction.
+ * 5m proposes the mature direction. 10m must independently agree.
+ */
+function candleDirectionFromBars(bars = []) {
+  const recent = Array.isArray(bars) ? bars.filter(Boolean).slice(-3) : [];
+
+  if (recent.length < 2) return "NEUTRAL";
+
+  const last = recent.at(-1);
+  const prev = recent.at(-2);
+
+  const lastClose = barClose(last);
+  const prevClose = barClose(prev);
+  const lastLow = barLow(last);
+  const prevLow = barLow(prev);
+  const lastHigh = barHigh(last);
+  const prevHigh = barHigh(prev);
+
+  if (
+    lastClose != null &&
+    prevClose != null &&
+    lastLow != null &&
+    prevLow != null &&
+    lastClose < prevClose &&
+    lastLow <= prevLow
+  ) {
+    return "SHORT";
+  }
+
+  if (
+    lastClose != null &&
+    prevClose != null &&
+    lastHigh != null &&
+    prevHigh != null &&
+    lastClose > prevClose &&
+    lastHigh >= prevHigh
+  ) {
+    return "LONG";
+  }
+
+  return "NEUTRAL";
 }
 
-function classifyCloseLocation(close, zone) {
+function closeLocation(close, zone) {
   if (close == null || !zone) return "UNKNOWN";
   if (close < zone.lo) return "BELOW_ZONE";
   if (close > zone.hi) return "ABOVE_ZONE";
@@ -286,70 +302,61 @@ function classifyCloseLocation(close, zone) {
   return "INSIDE_LOWER_HALF";
 }
 
+function touchesZone(bar, zone) {
+  if (!bar || !zone) return false;
+  const high = barHigh(bar);
+  const low = barLow(bar);
+  return high != null && low != null && high >= zone.lo && low <= zone.hi;
+}
+
 /*
- * Book-based negotiated-zone reaction reader.
+ * Book-language state at the exact Engine 26 negotiated zone.
  *
  * IMPORTANT:
- * - The Engine 26 negotiated zone is the ONLY reference.
- * - A state is descriptive evidence, not a magic buy/sell label.
- * - The latest completed candle controls the current aftermath.
- * - Prior completed candles are used only to explain how price arrived there.
- * - A stale prior reclaim can never keep a LONG read alive after the latest
- *   completed candle has failed back below the zone.
+ * The state explains WHAT happened at the zone. It does not override the
+ * independent 5m/10m direction calculation merely because of its label.
  */
-function evaluateZoneReaction({
-  bars = [],
-  zone = null,
-  timeframe = "5m",
-} = {}) {
+function evaluateNegotiatedZoneState({ bars = [], zone = null } = {}) {
   const recent = Array.isArray(bars) ? bars.filter(Boolean).slice(-3) : [];
-  const currentBar = recent.at(-1) || null;
-  const priorBar = recent.at(-2) || null;
-  const firstBar = recent.at(-3) || null;
+  const current = recent.at(-1) || null;
+  const prior = recent.at(-2) || null;
+  const first = recent.at(-3) || null;
 
-  if (!zone || !currentBar) {
+  if (!zone || !current) {
     return {
-      active: false,
       state: "NO_SIGNAL",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
       evidence: [],
       sequence: [],
-      followThrough: false,
-      reasonCodes: ["NEGOTIATED_ZONE_REACTION_DATA_INCOMPLETE"],
+      reasonCodes: ["ENGINE3_NEGOTIATED_ZONE_STATE_DATA_INCOMPLETE"],
     };
   }
 
-  const o = barOpen(currentBar);
-  const h = barHigh(currentBar);
-  const l = barLow(currentBar);
-  const c = barClose(currentBar);
-  const pc = barClose(priorBar);
-  const ph = barHigh(priorBar);
-  const pl = barLow(priorBar);
-  const fc = barClose(firstBar);
+  const o = barOpen(current);
+  const h = barHigh(current);
+  const l = barLow(current);
+  const c = barClose(current);
+  const pc = barClose(prior);
+  const ph = barHigh(prior);
+  const pl = barLow(prior);
 
-  if ([h, l, c].some((v) => v == null)) {
+  if ([h, l, c].some((value) => value == null)) {
     return {
-      active: false,
       state: "NO_SIGNAL",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
       evidence: [],
       sequence: [],
-      followThrough: false,
-      reasonCodes: ["NEGOTIATED_ZONE_CANDLE_OHLC_INCOMPLETE"],
+      reasonCodes: ["ENGINE3_NEGOTIATED_ZONE_CURRENT_BAR_INCOMPLETE"],
     };
   }
 
   const evidence = [];
   const sequence = recent.map((bar) => ({
+    time: barTime(bar),
     open: barOpen(bar),
     high: barHigh(bar),
     low: barLow(bar),
     close: barClose(bar),
-    closeLocation: classifyCloseLocation(barClose(bar), zone),
-    touchedZone: barTouchesZone(bar, zone),
+    closeLocation: closeLocation(barClose(bar), zone),
+    touchedZone: touchesZone(bar, zone),
   }));
 
   const currentBelow = c < zone.lo;
@@ -358,364 +365,343 @@ function evaluateZoneReaction({
 
   const priorBelow = pc != null && pc < zone.lo;
   const priorAbove = pc != null && pc > zone.hi;
-  const priorInside = pc != null && pc >= zone.lo && pc <= zone.hi;
+  const priorInside = pc != null && !priorBelow && !priorAbove;
 
-  const currentSweptBelow = l < zone.lo;
-  const currentSweptAbove = h > zone.hi;
-  const currentTouchedLowerEdge = h >= zone.lo;
-  const currentTouchedUpperEdge = l <= zone.hi;
-
-  const wickBelowAndReclaim = currentSweptBelow && c >= zone.lo;
-  const dipBoughtFast = wickBelowAndReclaim && o != null && c > o;
-  const sellersTrapped = priorBelow && c >= zone.lo;
-  const reclaimedLevel = priorBelow && c >= zone.lo;
-  const acceptingValue = (priorBelow || priorInside) && c > zone.hi;
-  const breakoutHolding = priorAbove && c > zone.hi;
-  const heldLevel =
-    currentInside &&
-    c >= zone.mid &&
-    pc != null &&
-    pc >= zone.lo &&
-    l >= zone.lo;
-
-  const rejectingValue = currentSweptAbove && c <= zone.hi;
-  const breakoutFailing = priorAbove && c <= zone.hi;
-  const lostLevel = currentBelow && pc != null && pc >= zone.lo;
-  const failedReclaim =
-    currentBelow &&
-    (currentTouchedLowerEdge || (priorBelow && ph != null && ph >= zone.lo));
-
-  const chopInsideValue = currentInside;
+  const wickBelowAndReclaim = l < zone.lo && c >= zone.lo;
+  const wickAboveAndReject = h > zone.hi && c <= zone.hi;
 
   if (wickBelowAndReclaim) evidence.push("WICK_BELOW_AND_RECLAIM");
-  if (dipBoughtFast) evidence.push("DIP_BOUGHT_FAST");
-  if (sellersTrapped) evidence.push("SELLERS_TRAPPED");
-  if (reclaimedLevel) evidence.push("RECLAIMED_LEVEL");
-  if (heldLevel) evidence.push("HELD_LEVEL");
-  if (acceptingValue) evidence.push("ACCEPTING_VALUE");
-  if (breakoutHolding) evidence.push("BREAKOUT_HOLDING");
-  if (rejectingValue) evidence.push("REJECTING_VALUE");
-  if (breakoutFailing) evidence.push("BREAKOUT_FAILING");
-  if (lostLevel) evidence.push("LOST_LEVEL");
-  if (failedReclaim) evidence.push("FAILED_RECLAIM");
-  if (chopInsideValue) evidence.push("CHOP_INSIDE_VALUE");
+  if (wickBelowAndReclaim && o != null && c > o) evidence.push("DIP_BOUGHT_FAST");
 
-  let state = "NO_SIGNAL";
-  let direction = "NEUTRAL";
-  let maturity = "WAIT";
-
-  /*
-   * AFTERMATH FIRST.
-   * The latest completed close wins over stale prior labels.
-   */
-  if (currentBelow) {
-    if (failedReclaim) state = "FAILED_RECLAIM";
-    else if (lostLevel) state = "LOST_LEVEL";
-    else state = "LOST_LEVEL";
-
-    direction = "SHORT";
-    maturity = "MATURE_REACTION";
-  } else if (currentAbove) {
-    state = breakoutHolding ? "BREAKOUT_HOLDING" : "ACCEPTING_VALUE";
-    direction = "LONG";
-    maturity = "MATURE_REACTION";
-  } else if (currentInside) {
-    /*
-     * Inside-zone states describe the battle. They become directional only when
-     * the reclaim/rejection has visible follow-through into the correct half of
-     * the zone. Otherwise Engine 3 waits instead of guessing.
-     */
-    if (breakoutFailing || (rejectingValue && c <= zone.mid)) {
-      state = breakoutFailing ? "BREAKOUT_FAILING" : "REJECTING_VALUE";
-      direction = "SHORT";
-      maturity = "MATURE_REACTION";
-    } else if ((heldLevel || reclaimedLevel || sellersTrapped || wickBelowAndReclaim) && c >= zone.mid) {
-      if (heldLevel) state = "HELD_LEVEL";
-      else if (sellersTrapped) state = "SELLERS_TRAPPED";
-      else if (reclaimedLevel) state = "RECLAIMED_LEVEL";
-      else if (dipBoughtFast) state = "DIP_BOUGHT_FAST";
-      else state = "WICK_BELOW_AND_RECLAIM";
-      direction = "LONG";
-      maturity = "MATURE_REACTION";
-    } else {
-      state = "CHOP_INSIDE_VALUE";
-      direction = "NEUTRAL";
-      maturity = "WAIT";
+  if (priorBelow && c >= zone.lo) {
+    evidence.push("RECLAIMED_LEVEL");
+    if (c > pc && (h == null || ph == null || h >= ph)) {
+      evidence.push("SELLERS_TRAPPED");
     }
   }
 
-  let followThrough = false;
-  if (direction === "SHORT") {
-    followThrough =
-      currentBelow ||
-      (pc != null && c <= pc && c <= zone.mid);
-  } else if (direction === "LONG") {
-    followThrough =
-      currentAbove ||
-      (pc != null && c >= pc && c >= zone.mid);
+  if (wickAboveAndReject) evidence.push("REJECTING_VALUE");
+
+  if (priorAbove && c <= zone.hi) {
+    evidence.push("BREAKOUT_FAILING");
+  }
+
+  if (priorInside && currentBelow) {
+    evidence.push("LOST_LEVEL");
+  }
+
+  const attemptedReclaimFromBelow =
+    currentBelow &&
+    (
+      h >= zone.lo ||
+      (prior && barHigh(prior) != null && barHigh(prior) >= zone.lo)
+    );
+
+  if (attemptedReclaimFromBelow) {
+    evidence.push("FAILED_RECLAIM");
+  }
+
+  if (currentAbove && (priorInside || priorBelow)) {
+    evidence.push("ACCEPTING_VALUE");
+  }
+
+  if (currentAbove && priorAbove) {
+    evidence.push("BREAKOUT_HOLDING");
+  }
+
+  const heldInside =
+    currentInside &&
+    priorInside &&
+    l >= zone.lo &&
+    h <= zone.hi;
+
+  if (heldInside) {
+    evidence.push("HELD_LEVEL");
+  }
+
+  if (currentInside && evidence.length === 0) {
+    evidence.push("CHOP_INSIDE_VALUE");
+  }
+
+  // Outside-zone continuation remains described in zone language. This is not
+  // a new directional classifier; direction is still independently calculated.
+  if (currentBelow && evidence.length === 0) {
+    evidence.push("LOST_LEVEL");
+  }
+
+  if (currentAbove && evidence.length === 0) {
+    evidence.push("BREAKOUT_HOLDING");
+  }
+
+  // Primary state favors the latest aftermath over an older touch label.
+  let state = "NO_SIGNAL";
+
+  if (currentBelow) {
+    state = evidence.includes("FAILED_RECLAIM") ? "FAILED_RECLAIM" : "LOST_LEVEL";
+  } else if (currentAbove) {
+    state = evidence.includes("ACCEPTING_VALUE")
+      ? "ACCEPTING_VALUE"
+      : "BREAKOUT_HOLDING";
+  } else if (evidence.includes("BREAKOUT_FAILING")) {
+    state = "BREAKOUT_FAILING";
+  } else if (evidence.includes("REJECTING_VALUE")) {
+    state = "REJECTING_VALUE";
+  } else if (evidence.includes("SELLERS_TRAPPED")) {
+    state = "SELLERS_TRAPPED";
+  } else if (evidence.includes("DIP_BOUGHT_FAST")) {
+    state = "DIP_BOUGHT_FAST";
+  } else if (evidence.includes("WICK_BELOW_AND_RECLAIM")) {
+    state = "WICK_BELOW_AND_RECLAIM";
+  } else if (evidence.includes("RECLAIMED_LEVEL")) {
+    state = "RECLAIMED_LEVEL";
+  } else if (evidence.includes("HELD_LEVEL")) {
+    state = "HELD_LEVEL";
+  } else if (currentInside) {
+    state = "CHOP_INSIDE_VALUE";
   }
 
   return {
-    active: true,
-    timeframe,
     state,
-    direction,
-    maturity,
     evidence: unique(evidence),
     sequence,
-    followThrough,
-    currentClose: c,
-    priorClose: pc,
-    firstClose: fc,
-    currentOpen: o,
-    currentHigh: h,
-    currentLow: l,
-    currentCloseLocation: classifyCloseLocation(c, zone),
-    reasonCodes: unique([
-      `ENGINE3_${timeframe.toUpperCase()}_ZONE_STATE_${state}`,
-      `ENGINE3_${timeframe.toUpperCase()}_ZONE_DIRECTION_${direction}`,
-      maturity === "MATURE_REACTION"
-        ? `ENGINE3_${timeframe.toUpperCase()}_MATURE_REACTION_PRESENT`
-        : `ENGINE3_${timeframe.toUpperCase()}_REACTION_WAITING`,
-      followThrough
-        ? `ENGINE3_${timeframe.toUpperCase()}_FOLLOW_THROUGH_PRESENT`
-        : null,
-    ]),
+    currentCloseLocation: closeLocation(c, zone),
+    currentTouchedZone: touchesZone(current, zone),
+    priorTouchedZone: touchesZone(prior, zone),
+    firstTouchedZone: touchesZone(first, zone),
+    reasonCodes: [
+      `ENGINE3_ZONE_STATE_${state}`,
+      "ENGINE3_ENGINE26_NEGOTIATED_ZONE_ONLY",
+      "ENGINE3_STATE_IS_DIAGNOSTIC_EVIDENCE_NOT_DIRECTION_VETO",
+    ],
   };
 }
 
 function buildFiveMinuteReaction({
-  validation5m,
-  fiveMinuteBars = [],
-  zone,
-  handoff,
+  bars = [],
   evaluationTimeMs = null,
-} = {}) {
-  const identityAligned = identityMatches(validation5m, handoff);
-  const sourceFresh = validation5m?.stale === false;
-
-  if (!identityAligned) {
-    return {
-      active: false,
-      role: "MATURE_REACTION_EVIDENCE",
-      state: "IDENTITY_MISMATCH",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
-      evidence: [],
-      sequence: [],
-      confirmedCandleData: false,
-      sourceFresh,
-      identityAligned: false,
-      reasonCodes: ["ENGINE3_5M_IDENTITY_MISMATCH"],
-    };
-  }
-
-  if (!sourceFresh) {
-    return {
-      active: false,
-      role: "MATURE_REACTION_EVIDENCE",
-      state: "STALE",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
-      evidence: [],
-      sequence: [],
-      confirmedCandleData: false,
-      sourceFresh: false,
-      identityAligned: true,
-      reasonCodes: [validation5m?.staleReason || "ENGINE3_5M_SOURCE_STALE"],
-    };
-  }
-
-  const { completedBars } = completedBarsForTimeframe({
-    bars: fiveMinuteBars,
-    timeframe: "5m",
-    evaluationTimeMs,
-  });
-
-  // Fallback preserves compatibility if raw 5m bars were not supplied yet.
-  const fallbackBars = [
-    completedCandle(validation5m, "prior"),
-    completedCandle(validation5m, "current"),
-  ].filter(Boolean);
-
-  const barsForRead = completedBars.length > 0 ? completedBars : fallbackBars;
-
-  if (barsForRead.length < 1) {
-    return {
-      active: false,
-      role: "MATURE_REACTION_EVIDENCE",
-      state: "WAITING_FOR_COMPLETED_5M",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
-      evidence: [],
-      sequence: [],
-      confirmedCandleData: false,
-      sourceFresh: true,
-      identityAligned: true,
-      reasonCodes: ["ENGINE3_WAITING_FOR_COMPLETED_5M_CANDLE"],
-    };
-  }
-
-  const reaction = evaluateZoneReaction({
-    bars: barsForRead,
-    zone,
-    timeframe: "5m",
-  });
-
-  return {
-    ...reaction,
-    role: "MATURE_REACTION_EVIDENCE",
-    sourceTimeframe: "5m",
-    confirmedCandleData: true,
-    sourceFresh: true,
-    identityAligned: true,
-  };
-}
-
-function buildTenMinuteConfirmation({
-  tenMinuteBars = [],
   zone = null,
-  evaluationTimeMs = null,
+  validation5m = null,
 } = {}) {
-  const { completedBars } = completedBarsForTimeframe({
-    bars: tenMinuteBars,
-    timeframe: "10m",
+  const { truth, completedBars } = completedBarsForTimeframe({
+    bars,
+    timeframe: "5m",
     evaluationTimeMs,
   });
 
-  if (!zone || completedBars.length < 1) {
-    return {
-      active: false,
-      role: "BROADER_PRICE_CONFIRMATION",
-      state: "WAITING_FOR_COMPLETED_10M_CONFIRMATION",
-      direction: "NEUTRAL",
-      maturity: "WAIT",
-      evidence: [],
-      sequence: [],
-      confirmed: false,
-      reason: "NO_COMPLETED_10M_ZONE_READ",
-      reasonCodes: ["ENGINE3_WAITING_FOR_10M_NEGOTIATED_ZONE_CONFIRMATION"],
-    };
-  }
-
-  const reaction = evaluateZoneReaction({
+  // Prefer the raw completed-bar calculation. The existing validation object is
+  // retained only as a diagnostic cross-check and never compares against 1m here.
+  const direction = candleDirectionFromBars(completedBars);
+  const zoneRead = evaluateNegotiatedZoneState({
     bars: completedBars,
     zone,
-    timeframe: "10m",
   });
 
-  const confirmed =
-    ["LONG", "SHORT"].includes(reaction.direction) &&
-    reaction.maturity === "MATURE_REACTION" &&
-    reaction.followThrough === true;
+  const enoughBars = completedBars.length >= 2;
+  const directional = direction === "LONG" || direction === "SHORT";
 
   return {
-    ...reaction,
-    role: "BROADER_PRICE_CONFIRMATION",
-    sourceTimeframe: "10m",
-    confirmed,
-    reason: confirmed
-      ? `10M_${reaction.direction}_NEGOTIATED_ZONE_CONFIRMATION`
-      : "10M_NEGOTIATED_ZONE_CONFIRMATION_NOT_YET_DIRECTIONAL",
-  };
-}
-
-function buildInitialReaction({
-  engine26ReactionHandoff,
-  fiveMinuteReaction,
-  tenMinuteConfirmation,
-} = {}) {
-  const authorized = engine26ReactionHandoff?.authorizeEngine3Evaluation === true;
-  const handoffActive = engine26ReactionHandoff?.active !== false;
-  const identityReady =
-    identityValue(engine26ReactionHandoff, "candidateId") != null &&
-    identityValue(engine26ReactionHandoff, "zoneId") != null;
-
-  const fiveDirection = safeUpper(fiveMinuteReaction?.direction, "NEUTRAL");
-  const tenDirection = safeUpper(tenMinuteConfirmation?.direction, "NEUTRAL");
-
-  const fiveMature =
-    fiveMinuteReaction?.confirmedCandleData === true &&
-    fiveMinuteReaction?.maturity === "MATURE_REACTION" &&
-    ["LONG", "SHORT"].includes(fiveDirection);
-
-  const tenConfirmed =
-    tenMinuteConfirmation?.confirmed === true &&
-    ["LONG", "SHORT"].includes(tenDirection);
-
-  const aligned = fiveMature && tenConfirmed && fiveDirection === tenDirection;
-
-  const confirmed =
-    authorized &&
-    handoffActive &&
-    identityReady &&
-    fiveMinuteReaction?.sourceFresh === true &&
-    fiveMinuteReaction?.identityAligned === true &&
-    aligned;
-
-  const blockers = unique([
-    !authorized ? "ENGINE26_ENGINE3_EVALUATION_NOT_AUTHORIZED" : null,
-    !handoffActive ? "ENGINE26_REACTION_HANDOFF_NOT_ACTIVE" : null,
-    !identityReady ? "ENGINE26_REACTION_IDENTITY_INCOMPLETE" : null,
-    fiveMinuteReaction?.identityAligned === false ? "ENGINE3_5M_IDENTITY_MISMATCH" : null,
-    fiveMinuteReaction?.sourceFresh === false ? "ENGINE3_5M_SOURCE_STALE" : null,
-    fiveMinuteReaction?.confirmedCandleData !== true
-      ? "ENGINE3_WAITING_FOR_COMPLETED_5M_REACTION"
+    active: zone != null && enoughBars,
+    sourceTimeframe: "5m",
+    role: "PRIMARY_MATURE_REACTION_EVIDENCE",
+    direction,
+    state: zoneRead.state,
+    reactionState: zoneRead.state,
+    quality: directional ? "GOOD" : "WEAK",
+    maturity: enoughBars && directional ? "MATURE_REACTION" : "WAIT",
+    maturityResolved: enoughBars && directional,
+    observedAt: truth?.evaluationTimeMs ?? evaluationTimeMs ?? null,
+    completedBarCount: completedBars.length,
+    latestCompletedBar: completedBars.at(-1) || null,
+    priorCompletedBar: completedBars.at(-2) || null,
+    evidence: zoneRead.evidence,
+    sequence: zoneRead.sequence,
+    currentCloseLocation: zoneRead.currentCloseLocation,
+    currentTouchedZone: zoneRead.currentTouchedZone,
+    validationDiagnostic: validation5m
+      ? {
+          direction: validation5m?.direction ?? null,
+          quality: validation5m?.quality ?? null,
+          validationState: validation5m?.validationState ?? null,
+          stale: validation5m?.stale ?? null,
+        }
       : null,
-    fiveMinuteReaction?.confirmedCandleData === true && !fiveMature
-      ? "ENGINE3_5M_REACTION_NOT_YET_MATURE"
-      : null,
-    tenMinuteConfirmation?.confirmed !== true
-      ? "ENGINE3_WAITING_FOR_COMPLETED_10M_CONFIRMATION"
-      : null,
-    fiveMature && tenConfirmed && fiveDirection !== tenDirection
-      ? "ENGINE3_5M_10M_REACTION_CONFLICT"
-      : null,
-  ]);
-
-  return {
-    confirmed,
-    direction: confirmed ? fiveDirection : "NEUTRAL",
-    state: confirmed
-      ? fiveMinuteReaction?.state || "REACTION_CONFIRMED"
-      : fiveMinuteReaction?.state || "WATCHING_NEGOTIATED_ZONE",
-    quality: confirmed ? "GOOD" : "WEAK",
-    aligned,
-    blockers,
+    currentCandleStatus: truth?.latestBarCompletionState ?? null,
+    evaluationTimeMs: truth?.evaluationTimeMs ?? evaluationTimeMs ?? null,
     reasonCodes: unique([
-      "ENGINE3_ENGINE26_NEGOTIATED_ZONE_ONLY",
-      "ENGINE3_1M_WATCH_ONLY",
-      "ENGINE3_5M_MATURE_REACTION_EVIDENCE",
-      "ENGINE3_10M_BROADER_PRICE_CONFIRMATION",
-      confirmed
-        ? `ENGINE3_${fiveDirection}_REACTION_CONFIRMED_BY_5M_PLUS_10M`
-        : null,
-      ...((fiveMinuteReaction?.reasonCodes) || []),
-      ...((tenMinuteConfirmation?.reasonCodes) || []),
+      "ENGINE3_5M_PRIMARY_REACTION_EVIDENCE",
+      "ENGINE3_5M_DIRECTION_FROM_COMPLETED_CANDLES",
+      ...zoneRead.reasonCodes,
+      !enoughBars ? "ENGINE3_WAITING_FOR_TWO_COMPLETED_5M_BARS_FOR_DIRECTION" : null,
+      directional ? `ENGINE3_5M_DIRECTION_${direction}` : "ENGINE3_5M_DIRECTION_NEUTRAL",
     ]),
   };
 }
 
-function resolvePersistence({
-  initialReaction,
-  previousCanonicalDirection,
-  previousReactionConfirmed,
-  previousCandidateId,
-  previousZoneId,
-  engine26ReactionHandoff,
-  currentPrice,
-  zone,
-  tenMinuteCompletedClose,
-  tenMinuteEma10,
-  activePaperTradeDirection,
+function buildTenMinuteConfirmation({
+  bars = [],
+  evaluationTimeMs = null,
+  zone = null,
+  fiveMinuteReaction = null,
 } = {}) {
+  const { truth, completedBars } = completedBarsForTimeframe({
+    bars,
+    timeframe: "10m",
+    evaluationTimeMs,
+  });
+
+  const direction = candleDirectionFromBars(completedBars);
+  const zoneRead = evaluateNegotiatedZoneState({
+    bars: completedBars,
+    zone,
+  });
+
+  const fiveDirection = safeUpper(fiveMinuteReaction?.direction, "NEUTRAL");
+  const directional = direction === "LONG" || direction === "SHORT";
+  const fiveDirectional = fiveDirection === "LONG" || fiveDirection === "SHORT";
+  const enoughBars = completedBars.length >= 2;
+  const aligned = enoughBars && directional && fiveDirectional && direction === fiveDirection;
+  const conflict = enoughBars && directional && fiveDirectional && direction !== fiveDirection;
+
+  return {
+    active: zone != null && enoughBars,
+    sourceTimeframe: "10m",
+    role: "BROADER_PRICE_CONFIRMATION",
+    direction,
+    state: zoneRead.state,
+    reactionState: zoneRead.state,
+    quality: aligned ? "GOOD" : "WEAK",
+    confirmed: aligned,
+    validationState: aligned ? "SUPPORT" : conflict ? "CONFLICT" : "UNRESOLVED",
+    supportsFiveMinuteDirection: aligned,
+    conflictsWithFiveMinuteDirection: conflict,
+    completedBarCount: completedBars.length,
+    latestCompletedBar: completedBars.at(-1) || null,
+    priorCompletedBar: completedBars.at(-2) || null,
+    evidence: zoneRead.evidence,
+    sequence: zoneRead.sequence,
+    currentCloseLocation: zoneRead.currentCloseLocation,
+    currentCandleStatus: truth?.latestBarCompletionState ?? null,
+    evaluationTimeMs: truth?.evaluationTimeMs ?? evaluationTimeMs ?? null,
+    reason: !enoughBars
+      ? "WAITING_FOR_COMPLETED_10M_PRICE_SEQUENCE"
+      : aligned
+      ? `COMPLETED_10M_CONFIRMS_${direction}`
+      : conflict
+      ? `COMPLETED_10M_CONFLICTS_WITH_5M_${fiveDirection}`
+      : "COMPLETED_10M_NOT_DIRECTIONAL",
+    reasonCodes: unique([
+      "ENGINE3_10M_BROADER_PRICE_CONFIRMATION",
+      "ENGINE3_10M_DIRECTION_FROM_COMPLETED_CANDLES",
+      ...zoneRead.reasonCodes,
+      !enoughBars ? "ENGINE3_WAITING_FOR_TWO_COMPLETED_10M_BARS_FOR_DIRECTION" : null,
+      aligned ? `ENGINE3_10M_CONFIRMS_${direction}` : null,
+      conflict ? "ENGINE3_10M_CONFLICTS_WITH_5M" : null,
+    ]),
+  };
+}
+
+function resolveBroaderReaction10m({
+  fastImbalanceReaction = null,
+  currentLevelAction = null,
+} = {}) {
+  // Compatibility-only helper for the old buildPaperScalpReaction export.
+  // Strategy 1 attachPaperScalpReactionToConfluence() does NOT use this as
+  // canonical authority.
+  if (fastImbalanceReaction && typeof fastImbalanceReaction === "object") {
+    return {
+      ...fastImbalanceReaction,
+      broaderContextOnly: true,
+      canonicalDirectionAuthority: false,
+      canonicalQualificationAuthority: false,
+    };
+  }
+
+  if (currentLevelAction && typeof currentLevelAction === "object") {
+    return {
+      ...currentLevelAction,
+      broaderContextOnly: true,
+      canonicalDirectionAuthority: false,
+      canonicalQualificationAuthority: false,
+    };
+  }
+
+  return null;
+}
+
+function setupTypeForCanonical({ state, direction } = {}) {
+  const s = safeUpper(state, "NO_SIGNAL");
+  const d = safeUpper(direction, "NEUTRAL");
+
+  if (d === "SHORT") {
+    if (s === "LOST_LEVEL") return "LOST_LEVEL_SHORT";
+    if (s === "FAILED_RECLAIM") return "FAILED_RECLAIM_SHORT";
+    if (s === "REJECTING_VALUE") return "REJECTING_VALUE_SHORT";
+    if (s === "BREAKOUT_FAILING") return "BREAKOUT_FAILING_SHORT";
+    return "CANONICAL_SHORT_REACTION";
+  }
+
+  if (d === "LONG") {
+    if (s === "RECLAIMED_LEVEL") return "RECLAIMED_LEVEL_LONG";
+    if (s === "WICK_BELOW_AND_RECLAIM") return "WICK_BELOW_AND_RECLAIM_LONG";
+    if (s === "DIP_BOUGHT_FAST") return "DIP_BOUGHT_FAST_LONG";
+    if (s === "SELLERS_TRAPPED") return "SELLERS_TRAPPED_LONG";
+    if (s === "HELD_LEVEL") return "HELD_LEVEL_LONG";
+    if (s === "ACCEPTING_VALUE") return "ACCEPTING_VALUE_LONG";
+    if (s === "BREAKOUT_HOLDING") return "BREAKOUT_HOLDING_LONG";
+    return "CANONICAL_LONG_REACTION";
+  }
+
+  return "CANONICAL_NEUTRAL_REACTION";
+}
+
+function buildAuthorizationContext({
+  engine26ReactionHandoff = null,
+  engine26StructuralContext = null,
+  state = "NO_SIGNAL",
+  quality = "WEAK",
+  direction = "NEUTRAL",
+  confirmed = false,
+  currentPrice = null,
+  lastCandle = null,
+} = {}) {
+  return buildEngine26LocationReactionContext({
+    engine26ReactionHandoff,
+    engine26StructuralContext,
+    reactionInput: {
+      ...sourceIdentityFromHandoff(engine26ReactionHandoff),
+      state,
+      quality,
+      direction,
+      confirmed,
+      currentPrice,
+      lastCandle,
+      noPermissionCreated: true,
+      noExecution: true,
+    },
+  });
+}
+
+function directionIsDirectional(direction) {
+  return direction === "LONG" || direction === "SHORT";
+}
+
+function resolveCanonicalLifecycle({
+  fiveMinuteReaction,
+  tenMinuteConfirmation,
+  engine26ReactionHandoff,
+  zonePosition,
+  previousCanonicalDirection = null,
+  previousReactionConfirmed = false,
+  previousCandidateId = null,
+  previousZoneId = null,
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
+  activePaperTradeDirection = null,
+} = {}) {
+  const fiveDirection = safeUpper(fiveMinuteReaction?.direction, "NEUTRAL");
+  const tenDirection = safeUpper(tenMinuteConfirmation?.direction, "NEUTRAL");
   const previousDirection = safeUpper(previousCanonicalDirection, "NEUTRAL");
   const activeDirection = safeUpper(activePaperTradeDirection, "NEUTRAL");
-  const inheritedDirection = ["LONG", "SHORT"].includes(activeDirection)
-    ? activeDirection
-    : ["LONG", "SHORT"].includes(previousDirection) && previousReactionConfirmed === true
-    ? previousDirection
-    : "NEUTRAL";
 
   const lifecycleSame = sameLifecycle({
     previousCandidateId,
@@ -723,138 +709,214 @@ function resolvePersistence({
     handoff: engine26ReactionHandoff,
   });
 
-  const position = zonePosition(currentPrice, zone);
+  const lifecycleChanged = lifecycleSame === false;
+  const previousDirectional = directionIsDirectional(previousDirection);
+  const activeDirectional = directionIsDirectional(activeDirection);
 
-  // A newly confirmed current-lifecycle reaction always wins over old neutral.
-  if (initialReaction?.confirmed === true) {
-    return {
-      direction: initialReaction.direction,
-      state: initialReaction.state,
-      quality: initialReaction.quality,
-      reactionConfirmed: true,
-      directionPersistenceActive: !position.inside,
-      ema10ResetTriggered: false,
-      lifecycleResetTriggered: false,
-      resolutionStatus: `CANONICAL_${initialReaction.direction}_NEGOTIATED_ZONE_REACTION_CONFIRMED`,
-      resolutionReason: "ENGINE3_DIRECTION_ESTABLISHED_BY_5M_REACTION_AND_10M_CONFIRMATION_AT_ENGINE26_NEGOTIATED_ZONE",
-    };
-  }
+  const completedClose = toNum(tenMinuteCompletedClose);
+  const ema10 = toNum(tenMinuteEma10);
+  const ema10DataAvailable = completedClose != null && ema10 != null;
 
-  // Fresh Engine 26 lifecycle after midpoint completion: do not carry old trip.
-  if (!lifecycleSame && inheritedDirection !== "NEUTRAL") {
-    return {
-      direction: "NEUTRAL",
-      state: "WAITING_FOR_NEGOTIATED_ZONE_REACTION",
-      quality: "WEAK",
-      reactionConfirmed: false,
-      directionPersistenceActive: false,
-      ema10ResetTriggered: false,
-      lifecycleResetTriggered: true,
-      resolutionStatus: "CANONICAL_NEUTRAL_NEW_ENGINE26_LIFECYCLE",
-      resolutionReason: "ENGINE26_CANDIDATE_OR_ZONE_CHANGED_PRIOR_ENGINE3_DIRECTION_RELEASED",
-    };
-  }
+  const engine26EvaluationAuthorized =
+    engine26ReactionHandoff?.active === true &&
+    engine26ReactionHandoff?.authorizeEngine3Evaluation === true;
 
-  // Once Engine 3 has completed the price-reaction answer for this lifecycle,
-  // 1m/5m/10m reaction diagnostics cannot flip it. 10m EMA10 is only the
-  // post-zone HOLD / RESET authority.
-  if (inheritedDirection !== "NEUTRAL") {
-    const close10 = validPrice(tenMinuteCompletedClose);
-    const ema10 = validPrice(tenMinuteEma10);
+  const alignedInitialReaction =
+    engine26EvaluationAuthorized &&
+    directionIsDirectional(fiveDirection) &&
+    tenMinuteConfirmation?.confirmed === true &&
+    tenDirection === fiveDirection;
 
-    if (!position.inside && close10 != null && ema10 != null) {
-      const adverseCross =
-        inheritedDirection === "SHORT"
-          ? close10 > ema10
-          : close10 < ema10;
+  let direction = "NEUTRAL";
+  let state = fiveMinuteReaction?.state || "NO_SIGNAL";
+  let quality = "WEAK";
+  let reactionConfirmed = false;
+  let directionPersistenceActive = false;
+  let ema10ResetTriggered = false;
+  let sourceTimeframe = null;
+  let reactionTimeframe = null;
+  let resolutionStatus = "CANONICAL_NEUTRAL_WAITING_FOR_REACTION";
+  let resolutionReason = "WAITING_FOR_5M_REACTION_AND_10M_CONFIRMATION";
 
-      if (adverseCross) {
-        return {
-          direction: "NEUTRAL",
-          state: "DIRECTION_RESET_BY_10M_EMA10",
-          quality: "WEAK",
-          reactionConfirmed: false,
-          directionPersistenceActive: false,
-          ema10ResetTriggered: true,
-          lifecycleResetTriggered: false,
-          resolutionStatus: "CANONICAL_NEUTRAL_10M_EMA10_RESET",
-          resolutionReason:
-            inheritedDirection === "SHORT"
-              ? "COMPLETED_10M_CLOSED_ABOVE_EMA10_SHORT_RESET"
-              : "COMPLETED_10M_CLOSED_BELOW_EMA10_LONG_RESET",
-        };
-      }
+  // A new Engine 26 lifecycle invalidates inherited Engine 3 direction before
+  // any new reaction is evaluated. New 5m+10m evidence may still establish a
+  // fresh direction in the same build.
+  const inheritedDirectionAllowed = lifecycleSame;
+
+  if (activeDirectional && inheritedDirectionAllowed) {
+    const resetShort =
+      activeDirection === "SHORT" &&
+      ema10DataAvailable &&
+      completedClose > ema10;
+
+    const resetLong =
+      activeDirection === "LONG" &&
+      ema10DataAvailable &&
+      completedClose < ema10;
+
+    ema10ResetTriggered = resetShort || resetLong;
+
+    if (ema10ResetTriggered) {
+      direction = "NEUTRAL";
+      state = "ACTIVE_TRADE_DIRECTION_RESET";
+      sourceTimeframe = "10m";
+      reactionTimeframe = "10m";
+      resolutionStatus = `ACTIVE_PAPER_TRADE_${activeDirection}_RESET_AT_10M_EMA10`;
+      resolutionReason =
+        activeDirection === "SHORT"
+          ? "ACTIVE_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ACTIVE_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    } else {
+      direction = activeDirection;
+      state = fiveMinuteReaction?.state || "ACTIVE_TRADE_DIRECTION_PERSISTED";
+      quality = "GOOD";
+      reactionConfirmed = true;
+      directionPersistenceActive = true;
+      sourceTimeframe = "ACTIVE_PAPER_TRADE";
+      reactionTimeframe = "10m";
+      resolutionStatus = `ACTIVE_PAPER_TRADE_${activeDirection}_PERSISTED`;
+      resolutionReason =
+        activeDirection === "SHORT"
+          ? "ACTIVE_SHORT_HELD_UNTIL_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ACTIVE_LONG_HELD_UNTIL_COMPLETED_10M_CLOSE_BELOW_EMA10";
     }
+  } else if (
+    inheritedDirectionAllowed &&
+    previousDirectional &&
+    previousReactionConfirmed === true &&
+    zonePosition?.known === true &&
+    zonePosition?.inside !== true
+  ) {
+    const resetShort =
+      previousDirection === "SHORT" &&
+      ema10DataAvailable &&
+      completedClose > ema10;
 
-    return {
-      direction: inheritedDirection,
-      state: "REACTION_CONFIRMED",
-      quality: "GOOD",
-      reactionConfirmed: true,
-      directionPersistenceActive: !position.inside,
-      ema10ResetTriggered: false,
-      lifecycleResetTriggered: false,
-      resolutionStatus: `CANONICAL_${inheritedDirection}_LIFECYCLE_DIRECTION_LOCKED`,
-      resolutionReason: position.inside
-        ? "ENGINE3_CONFIRMED_DIRECTION_LOCKED_FOR_CURRENT_ENGINE26_LIFECYCLE"
-        : "POST_ZONE_ENGINE3_DIRECTION_HELD_UNTIL_TARGET_MIDPOINT_OR_ADVERSE_10M_EMA10_CLOSE",
-    };
+    const resetLong =
+      previousDirection === "LONG" &&
+      ema10DataAvailable &&
+      completedClose < ema10;
+
+    ema10ResetTriggered = resetShort || resetLong;
+
+    if (ema10ResetTriggered) {
+      direction = "NEUTRAL";
+      state = "ZONE_EXIT_DIRECTION_RESET";
+      sourceTimeframe = "10m";
+      reactionTimeframe = "10m";
+      resolutionStatus = `ZONE_EXIT_${previousDirection}_RESET_AT_10M_EMA10`;
+      resolutionReason =
+        previousDirection === "SHORT"
+          ? "ZONE_EXIT_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ZONE_EXIT_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    } else {
+      direction = previousDirection;
+      state = fiveMinuteReaction?.state || "ZONE_EXIT_DIRECTION_PERSISTED";
+      quality = "GOOD";
+      reactionConfirmed = true;
+      directionPersistenceActive = true;
+      sourceTimeframe = "10m_EMA10_HOLD";
+      reactionTimeframe = "10m";
+      resolutionStatus = `ZONE_EXIT_${previousDirection}_PERSISTED_BY_10M_EMA10`;
+      resolutionReason =
+        previousDirection === "SHORT"
+          ? "ZONE_EXIT_SHORT_HELD_UNTIL_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ZONE_EXIT_LONG_HELD_UNTIL_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    }
+  } else if (alignedInitialReaction) {
+    direction = fiveDirection;
+    state = fiveMinuteReaction?.state || "NO_SIGNAL";
+    quality = "GOOD";
+    reactionConfirmed = true;
+    sourceTimeframe = "5m+10m";
+    reactionTimeframe = "5m+10m";
+    resolutionStatus = `CANONICAL_${fiveDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`;
+    resolutionReason = "ENGINE3_DIRECTION_ESTABLISHED_BY_ALIGNED_COMPLETED_5M_AND_10M_PRICE_REACTION";
+  } else if (lifecycleChanged) {
+    direction = "NEUTRAL";
+    state = fiveMinuteReaction?.state || "NO_SIGNAL";
+    resolutionStatus = "ENGINE26_NEW_LIFECYCLE_RESET_TO_NEUTRAL";
+    resolutionReason = "PREVIOUS_ENGINE3_DIRECTION_BELONGED_TO_PRIOR_ENGINE26_CANDIDATE_OR_ZONE";
+  } else if (!engine26EvaluationAuthorized) {
+    resolutionStatus = "WAITING_FOR_ENGINE26_AUTHORIZED_LOCATION";
+    resolutionReason = "ENGINE26_EVALUATION_NOT_AUTHORIZED";
+  } else if (!directionIsDirectional(fiveDirection)) {
+    resolutionStatus = "WAITING_FOR_MATURE_5M_REACTION";
+    resolutionReason = "COMPLETED_5M_REACTION_NOT_DIRECTIONAL";
+  } else if (tenMinuteConfirmation?.confirmed !== true) {
+    resolutionStatus = "WAITING_FOR_ALIGNED_10M_CONFIRMATION";
+    resolutionReason = tenMinuteConfirmation?.reason || "COMPLETED_10M_HAS_NOT_CONFIRMED_5M_DIRECTION";
   }
 
   return {
-    direction: "NEUTRAL",
-    state: initialReaction?.state || "WAITING_FOR_NEGOTIATED_ZONE_REACTION",
-    quality: "WEAK",
-    reactionConfirmed: false,
-    directionPersistenceActive: false,
-    ema10ResetTriggered: false,
-    lifecycleResetTriggered: false,
-    resolutionStatus: "CANONICAL_NEUTRAL_WAITING_FOR_REACTION",
-    resolutionReason: "WAITING_FOR_MATURE_5M_REACTION_AND_ALIGNED_10M_CONFIRMATION_AT_ENGINE26_NEGOTIATED_ZONE",
+    state,
+    direction,
+    quality,
+    reactionConfirmed,
+    sourceTimeframe,
+    reactionTimeframe,
+    directionPersistenceActive,
+    ema10ResetTriggered,
+    tenMinuteCompletedClose: completedClose,
+    tenMinuteEma10: ema10,
+    ema10ResetDataAvailable: ema10DataAvailable,
+    previousCanonicalDirection: inheritedDirectionAllowed && previousDirectional
+      ? previousDirection
+      : "NEUTRAL",
+    previousReactionConfirmed: previousReactionConfirmed === true,
+    activePaperTrade: activeDirectional,
+    activePaperTradeDirection: activeDirectional ? activeDirection : "NEUTRAL",
+    lifecycleSame,
+    lifecycleChanged,
+    engine26EvaluationAuthorized,
+    alignedInitialReaction,
+    candidateDirection: fiveDirection,
+    candidateState: fiveMinuteReaction?.state || "NO_SIGNAL",
+    candidateQuality: directionIsDirectional(fiveDirection) ? "GOOD" : "WEAK",
+    resolutionStatus,
+    resolutionReason,
   };
 }
 
-function qualificationFromCanonical({ canonical, engine26LocationContext } = {}) {
-  const directional = ["LONG", "SHORT"].includes(
-    safeUpper(canonical?.direction, "NEUTRAL")
-  );
+function resolveStrategy1Qualification({
+  canonicalResolution,
+  engine26LocationContext,
+} = {}) {
+  const blockers = [];
+  const reasonCodes = [];
 
-  const authorized =
-    engine26LocationContext?.authorized === true &&
-    engine26LocationContext?.authorizeEngine3Evaluation === true;
+  const reactionConfirmed = canonicalResolution?.reactionConfirmed === true;
+  const direction = safeUpper(canonicalResolution?.direction, "NEUTRAL");
+  const directional = directionIsDirectional(direction);
 
-  const identityMatched =
-    engine26LocationContext?.identityComparison?.matched !== false;
-
-  const verified =
+  const engine26Verified =
     engine26LocationContext?.confirmed === true &&
     engine26LocationContext?.state === "REACTION_CONFIRMED";
 
-  const qualified =
-    directional &&
-    canonical?.reactionConfirmed === true &&
-    authorized &&
-    identityMatched &&
-    verified;
+  if (!reactionConfirmed) blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+  if (!directional) blockers.push("ENGINE3_CANONICAL_DIRECTION_NEUTRAL");
+  if (!engine26Verified) blockers.push("ENGINE26_REACTION_NOT_VERIFIED");
+
+  const qualified = blockers.length === 0;
+
+  reasonCodes.push(
+    qualified
+      ? "ENGINE3_STRATEGY1_QUALIFIED_FOR_ENGINE6"
+      : "ENGINE3_STRATEGY1_NOT_QUALIFIED_FOR_ENGINE6"
+  );
 
   return {
     qualified,
-    blockers: unique([
-      !directional ? "ENGINE3_CANONICAL_DIRECTION_NEUTRAL" : null,
-      canonical?.reactionConfirmed !== true ? "ENGINE3_REACTION_NOT_CONFIRMED" : null,
-      !authorized ? "ENGINE26_ENGINE3_EVALUATION_NOT_AUTHORIZED" : null,
-      !identityMatched ? "ENGINE3_ENGINE26_IDENTITY_MISMATCH" : null,
-      !verified ? "ENGINE26_REACTION_NOT_VERIFIED" : null,
-    ]),
-    reasonCodes: unique([
-      qualified ? "ENGINE3_STRATEGY1_QUALIFIED" : "ENGINE3_STRATEGY1_NOT_QUALIFIED",
-    ]),
+    blockers,
+    reasonCodes,
   };
 }
 
 /*
- * Compatibility builder retained for old tests/routes.
- * It is diagnostic-only and cannot create Strategy 1 canonical authority.
+ * Compatibility export for old callers.
+ * This is broader diagnostic context only and does not own Strategy 1 canonical
+ * direction. It is intentionally preserved to avoid breaking old routes while
+ * the Strategy 1 canonical path stays clean.
  */
 export function buildPaperScalpReaction({
   currentLevelAction = null,
@@ -864,21 +926,24 @@ export function buildPaperScalpReaction({
   engine26StructuralContext = null,
   paperShortResearchEnabled = false,
 } = {}) {
-  const diagnostic =
-    fastImbalanceReaction ||
-    currentLevelAction ||
-    {};
+  const broaderReaction10m = resolveBroaderReaction10m({
+    fastImbalanceReaction,
+    currentLevelAction,
+  });
+
+  const diagnosticInput = broaderReaction10m || currentLevelAction || {};
 
   const engine26LocationContext = buildEngine26LocationReactionContext({
     engine26ReactionHandoff,
     engine26StructuralContext,
     reactionInput: {
-      state: diagnostic?.state || "NO_SIGNAL",
-      quality: diagnostic?.quality || "WEAK",
-      direction: diagnostic?.direction || "NEUTRAL",
+      ...sourceIdentityFromHandoff(engine26ReactionHandoff),
+      state: diagnosticInput?.state || "NO_SIGNAL",
+      quality: diagnosticInput?.quality || "WEAK",
+      direction: diagnosticInput?.direction || "NEUTRAL",
       confirmed: false,
-      currentPrice: diagnostic?.currentPrice ?? null,
-      lastCandle: diagnostic?.lastCandle ?? null,
+      currentPrice: diagnosticInput?.currentPrice ?? null,
+      lastCandle: diagnosticInput?.lastCandle ?? null,
       noPermissionCreated: true,
       noExecution: true,
     },
@@ -890,9 +955,9 @@ export function buildPaperScalpReaction({
     source: SOURCE,
     mode: "PAPER_ONLY",
     researchOnly: true,
-    state: diagnostic?.state || "NO_SIGNAL",
-    direction: diagnostic?.direction || "NEUTRAL",
-    quality: diagnostic?.quality || "WEAK",
+    state: diagnosticInput?.state || "NO_SIGNAL",
+    direction: diagnosticInput?.direction || "NEUTRAL",
+    quality: diagnosticInput?.quality || "WEAK",
     allowed: false,
     engine3Strategy1QualifiedForEngine6: false,
     participationEvaluationEligible: false,
@@ -907,9 +972,9 @@ export function buildPaperScalpReaction({
     noRealPermissionCreated: true,
     noExecution: true,
     realExecutionAuthority: false,
-    blockers: ["LEGACY_DIAGNOSTIC_BUILDER_ONLY"],
+    blockers: ["BROADER_10M_CONTEXT_ONLY"],
     reasonCodes: [
-      "ENGINE3_LEGACY_DIAGNOSTIC_BUILDER_ONLY",
+      "ENGINE3_BROADER_10M_CONTEXT_ONLY",
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
     ],
@@ -926,130 +991,147 @@ export function attachPaperScalpReactionToConfluence({
   previousReactionConfirmed = false,
   previousCandidateId = null,
   previousZoneId = null,
-  tenMinuteCompletedClose = null,
-  tenMinuteEma10 = null,
   fiveMinuteBars = [],
   tenMinuteBars = [],
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
   activePaperTradeDirection = null,
 }) {
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = patchedConfluence.context.reaction || {};
 
   const observation1m =
-    patchedConfluence.context.reaction.engine3ReactionObservation1m || null;
+    patchedConfluence?.context?.reaction?.engine3ReactionObservation1m || null;
 
   const validation5m =
-    patchedConfluence.context.reaction.engine3ReactionValidation5m || null;
+    patchedConfluence?.context?.reaction?.engine3ReactionValidation5m || null;
+
+  // Legacy objects remain visible for diagnostics only. They cannot create,
+  // confirm, veto, hold, or reset Strategy 1 canonical Engine 3 direction.
+  const currentLevelAction =
+    patchedConfluence?.context?.reaction?.currentLevelAction || null;
+
+  const fastImbalanceReaction =
+    patchedConfluence?.context?.reaction?.engine3FastImbalanceReaction || null;
+
+  const evaluationTimeMs =
+    observation1m?.evaluationTimeMs ??
+    observation1m?.observedAt ??
+    validation5m?.evaluationTimeMs ??
+    validation5m?.observedAt ??
+    Date.now();
 
   const zone = normalizeZone(engine26ReactionHandoff);
 
   const currentPrice =
     validPrice(observation1m?.currentPrice) ??
     validPrice(observation1m?.currentCandle?.close) ??
-    validPrice(engine26ReactionHandoff?.currentPrice) ??
-    validPrice(engine26ReactionHandoff?.zone?.currentPrice) ??
+    validPrice(validation5m?.currentCandle?.close) ??
+    validPrice(tenMinuteCompletedClose) ??
     null;
 
-  const position = zonePosition(currentPrice, zone);
-
-  // 1m is retained exactly as a WATCH / DISPLAY sensor.
-  const oneMinuteWatch = {
-    active: observation1m?.active === true,
-    role: "WATCH_DISPLAY_ONLY",
-    watchOnly: true,
-    direction: safeUpper(observation1m?.direction, "NEUTRAL"),
-    quality: safeUpper(observation1m?.quality, "WEAK"),
-    state: safeUpper(observation1m?.state, "NO_SIGNAL"),
-    candleState: observation1m?.candleState ?? null,
-    stale: observation1m?.stale ?? null,
-    staleReason: observation1m?.staleReason ?? null,
-    evidenceAuthority: false,
-    canonicalDirectionAuthority: false,
-  };
+  const negotiatedZonePosition = resolveNegotiatedZonePosition({
+    currentPrice,
+    zone,
+  });
 
   const fiveMinuteReaction = buildFiveMinuteReaction({
-    validation5m,
-    fiveMinuteBars,
+    bars: fiveMinuteBars,
+    evaluationTimeMs,
     zone,
-    handoff: engine26ReactionHandoff,
-    evaluationTimeMs:
-      validation5m?.evaluationTimeMs ??
-      observation1m?.evaluationTimeMs ??
-      observation1m?.observedAt ??
-      null,
+    validation5m,
   });
 
   const tenMinuteConfirmation = buildTenMinuteConfirmation({
-    tenMinuteBars,
+    bars: tenMinuteBars,
+    evaluationTimeMs,
     zone,
-    evaluationTimeMs:
-      validation5m?.evaluationTimeMs ??
-      observation1m?.evaluationTimeMs ??
-      observation1m?.observedAt ??
-      null,
+    fiveMinuteReaction,
   });
 
-  const initialReaction = buildInitialReaction({
-    engine26ReactionHandoff,
+  const canonicalResolution = resolveCanonicalLifecycle({
     fiveMinuteReaction,
     tenMinuteConfirmation,
-  });
-
-  const canonical = resolvePersistence({
-    initialReaction,
+    engine26ReactionHandoff,
+    zonePosition: negotiatedZonePosition,
     previousCanonicalDirection,
     previousReactionConfirmed,
     previousCandidateId,
     previousZoneId,
-    engine26ReactionHandoff,
-    currentPrice,
-    zone,
     tenMinuteCompletedClose,
     tenMinuteEma10,
     activePaperTradeDirection,
   });
 
-  const reactionInput = {
-    state: canonical.state,
-    quality: canonical.quality,
-    direction: canonical.direction,
-    confirmed: canonical.reactionConfirmed === true,
-    currentPrice,
-    lastCandle: validation5m?.currentCandle || observation1m?.currentCandle || null,
+  const canonicalDirection = safeUpper(canonicalResolution.direction, "NEUTRAL");
+  const canonicalDirectional = directionIsDirectional(canonicalDirection);
+  const canonicalQuality = canonicalDirectional ? canonicalResolution.quality : "WEAK";
+  const bookReactionState = fiveMinuteReaction?.state || "NO_SIGNAL";
 
-    symbol: engine26ReactionHandoff?.symbol ?? null,
-    laneId: engine26ReactionHandoff?.laneId ?? null,
-    strategyId: engine26ReactionHandoff?.strategyId ?? null,
-    candidateId: engine26ReactionHandoff?.candidateId ?? null,
-    zoneId: engine26ReactionHandoff?.zoneId ?? null,
-    setupClass: engine26ReactionHandoff?.setupClass ?? null,
-    setupGrade: engine26ReactionHandoff?.setupGrade ?? null,
-    identitySetupKey: engine26ReactionHandoff?.identitySetupKey ?? null,
-    candidateIdentityVersion: engine26ReactionHandoff?.candidateIdentityVersion ?? null,
+  const lastCandle =
+    fiveMinuteReaction?.latestCompletedBar ||
+    observation1m?.currentCandle ||
+    null;
 
-    noPermissionCreated: true,
-    noExecution: true,
-  };
-
-  const engine26LocationContext = buildEngine26LocationReactionContext({
+  const engine26LocationContext = buildAuthorizationContext({
     engine26ReactionHandoff,
     engine26StructuralContext,
-    reactionInput,
+    state: bookReactionState,
+    quality: canonicalQuality,
+    direction: canonicalDirection,
+    confirmed: canonicalResolution.reactionConfirmed === true,
+    currentPrice,
+    lastCandle,
   });
 
-  const qualification = qualificationFromCanonical({
-    canonical,
+  const qualification = resolveStrategy1Qualification({
+    canonicalResolution,
     engine26LocationContext,
   });
 
   const qualified = qualification.qualified === true;
+  const participationEvaluationEligible = qualified;
+  const authorizedForEngine4 = qualified;
 
-  const bookReactionState =
-    canonical.reactionConfirmed === true
-      ? fiveMinuteReaction?.state || canonical.state
-      : fiveMinuteReaction?.state || "WATCHING_NEGOTIATED_ZONE";
+  const setupType = setupTypeForCanonical({
+    state: bookReactionState,
+    direction: canonicalDirection,
+  });
 
-  const referenceLevel = zone?.mid ?? null;
+  const activePaperTradeLocked =
+    canonicalResolution?.activePaperTrade === true &&
+    canonicalResolution?.directionPersistenceActive === true &&
+    canonicalResolution?.ema10ResetTriggered !== true &&
+    canonicalDirectional;
+
+  const zoneExitDirectionLocked =
+    canonicalResolution?.activePaperTrade !== true &&
+    canonicalResolution?.directionPersistenceActive === true &&
+    canonicalResolution?.ema10ResetTriggered !== true &&
+    canonicalDirectional;
+
+  const oneMinuteDirection = safeUpper(observation1m?.direction, "NEUTRAL");
+  const oneMinuteState = safeUpper(observation1m?.state, "NO_SIGNAL");
+  const oneMinuteQuality = safeUpper(observation1m?.quality, "WEAK");
+
+  const blockers = unique([
+    ...qualification.blockers,
+    canonicalResolution.engine26EvaluationAuthorized !== true
+      ? "ENGINE26_EVALUATION_NOT_AUTHORIZED"
+      : null,
+    !fiveMinuteReaction?.maturityResolved && !canonicalResolution.directionPersistenceActive
+      ? "ENGINE3_WAITING_FOR_MATURE_5M_REACTION"
+      : null,
+    fiveMinuteReaction?.maturityResolved === true &&
+    tenMinuteConfirmation?.confirmed !== true &&
+    !canonicalResolution.directionPersistenceActive &&
+    !canonicalResolution.ema10ResetTriggered
+      ? "ENGINE3_WAITING_FOR_ALIGNED_10M_CONFIRMATION"
+      : null,
+    canonicalResolution.ema10ResetTriggered
+      ? "ENGINE3_DIRECTION_RESET_BY_COMPLETED_10M_EMA10"
+      : null,
+  ]);
 
   const paperScalpReaction = {
     active: true,
@@ -1058,97 +1140,108 @@ export function attachPaperScalpReactionToConfluence({
     mode: "PAPER_ONLY",
     researchOnly: true,
     fastMode: false,
+    paperShortResearchEnabled: paperShortResearchEnabled === true,
 
-    // ONE canonical Engine 3 answer.
-    state: canonical.state,
-    direction: canonical.direction,
-    quality: canonical.quality,
-    reactionState: canonical.reactionConfirmed === true
-      ? "REACTION_CONFIRMED"
-      : bookReactionState,
+    // ONE canonical Engine 3 truth.
+    state: canonicalResolution.state,
+    direction: canonicalDirection,
+    quality: canonicalQuality,
+    setupType,
+
+    reactionState: bookReactionState,
     bookReactionState,
-    bookReactionEvidence5m: fiveMinuteReaction?.evidence || [],
-    bookReactionEvidence10m: tenMinuteConfirmation?.evidence || [],
+    bookReactionEvidence: fiveMinuteReaction?.evidence || [],
 
-    setupType:
-      canonical.direction === "LONG"
-        ? "NEGOTIATED_ZONE_LONG_REACTION"
-        : canonical.direction === "SHORT"
-        ? "NEGOTIATED_ZONE_SHORT_REACTION"
-        : "NEGOTIATED_ZONE_REACTION_WATCH",
+    reactionConfirmed: canonicalResolution.reactionConfirmed === true,
+    authorizedForEngine4,
+    allowed: qualified,
+    engine3Strategy1QualifiedForEngine6: qualified,
+    participationEvaluationEligible,
+    qualificationExplicitlyPublished: true,
 
-    reactionTimeframe: "5m",
-    sourceTimeframe: "5m",
-    directionEstablishmentTimeframe: "5m_REACTION_PLUS_10m_CONFIRMATION",
-    validationTimeframe: "10m_NEGOTIATED_ZONE_CONFIRMATION",
-    directionResetTimeframe: "10m_EMA10_POST_ZONE_HOLD_RESET",
-
-    canonicalResolutionStatus: canonical.resolutionStatus,
-    canonicalResolutionReason: canonical.resolutionReason,
+    canonicalResolutionStatus: canonicalResolution.resolutionStatus,
+    canonicalResolutionReason: canonicalResolution.resolutionReason,
     canonicalObservationUsable:
-      fiveMinuteReaction?.confirmedCandleData === true &&
-      fiveMinuteReaction?.sourceFresh === true,
-    canonicalIdentityAligned: fiveMinuteReaction?.identityAligned !== false,
+      fiveMinuteReaction?.maturityResolved === true &&
+      tenMinuteConfirmation?.completedBarCount >= 2,
+    canonicalIdentityAligned:
+      engine26LocationContext?.identityComparison?.matched === true,
 
-    currentPrice,
-    insideNegotiatedZone: position.inside === true,
-    negotiatedZonePosition: position.position,
-    negotiatedZonePositionKnown: position.known === true,
+    sourceTimeframe: canonicalResolution.sourceTimeframe,
+    reactionTimeframe: canonicalResolution.reactionTimeframe,
+
+    directionEstablishmentTimeframe:
+      canonicalResolution.directionPersistenceActive
+        ? "10m_EMA10_POST_ZONE_HOLD"
+        : "5m_REACTION_PLUS_10m_CONFIRMATION",
+
+    validationTimeframe: "10m_CONFIRMS_5m_REACTION",
+    directionResetTimeframe: "10m_EMA10_OR_ENGINE26_NEW_LIFECYCLE",
+
+    // Exact canonical reference from Engine 26 only.
+    referenceType: "ENGINE26_NEGOTIATED_ZONE",
+    referenceLabel: "ENGINE26_NEGOTIATED_ZONE",
+    referenceLevel: zone?.mid ?? null,
     negotiatedZoneLo: zone?.lo ?? null,
     negotiatedZoneHi: zone?.hi ?? null,
     negotiatedZoneMid: zone?.mid ?? null,
+    negotiatedZonePosition: negotiatedZonePosition.position,
+    negotiatedZonePositionKnown: negotiatedZonePosition.known,
+    insideNegotiatedZone: negotiatedZonePosition.inside,
 
-    // Engine 26 is the ONLY canonical Strategy 1 reaction reference.
-    referenceLevel,
-    referenceType: "ENGINE26_NEGOTIATED_ZONE",
-    referenceLabel: "Engine 26 negotiated zone",
-    referenceSource: "ENGINE26",
+    currentPrice,
     distancePts:
-      currentPrice != null && referenceLevel != null
-        ? Number(Math.abs(currentPrice - referenceLevel).toFixed(2))
+      currentPrice != null && zone?.mid != null
+        ? Number(Math.abs(currentPrice - zone.mid).toFixed(2))
         : null,
 
-    // 1m remains visible but has zero canonical authority.
-    oneMinuteImmediateDirection: oneMinuteWatch.direction,
-    oneMinuteWatch,
+    // 1m is permanently watch/display only.
+    oneMinuteImmediateDirection: oneMinuteDirection,
+    oneMinuteWatchDirection: oneMinuteDirection,
+    oneMinuteWatchState: oneMinuteState,
+    oneMinuteWatchQuality: oneMinuteQuality,
     oneMinuteCanonicalAuthority: false,
+    directionEstablishedByFresh1m: false,
+    fiveMinuteValidationRequired: true,
 
-    // 5m is mature reaction evidence.
-    fiveMinuteValidationDirection: fiveMinuteReaction?.direction || "NEUTRAL",
-    fiveMinuteReactionState: fiveMinuteReaction?.state || "NO_SIGNAL",
-    fiveMinuteReactionEvidence: fiveMinuteReaction?.evidence || [],
-    fiveMinuteFollowThrough: fiveMinuteReaction?.followThrough === true,
+    reactionObservation1m: observation1m,
 
-    // 10m is broader price confirmation at the SAME Engine 26 zone.
-    broaderTenMinuteDirection: tenMinuteConfirmation?.direction || "NEUTRAL",
-    tenMinuteConfirmationState: tenMinuteConfirmation?.state || "NO_SIGNAL",
-    tenMinuteConfirmationEvidence: tenMinuteConfirmation?.evidence || [],
-    tenMinuteConfirmationAligned:
-      initialReaction?.aligned === true,
+    // 5m is the primary mature price-reaction evidence.
+    fiveMinuteValidationDirection: fiveMinuteReaction.direction,
+    fiveMinuteReaction,
+    reactionValidation5m: validation5m,
+    fiveMinuteCanonicalDirectionAuthority: false,
+    fiveMinuteReactionEvidenceAuthority: true,
 
-    reactionCandidateDirection: initialReaction?.direction || "NEUTRAL",
-    reactionCandidateState: initialReaction?.state || "NO_SIGNAL",
-    reactionCandidateQuality: initialReaction?.quality || "WEAK",
-    reactionCandidateConfirmed: initialReaction?.confirmed === true,
+    // 10m confirms the 5m direction; it does not use EMA10 for initial direction.
+    broaderTenMinuteDirection: tenMinuteConfirmation.direction,
+    broaderReaction10m: tenMinuteConfirmation,
+    tenMinuteConfirmation,
+    tenMinuteInitialDirectionAuthority: false,
+    tenMinuteConfirmationAuthority: true,
 
-    previousCanonicalDirection: safeUpper(previousCanonicalDirection, "NEUTRAL"),
-    previousReactionConfirmed: previousReactionConfirmed === true,
+    reactionCandidateDirection: fiveMinuteReaction.direction,
+    reactionCandidateState: fiveMinuteReaction.state,
+    reactionCandidateQuality: fiveMinuteReaction.quality,
+    reactionCandidateConfirmed: tenMinuteConfirmation.confirmed === true,
+
+    previousCanonicalDirection: canonicalResolution.previousCanonicalDirection,
+    previousReactionConfirmed: canonicalResolution.previousReactionConfirmed,
     previousCandidateId,
     previousZoneId,
+    lifecycleSame: canonicalResolution.lifecycleSame,
+    lifecycleChanged: canonicalResolution.lifecycleChanged,
 
-    activePaperTrade: ["LONG", "SHORT"].includes(
-      safeUpper(activePaperTradeDirection, "NEUTRAL")
-    ),
-    activePaperTradeDirection: safeUpper(activePaperTradeDirection, "NEUTRAL"),
-    directionPersistenceActive: canonical.directionPersistenceActive === true,
-    lifecycleResetTriggered: canonical.lifecycleResetTriggered === true,
+    activePaperTrade: canonicalResolution.activePaperTrade,
+    activePaperTradeDirection: canonicalResolution.activePaperTradeDirection,
+    directionPersistenceActive: canonicalResolution.directionPersistenceActive,
+    activePaperTradeLocked,
+    zoneExitDirectionLocked,
 
-    tenMinuteCompletedClose: validPrice(tenMinuteCompletedClose),
-    tenMinuteEma10: validPrice(tenMinuteEma10),
-    ema10ResetDataAvailable:
-      validPrice(tenMinuteCompletedClose) != null &&
-      validPrice(tenMinuteEma10) != null,
-    ema10ResetTriggered: canonical.ema10ResetTriggered === true,
+    tenMinuteCompletedClose: canonicalResolution.tenMinuteCompletedClose,
+    tenMinuteEma10: canonicalResolution.tenMinuteEma10,
+    ema10ResetDataAvailable: canonicalResolution.ema10ResetDataAvailable,
+    ema10ResetTriggered: canonicalResolution.ema10ResetTriggered,
 
     // Engine 26 authorization / identity transport.
     authorized: engine26LocationContext?.authorized === true,
@@ -1156,174 +1249,171 @@ export function attachPaperScalpReactionToConfluence({
       engine26LocationContext?.authorizeEngine3Evaluation === true,
     authorizeEngine3Evaluation:
       engine26LocationContext?.authorizeEngine3Evaluation === true,
+
     authorizedReactionState:
-      canonical.reactionConfirmed === true ? "REACTION_CONFIRMED" : engine26LocationContext?.state ?? null,
-    authorizedReactionRawState: bookReactionState,
-    reactionConfirmed: canonical.reactionConfirmed === true,
+      canonicalResolution.reactionConfirmed === true
+        ? "REACTION_CONFIRMED"
+        : engine26LocationContext?.state ?? null,
+
+    authorizedReactionRawState:
+      engine26LocationContext?.rawState ?? bookReactionState,
+
     engine26ReactionVerified:
       engine26LocationContext?.confirmed === true &&
       engine26LocationContext?.state === "REACTION_CONFIRMED",
 
     candidateId:
-      engine26LocationContext?.candidateId ?? engine26ReactionHandoff?.candidateId ?? null,
+      engine26LocationContext?.candidateId ??
+      engine26ReactionHandoff?.candidateId ??
+      null,
+
     zoneId:
-      engine26LocationContext?.zoneId ?? engine26ReactionHandoff?.zoneId ?? null,
+      engine26LocationContext?.zoneId ??
+      engine26ReactionHandoff?.zoneId ??
+      null,
+
     laneId:
-      engine26LocationContext?.laneId ?? engine26ReactionHandoff?.laneId ?? null,
+      engine26LocationContext?.laneId ??
+      engine26ReactionHandoff?.laneId ??
+      null,
+
     strategyId:
-      engine26LocationContext?.strategyId ?? engine26ReactionHandoff?.strategyId ?? null,
+      engine26LocationContext?.strategyId ??
+      engine26ReactionHandoff?.strategyId ??
+      null,
+
     symbol:
-      engine26LocationContext?.symbol ?? engine26ReactionHandoff?.symbol ?? null,
+      engine26LocationContext?.symbol ??
+      engine26ReactionHandoff?.symbol ??
+      null,
+
     setupClass:
-      engine26LocationContext?.setupClass ?? engine26ReactionHandoff?.setupClass ?? null,
+      engine26LocationContext?.setupClass ??
+      engine26ReactionHandoff?.setupClass ??
+      null,
+
     setupGrade:
-      engine26LocationContext?.setupGrade ?? engine26ReactionHandoff?.setupGrade ?? null,
+      engine26LocationContext?.setupGrade ??
+      engine26ReactionHandoff?.setupGrade ??
+      null,
+
     identitySetupKey:
-      engine26LocationContext?.identitySetupKey ?? engine26ReactionHandoff?.identitySetupKey ?? null,
+      engine26LocationContext?.identitySetupKey ??
+      engine26ReactionHandoff?.identitySetupKey ??
+      null,
+
     candidateIdentityVersion:
       engine26LocationContext?.candidateIdentityVersion ??
       engine26ReactionHandoff?.candidateIdentityVersion ??
       null,
+
     canonicalIdentity: engine26LocationContext?.canonicalIdentity || null,
     sourceIdentity: engine26LocationContext?.sourceIdentity || null,
     identityComparison: engine26LocationContext?.identityComparison || null,
+
     armed: engine26LocationContext?.armed === true,
     chainArmed: engine26LocationContext?.chainArmed === true,
     contactState: engine26LocationContext?.contactState ?? null,
     directionState: engine26LocationContext?.directionState ?? null,
     tradeDirectionBias: engine26LocationContext?.tradeDirectionBias ?? null,
-    expectedReactionDirection: engine26LocationContext?.expectedReactionDirection ?? null,
+    expectedReactionDirection:
+      engine26LocationContext?.expectedReactionDirection ?? null,
     expectedReactions: Array.isArray(engine26LocationContext?.expectedReactions)
       ? engine26LocationContext.expectedReactions
       : [],
     reactionExpected: engine26LocationContext?.reactionExpected ?? null,
     timeframe: engine26LocationContext?.timeframe ?? null,
     snapshotTime: engine26LocationContext?.snapshotTime ?? null,
-
-    // Final Engine 3 handoff to Engine 4 / Engine 6.
-    allowed: qualified,
-    authorizedForEngine4: qualified,
-    engine3Strategy1QualifiedForEngine6: qualified,
-    participationEvaluationEligible: qualified,
-    qualificationExplicitlyPublished: true,
-    targetModel: TARGET_MODEL,
-
-    // Preserve three-timeframe objects for timeline / diagnostics.
-    // IMPORTANT: the timeline receives Engine 3's negotiated-zone interpretation,
-    // not the legacy 5m "does it agree with 1m" direction.
-    reactionObservation1m: {
-      ...(observation1m || {}),
-      role: "WATCH_DISPLAY_ONLY",
-      watchOnly: true,
-      canonicalDirectionAuthority: false,
-    },
-    reactionValidation5m: {
-      ...(validation5m || {}),
-      role: "MATURE_REACTION_EVIDENCE",
-      direction: fiveMinuteReaction?.direction || "NEUTRAL",
-      state: fiveMinuteReaction?.state || "NO_SIGNAL",
-      reactionState: fiveMinuteReaction?.state || "NO_SIGNAL",
-      quality:
-        fiveMinuteReaction?.maturity === "MATURE_REACTION"
-          ? "GOOD"
-          : "WEAK",
-      maturity: fiveMinuteReaction?.maturity || "WAIT",
-      evidence: fiveMinuteReaction?.evidence || [],
-      sequence: fiveMinuteReaction?.sequence || [],
-      followThrough: fiveMinuteReaction?.followThrough === true,
-      legacyValidationDirection: validation5m?.direction || null,
-      legacyValidationState: validation5m?.validationState || null,
-      canonicalDirectionAuthority: false,
-    },
-    broaderReaction10m: tenMinuteConfirmation,
-    tenMinuteConfirmation,
-
-    // Legacy sources remain schema-stable but have ZERO Strategy 1 authority.
-    currentLevelAction: null,
-    fastImbalanceReaction: null,
-    legacyReferenceAuthorityRemoved: true,
-
     engine26LocationContext: engine26LocationContext || null,
 
-    confirmationDiagnostics: {
-      engine26Authorized:
-        engine26ReactionHandoff?.authorizeEngine3Evaluation === true,
-      sameEngine26Lifecycle: sameLifecycle({
-        previousCandidateId,
-        previousZoneId,
-        handoff: engine26ReactionHandoff,
-      }),
-      oneMinuteWatchOnly: true,
-      fiveMinuteReactionDirection: fiveMinuteReaction?.direction || "NEUTRAL",
-      fiveMinuteReactionState: fiveMinuteReaction?.state || "NO_SIGNAL",
-      fiveMinuteReactionEvidence: fiveMinuteReaction?.evidence || [],
-      fiveMinuteSourceFresh: fiveMinuteReaction?.sourceFresh === true,
-      fiveMinuteIdentityAligned: fiveMinuteReaction?.identityAligned !== false,
-      tenMinuteConfirmationDirection: tenMinuteConfirmation?.direction || "NEUTRAL",
-      tenMinuteConfirmationState: tenMinuteConfirmation?.state || "NO_SIGNAL",
-      tenMinuteConfirmationEvidence: tenMinuteConfirmation?.evidence || [],
-      fiveAndTenMinuteAligned: initialReaction?.aligned === true,
-      initialReactionConfirmed: initialReaction?.confirmed === true,
-      directionLockedForLifecycle: canonical.reactionConfirmed === true,
-      directionPersistenceActive: canonical.directionPersistenceActive === true,
-      ema10ResetTriggered: canonical.ema10ResetTriggered === true,
-      lifecycleResetTriggered: canonical.lifecycleResetTriggered === true,
-    },
+    targetModel: TARGET_MODEL,
 
-    validationState:
-      initialReaction?.confirmed === true
-        ? "CONFIRMED"
-        : fiveMinuteReaction?.direction !== "NEUTRAL" &&
-          tenMinuteConfirmation?.direction !== "NEUTRAL" &&
-          fiveMinuteReaction?.direction !== tenMinuteConfirmation?.direction
-        ? "CONFLICT"
-        : "UNRESOLVED",
-
+    // Backward-compatible validation fields, now describing 5m -> 10m rather
+    // than 1m -> 5m authority.
+    validationState: tenMinuteConfirmation.validationState,
     validationSupports1m: false,
     validationConflictsWith1m: false,
-    validationResolved5m: fiveMinuteReaction?.direction !== "NEUTRAL",
+    validationResolved5m: fiveMinuteReaction.maturityResolved === true,
+    validationSupports5m: tenMinuteConfirmation.supportsFiveMinuteDirection === true,
+    validationConflictsWith5m:
+      tenMinuteConfirmation.conflictsWithFiveMinuteDirection === true,
 
-    broaderContextDirection: tenMinuteConfirmation?.direction || null,
-    broaderContextState: tenMinuteConfirmation?.state || null,
+    broaderContextDirection: tenMinuteConfirmation.direction,
+    broaderContextState: tenMinuteConfirmation.state,
 
-    // Candle contract retained for downstream compatibility.
+    confirmationDiagnostics: {
+      oneMinuteWatchOnly: true,
+      oneMinuteDirection,
+      oneMinuteState,
+      oneMinuteQuality,
+      fiveMinuteDirection: fiveMinuteReaction.direction,
+      fiveMinuteState: fiveMinuteReaction.state,
+      fiveMinuteQuality: fiveMinuteReaction.quality,
+      fiveMinuteMaturityResolved: fiveMinuteReaction.maturityResolved,
+      tenMinuteDirection: tenMinuteConfirmation.direction,
+      tenMinuteState: tenMinuteConfirmation.state,
+      tenMinuteConfirmed: tenMinuteConfirmation.confirmed,
+      tenMinuteValidationState: tenMinuteConfirmation.validationState,
+      engine26EvaluationAuthorized:
+        canonicalResolution.engine26EvaluationAuthorized,
+      lifecycleSame: canonicalResolution.lifecycleSame,
+      lifecycleChanged: canonicalResolution.lifecycleChanged,
+      activePaperTradeLocked,
+      zoneExitDirectionLocked,
+      authorizedForEngine4,
+    },
+
+    // Candle contract remains available for Engine 4 / diagnostics. 1m remains
+    // the most immediate observation but has no canonical reaction authority.
     supportingBarTime:
-      validation5m?.supportingBarTime ?? observation1m?.supportingBarTime ?? null,
-    evaluationTimeMs:
-      validation5m?.evaluationTimeMs ?? observation1m?.evaluationTimeMs ?? null,
-    currentCandleStatus:
-      validation5m?.currentCandleStatus ?? observation1m?.currentCandleStatus ?? null,
-    priorCandleStatus:
-      validation5m?.priorCandleStatus ?? observation1m?.priorCandleStatus ?? null,
-    currentCandle:
-      validation5m?.currentCandle ?? observation1m?.currentCandle ?? null,
-    priorCandle:
-      validation5m?.priorCandle ?? observation1m?.priorCandle ?? null,
-    lastCandle:
-      validation5m?.currentCandle ?? observation1m?.currentCandle ?? null,
-    candleClosed:
-      (validation5m?.currentCandleStatus ?? observation1m?.currentCandleStatus) === "COMPLETED"
-        ? true
-        : (validation5m?.currentCandleStatus ?? observation1m?.currentCandleStatus) === "FORMING"
-        ? false
-        : null,
-    priorCandleCompleted:
-      (validation5m?.priorCandleStatus ?? observation1m?.priorCandleStatus) === "COMPLETED"
-        ? true
-        : (validation5m?.priorCandleStatus ?? observation1m?.priorCandleStatus) === "FORMING"
-        ? false
-        : null,
-    candleSourceFresh:
-      validation5m?.stale === false,
+      observation1m?.supportingBarTime ??
+      barTime(fiveMinuteReaction?.latestCompletedBar) ??
+      null,
 
-    // Engine 22 remains diagnostic only.
+    evaluationTimeMs,
+    currentCandleStatus: observation1m?.currentCandleStatus || null,
+    priorCandleStatus: observation1m?.priorCandleStatus || null,
+    currentCandle: observation1m?.currentCandle || null,
+    priorCandle: observation1m?.priorCandle || null,
+    lastCandle:
+      observation1m?.currentCandle ||
+      fiveMinuteReaction?.latestCompletedBar ||
+      null,
+
+    candleClosed:
+      observation1m?.currentCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.currentCandleStatus === "FORMING"
+        ? false
+        : null,
+
+    priorCandleCompleted:
+      observation1m?.priorCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.priorCandleStatus === "FORMING"
+        ? false
+        : null,
+
+    candleSourceFresh:
+      observation1m?.stale === false &&
+      (validation5m == null || validation5m?.stale === false),
+
+    // Legacy inputs are visible only so old UI/routes do not break. They have
+    // no Strategy 1 canonical authority in v7.
+    currentLevelAction: currentLevelAction || null,
+    fastImbalanceReaction: fastImbalanceReaction || null,
+    legacyNearestReferenceAuthority: false,
+    legacyFastImbalanceAuthority: false,
+
     lifecycleKey:
       engine22WaveStrategy?.currentLifecycleState?.key || null,
+
     engine22Direction: getEngine22Direction(engine22WaveStrategy),
+
     waveContext: buildEngine22DegreeWaveContext({
       engine22WaveStrategy,
-      reactionState: canonical.state,
-      reactionDirection: canonical.direction,
+      reactionState: bookReactionState,
+      reactionDirection: canonicalDirection,
     }),
 
     requiresEngine6PaperApproval: true,
@@ -1332,43 +1422,44 @@ export function attachPaperScalpReactionToConfluence({
     noPermissionCreated: true,
     noExecution: true,
 
-    blockers: unique([
-      ...(initialReaction?.blockers || []),
-      ...(qualification?.blockers || []),
-    ]),
+    blockers,
 
     reasonCodes: unique([
       "PAPER_ONLY_RESEARCH_LANE",
-      "ENGINE3_STRATEGY1_CANONICAL_REACTION_V6",
+      "ENGINE3_STRATEGY1_CANONICAL_REACTION_V7",
       "ENGINE26_NEGOTIATED_ZONE_IS_ONLY_CANONICAL_REFERENCE",
-      "ENGINE3_1M_WATCH_DISPLAY_ONLY",
-      "ENGINE3_5M_MATURE_REACTION_EVIDENCE",
-      "ENGINE3_10M_NEGOTIATED_ZONE_CONFIRMATION",
       "ENGINE3_BOOK_BASED_REACTION_LANGUAGE_RESTORED",
+      "ENGINE3_1M_WATCH_DISPLAY_ONLY",
+      "ENGINE3_5M_PRIMARY_MATURE_REACTION_EVIDENCE",
+      "ENGINE3_10M_BROADER_PRICE_CONFIRMATION",
+      "ENGINE3_5M_AND_10M_MUST_ALIGN_FOR_INITIAL_DIRECTION",
+      "ENGINE3_SEMANTIC_STATE_IS_NOT_DIRECTION_VETO",
       "LEGACY_NEAREST_REFERENCE_AUTHORITY_REMOVED",
       "LEGACY_FAST_IMBALANCE_AUTHORITY_REMOVED",
-      "ENGINE4_OWNS_PARTICIPATION",
-      "ENGINE6_FINAL_PAPER_PERMISSION_REQUIRED",
-      canonical.resolutionStatus,
-      canonical.resolutionReason,
-      canonical.directionPersistenceActive
+      "TEN_MINUTE_EMA10_HOLD_RESET_ONLY_AFTER_ESTABLISHED_DIRECTION",
+      canonicalResolution.lifecycleChanged
+        ? "ENGINE3_RESET_BY_NEW_ENGINE26_LIFECYCLE"
+        : null,
+      canonicalResolution.directionPersistenceActive
         ? "ENGINE3_DIRECTION_PERSISTENCE_ACTIVE"
         : null,
-      canonical.ema10ResetTriggered
+      canonicalResolution.ema10ResetTriggered
         ? "ENGINE3_DIRECTION_RESET_BY_10M_EMA10"
         : null,
-      canonical.lifecycleResetTriggered
-        ? "ENGINE3_DIRECTION_RESET_BY_NEW_ENGINE26_LIFECYCLE"
-        : null,
-      ...(initialReaction?.reasonCodes || []),
+      canonicalResolution.resolutionStatus,
+      canonicalResolution.resolutionReason,
+      ...fiveMinuteReaction.reasonCodes,
+      ...tenMinuteConfirmation.reasonCodes,
       ...(engine26LocationContext?.reasonCodes || []),
-      ...(qualification?.reasonCodes || []),
+      ...qualification.reasonCodes,
       qualified
         ? "ENGINE3_PAPER_SCALP_REACTION_ALLOWED"
         : "ENGINE3_PAPER_SCALP_REACTION_NOT_ALLOWED",
-      qualified
+      authorizedForEngine4
         ? "ENGINE4_PARTICIPATION_EVALUATION_ELIGIBLE"
         : "ENGINE4_PARTICIPATION_EVALUATION_NOT_ELIGIBLE",
+      "ENGINE4_OWNS_PARTICIPATION",
+      "ENGINE6_FINAL_PAPER_APPROVAL_REQUIRED",
       "NO_REAL_PERMISSION_CREATED",
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
@@ -1376,7 +1467,7 @@ export function attachPaperScalpReactionToConfluence({
   };
 
   patchedConfluence.context.reaction = {
-    ...patchedConfluence.context.reaction,
+    ...(patchedConfluence.context.reaction || {}),
     paperScalpReaction,
   };
 
