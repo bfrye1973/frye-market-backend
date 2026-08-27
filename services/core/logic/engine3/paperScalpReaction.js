@@ -510,6 +510,10 @@ function resolveCanonicalDirection({
 function resolveFinalCanonicalDirection({
   candidateResolution,
   candidateConfirmation,
+
+  establishedTripDirection = null,
+  engine26MidpointReset = false,
+
   insideNegotiatedZone = false,
   negotiatedZonePositionKnown = false,
 } = {}) {
@@ -523,6 +527,16 @@ function resolveFinalCanonicalDirection({
     candidateResolution?.previousCanonicalDirection,
     "NEUTRAL"
   );
+
+  const lockedTripDirection =
+  safeUpper(
+    establishedTripDirection,
+    "NEUTRAL"
+  );
+
+const lockedTripDirectional =
+  lockedTripDirection === "LONG" ||
+  lockedTripDirection === "SHORT";
 
   const previousDirectional =
     previousDirection === "LONG" ||
@@ -1300,6 +1314,10 @@ export function attachPaperScalpReactionToConfluence({
   paperShortResearchEnabled = false,
   previousCanonicalDirection = null,
   previousReactionConfirmed = false,
+
+  previousEstablishedTripDirection = null,
+  previousEstablishedTripCandidateId = null,
+
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
   activePaperTradeDirection = null,
@@ -1503,6 +1521,54 @@ const matureReaction5m = {
 
   const insideNegotiatedZone =
     negotiatedZonePosition.inside === true;
+
+/*
+ * Strategy 1 established-trip memory.
+ *
+ * This is completely separate from the current 1m / 5m / 10m
+ * reaction diagnostics.
+ */
+const priorEstablishedTripDirection =
+  ["LONG", "SHORT"].includes(
+    safeUpper(
+      previousEstablishedTripDirection,
+      "NEUTRAL"
+    )
+  )
+    ? safeUpper(
+        previousEstablishedTripDirection,
+        "NEUTRAL"
+      )
+    : "NEUTRAL";
+
+const currentCandidateId =
+  engine26ReactionHandoff?.candidateId ??
+  null;
+
+/*
+ * Engine 26 midpoint completion starts a brand-new trip.
+ *
+ * These fields are real Engine 26 handoff fields in the current
+ * backend:
+ *   priorRotationCompletionState
+ *   priorRotationFullyComplete
+ *   promotedFromTargetCompletion
+ *
+ * Candidate-ID change makes this a one-time reset instead of
+ * repeatedly resetting the new trip.
+ */
+const engine26MidpointReset =
+  currentCandidateId != null &&
+  previousEstablishedTripCandidateId != null &&
+  currentCandidateId !== previousEstablishedTripCandidateId &&
+  (
+    engine26ReactionHandoff?.priorRotationFullyComplete === true ||
+    engine26ReactionHandoff?.promotedFromTargetCompletion === true ||
+    safeUpper(
+      engine26ReactionHandoff?.priorRotationCompletionState,
+      "NONE"
+    ) === "FULL_TARGET_COMPLETION"
+  );
 
   /*
    * STEP 2 — score the candidate.
