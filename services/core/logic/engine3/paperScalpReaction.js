@@ -612,8 +612,6 @@ function resolveFinalCanonicalDirection({
           : `ACTIVE_${activeTradeDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`;
     }
   } else if (
-    negotiatedZonePositionKnown &&
-    !insideNegotiatedZone &&
     previousDirectional
   ) {
     /*
