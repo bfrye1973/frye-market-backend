@@ -43,6 +43,7 @@ import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTr
 import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
 import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
+import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { listTrades } from "../logic/journal/tradeJournalStore.js";
@@ -8684,11 +8685,27 @@ if (isEsIntradayScalp) {
     "5m"
   );
 
+  const engine3ReactionConfirmation10m =
+    buildReactionConfirmation10m({
+      bars:
+        marketMeter
+          ?.layers
+          ?.emaPosture
+          ?.tenMinute
+          ?.bars || [],
+
+      evaluationTimeMs,
+
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    });
+
   patchedConfluence.context = patchedConfluence.context || {};
   patchedConfluence.context.reaction = {
     ...(patchedConfluence.context.reaction || {}),
     engine3ReactionObservation1m,
     engine3ReactionValidation5m,
+    engine3ReactionConfirmation10m,
   };
   
 attachPaperScalpReactionToConfluence({
