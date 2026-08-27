@@ -71,6 +71,8 @@ const BULLISH_REACTION_STATES = new Set([
   "HELD_LEVEL",
   "ACCEPTING_VALUE",
   "BREAKOUT_HOLDING",
+
+  "PUSHING_HIGHER",
 ]);
 
 const BEARISH_REACTION_STATES = new Set([
@@ -80,6 +82,8 @@ const BEARISH_REACTION_STATES = new Set([
   "BREAKOUT_FAILING",
   "FAILED_ACCEPTANCE_SHORT",
   "LOST_SHORT_TRIGGER_LEVEL",
+
+  "PUSHING_LOWER",
 ]);
 
 function directionFromReactionState(state) {
@@ -1641,29 +1645,28 @@ const confirmation10m =
 
 const broaderConfirmation10m = {
   active:
-    confirmation10m?.completedZoneReactionActive === true,
+    confirmation10m?.active === true,
 
   state:
     safeUpper(
-      confirmation10m?.completedZoneReactionState,
-      "NO_SIGNAL"
+      confirmation10m?.currentPriceActionState,
+      "NO_CLEAR_DIRECTION"
     ),
 
   direction:
     safeUpper(
-      confirmation10m?.completedZoneReactionDirection,
+      confirmation10m?.currentPriceActionDirection,
       "NEUTRAL"
     ),
 
   quality:
     safeUpper(
-      confirmation10m?.completedZoneReactionQuality,
+      confirmation10m?.currentPriceActionQuality,
       "WEAK"
     ),
 
   role:
-    confirmation10m?.completedZoneReactionRole ||
-    "BROADER_ENGINE3_CONFIRMATION_EVIDENCE",
+    "CURRENT_10M_PRICE_ACTION",
 
   referenceType:
     confirmation10m?.referenceType ||
@@ -1683,7 +1686,6 @@ const broaderConfirmation10m = {
 
   canonicalDirectionAuthority: false,
 };
-
 /*
  * Strategy 1 mature 5m price-reaction evidence.
  *
@@ -1696,29 +1698,28 @@ const broaderConfirmation10m = {
  */
 const matureReaction5m = {
   active:
-    validation5m?.completedZoneReactionActive === true,
+    validation5m?.active === true,
 
   state:
     safeUpper(
-      validation5m?.completedZoneReactionState,
-      "NO_SIGNAL"
+      validation5m?.currentPriceActionState,
+      "NO_CLEAR_DIRECTION"
     ),
 
   direction:
     safeUpper(
-      validation5m?.completedZoneReactionDirection,
+      validation5m?.currentPriceActionDirection,
       "NEUTRAL"
     ),
 
   quality:
     safeUpper(
-      validation5m?.completedZoneReactionQuality,
+      validation5m?.currentPriceActionQuality,
       "WEAK"
     ),
 
   role:
-    validation5m?.completedZoneReactionRole ||
-    "MATURE_ENGINE3_REACTION_EVIDENCE",
+    "CURRENT_5M_PRICE_ACTION",
 
   referenceType:
     validation5m?.referenceType ||
@@ -1738,7 +1739,7 @@ const matureReaction5m = {
     null,
 
   levelAction:
-    validation5m?.completedLevelAction ||
+    validation5m?.levelAction ||
     null,
 
   sourceTimeframe:
