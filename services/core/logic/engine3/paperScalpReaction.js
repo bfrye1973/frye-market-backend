@@ -581,7 +581,7 @@ const lockedTripDirectional =
    * The open trade direction owns Engine 3 direction.
    * Only a completed 10m close across EMA10 resets it.
    */
-  else if (activePaperTrade) {
+  
     const resetShort =
       activeTradeDirection === "SHORT" &&
       ema10DataAvailable &&
