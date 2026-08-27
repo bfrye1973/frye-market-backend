@@ -8210,6 +8210,25 @@ const previousEngine3EstablishedTripCandidateId =
       null
     : null;
 
+const strategy1TenMinuteCompletedBars =
+  isEsIntradayScalp
+    ? marketMeter
+        ?.layers
+        ?.emaPosture
+        ?.tenMinute
+        ?.completedBars || []
+    : [];
+
+const strategy1TenMinutePriorCompletedClose =
+  isEsIntradayScalp &&
+  strategy1TenMinuteCompletedBars.length >= 2
+    ? barClose(
+        strategy1TenMinuteCompletedBars[
+          strategy1TenMinuteCompletedBars.length - 2
+        ]
+      )
+    : null;
+
 const strategy1TenMinuteCompletedClose =
   isEsIntradayScalp
     ? marketMeter
@@ -8229,7 +8248,6 @@ const strategy1TenMinuteEma10 =
         ?.ema10 ??
       null
     : null;
-
   if (s.strategyId === "intraday_scalp@10m" && s.tf === "10m") {
     // Engine 22 Lifecycle source-of-truth handoff:
     // Build the FULL Engine 2 state here and pass that same object into
@@ -8752,9 +8770,12 @@ attachPaperScalpReactionToConfluence({
   previousEstablishedTripCandidateId:
     previousEngine3EstablishedTripCandidateId,
 
-  tenMinuteCompletedClose:
-    strategy1TenMinuteCompletedClose,
+  tenMinutePriorCompletedClose:
+    strategy1TenMinutePriorCompletedClose,
 
+  tenMinuteCompletedClose:
+    strategy1TenMinuteCompletedClose, 
+  
   tenMinuteEma10:
     strategy1TenMinuteEma10,
 });
