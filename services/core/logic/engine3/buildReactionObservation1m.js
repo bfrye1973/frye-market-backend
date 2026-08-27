@@ -58,12 +58,12 @@ function negotiatedZone(candidate = {}, handoff = {}) {
 }
 
 /*
- * Strategy 1 immediate direction is candle-owned.
+ * CURRENT 1m PRICE ACTION
  *
- * Engine 26 still owns zone/location context, but zone position must not
- * suppress clear intraday candle direction.
- *
- * Use completed candles only for actionable direction.
+ * Diagnostic only.
+ * - Does not use EMA10.
+ * - Does not create/hold/reset canonical Engine 3 travel direction.
+ * - Does not derive direction from negotiated-zone position.
  */
 function directionalPair(previousBar, currentBar) {
   const currentClose = number(currentBar?.close ?? currentBar?.c);
@@ -76,17 +76,6 @@ function directionalPair(previousBar, currentBar) {
   if (
     currentClose != null &&
     previousClose != null &&
-    currentLow != null &&
-    previousLow != null &&
-    currentClose < previousClose &&
-    currentLow <= previousLow
-  ) {
-    return "SHORT";
-  }
-
-  if (
-    currentClose != null &&
-    previousClose != null &&
     currentHigh != null &&
     previousHigh != null &&
     currentClose > previousClose &&
@@ -95,26 +84,31 @@ function directionalPair(previousBar, currentBar) {
     return "LONG";
   }
 
+  if (
+    currentClose != null &&
+    previousClose != null &&
+    currentLow != null &&
+    previousLow != null &&
+    currentClose < previousClose &&
+    currentLow <= previousLow
+  ) {
+    return "SHORT";
+  }
+
   return "NEUTRAL";
 }
 
-/*
- * Strategy 1 direction and quality share one completed-1m candle model.
- *
- * GOOD   = newest completed pair qualifies directionally.
- * STRONG = newest two consecutive pairs across the latest three completed
- *          bars qualify in the same direction.
- * WEAK   = newest completed pair does not qualify.
- *
- * Legacy currentLevelAction state/quality remain diagnostic only.
- */
 function candleReactionFromBars(bars = []) {
   const recent = Array.isArray(bars)
     ? bars.filter(Boolean).slice(-3)
     : [];
 
   if (recent.length < 2) {
-    return { direction: "NEUTRAL", quality: "WEAK" };
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
   }
 
   const latestDirection = directionalPair(
@@ -123,8 +117,14 @@ function candleReactionFromBars(bars = []) {
   );
 
   if (latestDirection === "NEUTRAL") {
-    return { direction: "NEUTRAL", quality: "WEAK" };
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
   }
+
+  let quality = "GOOD";
 
   if (recent.length >= 3) {
     const previousDirection = directionalPair(
@@ -133,11 +133,18 @@ function candleReactionFromBars(bars = []) {
     );
 
     if (previousDirection === latestDirection) {
-      return { direction: latestDirection, quality: "STRONG" };
+      quality = "STRONG";
     }
   }
 
-  return { direction: latestDirection, quality: "GOOD" };
+  return {
+    state:
+      latestDirection === "LONG"
+        ? "PUSHING_HIGHER"
+        : "PUSHING_LOWER",
+    direction: latestDirection,
+    quality,
+  };
 }
 
 export function buildReactionObservation1m({
@@ -162,7 +169,11 @@ export function buildReactionObservation1m({
     evaluationTimeMs,
   });
 
-  const action = buildCurrentLevelAction({
+  /*
+   * Keep the old level/zone action for diagnostic detail only.
+   * It is not the 1m current-price-action direction.
+   */
+  const levelAction = buildCurrentLevelAction({
     symbol: identity.symbol,
     tf: "1m",
     bars10m: truth.allBars,
@@ -178,7 +189,18 @@ export function buildReactionObservation1m({
     evaluationTimeMs,
   });
 
-  const candleReaction = candleReactionFromBars(
+  /*
+   * 1m display is intentionally immediate.
+   * Use all available 1m bars, including the current forming candle.
+   */
+  const currentPriceAction = candleReactionFromBars(
+    truth.allBars
+  );
+
+  /*
+   * Completed-only 1m read remains visible separately for stable diagnostics.
+   */
+  const completedPriceAction = candleReactionFromBars(
     truth.completedBars
   );
 
@@ -203,23 +225,48 @@ export function buildReactionObservation1m({
 
   return {
     active:
-      action.active === true &&
-      zone != null,
+      Array.isArray(truth.allBars) &&
+      truth.allBars.length >= 2,
 
     diagnosticOnly: true,
+    currentPriceActionOnly: true,
     noPermissionCreated: true,
     noExecution: true,
 
     sourceTimeframe: "1m",
 
-    // Strategy 1 direction is derived from completed candle behavior,
-    // not from where price sits inside the larger imbalance zone.
-    direction: candleReaction.direction,
-    quality: candleReaction.quality,
+    /*
+     * Primary 1m row: what price is doing NOW.
+     */
+    state: currentPriceAction.state,
+    direction: currentPriceAction.direction,
+    quality: currentPriceAction.quality,
 
-    // Preserve legacy level-action outputs as diagnostics only.
-    state: action.state || "NO_SIGNAL",
-    levelActionQuality: action.quality || "WEAK",
+    currentPriceActionState:
+      currentPriceAction.state,
+    currentPriceActionDirection:
+      currentPriceAction.direction,
+    currentPriceActionQuality:
+      currentPriceAction.quality,
+
+    completedPriceActionState:
+      completedPriceAction.state,
+    completedPriceActionDirection:
+      completedPriceAction.direction,
+    completedPriceActionQuality:
+      completedPriceAction.quality,
+
+    /*
+     * Negotiated-zone/reference diagnostics remain separate.
+     */
+    levelActionState:
+      levelAction?.state || "NO_SIGNAL",
+
+    levelActionDirection:
+      levelAction?.direction || "NEUTRAL",
+
+    levelActionQuality:
+      levelAction?.quality || "WEAK",
 
     candleState:
       truth.latestBarCompletionState,
@@ -237,29 +284,55 @@ export function buildReactionObservation1m({
     staleReason,
 
     currentPrice:
-      action.currentPrice ?? null,
+      truth.allBars.at(-1)?.close ??
+      levelAction?.currentPrice ??
+      null,
 
     referenceLevel:
-      action.referenceLevel ?? null,
+      levelAction?.referenceLevel ?? null,
 
     referenceType:
-      action.referenceType ?? null,
+      levelAction?.referenceType ?? null,
+
+    referenceLabel:
+      levelAction?.referenceLabel ?? null,
 
     distancePts:
-      action.distancePts ?? null,
+      levelAction?.distancePts ?? null,
 
     levelAction:
-      action.levelAction || null,
+      levelAction?.levelAction || null,
+
+    currentCandle:
+      truth.allBars.at(-1) || null,
+
+    priorCandle:
+      truth.allBars.at(-2) || null,
+
+    currentCandleStatus:
+      truth.latestBarCompletionState || "NO_BARS",
+
+    completedBarCount:
+      Array.isArray(truth.completedBars)
+        ? truth.completedBars.length
+        : 0,
 
     ...identity,
 
+    canonicalDirectionAuthority: false,
+    canonicalQualificationAuthority: false,
+    ema10Authority: false,
+
     reasonCodes: [
-      "ENGINE3_1M_DIAGNOSTIC_OBSERVATION",
-      "ENGINE3_STRATEGY1_CANDLE_DIRECTION_INDEPENDENT_OF_ZONE",
+      "ENGINE3_1M_CURRENT_PRICE_ACTION_DIAGNOSTIC",
+      "ENGINE3_1M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_ZONE",
+      "ENGINE3_1M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_EMA10",
       ...(zone
-        ? []
+        ? ["ENGINE26_NEGOTIATED_ZONE_CONTEXT_AVAILABLE_DIAGNOSTIC_ONLY"]
         : ["NEGOTIATED_ZONE_MISSING"]),
-      ...(action.reasonCodes || []),
+      ...(levelAction?.reasonCodes || []),
+      "NO_PERMISSION_CREATED",
+      "NO_EXECUTION",
     ],
   };
 }
