@@ -2194,6 +2194,26 @@ const establishedTripDirectionLocked =
 
     engine26MidpointReset,
 
+    travelModeActive:
+      canonicalResolution.travelModeActive === true,
+
+    travelModeActivated:
+      canonicalResolution.travelModeActivated === true,
+
+    engine3Mode:
+      canonicalResolution.travelModeActive === true
+        ? "TRAVEL_MODE"
+        : "REACTION_MODE",
+
+    tenMinutePriorCompletedClose:
+      tenMinutePriorCompletedClose,
+
+    cleanDepartureDirection:
+      canonicalResolution.cleanDepartureDirection,
+
+    cleanTenMinuteDeparture:
+      canonicalResolution.cleanTenMinuteDeparture,
+
     activePaperTrade:
       canonicalResolution.activePaperTrade,
 
