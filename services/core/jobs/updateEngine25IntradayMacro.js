@@ -415,15 +415,22 @@ function buildCombinedRollingRead({
   resolvedContract = null,
   sourceType = null,
   symbol = null,
+  sessionStartSec = null,
 }) {
-  const five = buildRollingChanges(fiveMinuteBars);
-  const ten = buildRollingChanges(tenMinuteBars);
+  const five = buildRollingChanges(fiveMinuteBars, null, sessionStartSec);
+  const ten = buildRollingChanges(tenMinuteBars, null, sessionStartSec);
 
   return {
     ...(productCode ? { productCode } : {}),
     ...(resolvedContract ? { resolvedContract } : {}),
     ...(symbol ? { symbol } : {}),
     ...(sourceType ? { sourceType } : {}),
+    sessionStartUnix: Number.isFinite(Number(sessionStartSec))
+      ? Number(sessionStartSec)
+      : null,
+    sessionStartUtc: Number.isFinite(Number(sessionStartSec))
+      ? new Date(Number(sessionStartSec) * 1000).toISOString()
+      : null,
     price: five.price ?? ten.price ?? null,
     asOfUnix: five.asOfUnix ?? ten.asOfUnix ?? null,
     asOfUtc: five.asOfUtc ?? ten.asOfUtc ?? null,
@@ -517,6 +524,102 @@ function maxIso(values = []) {
   if (!valid.length) return null;
 
   return new Date(Math.max(...valid)).toISOString();
+}
+
+const ENGINE25_MARKET_TIME_ZONE = "America/New_York";
+
+function zonedDateParts(date, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    hour: map.hour,
+    minute: map.minute,
+    second: map.second,
+  };
+}
+
+function addCalendarDays({ year, month, day }, deltaDays) {
+  const d = new Date(Date.UTC(year, month - 1, day + deltaDays, 12, 0, 0));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function timeZoneOffsetMs(date, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const parts = zonedDateParts(date, timeZone);
+  const asUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+
+  return asUtc - date.getTime();
+}
+
+function zonedDateTimeToUnixSec({ year, month, day, hour, minute = 0, second = 0 }, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const wallClockUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  let guessMs = wallClockUtcMs;
+
+  // Two passes are enough to resolve normal DST offsets for the target date.
+  for (let i = 0; i < 2; i += 1) {
+    const offsetMs = timeZoneOffsetMs(new Date(guessMs), timeZone);
+    guessMs = wallClockUtcMs - offsetMs;
+  }
+
+  return Math.floor(guessMs / 1000);
+}
+
+function sessionStartUnixSec({ now = new Date(), hour, minute = 0 }) {
+  const local = zonedDateParts(now, ENGINE25_MARKET_TIME_ZONE);
+  const localMinutes = local.hour * 60 + local.minute;
+  const startMinutes = hour * 60 + minute;
+
+  const baseDate =
+    localMinutes >= startMinutes
+      ? { year: local.year, month: local.month, day: local.day }
+      : addCalendarDays(
+          { year: local.year, month: local.month, day: local.day },
+          -1
+        );
+
+  return zonedDateTimeToUnixSec(
+    { ...baseDate, hour, minute, second: 0 },
+    ENGINE25_MARKET_TIME_ZONE
+  );
+}
+
+function futuresSessionStartUnixSec(now = new Date()) {
+  // CL/BZ/ZN/ZB Globex session begins at 18:00 New York time on the
+  // prior calendar day for the daytime trading session.
+  return sessionStartUnixSec({ now, hour: 18, minute: 0 });
+}
+
+function tltCashSessionStartUnixSec(now = new Date()) {
+  // TLT cash-session reference begins at 09:30 New York time.
+  return sessionStartUnixSec({ now, hour: 9, minute: 30 });
 }
 
 function atomicWriteJson(filePath, value) {
@@ -665,6 +768,7 @@ async function collectFuturesProduct(productCode, now) {
       productCode === "ZN" || productCode === "ZB"
         ? "FUTURES_PROXY"
         : "DIRECT_FUTURES",
+    sessionStartSec: futuresSessionStartUnixSec(now),
   });
 
   return {
@@ -758,6 +862,7 @@ export async function buildAndWriteEngine25IntradayMacro({
       tenMinuteBars: tltTen.bars,
       symbol: "TLT",
       sourceType: "ETF_PROXY",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
     });
 
     // Canonical contract uses cashSession for TLT rather than generic session.
