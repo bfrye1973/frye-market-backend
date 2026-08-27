@@ -797,31 +797,16 @@ function resolveFinalConfirmation({
   };
 }
 function resolveCanonicalQuality({
-  observation1m = null,
-  canonicalResolution = null,
+  matureReaction5m = null,
 } = {}) {
-  const canonicalDirection =
+  const quality =
     safeUpper(
-      canonicalResolution?.direction,
-      "NEUTRAL"
-    );
-
-  const oneMinuteDirection =
-    safeUpper(
-      observation1m?.direction,
-      "NEUTRAL"
-    );
-
-  const oneMinuteQuality =
-    safeUpper(
-      observation1m?.quality,
+      matureReaction5m?.quality,
       "WEAK"
     );
 
-  const oneMinuteFreshAligned =
-    canonicalResolution?.observationUsable === true &&
-    ["LONG", "SHORT"].includes(canonicalDirection) &&
-    oneMinuteDirection === canonicalDirection;
+  return quality;
+}
 
   /*
    * 1m owns the immediate reaction candidate inside the negotiated zone.
@@ -1551,9 +1536,7 @@ const matureReaction5m = {
    */
   const candidateQuality =
     resolveCanonicalQuality({
-      observation1m,
-      canonicalResolution:
-        candidateResolution,
+      matureReaction5m,
     });
 
   /*
@@ -1592,13 +1575,13 @@ const matureReaction5m = {
     resolveCanonicalConfirmation({
       canonicalResolution:
         candidateResolution,
-      canonicalQuality:
-        candidateQuality,
-      observation1m,
-      validation5m,
+
+      matureReaction5m,
+      broaderConfirmation10m,
+      broaderConfirmation10m,
+
       authorizationContext,
       previousReactionConfirmed,
-      insideNegotiatedZone,
     });
 
   /*
