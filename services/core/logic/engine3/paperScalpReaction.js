@@ -177,7 +177,106 @@ function resolveNegotiatedZonePosition({
     hi,
   };
 }
+function resolveCleanTenMinuteDeparture({
+  priorCompletedClose = null,
+  completedClose = null,
+  zoneLo = null,
+  zoneHi = null,
+} = {}) {
+  const priorClose =
+    toNum(priorCompletedClose);
 
+  const currentClose =
+    toNum(completedClose);
+
+  const rawLo =
+    validPrice(zoneLo);
+
+  const rawHi =
+    validPrice(zoneHi);
+
+  if (
+    priorClose == null ||
+    currentClose == null ||
+    rawLo == null ||
+    rawHi == null
+  ) {
+    return {
+      active: false,
+      direction: "NEUTRAL",
+      priorCompletedClose: priorClose,
+      completedClose: currentClose,
+      zoneLo: rawLo,
+      zoneHi: rawHi,
+      reason:
+        "TWO_COMPLETED_10M_CLOSES_OR_ZONE_UNAVAILABLE",
+    };
+  }
+
+  const lo =
+    Math.min(rawLo, rawHi);
+
+  const hi =
+    Math.max(rawLo, rawHi);
+
+  /*
+   * Locked Strategy 1 travel-activation rule.
+   *
+   * SHORT:
+   * - two consecutive completed 10m closes below zone low
+   * - second close <= first close
+   *
+   * LONG:
+   * - two consecutive completed 10m closes above zone high
+   * - second close >= first close
+   */
+  const cleanShortDeparture =
+    priorClose < lo &&
+    currentClose < lo &&
+    currentClose <= priorClose;
+
+  const cleanLongDeparture =
+    priorClose > hi &&
+    currentClose > hi &&
+    currentClose >= priorClose;
+
+  if (cleanShortDeparture) {
+    return {
+      active: true,
+      direction: "SHORT",
+      priorCompletedClose: priorClose,
+      completedClose: currentClose,
+      zoneLo: lo,
+      zoneHi: hi,
+      reason:
+        "TWO_COMPLETED_10M_CLOSES_CLEANLY_BELOW_NEGOTIATED_ZONE",
+    };
+  }
+
+  if (cleanLongDeparture) {
+    return {
+      active: true,
+      direction: "LONG",
+      priorCompletedClose: priorClose,
+      completedClose: currentClose,
+      zoneLo: lo,
+      zoneHi: hi,
+      reason:
+        "TWO_COMPLETED_10M_CLOSES_CLEANLY_ABOVE_NEGOTIATED_ZONE",
+    };
+  }
+
+  return {
+    active: false,
+    direction: "NEUTRAL",
+    priorCompletedClose: priorClose,
+    completedClose: currentClose,
+    zoneLo: lo,
+    zoneHi: hi,
+    reason:
+      "TWO_COMPLETED_10M_CLEAN_DEPARTURE_NOT_CONFIRMED",
+  };
+}
 function getEngine22Direction(engine22WaveStrategy) {
   return safeUpper(
     engine22WaveStrategy
@@ -516,79 +615,185 @@ function resolveFinalCanonicalDirection({
 
   insideNegotiatedZone = false,
   negotiatedZonePositionKnown = false,
+
+  cleanTenMinuteDeparture = null,
 } = {}) {
-  const candidateDirection = safeUpper(
-    candidateResolution?.candidateDirection ??
+  const candidateDirection =
+    safeUpper(
+      candidateResolution?.candidateDirection ??
       candidateResolution?.direction,
-    "NEUTRAL"
-  );
+      "NEUTRAL"
+    );
 
-  const previousDirection = safeUpper(
-    candidateResolution?.previousCanonicalDirection,
-    "NEUTRAL"
-  );
-
-  const lockedTripDirection = safeUpper(
-    establishedTripDirection,
-    "NEUTRAL"
-  );
+  const lockedTripDirection =
+    safeUpper(
+      establishedTripDirection,
+      "NEUTRAL"
+    );
 
   const lockedTripDirectional =
     lockedTripDirection === "LONG" ||
     lockedTripDirection === "SHORT";
 
-  const previousDirectional =
-    previousDirection === "LONG" ||
-    previousDirection === "SHORT";
-
-  const activePaperTrade =
-    candidateResolution?.activePaperTrade === true;
-
-  const activeTradeDirection = safeUpper(
-    candidateResolution?.activePaperTradeDirection,
-    "NEUTRAL"
-  );
-
   const completedClose =
-    toNum(candidateResolution?.tenMinuteCompletedClose);
+    toNum(
+      candidateResolution?.tenMinuteCompletedClose
+    );
 
   const ema10 =
-    toNum(candidateResolution?.tenMinuteEma10);
+    toNum(
+      candidateResolution?.tenMinuteEma10
+    );
 
   const ema10DataAvailable =
     completedClose != null &&
     ema10 != null;
 
+  const reactionConfirmed =
+    candidateConfirmation?.reactionConfirmed === true;
+
+  const candidateDirectional =
+    candidateDirection === "LONG" ||
+    candidateDirection === "SHORT";
+
+  const cleanDepartureDirection =
+    safeUpper(
+      cleanTenMinuteDeparture?.direction,
+      "NEUTRAL"
+    );
+
+  const cleanDepartureDirectional =
+    cleanTenMinuteDeparture?.active === true &&
+    (
+      cleanDepartureDirection === "LONG" ||
+      cleanDepartureDirection === "SHORT"
+    );
+
   let state =
     candidateResolution?.state ||
     "NO_SIGNAL";
 
-  let direction = "NEUTRAL";
-  let sourceTimeframe = null;
-  let reactionTimeframe = null;
-  let directionPersistenceActive = false;
-  let directionEstablishedByFresh1m = false;
-  let ema10ResetTriggered = false;
+  let direction =
+    "NEUTRAL";
+
+  let sourceTimeframe =
+    null;
+
+  let reactionTimeframe =
+    null;
+
+  let directionPersistenceActive =
+    false;
+
+  let directionEstablishedByFresh1m =
+    false;
+
+  let ema10ResetTriggered =
+    false;
+
+  let travelModeActive =
+    false;
+
+  let travelModeActivated =
+    false;
+
   let resolutionStatus =
     "REACTION_NOT_CONFIRMED_DIRECTION_NEUTRAL";
+
   let resolutionReason =
-    "ENGINE3_DIRECTION_REQUIRES_NEGOTIATED_ZONE_REACTION";
+    "ENGINE3_REACTION_NOT_CONFIRMED";
 
   /*
-   * ESTABLISHED STRATEGY 1 TRIP
+   * 1 — ENGINE 26 MIDPOINT COMPLETION
    *
-   * Once Engine 3 has established LONG or SHORT, current reaction
-   * diagnostics cannot flip canonical Engine 3 direction.
-   *
-   * LONG stays LONG until a completed 10m close is below EMA10.
-   * SHORT stays SHORT until a completed 10m close is above EMA10.
-   *
-   * EMA10 never creates an initial direction.
+   * Old trip is finished.
    */
-  if (
-    lockedTripDirectional &&
-    engine26MidpointReset !== true
-  ) {
+  if (engine26MidpointReset === true) {
+    state =
+      "ENGINE26_MIDPOINT_TRIP_RESET";
+
+    direction =
+      "NEUTRAL";
+
+    sourceTimeframe =
+      "ENGINE26_MIDPOINT_RESET";
+
+    reactionTimeframe =
+      null;
+
+    resolutionStatus =
+      "ENGINE26_MIDPOINT_COMPLETION_RESET_TO_NEUTRAL";
+
+    resolutionReason =
+      "ENGINE26_FULL_TARGET_COMPLETION_START_FRESH_ENGINE3_REACTION";
+  }
+
+  /*
+   * 2 — NEGOTIATED-ZONE REACTION MODE
+   *
+   * EMA10 IS COMPLETELY OFF.
+   *
+   * Even if an old travel direction existed, re-entering
+   * a negotiated zone returns Engine 3 to reaction mode.
+   */
+  else if (insideNegotiatedZone === true) {
+    travelModeActive =
+      false;
+
+    directionPersistenceActive =
+      false;
+
+    ema10ResetTriggered =
+      false;
+
+    if (
+      reactionConfirmed &&
+      candidateDirectional
+    ) {
+      direction =
+        candidateDirection;
+
+      sourceTimeframe =
+        "5m_10m_REACTION";
+
+      reactionTimeframe =
+        "5m_10m";
+
+      resolutionStatus =
+        `NEGOTIATED_ZONE_REACTION_${candidateDirection}_CONFIRMED`;
+
+      resolutionReason =
+        "EMA10_OFF_NEGOTIATED_ZONE_REACTION_OWNS_DIRECTION";
+    } else {
+      direction =
+        "NEUTRAL";
+
+      sourceTimeframe =
+        "NEGOTIATED_ZONE_REACTION";
+
+      reactionTimeframe =
+        "5m_10m";
+
+      resolutionStatus =
+        "NEGOTIATED_ZONE_REACTION_WAITING";
+
+      resolutionReason =
+        "EMA10_OFF_WAITING_FOR_CONFIRMED_ZONE_REACTION";
+    }
+  }
+
+  /*
+   * 3 — EXISTING TRAVEL MODE
+   *
+   * Price is outside the zone and a clean departure was
+   * already established previously.
+   *
+   * NOW EMA10 owns persistence.
+   */
+  else if (lockedTripDirectional) {
+    travelModeActive =
+      true;
+
     const resetShort =
       lockedTripDirection === "SHORT" &&
       ema10DataAvailable &&
@@ -603,11 +808,23 @@ function resolveFinalCanonicalDirection({
       resetShort || resetLong;
 
     if (ema10ResetTriggered) {
-      state = "ESTABLISHED_TRIP_DIRECTION_RESET";
-      direction = "NEUTRAL";
-      sourceTimeframe = "10m";
-      reactionTimeframe = "10m";
-      directionPersistenceActive = false;
+      state =
+        "ESTABLISHED_TRIP_DIRECTION_RESET";
+
+      direction =
+        "NEUTRAL";
+
+      sourceTimeframe =
+        "10m";
+
+      reactionTimeframe =
+        "10m";
+
+      directionPersistenceActive =
+        false;
+
+      travelModeActive =
+        false;
 
       resolutionStatus =
         `ESTABLISHED_TRIP_${lockedTripDirection}_RESET_AT_10M_EMA10`;
@@ -617,11 +834,20 @@ function resolveFinalCanonicalDirection({
           ? "ESTABLISHED_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
           : "ESTABLISHED_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
     } else {
-      state = "ESTABLISHED_TRIP_DIRECTION_PERSISTED";
-      direction = lockedTripDirection;
-      sourceTimeframe = "10m_EMA10_HOLD";
-      reactionTimeframe = "10m";
-      directionPersistenceActive = true;
+      state =
+        "ESTABLISHED_TRIP_DIRECTION_PERSISTED";
+
+      direction =
+        lockedTripDirection;
+
+      sourceTimeframe =
+        "10m_EMA10_HOLD";
+
+      reactionTimeframe =
+        "10m";
+
+      directionPersistenceActive =
+        true;
 
       resolutionStatus =
         `ESTABLISHED_TRIP_${lockedTripDirection}_PERSISTED`;
@@ -631,151 +857,145 @@ function resolveFinalCanonicalDirection({
           ? "ESTABLISHED_SHORT_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_ABOVE_EMA10"
           : "ESTABLISHED_LONG_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_BELOW_EMA10";
     }
-  } else if (engine26MidpointReset === true) {
-    /*
-     * Engine 26 completed the old trip at the next negotiated midpoint.
-     * Clear the old Engine 3 trip and start fresh from NEUTRAL.
-     */
-    state = "ENGINE26_MIDPOINT_TRIP_RESET";
-    direction = "NEUTRAL";
-    sourceTimeframe = "ENGINE26_MIDPOINT_RESET";
-    reactionTimeframe = null;
-    directionPersistenceActive = false;
-    ema10ResetTriggered = false;
+  }
+
+  /*
+   * 4 — NEW CLEAN DEPARTURE
+   *
+   * Two consecutive completed 10m candles have now
+   * cleanly moved away from the negotiated zone.
+   *
+   * THIS activates travel mode.
+   *
+   * EMA10 did not create the direction.
+   * The two-candle zone departure created the travel direction.
+   */
+  else if (cleanDepartureDirectional) {
+    state =
+      "CLEAN_10M_ZONE_DEPARTURE_CONFIRMED";
+
+    direction =
+      cleanDepartureDirection;
+
+    sourceTimeframe =
+      "10m_TWO_CANDLE_ZONE_DEPARTURE";
+
+    reactionTimeframe =
+      "10m";
+
+    directionPersistenceActive =
+      true;
+
+    travelModeActive =
+      true;
+
+    travelModeActivated =
+      true;
 
     resolutionStatus =
-      "ENGINE26_MIDPOINT_COMPLETION_RESET_TO_NEUTRAL";
+      `TRAVEL_MODE_${cleanDepartureDirection}_ACTIVATED`;
 
     resolutionReason =
-      "ENGINE26_FULL_TARGET_COMPLETION_START_FRESH_ENGINE3_REACTION";
-  } else if (activePaperTrade) {
-    /*
-     * Existing active-paper-trade compatibility path.
-     */
-    const resetShort =
-      activeTradeDirection === "SHORT" &&
-      ema10DataAvailable &&
-      completedClose > ema10;
+      cleanTenMinuteDeparture?.reason ||
+      "TWO_COMPLETED_10M_CLEAN_ZONE_DEPARTURE";
+  }
 
-    const resetLong =
-      activeTradeDirection === "LONG" &&
-      ema10DataAvailable &&
-      completedClose < ema10;
+  /*
+   * 5 — OUTSIDE ZONE BUT TRAVEL NOT YET CONFIRMED
+   *
+   * This is where 8/25-style fakeouts live.
+   *
+   * One candle outside the zone does NOT turn EMA10 on.
+   * Engine 3 remains in reaction mode.
+   */
+  else if (
+    negotiatedZonePositionKnown === true
+  ) {
+    travelModeActive =
+      false;
+
+    directionPersistenceActive =
+      false;
 
     ema10ResetTriggered =
-      resetShort || resetLong;
+      false;
 
-    if (ema10ResetTriggered) {
-      state = "ACTIVE_TRADE_DIRECTION_RESET";
-      direction = "NEUTRAL";
-      sourceTimeframe = "10m";
-      reactionTimeframe = "10m";
+    if (
+      reactionConfirmed &&
+      candidateDirectional
+    ) {
+      direction =
+        candidateDirection;
+
+      sourceTimeframe =
+        "5m_10m_REACTION";
+
+      reactionTimeframe =
+        "5m_10m";
 
       resolutionStatus =
-        "ACTIVE_PAPER_TRADE_DIRECTION_RESET_AT_10M_EMA10";
+        `OUTSIDE_ZONE_REACTION_${candidateDirection}_CONFIRMED_WAITING_FOR_TRAVEL`;
 
       resolutionReason =
-        activeTradeDirection === "SHORT"
-          ? "ACTIVE_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
-          : "ACTIVE_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+        "EMA10_OFF_WAITING_FOR_TWO_COMPLETED_10M_CLEAN_DEPARTURE";
     } else {
-      state = "ACTIVE_TRADE_DIRECTION_PERSISTED";
-      direction = activeTradeDirection;
-      sourceTimeframe = "ACTIVE_PAPER_TRADE";
-      reactionTimeframe = "10m";
-      directionPersistenceActive = true;
+      direction =
+        "NEUTRAL";
+
+      sourceTimeframe =
+        "REACTION_MODE";
+
+      reactionTimeframe =
+        "5m_10m";
 
       resolutionStatus =
-        `ACTIVE_PAPER_TRADE_${activeTradeDirection}_PERSISTED`;
+        "OUTSIDE_ZONE_REACTION_MODE_WAITING";
 
       resolutionReason =
-        ema10DataAvailable
-          ? activeTradeDirection === "SHORT"
-            ? "ACTIVE_SHORT_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_ABOVE_EMA10"
-            : "ACTIVE_LONG_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_BELOW_EMA10"
-          : `ACTIVE_${activeTradeDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`;
+        "EMA10_OFF_TWO_COMPLETED_10M_CLEAN_DEPARTURE_NOT_CONFIRMED";
     }
-  } else if (
-    previousDirectional &&
-    engine26MidpointReset !== true
-  ) {
-    /*
-     * Legacy previous-canonical-direction fallback.
-     * This remains behind establishedTripDirection ownership.
-     */
-    const resetShort =
-      previousDirection === "SHORT" &&
-      ema10DataAvailable &&
-      completedClose > ema10;
+  }
 
-    const resetLong =
-      previousDirection === "LONG" &&
-      ema10DataAvailable &&
-      completedClose < ema10;
+  /*
+   * 6 — UNKNOWN ZONE GEOMETRY
+   *
+   * Do not invent travel mode.
+   */
+  else {
+    travelModeActive =
+      false;
 
-    ema10ResetTriggered =
-      resetShort || resetLong;
+    directionPersistenceActive =
+      false;
 
-    if (ema10ResetTriggered) {
-      state = "ZONE_EXIT_DIRECTION_RESET";
-      direction = "NEUTRAL";
-      sourceTimeframe = "10m";
-      reactionTimeframe = "10m";
+    if (
+      reactionConfirmed &&
+      candidateDirectional
+    ) {
+      direction =
+        candidateDirection;
+
+      sourceTimeframe =
+        "5m_10m_REACTION";
+
+      reactionTimeframe =
+        "5m_10m";
 
       resolutionStatus =
-        `ZONE_EXIT_${previousDirection}_RESET_AT_10M_EMA10`;
+        `REACTION_${candidateDirection}_CONFIRMED_ZONE_POSITION_UNKNOWN`;
 
       resolutionReason =
-        previousDirection === "SHORT"
-          ? "ZONE_EXIT_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
-          : "ZONE_EXIT_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+        "ZONE_POSITION_UNKNOWN_EMA10_TRAVEL_MODE_NOT_ACTIVATED";
     } else {
-      state = "ZONE_EXIT_DIRECTION_PERSISTED";
-      direction = previousDirection;
-      sourceTimeframe = "10m_EMA10_HOLD";
-      reactionTimeframe = "10m";
-      directionPersistenceActive = true;
+      direction =
+        "NEUTRAL";
 
       resolutionStatus =
-        `ZONE_EXIT_${previousDirection}_PERSISTED_BY_10M_EMA10`;
+        "ZONE_POSITION_UNKNOWN_REACTION_WAITING";
 
       resolutionReason =
-        previousDirection === "SHORT"
-          ? "ZONE_EXIT_SHORT_HELD_UNTIL_COMPLETED_10M_CLOSE_ABOVE_EMA10"
-          : "ZONE_EXIT_LONG_HELD_UNTIL_COMPLETED_10M_CLOSE_BELOW_EMA10";
+        "NO_TRAVEL_MODE_WITHOUT_NEGOTIATED_ZONE_GEOMETRY";
     }
-  } else if (
-    insideNegotiatedZone &&
-    candidateConfirmation?.reactionConfirmed === true &&
-    (candidateDirection === "LONG" || candidateDirection === "SHORT")
-  ) {
-    /*
-     * Fresh negotiated-zone reaction establishment.
-     * EMA10 is not allowed to create this initial direction.
-     */
-    direction = candidateDirection;
-    sourceTimeframe = "5m";
-    reactionTimeframe = "5m";
-
-    resolutionStatus =
-      `CANONICAL_${candidateDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`;
-
-    resolutionReason =
-      "ENGINE3_DIRECTION_ESTABLISHED_BY_CONFIRMED_NEGOTIATED_ZONE_REACTION";
-  } else if (
-    negotiatedZonePositionKnown &&
-    !insideNegotiatedZone
-  ) {
-    state = "WAITING_FOR_NEGOTIATED_ZONE_DIRECTION";
-    direction = "NEUTRAL";
-    sourceTimeframe = null;
-    reactionTimeframe = null;
-
-    resolutionStatus =
-      "OUTSIDE_ZONE_WITHOUT_ESTABLISHED_DIRECTION";
-
-    resolutionReason =
-      "EMA10_CANNOT_CREATE_INITIAL_DIRECTION";
   }
 
   return {
@@ -791,6 +1011,16 @@ function resolveFinalCanonicalDirection({
     directionEstablishedByFresh1m,
 
     ema10ResetTriggered,
+
+    travelModeActive,
+    travelModeActivated,
+
+    cleanDepartureDirection:
+      cleanDepartureDirectional
+        ? cleanDepartureDirection
+        : "NEUTRAL",
+
+    cleanTenMinuteDeparture,
 
     resolutionStatus,
     resolutionReason,
@@ -1369,6 +1599,7 @@ export function attachPaperScalpReactionToConfluence({
   previousEstablishedTripDirection = null,
   previousEstablishedTripCandidateId = null,
 
+  tenMinutePriorCompletedClose = null,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
   activePaperTradeDirection = null,
@@ -1572,6 +1803,20 @@ const matureReaction5m = {
 
   const insideNegotiatedZone =
     negotiatedZonePosition.inside === true;
+  const cleanTenMinuteDeparture =
+    resolveCleanTenMinuteDeparture({
+      priorCompletedClose:
+        tenMinutePriorCompletedClose,
+
+      completedClose:
+        tenMinuteCompletedClose,
+
+      zoneLo:
+        negotiatedZonePosition.lo,
+
+      zoneHi:
+        negotiatedZonePosition.hi,
+    });
 
 /*
  * Strategy 1 established-trip memory.
@@ -1701,8 +1946,11 @@ const engine26MidpointReset =
       engine26MidpointReset,
 
       insideNegotiatedZone,
+
       negotiatedZonePositionKnown:
         negotiatedZonePosition.known === true,
+
+      cleanTenMinuteDeparture,
     });
 
   const confirmation =
