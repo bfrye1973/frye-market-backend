@@ -1621,8 +1621,7 @@ const engine26MidpointReset =
       canonicalResolution:
         candidateResolution,
 
-      matureReaction5m,
-      broaderConfirmation10m,
+      matureReaction5m,      
       broaderConfirmation10m,
 
       authorizationContext,
@@ -1660,6 +1659,46 @@ const engine26MidpointReset =
       candidateConfirmation,
       canonicalResolution,
     });
+
+/*
+ * Persist the Strategy 1 trip direction inside Engine 3.
+ *
+ * Reaction diagnostics may continue changing.
+ * This direction does not.
+ */
+const canonicalDirectionNow =
+  safeUpper(
+    canonicalResolution?.direction,
+    "NEUTRAL"
+  );
+
+const freshDirectionEstablished =
+  candidateConfirmation?.reactionConfirmed === true &&
+  (
+    canonicalDirectionNow === "LONG" ||
+    canonicalDirectionNow === "SHORT"
+  );
+
+const establishedTripDirection =
+  engine26MidpointReset === true ||
+  canonicalResolution?.ema10ResetTriggered === true
+    ? "NEUTRAL"
+    : priorEstablishedTripDirection !== "NEUTRAL"
+    ? priorEstablishedTripDirection
+    : freshDirectionEstablished
+    ? canonicalDirectionNow
+    : "NEUTRAL";
+
+const establishedTripCandidateId =
+  establishedTripDirection === "LONG" ||
+  establishedTripDirection === "SHORT"
+    ? previousEstablishedTripCandidateId ??
+      currentCandidateId
+    : null;
+
+const establishedTripDirectionLocked =
+  establishedTripDirection === "LONG" ||
+  establishedTripDirection === "SHORT";
 
   const canonicalQuality =
     ["LONG", "SHORT"].includes(
@@ -1830,6 +1869,26 @@ const engine26MidpointReset =
 
     directionEstablishedByFresh1m:
       canonicalResolution.directionEstablishedByFresh1m,
+
+    previousCanonicalDirection:
+      canonicalResolution.previousCanonicalDirection,
+
+    /*
+     * Engine 3 Strategy 1 travel-direction memory.
+     *
+     * This is the direction protected by completed 10m EMA10.
+     * It is separate from live 1m / 5m / 10m reaction diagnostics.
+     */
+    establishedTripDirection,
+
+    establishedTripCandidateId,
+
+    establishedTripDirectionLocked,
+
+    engine26MidpointReset,
+
+    activePaperTrade:
+      canonicalResolution.activePaperTrade,
 
     previousCanonicalDirection:
       canonicalResolution.previousCanonicalDirection,
