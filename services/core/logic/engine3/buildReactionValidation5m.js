@@ -68,55 +68,93 @@ function zoneFrom(candidate = {}, handoff = {}) {
 }
 
 /*
- * LEGACY / COMPATIBILITY DIRECTION
+ * CURRENT 5m PRICE ACTION
  *
- * This remains published so existing downstream/front-end code does not
- * break while Strategy 1 is being rewired.
- *
- * It is NOT the new canonical Engine 3 reaction authority.
+ * Diagnostic only.
+ * - Does not use EMA10.
+ * - Does not create/hold/reset canonical Engine 3 travel direction.
+ * - Does not derive direction from negotiated-zone position.
  */
-function candleDirectionFromBars(bars = []) {
+function directionalPair(previousBar, currentBar) {
+  const currentClose = number(currentBar?.close ?? currentBar?.c);
+  const previousClose = number(previousBar?.close ?? previousBar?.c);
+  const currentLow = number(currentBar?.low ?? currentBar?.l);
+  const previousLow = number(previousBar?.low ?? previousBar?.l);
+  const currentHigh = number(currentBar?.high ?? currentBar?.h);
+  const previousHigh = number(previousBar?.high ?? previousBar?.h);
+
+  if (
+    currentClose != null &&
+    previousClose != null &&
+    currentHigh != null &&
+    previousHigh != null &&
+    currentClose > previousClose &&
+    currentHigh >= previousHigh
+  ) {
+    return "LONG";
+  }
+
+  if (
+    currentClose != null &&
+    previousClose != null &&
+    currentLow != null &&
+    previousLow != null &&
+    currentClose < previousClose &&
+    currentLow <= previousLow
+  ) {
+    return "SHORT";
+  }
+
+  return "NEUTRAL";
+}
+
+function candleReactionFromBars(bars = []) {
   const recent = Array.isArray(bars)
     ? bars.filter(Boolean).slice(-3)
     : [];
 
   if (recent.length < 2) {
-    return "NEUTRAL";
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
   }
 
-  const last = recent[recent.length - 1];
-  const prev = recent[recent.length - 2];
+  const latestDirection = directionalPair(
+    recent[recent.length - 2],
+    recent[recent.length - 1]
+  );
 
-  const lastClose = number(last?.close ?? last?.c);
-  const prevClose = number(prev?.close ?? prev?.c);
-  const lastLow = number(last?.low ?? last?.l);
-  const prevLow = number(prev?.low ?? prev?.l);
-  const lastHigh = number(last?.high ?? last?.h);
-  const prevHigh = number(prev?.high ?? prev?.h);
-
-  if (
-    lastClose != null &&
-    prevClose != null &&
-    lastLow != null &&
-    prevLow != null &&
-    lastClose < prevClose &&
-    lastLow <= prevLow
-  ) {
-    return "SHORT";
+  if (latestDirection === "NEUTRAL") {
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
   }
 
-  if (
-    lastClose != null &&
-    prevClose != null &&
-    lastHigh != null &&
-    prevHigh != null &&
-    lastClose > prevClose &&
-    lastHigh >= prevHigh
-  ) {
-    return "LONG";
+  let quality = "GOOD";
+
+  if (recent.length >= 3) {
+    const previousDirection = directionalPair(
+      recent[recent.length - 3],
+      recent[recent.length - 2]
+    );
+
+    if (previousDirection === latestDirection) {
+      quality = "STRONG";
+    }
   }
 
-  return "NEUTRAL";
+  return {
+    state:
+      latestDirection === "LONG"
+        ? "PUSHING_HIGHER"
+        : "PUSHING_LOWER",
+    direction: latestDirection,
+    quality,
+  };
 }
 
 export function buildReactionValidation5m({
@@ -137,68 +175,52 @@ export function buildReactionValidation5m({
     engine26ReactionHandoff
   );
 
+  const symbol =
+    observation1m?.symbol ||
+    engine26ReactionHandoff?.symbol ||
+    engine26LocationCandidate?.symbol ||
+    "ES";
+
   /*
-   * LIVE 5m negotiated-zone observation.
-   *
-   * Uses all 5m bars, including the current forming bar.
-   * Purpose:
-   * - dashboard/watch visibility
-   * - show what Engine 3 is seeing right now
-   *
-   * This must NOT directly authorize canonical Engine 3.
+   * Keep exact-zone diagnostics for separate inspection.
+   * These are NOT the 5m current-price-action read.
    */
   const liveZoneAction = buildExactZoneAction({
-    symbol:
-      observation1m?.symbol ||
-      engine26ReactionHandoff?.symbol ||
-      engine26LocationCandidate?.symbol ||
-      "ES",
-
+    symbol,
     tf: "5m",
-
-    bars:
-      truth.allBars,
-
+    bars: truth.allBars,
     currentPrice:
       truth.allBars.at(-1)?.close ??
       null,
-
     zone,
+    evaluationTimeMs,
+  });
 
+  const completedZoneAction = buildExactZoneAction({
+    symbol,
+    tf: "5m",
+    bars: truth.completedBars,
+    currentPrice:
+      truth.completedBars.at(-1)?.close ??
+      null,
+    zone,
     evaluationTimeMs,
   });
 
   /*
-   * COMPLETED 5m negotiated-zone reaction evidence.
-   *
-   * Uses completed 5m bars only.
-   * This is the stable/mature 5m price-reaction evidence that may later
-   * be consumed by canonical Engine 3 after the manager-approved wiring
-   * is implemented.
-   *
-   * IMPORTANT:
-   * This builder still does not authorize Engine 3.
+   * 5m timeline row is current price action.
+   * Use all 5m bars, including the current forming candle.
    */
-  const completedZoneAction = buildExactZoneAction({
-    symbol:
-      observation1m?.symbol ||
-      engine26ReactionHandoff?.symbol ||
-      engine26LocationCandidate?.symbol ||
-      "ES",
+  const currentPriceAction = candleReactionFromBars(
+    truth.allBars
+  );
 
-    tf: "5m",
-
-    bars:
-      truth.completedBars,
-
-    currentPrice:
-      truth.completedBars.at(-1)?.close ??
-      null,
-
-    zone,
-
-    evaluationTimeMs,
-  });
+  /*
+   * Completed-only 5m read stays available separately.
+   */
+  const completedPriceAction = candleReactionFromBars(
+    truth.completedBars
+  );
 
   const identity = {
     symbol:
@@ -308,28 +330,21 @@ export function buildReactionValidation5m({
       : null;
 
   /*
-   * Legacy compatibility comparison.
-   *
-   * Keep publishing this while old downstream consumers still expect
-   * SUPPORT / CONFLICT / UNRESOLVED.
-   *
-   * This no longer represents the intended future canonical Engine 3
-   * reaction authority.
+   * Compatibility comparison only.
    */
   const oneDirection =
     observation1m?.direction ||
     "NEUTRAL";
 
   const fiveDirection =
-    candleDirectionFromBars(
-      truth.completedBars
-    );
+    completedPriceAction.direction;
 
   const comparable =
     identityAligned &&
     !stale &&
     observation1m?.active === true &&
-    completedZoneAction?.active === true;
+    Array.isArray(truth.completedBars) &&
+    truth.completedBars.length >= 2;
 
   const supports =
     comparable &&
@@ -357,32 +372,50 @@ export function buildReactionValidation5m({
 
   return {
     active:
-      zone != null &&
-      (
-        liveZoneAction?.active === true ||
-        completedZoneAction?.active === true
-      ),
+      Array.isArray(truth.allBars) &&
+      truth.allBars.length >= 2,
 
     diagnosticOnly: true,
+    currentPriceActionOnly: true,
     noPermissionCreated: true,
     noExecution: true,
 
     sourceTimeframe: "5m",
 
     /*
-     * ------------------------------------------------------------------
-     * LEGACY COMPATIBILITY FIELDS
-     * ------------------------------------------------------------------
+     * Primary 5m row: what price is doing NOW.
      */
-    validationState,
+    state:
+      currentPriceAction.state,
 
     direction:
-      fiveDirection,
+      currentPriceAction.direction,
 
     quality:
-      completedZoneAction?.quality ||
-      liveZoneAction?.quality ||
-      "WEAK",
+      currentPriceAction.quality,
+
+    currentPriceActionState:
+      currentPriceAction.state,
+
+    currentPriceActionDirection:
+      currentPriceAction.direction,
+
+    currentPriceActionQuality:
+      currentPriceAction.quality,
+
+    completedPriceActionState:
+      completedPriceAction.state,
+
+    completedPriceActionDirection:
+      completedPriceAction.direction,
+
+    completedPriceActionQuality:
+      completedPriceAction.quality,
+
+    /*
+     * Legacy validation comparison remains diagnostic only.
+     */
+    validationState,
 
     supports1mDirection:
       supports,
@@ -394,11 +427,8 @@ export function buildReactionValidation5m({
       supports || conflicts,
 
     /*
-     * ------------------------------------------------------------------
-     * NEW EXACT ENGINE 26 NEGOTIATED-ZONE REACTION FIELDS
-     * ------------------------------------------------------------------
+     * Exact-zone diagnostics remain separate.
      */
-
     referenceType:
       liveZoneAction?.referenceType ||
       completedZoneAction?.referenceType ||
@@ -443,9 +473,6 @@ export function buildReactionValidation5m({
     liveZoneAction:
       liveZoneAction || null,
 
-    /*
-     * Backward-compatible aliases for the live exact-zone view.
-     */
     zoneReactionState:
       liveZoneAction?.state ||
       "NO_SIGNAL",
@@ -462,9 +489,6 @@ export function buildReactionValidation5m({
       liveZoneAction?.levelAction ||
       null,
 
-    /*
-     * COMPLETED / MATURE 5m VIEW
-     */
     completedZoneReactionRole:
       "MATURE_ENGINE3_REACTION_EVIDENCE",
 
@@ -507,6 +531,12 @@ export function buildReactionValidation5m({
     stale,
     staleReason,
 
+    currentCandle:
+      truth.allBars.at(-1) || null,
+
+    priorCandle:
+      truth.allBars.at(-2) || null,
+
     currentCandleStatus:
       truth.latestBarCompletionState ||
       "NO_BARS",
@@ -518,37 +548,24 @@ export function buildReactionValidation5m({
 
     ...identity,
 
-    canonicalDirectionAuthority:
-      false,
-
-    canonicalQualificationAuthority:
-      false,
-
-    liveReactionMayAuthorize:
-      false,
-
-    completedReactionMayAuthorize:
-      false,
+    canonicalDirectionAuthority: false,
+    canonicalQualificationAuthority: false,
+    liveReactionMayAuthorize: false,
+    completedReactionMayAuthorize: false,
+    ema10Authority: false,
 
     reasonCodes: [
-      "ENGINE3_5M_DIAGNOSTIC_VALIDATION",
-      "ENGINE3_STRATEGY1_CANDLE_DIRECTION_INDEPENDENT_OF_ZONE",
-
-      "ENGINE3_5M_EXACT_ENGINE26_NEGOTIATED_ZONE_REFERENCE",
-      "ENGINE3_5M_LIVE_ZONE_REACTION_WATCH_ONLY",
-      "ENGINE3_5M_COMPLETED_ZONE_REACTION_EVIDENCE",
-
-      "ENGINE3_5M_LIVE_REACTION_HAS_NO_CANONICAL_AUTHORITY",
-      "ENGINE3_5M_COMPLETED_REACTION_NOT_YET_WIRED_TO_CANONICAL_AUTHORITY",
-
+      "ENGINE3_5M_CURRENT_PRICE_ACTION_DIAGNOSTIC",
+      "ENGINE3_5M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_ZONE",
+      "ENGINE3_5M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_EMA10",
+      "ENGINE3_5M_VALIDATION_STATE_COMPATIBILITY_ONLY",
+      "ENGINE3_5M_EXACT_ZONE_DIAGNOSTICS_PRESERVED_SEPARATELY",
       ...(!identityAligned
         ? ["IDENTITY_MISMATCH"]
         : []),
-
       ...(staleReason
         ? [staleReason]
         : []),
-
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
     ],
