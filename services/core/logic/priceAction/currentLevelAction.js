@@ -770,6 +770,189 @@ function evaluateZoneAction({ zone, last, prev, price }) {
   };
 }
 
+export function buildExactZoneAction({
+  symbol = "ES",
+  tf = "5m",
+  bars = [],
+  currentPrice = null,
+  zone = null,
+  evaluationTimeMs = null,
+} = {}) {
+  const normalizedBars = normalizeBars(bars);
+
+  const last =
+    normalizedBars[normalizedBars.length - 1] ||
+    null;
+
+  const prev =
+    normalizedBars[normalizedBars.length - 2] ||
+    null;
+
+  const normalizedZone =
+    normalizeZone(zone);
+
+  const price =
+    toNum(currentPrice) ??
+    last?.close ??
+    null;
+
+  if (!last || !prev) {
+    return makeInactiveResult({
+      symbol,
+      tf,
+      state: "INSUFFICIENT_CANDLES",
+      currentPrice: price,
+      lastCandle: last,
+      priorCandle: prev,
+      references: {
+        engine26NegotiatedZone:
+          normalizedZone,
+      },
+      reasonCodes: [
+        "INSUFFICIENT_CANDLES",
+        "ENGINE26_NEGOTIATED_ZONE_ONLY",
+      ],
+    });
+  }
+
+  if (!normalizedZone) {
+    return makeInactiveResult({
+      symbol,
+      tf,
+      state: "NO_REFERENCE_LEVEL",
+      currentPrice: price,
+      lastCandle: last,
+      priorCandle: prev,
+      references: {
+        engine26NegotiatedZone: null,
+      },
+      reasonCodes: [
+        "ENGINE26_NEGOTIATED_ZONE_MISSING",
+      ],
+    });
+  }
+
+  const evaluation =
+    evaluateZoneAction({
+      zone: normalizedZone,
+      last,
+      prev,
+      price,
+    });
+
+  const state =
+    evaluation.state ||
+    "NO_SIGNAL";
+
+  const quality =
+    classifyQuality(state);
+
+  const direction =
+    classifyDirection(state);
+
+  const completionTruth =
+    deriveCandleCompletionTruth({
+      bars: normalizedBars,
+      timeframe: tf,
+      evaluationTimeMs,
+    });
+
+  const candleCompletionState =
+    completionTruth.latestBarCompletionState;
+
+  const candleClosed =
+    candleCompletionState === "COMPLETED"
+      ? true
+      : candleCompletionState === "FORMING"
+      ? false
+      : null;
+
+  return {
+    active: true,
+
+    engine: ENGINE,
+    source: SOURCE,
+
+    symbol,
+    tf,
+
+    state,
+    quality,
+    direction,
+
+    /*
+     * This is PRICE OBSERVATION ONLY.
+     * It does not authorize Engine 3.
+     */
+    confirmed: false,
+
+    candleClosed,
+    candleCompletionState,
+
+    evaluationTimeMs:
+      completionTruth.evaluationTimeMs,
+
+    supportingBarTime:
+      last?.time ??
+      null,
+
+    supportingExpectedCloseTimeMs:
+      completionTruth.latestExpectedCloseTimeMs,
+
+    currentPrice:
+      price,
+
+    referenceLevel:
+      normalizedZone.mid,
+
+    referenceType:
+      "ENGINE26_NEGOTIATED_ZONE",
+
+    referenceLabel:
+      "Engine 26 Negotiated Zone",
+
+    distancePts:
+      distanceToZone(
+        normalizedZone,
+        price
+      ),
+
+    zone: {
+      lo: normalizedZone.lo,
+      hi: normalizedZone.hi,
+      mid: normalizedZone.mid,
+    },
+
+    levelAction: {
+      ...DEFAULT_LEVEL_ACTION,
+      ...(evaluation.flags || {}),
+    },
+
+    references: {
+      engine26NegotiatedZone:
+        normalizedZone,
+    },
+
+    lastCandle:
+      last,
+
+    priorCandle:
+      prev,
+
+    noPermissionCreated: true,
+    noExecution: true,
+
+    reasonCodes:
+      uniqueReasonCodes([
+        "ENGINE3_EXACT_NEGOTIATED_ZONE_ACTION",
+        "ENGINE26_NEGOTIATED_ZONE_ONLY",
+        ...(evaluation.reasonCodes || []),
+        "NO_PERMISSION_CREATED",
+        "NO_EXECUTION",
+      ]),
+  };
+}
+
 function evaluateLevelAction({ level, last, prev }) {
   const ref = toNum(level);
 
