@@ -1,507 +1,1075 @@
-// services/core/logic/engine25IntradayMacro.js
+// services/core/jobs/updateEngine25IntradayMacro.js
 // Engine 25 Intraday Macro v0.1
-// Pure classification/normalization logic. No provider calls, no trade permission.
+//
+// Approved Phase 2-4 implementation:
+// - Resolve nearby CL / BZ / ZN / ZB outright futures.
+// - Prefer highest-volume nearby eligible contract.
+// - Fetch 5m / 10m futures bars.
+// - Fetch TLT 5m / 10m bars.
+// - Fetch slow FRED DGS10 / DGS30 context.
+// - Build and atomically write data/engine25-intraday-macro.json.
+//
+// Not yet implemented in this phase:
+// - temporary/manual event adapter
+// - event lifecycle persistence
+// - route/context/full-dashboard exposure
+//
+// Scope lock:
+// - No LONG/SHORT.
+// - No Engine 6 permission.
+// - No Engine 3/4/22/26 changes.
 
-export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.1";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
-export const MACRO_STATES = Object.freeze([
-  "MACRO_SUPPORTIVE",
-  "MACRO_NEUTRAL",
-  "MACRO_HEADWIND",
-  "MACRO_SHOCK",
+import {
+  FUTURES_TF_MAP,
+  FUTURES_DAYS_BY_TF,
+  fetchFuturesAggs,
+} from "../providers/futuresOhlcProvider.js";
+
+import { fetchFredSeries } from "../logic/engine25DataSources.js";
+
+import {
+  buildIntradayMacro,
+  buildRollingChanges,
+  pctChange,
+} from "../logic/engine25IntradayMacro.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const CORE_DIR = path.resolve(__dirname, "..");
+const DATA_DIR = path.join(CORE_DIR, "data");
+const OUTPUT_FILE = path.join(DATA_DIR, "engine25-intraday-macro.json");
+const TEMP_EVENTS_FILE = path.join(DATA_DIR, "engine25-temporary-events.json");
+const NEWS_EVENTS_FILE = path.join(DATA_DIR, "engine25-news-events.json");
+
+const POLY_KEY =
+  process.env.POLYGON_API ||
+  process.env.POLYGON_API_KEY ||
+  process.env.POLY_API_KEY ||
+  "";
+
+const FRED_KEY =
+  process.env.FRED_API_KEY ||
+  process.env.FRED_API ||
+  process.env.FRED_KEY ||
+  "";
+
+const POLYGON_REST_BASE =
+  process.env.POLYGON_REST_BASE ||
+  process.env.POLYGON_BASE_URL ||
+  "https://api.polygon.io";
+
+const MONTH_CODES = Object.freeze([
+  "F", "G", "H", "J", "K", "M", "N", "Q", "U", "V", "X", "Z",
 ]);
 
-export const EQUITY_IMPACTS = Object.freeze([
-  "EQUITY_SUPPORTIVE",
-  "EQUITY_NEGATIVE",
-  "MIXED",
-  "NEUTRAL",
-]);
-
-export const SEVERITIES = Object.freeze(["LOW", "MODERATE", "HIGH", "EXTREME"]);
-
-export const EVENT_STATES = Object.freeze([
-  "EVENT_DETECTED",
-  "EVENT_CONFIRMED",
-  "REACTION_HOLDING",
-  "REACTION_FADING",
-  "REACTION_FAILED",
-  "EVENT_EXPIRED",
-]);
-
-// Research thresholds only. These do not modify legacy Engine 25 scoring.
-export const RESEARCH_THRESHOLDS = Object.freeze({
-  tlt: {
-    warning10mPct: -0.35,
-    warning30mPct: -0.5,
-    strong60mPct: -0.75,
-    supportive30mPct: 0.35,
-  },
-  oil: {
-    warning30mPct: 1.0,
-    strong30mPct: 1.5,
-    shock30mPct: 2.0,
-    shock60mPct: 3.0,
-    supportive30mPct: -1.0,
-  },
-  treasuryProxy: {
-    // Futures prices move opposite yields. Values are percentage changes in futures price.
-    warning10mPct: -0.08,
-    warning30mPct: -0.15,
-    strong30mPct: -0.25,
-    supportive30mPct: 0.15,
-  },
-});
-
-function num(v) {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function round(v, digits = 4) {
-  const n = num(v);
-  if (n === null) return null;
-  const p = 10 ** digits;
-  return Math.round(n * p) / p;
+function dateOnlyUtc(d) {
+  return d.toISOString().slice(0, 10);
 }
 
-export function pctChange(current, prior, digits = 4) {
-  const c = num(current);
-  const p = num(prior);
-  if (c === null || p === null || p === 0) return null;
-  return round(((c - p) / p) * 100, digits);
+function shortYear(year) {
+  return String(year).slice(-1);
 }
 
-function barClose(bar) {
-  return num(bar?.close ?? bar?.c);
-}
-
-function barTime(bar) {
-  return num(bar?.time ?? bar?.t);
-}
-
-export function normalizeBars(bars = []) {
-  const seen = new Map();
-  for (const bar of Array.isArray(bars) ? bars : []) {
-    const time = barTime(bar);
-    const close = barClose(bar);
-    if (time === null || close === null) continue;
-    seen.set(time, {
-      time,
-      open: num(bar?.open ?? bar?.o),
-      high: num(bar?.high ?? bar?.h),
-      low: num(bar?.low ?? bar?.l),
-      close,
-      volume: num(bar?.volume ?? bar?.v) ?? 0,
-    });
-  }
-  return [...seen.values()].sort((a, b) => a.time - b.time);
-}
-
-function closeAtOrBefore(bars, targetSec) {
-  let found = null;
-  for (const bar of bars) {
-    if (bar.time <= targetSec) found = bar.close;
-    else break;
-  }
-  return found;
-}
-
-export function buildRollingChanges(barsInput = [], nowSec = null, sessionStartSec = null) {
-  const bars = normalizeBars(barsInput);
-  if (!bars.length) {
-    return {
-      price: null,
-      asOfUnix: null,
-      asOfUtc: null,
-      changesPct: { "5m": null, "10m": null, "30m": null, "60m": null, session: null },
-    };
-  }
-
-  const latest = bars[bars.length - 1];
-  const refSec = num(nowSec) ?? latest.time;
-  const current = latest.close;
-
-  const changesPct = {};
-  for (const [label, seconds] of Object.entries({
-    "5m": 5 * 60,
-    "10m": 10 * 60,
-    "30m": 30 * 60,
-    "60m": 60 * 60,
-  })) {
-    changesPct[label] = pctChange(current, closeAtOrBefore(bars, refSec - seconds));
-  }
-
-  let sessionOpen = bars[0]?.open ?? bars[0]?.close;
-  const sessionStart = num(sessionStartSec);
-  if (sessionStart !== null) {
-    const sessionBar = bars.find((bar) => bar.time >= sessionStart);
-    if (sessionBar) sessionOpen = sessionBar.open ?? sessionBar.close;
-  }
-  changesPct.session = pctChange(current, sessionOpen);
-
-  return {
-    price: current,
-    asOfUnix: latest.time,
-    asOfUtc: new Date(latest.time * 1000).toISOString(),
-    changesPct,
-  };
-}
-
-function anyAtOrBelow(values, threshold) {
-  return values.some((v) => num(v) !== null && Number(v) <= threshold);
-}
-
-function anyAtOrAbove(values, threshold) {
-  return values.some((v) => num(v) !== null && Number(v) >= threshold);
-}
-
-export function classifyRates({ tenYearProxy, thirtyYearProxy } = {}) {
-  const zn = tenYearProxy?.changesPct || {};
-  const zbInput = thirtyYearProxy?.changesPct || {};
-  const hasData = [tenYearProxy?.price, thirtyYearProxy?.price, ...Object.values(zn), ...Object.values(zbInput)]
-    .some((v) => num(v) !== null);
-  if (!hasData) {
-    return { state: "UNAVAILABLE", severity: null, velocityState: "UNAVAILABLE", reasonCodes: ["RATES_PROXY_DATA_UNAVAILABLE"] };
-  }
-
-  const zb = zbInput;
-  const t = RESEARCH_THRESHOLDS.treasuryProxy;
-
-  const znWarn = anyAtOrBelow([zn["10m"]], t.warning10mPct) || anyAtOrBelow([zn["30m"]], t.warning30mPct);
-  const zbWarn = anyAtOrBelow([zb["10m"]], t.warning10mPct) || anyAtOrBelow([zb["30m"]], t.warning30mPct);
-  const znStrong = anyAtOrBelow([zn["30m"]], t.strong30mPct);
-  const zbStrong = anyAtOrBelow([zb["30m"]], t.strong30mPct);
-  const bothSupportive =
-    anyAtOrAbove([zn["30m"]], t.supportive30mPct) &&
-    anyAtOrAbove([zb["30m"]], t.supportive30mPct);
-
-  const reasonCodes = [];
-  if (znWarn) reasonCodes.push("ZN_TREASURY_PRICE_PRESSURE");
-  if (zbWarn) reasonCodes.push("ZB_TREASURY_PRICE_PRESSURE");
-  if (znStrong) reasonCodes.push("ZN_STRONG_TREASURY_SELLING");
-  if (zbStrong) reasonCodes.push("ZB_STRONG_TREASURY_SELLING");
-  if (bothSupportive) reasonCodes.push("ZN_ZB_TREASURY_STRENGTH");
-
-  if (znStrong && zbStrong) {
-    return { state: "NEGATIVE", severity: "HIGH", velocityState: "TREASURY_SELLING_STRONG", reasonCodes };
-  }
-  if (znWarn && zbWarn) {
-    return { state: "NEGATIVE", severity: "MODERATE", velocityState: "TREASURY_SELLING_CONFIRMED", reasonCodes };
-  }
-  if (znWarn || zbWarn) {
-    return { state: "NEGATIVE", severity: "LOW", velocityState: "TREASURY_PRESSURE_DEVELOPING", reasonCodes };
-  }
-  if (bothSupportive) {
-    return { state: "SUPPORTIVE", severity: "LOW", velocityState: "TREASURY_STRENGTH", reasonCodes };
-  }
-  return { state: "NEUTRAL", severity: "LOW", velocityState: "STABLE", reasonCodes };
-}
-
-export function classifyTlt(tlt = {}) {
-  const c = tlt?.changesPct || {};
-  const hasData = [tlt?.price, ...Object.values(c)].some((v) => num(v) !== null);
-  if (!hasData) {
-    return { state: "UNAVAILABLE", severity: null, velocityState: "UNAVAILABLE", reasonCodes: ["TLT_DATA_UNAVAILABLE"] };
-  }
-  const t = RESEARCH_THRESHOLDS.tlt;
-  const reasonCodes = [];
-
-  const strong = anyAtOrBelow([c["60m"]], t.strong60mPct);
-  const warning =
-    anyAtOrBelow([c["10m"]], t.warning10mPct) ||
-    anyAtOrBelow([c["30m"]], t.warning30mPct);
-  const supportive = anyAtOrAbove([c["30m"]], t.supportive30mPct);
-
-  if (strong) {
-    reasonCodes.push("TLT_STRONG_DURATION_SELLING");
-    return { state: "NEGATIVE", severity: "HIGH", velocityState: "SELLING_STRONG", reasonCodes };
-  }
-  if (warning) {
-    reasonCodes.push("TLT_DURATION_PRESSURE");
-    return { state: "NEGATIVE", severity: "MODERATE", velocityState: "SELLING_ACCELERATING", reasonCodes };
-  }
-  if (supportive) {
-    reasonCodes.push("TLT_DURATION_STRENGTH");
-    return { state: "SUPPORTIVE", severity: "LOW", velocityState: "STRENGTHENING", reasonCodes };
-  }
-  return { state: "NEUTRAL", severity: "LOW", velocityState: "STABLE", reasonCodes };
-}
-
-function classifyOilLeg(changes = {}) {
-  const t = RESEARCH_THRESHOLDS.oil;
-  if (anyAtOrAbove([changes["30m"]], t.shock30mPct) || anyAtOrAbove([changes["60m"]], t.shock60mPct)) {
-    return "SHOCK";
-  }
-  if (anyAtOrAbove([changes["30m"]], t.strong30mPct)) return "STRONG_WARNING";
-  if (anyAtOrAbove([changes["30m"]], t.warning30mPct)) return "WARNING";
-  if (anyAtOrBelow([changes["30m"]], t.supportive30mPct)) return "SUPPORTIVE";
-  return "NEUTRAL";
-}
-
-export function classifyOil({ wti, brent } = {}) {
-  const hasWti = [wti?.price, ...Object.values(wti?.changesPct || {})].some((v) => num(v) !== null);
-  const hasBrent = [brent?.price, ...Object.values(brent?.changesPct || {})].some((v) => num(v) !== null);
-  if (!hasWti && !hasBrent) {
-    return { state: "UNAVAILABLE", severity: null, shockState: "UNAVAILABLE", marketConfirmed: false, reasonCodes: ["OIL_DATA_UNAVAILABLE"] };
-  }
-  const wtiState = hasWti ? classifyOilLeg(wti?.changesPct || {}) : "UNAVAILABLE";
-  const brentState = hasBrent ? classifyOilLeg(brent?.changesPct || {}) : "UNAVAILABLE";
-  const reasonCodes = [];
-
-  if (wtiState !== "NEUTRAL") reasonCodes.push(`WTI_${wtiState}`);
-  if (brentState !== "NEUTRAL") reasonCodes.push(`BRENT_${brentState}`);
-
-  const bothShock = wtiState === "SHOCK" && brentState === "SHOCK";
-  const oneShock = wtiState === "SHOCK" || brentState === "SHOCK";
-  const bothWarning = ["WARNING", "STRONG_WARNING", "SHOCK"].includes(wtiState) &&
-    ["WARNING", "STRONG_WARNING", "SHOCK"].includes(brentState);
-  const bothSupportive = wtiState === "SUPPORTIVE" && brentState === "SUPPORTIVE";
-
-  if (bothShock) {
-    reasonCodes.push("WTI_BRENT_OIL_SHOCK_CONFIRMED");
-    return { state: "NEGATIVE", severity: "EXTREME", shockState: "CONFIRMED", marketConfirmed: true, reasonCodes };
-  }
-  if (oneShock && bothWarning) {
-    reasonCodes.push("OIL_SHOCK_CROSS_MARKET_CONFIRMED");
-    return { state: "NEGATIVE", severity: "HIGH", shockState: "CONFIRMED", marketConfirmed: true, reasonCodes };
-  }
-  if (bothWarning) {
-    reasonCodes.push("WTI_BRENT_OIL_WARNING_CONFIRMED");
-    return { state: "NEGATIVE", severity: "MODERATE", shockState: "WARNING", marketConfirmed: true, reasonCodes };
-  }
-  if (["WARNING", "STRONG_WARNING", "SHOCK"].includes(wtiState) || ["WARNING", "STRONG_WARNING", "SHOCK"].includes(brentState)) {
-    return { state: "NEGATIVE", severity: "LOW", shockState: "DEVELOPING", marketConfirmed: false, reasonCodes };
-  }
-  if (bothSupportive) {
-    return { state: "SUPPORTIVE", severity: "LOW", shockState: "NONE", marketConfirmed: true, reasonCodes };
-  }
-  return { state: "NEUTRAL", severity: "LOW", shockState: "NONE", marketConfirmed: false, reasonCodes };
-}
-
-export function normalizeTemporaryEvents(raw, nowMs = Date.now()) {
-  const list = Array.isArray(raw) ? raw : Array.isArray(raw?.events) ? raw.events : [];
-  const normalized = [];
-
-  for (const event of list) {
-    if (!event || typeof event !== "object") continue;
-    const observedMs = Date.parse(event.observedAt || "");
-    const expiresMs = Date.parse(event.expiresAt || "");
-    const hasExpiry = Number.isFinite(expiresMs);
-    const expired = !hasExpiry || nowMs >= expiresMs;
-
-    normalized.push({
-      ...event,
-      observedAt: Number.isFinite(observedMs) ? new Date(observedMs).toISOString() : null,
-      expiresAt: hasExpiry ? new Date(expiresMs).toISOString() : null,
-      status: expired ? "EVENT_EXPIRED" : EVENT_STATES.includes(event.status) ? event.status : "EVENT_DETECTED",
-      expired,
-      usable: event.material === true && !expired && hasExpiry,
-    });
-  }
-
-  return normalized;
-}
-
-export function evaluateEventLifecycle({ event, oil, rates, tlt } = {}) {
-  if (!event || event.expired || event.status === "EVENT_EXPIRED") return "EVENT_EXPIRED";
-
-  const marketConfirmed = oil?.marketConfirmed === true ||
-    (rates?.state === "NEGATIVE" && tlt?.state === "NEGATIVE");
-
-  if (event.status === "EVENT_DETECTED" && !marketConfirmed) return "EVENT_DETECTED";
-  if (!marketConfirmed && event.status === "EVENT_CONFIRMED") return "EVENT_CONFIRMED";
-
-  if (marketConfirmed) return "REACTION_HOLDING";
-
-  return event.status || "EVENT_DETECTED";
-}
-
-function severityRank(value) {
-  return { LOW: 0, MODERATE: 1, HIGH: 2, EXTREME: 3 }[value] ?? 0;
-}
-
-function maxSeverity(...values) {
-  const best = values.reduce((a, b) => severityRank(b) > severityRank(a) ? b : a, "LOW");
-  return best;
-}
-
-export function buildIntradayMacro({
-  generatedAtUtc = new Date().toISOString(),
-  slowContext = {},
-  tenYearProxy = {},
-  thirtyYearProxy = {},
-  tlt = {},
-  wti = {},
-  brent = {},
-  temporaryEvents = [],
-  freshness = {},
-  warnings = [],
-  persistenceAvailable = false,
-} = {}) {
-  const ratesRead = classifyRates({ tenYearProxy, thirtyYearProxy });
-  const tltRead = classifyTlt(tlt);
-  const oilRead = classifyOil({ wti, brent });
-
-  const events = normalizeTemporaryEvents(temporaryEvents, Date.parse(generatedAtUtc) || Date.now());
-  const activeEvents = events.filter((e) => e.usable);
-
-  const geopoliticalEvents = activeEvents.filter((e) =>
-    ["GEOPOLITICAL_OIL_SUPPLY_RISK", "OIL_SHIPPING_DISRUPTION"].includes(e.eventType)
+function addMonthsUtc(date, months) {
+  return new Date(
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth() + months,
+      1,
+      0,
+      0,
+      0,
+      0
+    )
   );
-  const treasuryEvents = activeEvents.filter((e) =>
-    ["TREASURY_BUYBACK_ACTION", "TREASURY_LIQUIDITY_ACTION", "TREASURY_SUPPLY_DEVELOPMENT", "LONG_BOND_DISORDER", "FED_LIQUIDITY_ACTION"].includes(e.eventType)
-  );
+}
 
-  const geopoliticsActive = geopoliticalEvents.length > 0;
-  const geopoliticsMarketConfirmed = geopoliticsActive && oilRead.marketConfirmed === true;
-  const treasuryActive = treasuryEvents.length > 0;
-  const treasuryMarketConfirmed = treasuryActive && (ratesRead.state === "NEGATIVE" || tltRead.state === "NEGATIVE");
+function buildMonthlyCandidates(productCode, now = new Date(), horizon = 6) {
+  const out = [];
+  const seen = new Set();
 
-  const enrichedGeopoliticalEvents = geopoliticalEvents.map((event) => ({
-    ...event,
-    reactionState: evaluateEventLifecycle({ event, oil: oilRead, rates: ratesRead, tlt: tltRead }),
-  }));
-  const enrichedTreasuryEvents = treasuryEvents.map((event) => ({
-    ...event,
-    reactionState: evaluateEventLifecycle({ event, oil: oilRead, rates: ratesRead, tlt: tltRead }),
-  }));
+  for (let i = 0; i < horizon; i += 1) {
+    const d = addMonthsUtc(now, i);
+    const code = MONTH_CODES[d.getUTCMonth()];
+    const ticker = `${productCode}${code}${shortYear(d.getUTCFullYear())}`;
 
-  const ratesConfirmed = ratesRead.state === "NEGATIVE" && tltRead.state === "NEGATIVE";
-  const tltConfirmed = tltRead.state === "NEGATIVE";
-  const oilConfirmed = oilRead.marketConfirmed === true;
-  const crossMarketConfluence = ratesConfirmed && oilConfirmed;
-  const marketEvidenceCount = [ratesRead.state, tltRead.state, oilRead.state]
-    .filter((x) => x && x !== "UNAVAILABLE").length;
-
-  // Critical manager rule: a manual event alone never creates MACRO_SHOCK.
-  const macroShock =
-    (geopoliticsMarketConfirmed && oilRead.shockState === "CONFIRMED") ||
-    (crossMarketConfluence && oilRead.severity === "EXTREME");
-
-  let state = marketEvidenceCount > 0 ? "MACRO_NEUTRAL" : null;
-  let equityImpact = marketEvidenceCount > 0 ? "NEUTRAL" : null;
-  let severity = marketEvidenceCount > 0 ? "LOW" : null;
-  const reasonCodes = [];
-
-  if (marketEvidenceCount === 0) {
-    reasonCodes.push("INSUFFICIENT_INTRADAY_MARKET_DATA");
-  } else if (macroShock) {
-    state = "MACRO_SHOCK";
-    equityImpact = "EQUITY_NEGATIVE";
-    severity = maxSeverity("HIGH", ratesRead.severity, tltRead.severity, oilRead.severity);
-    reasonCodes.push("CROSS_MARKET_MACRO_SHOCK_CONFIRMED");
-  } else {
-    const negativeCount = [ratesRead.state, tltRead.state, oilRead.state].filter((x) => x === "NEGATIVE").length;
-    const supportiveCount = [ratesRead.state, tltRead.state, oilRead.state].filter((x) => x === "SUPPORTIVE").length;
-
-    if (negativeCount >= 2 || geopoliticsMarketConfirmed || treasuryMarketConfirmed) {
-      state = "MACRO_HEADWIND";
-      equityImpact = "EQUITY_NEGATIVE";
-      severity = maxSeverity("MODERATE", ratesRead.severity, tltRead.severity, oilRead.severity);
-      reasonCodes.push("MULTI_COMPONENT_MACRO_HEADWIND");
-    } else if (supportiveCount >= 2 && negativeCount === 0 && !geopoliticsActive && !treasuryActive) {
-      state = "MACRO_SUPPORTIVE";
-      equityImpact = "EQUITY_SUPPORTIVE";
-      severity = "LOW";
-      reasonCodes.push("MULTI_COMPONENT_MACRO_SUPPORTIVE");
-    } else if (negativeCount === 1 || geopoliticsActive || treasuryActive) {
-      state = "MACRO_HEADWIND";
-      equityImpact = negativeCount === 1 ? "EQUITY_NEGATIVE" : "MIXED";
-      severity = maxSeverity("LOW", ratesRead.severity, tltRead.severity, oilRead.severity);
-      reasonCodes.push("SINGLE_COMPONENT_OR_EVENT_HEADWIND");
+    if (!seen.has(ticker)) {
+      seen.add(ticker);
+      out.push(ticker);
     }
   }
 
-  const outputWarnings = [...warnings];
-  if (!persistenceAvailable) outputWarnings.push("EVENT_PERSISTENCE_DEGRADED");
-  if (events.some((e) => !e.expiresAt)) outputWarnings.push("TEMPORARY_EVENT_MISSING_EXPIRY_IGNORED");
+  return out;
+}
+
+function quarterMonthIndexesFromNow(now = new Date(), count = 4) {
+  const currentMonth = now.getUTCMonth();
+  const currentYear = now.getUTCFullYear();
+  const quarterlyMonths = [2, 5, 8, 11];
+  const out = [];
+
+  let year = currentYear;
+
+  while (out.length < count) {
+    for (const month of quarterlyMonths) {
+      if (year > currentYear || month >= currentMonth) {
+        out.push({ year, month });
+        if (out.length >= count) return out;
+      }
+    }
+    year += 1;
+  }
+
+  return out;
+}
+
+function buildQuarterlyCandidates(productCode, now = new Date(), count = 4) {
+  return quarterMonthIndexesFromNow(now, count).map(({ year, month }) => {
+    const monthCode = MONTH_CODES[month];
+    return `${productCode}${monthCode}${shortYear(year)}`;
+  });
+}
+
+function candidateTickers(productCode, now = new Date()) {
+  if (productCode === "CL" || productCode === "BZ") {
+    return buildMonthlyCandidates(productCode, now, 6);
+  }
+
+  if (productCode === "ZN" || productCode === "ZB") {
+    return buildQuarterlyCandidates(productCode, now, 4);
+  }
+
+  throw new Error(`Unsupported Engine 25 futures product: ${productCode}`);
+}
+
+async function readJsonResponse(response, label) {
+  const text = await response.text();
+
+  if (!text || !text.trim()) {
+    throw new Error(`${label} returned empty response`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(
+      `${label} returned non-JSON response. status=${response.status} preview=${text.slice(
+        0,
+        300
+      )}`
+    );
+  }
+}
+
+async function fetchTickerSnapshot(ticker) {
+  if (!POLY_KEY) throw new Error("Missing Polygon API key");
+
+  const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
+  const url = new URL(`${base}/futures/v1/snapshot`);
+
+  url.searchParams.set("ticker", ticker);
+  url.searchParams.set("apiKey", POLY_KEY);
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    return {
+      ticker,
+      ok: false,
+      httpStatus: response.status,
+      error: `Polygon futures snapshot ${response.status} ${text}`,
+    };
+  }
+
+  const json = await readJsonResponse(response, `Polygon snapshot ${ticker}`);
+  const rows = Array.isArray(json?.results) ? json.results : [];
+
+  const row =
+    rows.find(
+      (item) =>
+        String(item?.details?.ticker || "").toUpperCase() === ticker.toUpperCase()
+    ) ||
+    rows[0] ||
+    null;
+
+  if (!row) {
+    return {
+      ticker,
+      ok: false,
+      httpStatus: response.status,
+      notFound: true,
+      error: null,
+    };
+  }
+
+  const settlementDate = row?.details?.settlement_date || null;
+  const settlementMs = settlementDate
+    ? Date.parse(`${settlementDate}T23:59:59.999Z`)
+    : null;
+
+  const volume = Number(row?.session?.volume ?? 0);
+  const close = Number(row?.session?.close);
 
   return {
-    ok: marketEvidenceCount > 0,
-    engine: INTRADAY_MACRO_ENGINE,
-    generatedAtUtc,
-    state,
-    equityImpact,
-    severity,
-    macroShock,
-    freshness: {
-      status: freshness.status || "FRESH",
-      marketDataAsOfUtc: freshness.marketDataAsOfUtc || null,
-      eventDataAsOfUtc: freshness.eventDataAsOfUtc || null,
-      warnings: Array.isArray(freshness.warnings) ? freshness.warnings : [],
-    },
-    components: {
-      rates: {
-        state: ratesRead.state,
-        severity: ratesRead.severity,
-        slowContext: {
-          tenYearYield: num(slowContext.tenYearYield),
-          tenYearObservationDate: slowContext.tenYearObservationDate || null,
-          thirtyYearYield: num(slowContext.thirtyYearYield),
-          thirtyYearObservationDate: slowContext.thirtyYearObservationDate || null,
-          sourceType: "FRED_SLOW_CONTEXT",
-        },
-        tenYearProxy: { ...tenYearProxy, sourceType: "FUTURES_PROXY" },
-        thirtyYearProxy: { ...thirtyYearProxy, sourceType: "FUTURES_PROXY" },
-        velocityState: ratesRead.velocityState,
-        reasonCodes: ratesRead.reasonCodes,
-      },
-      tlt: {
-        ...tlt,
-        state: tltRead.state,
-        severity: tltRead.severity,
-        symbol: "TLT",
-        sourceType: "ETF_PROXY",
-        velocityState: tltRead.velocityState,
-        reasonCodes: tltRead.reasonCodes,
-      },
-      oil: {
-        state: oilRead.state,
-        severity: oilRead.severity,
-        wti: { ...wti, sourceType: wti.sourceType || "DIRECT_FUTURES" },
-        brent: { ...brent, sourceType: brent.sourceType || "DIRECT_FUTURES" },
-        shockState: oilRead.shockState,
-        reasonCodes: oilRead.reasonCodes,
-      },
-      treasuryLiquidity: {
-        state: treasuryMarketConfirmed ? "NEGATIVE" : treasuryActive ? "WATCH" : "NEUTRAL",
-        severity: treasuryMarketConfirmed ? "MODERATE" : treasuryActive ? "LOW" : "LOW",
-        activeEvents: enrichedTreasuryEvents,
-        reactionState: enrichedTreasuryEvents[0]?.reactionState || null,
-        reasonCodes: treasuryMarketConfirmed ? ["TREASURY_EVENT_MARKET_CONFIRMED"] : treasuryActive ? ["TREASURY_EVENT_ACTIVE"] : [],
-      },
-      geopolitics: {
-        state: geopoliticsMarketConfirmed ? "ELEVATED" : geopoliticsActive ? "WATCH" : "NORMAL",
-        severity: geopoliticsMarketConfirmed ? maxSeverity("MODERATE", oilRead.severity) : geopoliticsActive ? "LOW" : "LOW",
-        materialOilSupplyRisk: geopoliticsMarketConfirmed,
-        activeEvents: enrichedGeopoliticalEvents,
-        marketConfirmed: geopoliticsMarketConfirmed,
-        reasonCodes: geopoliticsMarketConfirmed ? ["GEOPOLITICAL_EVENT_OIL_MARKET_CONFIRMED"] : geopoliticsActive ? ["GEOPOLITICAL_EVENT_AWAITING_MARKET_CONFIRMATION"] : [],
-      },
-    },
-    marketConfirmation: {
-      ratesConfirmed,
-      tltConfirmed,
-      oilConfirmed,
-      crossMarketConfluence,
-    },
-    reasonCodes: [...new Set(reasonCodes)],
-    warnings: [...new Set(outputWarnings)],
+    ticker,
+    ok: true,
+    httpStatus: response.status,
+    productCode: String(row?.details?.product_code || "").toUpperCase() || null,
+    settlementDate,
+    settlementMs: Number.isFinite(settlementMs) ? settlementMs : null,
+    volume: Number.isFinite(volume) ? volume : 0,
+    close: Number.isFinite(close) ? close : null,
   };
 }
 
-export default {
-  INTRADAY_MACRO_ENGINE,
-  RESEARCH_THRESHOLDS,
-  pctChange,
-  normalizeBars,
-  buildRollingChanges,
-  classifyRates,
-  classifyTlt,
-  classifyOil,
-  normalizeTemporaryEvents,
-  evaluateEventLifecycle,
-  buildIntradayMacro,
-};
+function selectNearbyContract(productCode, snapshots, now = new Date()) {
+  const nowMs = now.getTime();
+
+  const valid = snapshots
+    .filter((row) => row?.ok === true)
+    .filter((row) => row?.productCode === productCode)
+    .filter((row) => {
+      if (!Number.isFinite(row?.settlementMs)) return true;
+      return row.settlementMs >= nowMs;
+    });
+
+  if (!valid.length) {
+    throw new Error(
+      `Could not resolve nearby outright futures contract for ${productCode}`
+    );
+  }
+
+  const sorted = [...valid].sort((a, b) => {
+    const volumeDiff = Number(b.volume || 0) - Number(a.volume || 0);
+    if (volumeDiff !== 0) return volumeDiff;
+
+    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
+    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
+    return aSettle - bSettle;
+  });
+
+  return {
+    productCode,
+    resolvedSymbol: sorted[0].ticker,
+    selected: sorted[0],
+    candidates: valid,
+    candidateCount: valid.length,
+    selectionRule: "nearby_eligible_outrights_highest_session_volume",
+    checkedAt: nowIso(),
+  };
+}
+
+export async function resolveEngine25FuturesContract(
+  productCodeInput,
+  now = new Date()
+) {
+  const productCode = String(productCodeInput || "").trim().toUpperCase();
+  const tickers = candidateTickers(productCode, now);
+
+  const snapshots = [];
+
+  for (const ticker of tickers) {
+    snapshots.push(await fetchTickerSnapshot(ticker));
+  }
+
+  return selectNearbyContract(productCode, snapshots, now);
+}
+
+function lookbackDates(timeframe, now = new Date()) {
+  const days = FUTURES_DAYS_BY_TF[timeframe] ?? 14;
+  const end = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+  return {
+    startDate: dateOnlyUtc(start),
+    endDate: dateOnlyUtc(end),
+  };
+}
+
+export async function fetchEngine25FuturesBars({
+  productCode,
+  timeframe,
+  now = new Date(),
+  limit = 1000,
+}) {
+  const tf = String(timeframe || "").toLowerCase();
+
+  if (!["5m", "10m"].includes(tf)) {
+    throw new Error(
+      `Engine 25 v0.1 only accepts 5m/10m fast bars. Received: ${tf}`
+    );
+  }
+
+  const resolution = FUTURES_TF_MAP[tf];
+  const resolver = await resolveEngine25FuturesContract(productCode, now);
+  const { startDate, endDate } = lookbackDates(tf, now);
+
+  const bars = await fetchFuturesAggs({
+    resolvedSymbol: resolver.resolvedSymbol,
+    resolution,
+    startDate,
+    endDate,
+    limit,
+  });
+
+  return {
+    ok: true,
+    productCode,
+    resolvedSymbol: resolver.resolvedSymbol,
+    sourceType:
+      productCode === "ZN" || productCode === "ZB"
+        ? "FUTURES_PROXY"
+        : "DIRECT_FUTURES",
+    timeframe: tf,
+    resolution,
+    resolver,
+    count: bars.length,
+    firstBar: bars[0] || null,
+    lastBar: bars[bars.length - 1] || null,
+    bars,
+  };
+}
+
+async function fetchPolygonEtfBars({
+  symbol,
+  multiplier,
+  now = new Date(),
+  lookbackDays = 7,
+  limit = 5000,
+}) {
+  if (!POLY_KEY) throw new Error("Missing Polygon API key");
+
+  const from = dateOnlyUtc(
+    new Date(now.getTime() - lookbackDays * 24 * 60 * 60 * 1000)
+  );
+  const to = dateOnlyUtc(now);
+
+  const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
+  const url = new URL(
+    `${base}/v2/aggs/ticker/${encodeURIComponent(
+      symbol
+    )}/range/${multiplier}/minute/${from}/${to}`
+  );
+
+  url.searchParams.set("adjusted", "true");
+  url.searchParams.set("sort", "asc");
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("apiKey", POLY_KEY);
+
+  const response = await fetch(url.toString(), {
+    cache: "no-store",
+    headers: { Accept: "application/json" },
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Polygon ${symbol} aggregates ${response.status} ${text}`);
+  }
+
+  const json = await readJsonResponse(response, `Polygon ${symbol} aggregates`);
+  const rows = Array.isArray(json?.results) ? json.results : [];
+
+  const bars = rows
+    .map((bar) => ({
+      time: Number.isFinite(Number(bar?.t))
+        ? Math.floor(Number(bar.t) / 1000)
+        : null,
+      open: Number(bar?.o),
+      high: Number(bar?.h),
+      low: Number(bar?.l),
+      close: Number(bar?.c),
+      volume: Number(bar?.v ?? 0),
+    }))
+    .filter((bar) =>
+      [bar.time, bar.open, bar.high, bar.low, bar.close].every(Number.isFinite)
+    )
+    .sort((a, b) => a.time - b.time);
+
+  return {
+    ok: true,
+    symbol,
+    timeframe: `${multiplier}m`,
+    count: bars.length,
+    firstBar: bars[0] || null,
+    lastBar: bars[bars.length - 1] || null,
+    bars,
+  };
+}
+
+function buildCombinedRollingRead({
+  fiveMinuteBars = [],
+  tenMinuteBars = [],
+  productCode = null,
+  resolvedContract = null,
+  sourceType = null,
+  symbol = null,
+  sessionStartSec = null,
+}) {
+  const five = buildRollingChanges(fiveMinuteBars, null, sessionStartSec);
+  const ten = buildRollingChanges(tenMinuteBars, null, sessionStartSec);
+
+  return {
+    ...(productCode ? { productCode } : {}),
+    ...(resolvedContract ? { resolvedContract } : {}),
+    ...(symbol ? { symbol } : {}),
+    ...(sourceType ? { sourceType } : {}),
+    sessionStartUnix: Number.isFinite(Number(sessionStartSec))
+      ? Number(sessionStartSec)
+      : null,
+    sessionStartUtc: Number.isFinite(Number(sessionStartSec))
+      ? new Date(Number(sessionStartSec) * 1000).toISOString()
+      : null,
+    price: five.price ?? ten.price ?? null,
+    asOfUnix: five.asOfUnix ?? ten.asOfUnix ?? null,
+    asOfUtc: five.asOfUtc ?? ten.asOfUtc ?? null,
+    changesPct: {
+      "5m": five.changesPct?.["5m"] ?? null,
+      "10m": ten.changesPct?.["10m"] ?? five.changesPct?.["10m"] ?? null,
+      "30m": five.changesPct?.["30m"] ?? ten.changesPct?.["30m"] ?? null,
+      "60m": five.changesPct?.["60m"] ?? ten.changesPct?.["60m"] ?? null,
+      session: five.changesPct?.session ?? null,
+    },
+  };
+}
+
+function latestObservation(seriesResult) {
+  const latest = seriesResult?.latest || null;
+
+  return {
+    value:
+      latest && Number.isFinite(Number(latest.value))
+        ? Number(latest.value)
+        : null,
+    date: latest?.date || null,
+  };
+}
+
+async function fetchSlowYieldContext() {
+  const warnings = [];
+
+  if (!FRED_KEY) {
+    return {
+      slowContext: {
+        tenYearYield: null,
+        tenYearObservationDate: null,
+        thirtyYearYield: null,
+        thirtyYearObservationDate: null,
+      },
+      warnings: ["FRED_SLOW_CONTEXT_UNAVAILABLE_MISSING_API_KEY"],
+    };
+  }
+
+  const observationStart = new Date(
+    Date.now() - 45 * 24 * 60 * 60 * 1000
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  let dgs10 = null;
+  let dgs30 = null;
+
+  try {
+    dgs10 = await fetchFredSeries({
+      seriesId: "DGS10",
+      apiKey: FRED_KEY,
+      observationStart,
+      limit: 100,
+    });
+  } catch (error) {
+    warnings.push(`DGS10_FETCH_FAILED:${error?.message || String(error)}`);
+  }
+
+  try {
+    dgs30 = await fetchFredSeries({
+      seriesId: "DGS30",
+      apiKey: FRED_KEY,
+      observationStart,
+      limit: 100,
+    });
+  } catch (error) {
+    warnings.push(`DGS30_FETCH_FAILED:${error?.message || String(error)}`);
+  }
+
+  const ten = latestObservation(dgs10);
+  const thirty = latestObservation(dgs30);
+
+  return {
+    slowContext: {
+      tenYearYield: ten.value,
+      tenYearObservationDate: ten.date,
+      thirtyYearYield: thirty.value,
+      thirtyYearObservationDate: thirty.date,
+    },
+    warnings,
+  };
+}
+
+function maxIso(values = []) {
+  const valid = values
+    .map((x) => (x ? Date.parse(x) : NaN))
+    .filter(Number.isFinite);
+
+  if (!valid.length) return null;
+
+  return new Date(Math.max(...valid)).toISOString();
+}
+
+const ENGINE25_MARKET_TIME_ZONE = "America/New_York";
+
+function zonedDateParts(date, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, Number(part.value)])
+  );
+
+  return {
+    year: map.year,
+    month: map.month,
+    day: map.day,
+    hour: map.hour,
+    minute: map.minute,
+    second: map.second,
+  };
+}
+
+function addCalendarDays({ year, month, day }, deltaDays) {
+  const d = new Date(Date.UTC(year, month - 1, day + deltaDays, 12, 0, 0));
+  return {
+    year: d.getUTCFullYear(),
+    month: d.getUTCMonth() + 1,
+    day: d.getUTCDate(),
+  };
+}
+
+function timeZoneOffsetMs(date, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const parts = zonedDateParts(date, timeZone);
+  const asUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+
+  return asUtc - date.getTime();
+}
+
+function zonedDateTimeToUnixSec({ year, month, day, hour, minute = 0, second = 0 }, timeZone = ENGINE25_MARKET_TIME_ZONE) {
+  const wallClockUtcMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  let guessMs = wallClockUtcMs;
+
+  // Two passes are enough to resolve normal DST offsets for the target date.
+  for (let i = 0; i < 2; i += 1) {
+    const offsetMs = timeZoneOffsetMs(new Date(guessMs), timeZone);
+    guessMs = wallClockUtcMs - offsetMs;
+  }
+
+  return Math.floor(guessMs / 1000);
+}
+
+function sessionStartUnixSec({ now = new Date(), hour, minute = 0 }) {
+  const local = zonedDateParts(now, ENGINE25_MARKET_TIME_ZONE);
+  const localMinutes = local.hour * 60 + local.minute;
+  const startMinutes = hour * 60 + minute;
+
+  const baseDate =
+    localMinutes >= startMinutes
+      ? { year: local.year, month: local.month, day: local.day }
+      : addCalendarDays(
+          { year: local.year, month: local.month, day: local.day },
+          -1
+        );
+
+  return zonedDateTimeToUnixSec(
+    { ...baseDate, hour, minute, second: 0 },
+    ENGINE25_MARKET_TIME_ZONE
+  );
+}
+
+function futuresSessionStartUnixSec(now = new Date()) {
+  // CL/BZ/ZN/ZB Globex session begins at 18:00 New York time on the
+  // prior calendar day for the daytime trading session.
+  return sessionStartUnixSec({ now, hour: 18, minute: 0 });
+}
+
+function tltCashSessionStartUnixSec(now = new Date()) {
+  // TLT cash-session reference begins at 09:30 New York time.
+  return sessionStartUnixSec({ now, hour: 9, minute: 30 });
+}
+
+function atomicWriteJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+  const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  fs.renameSync(tmp, filePath);
+}
+
+function readTemporaryEvents() {
+  if (!fs.existsSync(TEMP_EVENTS_FILE)) {
+    return {
+      ok: false,
+      updatedAtUtc: null,
+      events: [],
+      warnings: ["TEMPORARY_EVENTS_FILE_MISSING"],
+    };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(TEMP_EVENTS_FILE, "utf8"));
+    const events = Array.isArray(raw?.events) ? raw.events : [];
+    const updatedAtUtc =
+      raw?.updatedAtUtc && Number.isFinite(Date.parse(raw.updatedAtUtc))
+        ? new Date(Date.parse(raw.updatedAtUtc)).toISOString()
+        : null;
+
+    return {
+      ok: true,
+      updatedAtUtc,
+      events,
+      warnings: [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      updatedAtUtc: null,
+      events: [],
+      warnings: [
+        `TEMPORARY_EVENTS_FILE_INVALID:${error?.message || String(error)}`,
+      ],
+    };
+  }
+}
+
+
+function readEngine25NewsEvents() {
+  if (!fs.existsSync(NEWS_EVENTS_FILE)) {
+    return {
+      ok: false,
+      generatedAtUtc: null,
+      events: [],
+      warnings: ["ENGINE25_NEWS_EVENTS_FILE_MISSING"],
+    };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(NEWS_EVENTS_FILE, "utf8"));
+    const generatedAtUtc =
+      raw?.generatedAtUtc && Number.isFinite(Date.parse(raw.generatedAtUtc))
+        ? new Date(Date.parse(raw.generatedAtUtc)).toISOString()
+        : null;
+
+    if (raw?.ok !== true) {
+      return {
+        ok: false,
+        generatedAtUtc,
+        events: [],
+        warnings: Array.isArray(raw?.warnings) && raw.warnings.length
+          ? raw.warnings
+          : ["MASSIVE_BENZINGA_NEWS_UNAVAILABLE"],
+      };
+    }
+
+    return {
+      ok: true,
+      generatedAtUtc,
+      events: Array.isArray(raw?.events) ? raw.events : [],
+      warnings: Array.isArray(raw?.warnings) ? raw.warnings : [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      generatedAtUtc: null,
+      events: [],
+      warnings: [
+        `ENGINE25_NEWS_EVENTS_FILE_INVALID:${error?.message || String(error)}`,
+      ],
+    };
+  }
+}
+
+export function adaptEngine25NewsEventsForIntradayMacro(events = []) {
+  const out = [];
+
+  for (const event of Array.isArray(events) ? events : []) {
+    if (!event || typeof event !== "object") continue;
+
+    if (event.oilSupplyRisk === true) {
+      out.push({
+        ...event,
+        normalizedEventType: event.eventType,
+        eventType: "GEOPOLITICAL_OIL_SUPPLY_RISK",
+        integrationFamily: "OIL_GEOPOLITICAL",
+      });
+      continue;
+    }
+
+    if (event.treasuryLiquidityRisk === true) {
+      out.push({
+        ...event,
+        normalizedEventType: event.eventType,
+        eventType: "TREASURY_LIQUIDITY_ACTION",
+        integrationFamily: "TREASURY_LIQUIDITY",
+      });
+    }
+  }
+
+  return out;
+}
+
+async function collectFuturesProduct(productCode, now) {
+  const resolver = await resolveEngine25FuturesContract(productCode, now);
+
+  const fiveMinute = await fetchEngine25FuturesBars({
+    productCode,
+    timeframe: "5m",
+    now,
+    limit: 1000,
+  });
+
+  const tenMinute = await fetchEngine25FuturesBars({
+    productCode,
+    timeframe: "10m",
+    now,
+    limit: 1000,
+  });
+
+  const read = buildCombinedRollingRead({
+    fiveMinuteBars: fiveMinute.bars,
+    tenMinuteBars: tenMinute.bars,
+    productCode,
+    resolvedContract: resolver.resolvedSymbol,
+    sourceType:
+      productCode === "ZN" || productCode === "ZB"
+        ? "FUTURES_PROXY"
+        : "DIRECT_FUTURES",
+    sessionStartSec: futuresSessionStartUnixSec(now),
+  });
+
+  return {
+    resolver,
+    fiveMinute,
+    tenMinute,
+    read,
+  };
+}
+
+export async function buildAndWriteEngine25IntradayMacro({
+  now = new Date(),
+} = {}) {
+  const generatedAtUtc = now.toISOString();
+  const warnings = [];
+  const providerDiagnostics = {};
+
+  const products = {};
+
+  for (const productCode of ["CL", "BZ", "ZN", "ZB"]) {
+    try {
+      products[productCode] = await collectFuturesProduct(productCode, now);
+
+      providerDiagnostics[productCode] = {
+        ok: true,
+        resolvedContract: products[productCode].resolver.resolvedSymbol,
+        selectionRule: products[productCode].resolver.selectionRule,
+        candidates: products[productCode].resolver.candidates.map((x) => ({
+          ticker: x.ticker,
+          settlementDate: x.settlementDate,
+          volume: x.volume,
+          close: x.close,
+        })),
+        fiveMinuteCount: products[productCode].fiveMinute.count,
+        tenMinuteCount: products[productCode].tenMinute.count,
+      };
+    } catch (error) {
+      warnings.push(
+        `${productCode}_UNAVAILABLE:${error?.message || String(error)}`
+      );
+
+      providerDiagnostics[productCode] = {
+        ok: false,
+        error: error?.message || String(error),
+      };
+
+      products[productCode] = {
+        read: {
+          productCode,
+          resolvedContract: null,
+          sourceType:
+            productCode === "ZN" || productCode === "ZB"
+              ? "FUTURES_PROXY"
+              : "DIRECT_FUTURES",
+          price: null,
+          asOfUnix: null,
+          asOfUtc: null,
+          changesPct: {
+            "5m": null,
+            "10m": null,
+            "30m": null,
+            "60m": null,
+            session: null,
+          },
+        },
+      };
+    }
+  }
+
+  let tltFive = null;
+  let tltTen = null;
+  let tltRead = null;
+
+  try {
+    tltFive = await fetchPolygonEtfBars({
+      symbol: "TLT",
+      multiplier: 5,
+      now,
+      lookbackDays: 7,
+    });
+
+    tltTen = await fetchPolygonEtfBars({
+      symbol: "TLT",
+      multiplier: 10,
+      now,
+      lookbackDays: 7,
+    });
+
+    tltRead = buildCombinedRollingRead({
+      fiveMinuteBars: tltFive.bars,
+      tenMinuteBars: tltTen.bars,
+      symbol: "TLT",
+      sourceType: "ETF_PROXY",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+
+    // Canonical contract uses cashSession for TLT rather than generic session.
+    tltRead.changesPct.cashSession = tltRead.changesPct.session;
+    delete tltRead.changesPct.session;
+
+    providerDiagnostics.TLT = {
+      ok: true,
+      fiveMinuteCount: tltFive.count,
+      tenMinuteCount: tltTen.count,
+      lastFiveMinuteBar: tltFive.lastBar,
+      lastTenMinuteBar: tltTen.lastBar,
+    };
+  } catch (error) {
+    warnings.push(`TLT_UNAVAILABLE:${error?.message || String(error)}`);
+
+    tltRead = {
+      symbol: "TLT",
+      sourceType: "ETF_PROXY",
+      price: null,
+      asOfUnix: null,
+      asOfUtc: null,
+      changesPct: {
+        "5m": null,
+        "10m": null,
+        "30m": null,
+        "60m": null,
+        cashSession: null,
+      },
+    };
+
+    providerDiagnostics.TLT = {
+      ok: false,
+      error: error?.message || String(error),
+    };
+  }
+
+  const { slowContext, warnings: fredWarnings } =
+    await fetchSlowYieldContext();
+
+  warnings.push(...fredWarnings);
+
+  const temporaryEventInput = readTemporaryEvents();
+  warnings.push(...temporaryEventInput.warnings);
+
+  const newsEventInput = readEngine25NewsEvents();
+  warnings.push(...newsEventInput.warnings);
+
+  const newsConfirmationFamilyEvents = adaptEngine25NewsEventsForIntradayMacro(
+    newsEventInput.events
+  );
+
+  providerDiagnostics.TEMPORARY_EVENTS = {
+    ok: temporaryEventInput.ok,
+    updatedAtUtc: temporaryEventInput.updatedAtUtc,
+    eventCount: temporaryEventInput.events.length,
+  };
+
+  providerDiagnostics.MASSIVE_BENZINGA_NEWS = {
+    ok: newsEventInput.ok,
+    generatedAtUtc: newsEventInput.generatedAtUtc,
+    eventCount: newsEventInput.events.length,
+    confirmationFamilyEventCount: newsConfirmationFamilyEvents.length,
+    warnings: newsEventInput.warnings,
+  };
+
+  providerDiagnostics.FRED = {
+    ok:
+      slowContext.tenYearYield !== null ||
+      slowContext.thirtyYearYield !== null,
+    DGS10: {
+      value: slowContext.tenYearYield,
+      observationDate: slowContext.tenYearObservationDate,
+    },
+    DGS30: {
+      value: slowContext.thirtyYearYield,
+      observationDate: slowContext.thirtyYearObservationDate,
+    },
+  };
+
+  const marketDataAsOfUtc = maxIso([
+    products.CL.read.asOfUtc,
+    products.BZ.read.asOfUtc,
+    products.ZN.read.asOfUtc,
+    products.ZB.read.asOfUtc,
+    tltRead.asOfUtc,
+  ]);
+
+  const canonical = buildIntradayMacro({
+    generatedAtUtc,
+    slowContext,
+    tenYearProxy: products.ZN.read,
+    thirtyYearProxy: products.ZB.read,
+    tlt: tltRead,
+    wti: products.CL.read,
+    brent: {
+      ...products.BZ.read,
+      instrumentLabel: "Brent Crude Oil Last Day Financial Futures",
+    },
+    temporaryEvents: [
+      ...temporaryEventInput.events,
+      ...newsConfirmationFamilyEvents,
+    ],
+    freshness: {
+      status: marketDataAsOfUtc ? "FRESH" : "DEGRADED",
+      marketDataAsOfUtc,
+      eventDataAsOfUtc: maxIso([
+        temporaryEventInput.updatedAtUtc,
+        newsEventInput.generatedAtUtc,
+      ]),
+      warnings: [
+        ...temporaryEventInput.warnings,
+        ...newsEventInput.warnings,
+      ],
+    },
+    warnings,
+    // Phase 7 persistence has not been proven yet.
+    persistenceAvailable: false,
+  });
+
+  canonical.providerDiagnostics = providerDiagnostics;
+  canonical.newsEvents = {
+    source: "MASSIVE_BENZINGA_LICENSED_FEED",
+    ok: newsEventInput.ok,
+    generatedAtUtc: newsEventInput.generatedAtUtc,
+    activeMaterialEvents: newsEventInput.events.filter((event) => {
+      const expiresMs = Date.parse(event?.expiresAt || "");
+      return (
+        event?.material === true &&
+        Number.isFinite(expiresMs) &&
+        now.getTime() < expiresMs
+      );
+    }),
+    confirmationFamilies: {
+      oilGeopolitical: newsConfirmationFamilyEvents.filter(
+        (event) => event.integrationFamily === "OIL_GEOPOLITICAL"
+      ).length,
+      treasuryLiquidity: newsConfirmationFamilyEvents.filter(
+        (event) => event.integrationFamily === "TREASURY_LIQUIDITY"
+      ).length,
+    },
+    warnings: newsEventInput.warnings,
+  };
+  canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
+  canonical.note =
+    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + Massive/Benzinga normalized news adapter. News identifies events; existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
+
+
+  atomicWriteJson(OUTPUT_FILE, canonical);
+
+  return canonical;
+}
+
+async function main() {
+  const output = await buildAndWriteEngine25IntradayMacro();
+
+  console.log("========================================");
+  console.log("Engine 25 Intraday Macro Phase 5 Complete");
+  console.log("OK:", output.ok);
+  console.log("State:", output.state);
+  console.log("Equity Impact:", output.equityImpact);
+  console.log("Severity:", output.severity);
+  console.log("Macro Shock:", output.macroShock);
+  console.log("Wrote:", OUTPUT_FILE);
+  console.log("========================================");
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: output.ok,
+        engine: output.engine,
+        generatedAtUtc: output.generatedAtUtc,
+        state: output.state,
+        equityImpact: output.equityImpact,
+        severity: output.severity,
+        macroShock: output.macroShock,
+        freshness: output.freshness,
+        components: output.components,
+        marketConfirmation: output.marketConfirmation,
+        reasonCodes: output.reasonCodes,
+        warnings: output.warnings,
+        providerDiagnostics: output.providerDiagnostics,
+      },
+      null,
+      2
+    )
+  );
+}
+
+const isDirectRun =
+  process.argv[1] &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href;
+
+if (isDirectRun) {
+  main().catch((error) => {
+    console.error(
+      JSON.stringify(
+        {
+          ok: false,
+          engine: "engine25.intradayMacro.v0.1",
+          phase: "ENGINE25_INTRADAY_MACRO_PHASE_5",
+          error: error?.message || String(error),
+        },
+        null,
+        2
+      )
+    );
+    process.exitCode = 1;
+  });
+}
