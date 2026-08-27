@@ -909,205 +909,81 @@ function buildAuthorizationContext({
 
 function resolveCanonicalConfirmation({
   canonicalResolution,
-  canonicalQuality,
-  observation1m = null,
-  validation5m = null,
+  matureReaction5m = null,
+  broaderConfirmation10m = null,
   authorizationContext = null,
   previousReactionConfirmed = false,
-  insideNegotiatedZone = false,
 } = {}) {
   const blockers = [];
   const reasonCodes = [];
 
-  const direction =
+  const candidateDirection =
     safeUpper(
+      canonicalResolution?.candidateDirection ??
       canonicalResolution?.direction,
       "NEUTRAL"
     );
 
-  const oneMinuteState =
+  const fiveMinuteState =
     safeUpper(
-      observation1m?.state,
+      matureReaction5m?.state,
       "NO_SIGNAL"
     );
 
-  const oneMinuteDirection =
-    safeUpper(
-      observation1m?.direction,
-      "NEUTRAL"
+  const fiveMinuteDirection =
+    directionFromReactionState(
+      fiveMinuteState
     );
 
-  const oneMinuteQuality =
+  const tenMinuteState =
     safeUpper(
-      observation1m?.quality,
-      "WEAK"
+      broaderConfirmation10m?.state,
+      "NO_SIGNAL"
     );
 
-  const quality =
-    safeUpper(
-      canonicalQuality,
-      "WEAK"
+  const tenMinuteDirection =
+    directionFromReactionState(
+      tenMinuteState
     );
-
-  /*
-   * Engine 26 structural expectation remains visible
-   * for diagnostics only.
-   *
-   * It does NOT own Engine 3 reaction direction.
-   */
-  const expectedDirection =
-    safeUpper(
-      authorizationContext?.expectedReactionDirection,
-      "NEUTRAL"
-    );
-
-  const expectedReactions =
-    Array.isArray(
-      authorizationContext?.expectedReactions
-    )
-      ? authorizationContext.expectedReactions.map(
-          (state) => safeUpper(state, "")
-        )
-      : [];
 
   const authorizationValid =
     authorizationContext?.active === true &&
     authorizationContext?.authorized === true &&
-    authorizationContext
-      ?.authorizeEngine3Evaluation === true;
+    authorizationContext?.authorizeEngine3Evaluation === true;
 
-  /*
-   * Strategy 1 requires exact Engine 26 identity.
-   */
   const identityMatched =
     authorizationContext
       ?.identityComparison
       ?.matched === true;
 
-  const chainArmed =
-    authorizationContext?.chainArmed === true;
+  const candidateDirectional =
+    candidateDirection === "LONG" ||
+    candidateDirection === "SHORT";
 
-  const canonicalDirectional =
-    direction === "LONG" ||
-    direction === "SHORT";
+  const fiveMinuteActive =
+    matureReaction5m?.active === true;
+
+  const tenMinuteActive =
+    broaderConfirmation10m?.active === true;
 
   /*
-   * Diagnostic only.
+   * 5m owns mature reaction evidence.
    *
-   * Engine 26 expected direction no longer blocks or
-   * creates canonical Engine 3 reaction direction.
+   * 10m confirms whether the broader book-based price reaction
+   * is consistent with that same developing reaction.
+   *
+   * This is NOT simple candle voting.
+   * Both directions are derived from the book-based reaction states.
    */
-  const branchAligned =
-    canonicalDirectional &&
-    (
-      !["LONG", "SHORT"].includes(expectedDirection) ||
-      expectedDirection === direction
-    );
+  const fiveMinuteReactionAligned =
+    fiveMinuteActive &&
+    candidateDirectional &&
+    fiveMinuteDirection === candidateDirection;
 
-  const oneMinuteAligned =
-    canonicalResolution?.observationUsable === true &&
-    oneMinuteDirection === direction &&
-    canonicalDirectional;
-
-  const oneMinuteQualityApproved =
-    QUALIFYING_QUALITY.has(oneMinuteQuality);
-
-  const qualityApproved =
-    QUALIFYING_QUALITY.has(quality);
-
-  /*
-   * Fresh completed 1m candle must itself agree
-   * with the canonical direction.
-   */
-  const candleOpen =
-    toNum(observation1m?.currentCandle?.open);
-
-  const candleClose =
-    toNum(observation1m?.currentCandle?.close);
-
-  const candleCompleted =
-    observation1m?.currentCandleStatus === "COMPLETED" ||
-    observation1m?.currentCandle?.completionState === "COMPLETED" ||
-    observation1m?.candleState === "COMPLETED";
-
-  const candleDirectionAligned =
-    candleCompleted &&
-    candleOpen != null &&
-    candleClose != null &&
-    (
-      (
-        direction === "SHORT" &&
-        candleClose < candleOpen
-      ) ||
-      (
-        direction === "LONG" &&
-        candleClose > candleOpen
-      )
-    );
-
-  /*
-   * Local level-action state is now a contradiction
-   * check — not a required confirmation whitelist.
-   */
-  const shortContradictionStates =
-    new Set([
-      "RECLAIMED_LEVEL",
-      "WICK_BELOW_AND_RECLAIM",
-      "DIP_BOUGHT_FAST",
-      "SELLERS_TRAPPED",
-      "BREAKOUT_HOLDING",
-    ]);
-
-  const longContradictionStates =
-    new Set([
-      "LOST_LEVEL",
-      "FAILED_RECLAIM",
-      "REJECTING_VALUE",
-      "BREAKOUT_FAILING",
-      "FAILED_ACCEPTANCE_SHORT",
-      "LOST_SHORT_TRIGGER_LEVEL",
-    ]);
-
-  const oneMinuteContradiction =
-    direction === "SHORT"
-      ? shortContradictionStates.has(oneMinuteState)
-      : direction === "LONG"
-      ? longContradictionStates.has(oneMinuteState)
-      : true;
-
-  /*
-   * HELD_LEVEL / CHOP_INSIDE_VALUE / similar
-   * non-contradictory states no longer automatically block.
-   */
-  const approvedReactionState =
-    oneMinuteAligned &&
-    !oneMinuteContradiction;
-
-  const validationPresent =
-    validation5m != null &&
-    typeof validation5m === "object" &&
-    validation5m?.active === true;
-
-  const validationFresh =
-    validationPresent &&
-    validation5m?.stale === false;
-
-  const validationState =
-    safeUpper(
-      validation5m?.validationState,
-      "UNRESOLVED"
-    );
-
-  const validationResolved =
-    validation5m?.maturityResolved === true;
-
-  const validationSupports =
-    validation5m?.supports1mDirection === true &&
-    validationState === "SUPPORT";
-
-  const validationConflicts =
-    validation5m?.conflictsWith1mDirection === true ||
-    validationState === "CONFLICT";
+  const tenMinuteReactionAligned =
+    tenMinuteActive &&
+    candidateDirectional &&
+    tenMinuteDirection === candidateDirection;
 
   if (!authorizationValid) {
     blockers.push(
@@ -1121,50 +997,36 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  if (!canonicalDirectional) {
+  if (!candidateDirectional) {
     blockers.push(
-      "CANONICAL_DIRECTION_NOT_DIRECTIONAL"
+      "ENGINE3_5M_BOOK_REACTION_NOT_DIRECTIONAL"
     );
   }
 
-  if (!oneMinuteAligned) {
+  if (!fiveMinuteActive) {
     blockers.push(
-      "ONE_MINUTE_REACTION_NOT_ALIGNED_WITH_COMMITTED_DIRECTION"
+      "ENGINE3_COMPLETED_5M_REACTION_NOT_ACTIVE"
     );
   }
 
-  if (!oneMinuteQualityApproved) {
+  if (!fiveMinuteReactionAligned) {
     blockers.push(
-      "ONE_MINUTE_QUALITY_NOT_GOOD_OR_STRONG"
+      "ENGINE3_5M_BOOK_REACTION_NOT_ALIGNED"
     );
   }
 
-  if (!candleCompleted) {
+  if (!tenMinuteActive) {
     blockers.push(
-      "ONE_MINUTE_CANDLE_NOT_COMPLETED"
-    );
-  } else if (!candleDirectionAligned) {
-    blockers.push(
-      "ONE_MINUTE_CANDLE_NOT_ALIGNED_WITH_DIRECTION"
+      "ENGINE3_COMPLETED_10M_CONFIRMATION_NOT_ACTIVE"
     );
   }
 
-  if (oneMinuteContradiction) {
+  if (!tenMinuteReactionAligned) {
     blockers.push(
-      "ONE_MINUTE_REACTION_EXPLICITLY_CONTRADICTS_DIRECTION"
+      "ENGINE3_10M_BOOK_REACTION_NOT_CONFIRMING"
     );
   }
 
-  if (!qualityApproved) {
-    blockers.push(
-      "ENGINE3_CANONICAL_QUALITY_NOT_GOOD_OR_STRONG"
-    );
-  }
-
-  /*
-   * 5m remains diagnostic only.
-   * It does not create, flip, hold, or reset canonical Engine 3 direction.
-   */
   if (authorizationValid) {
     reasonCodes.push(
       "ENGINE26_EVALUATION_AUTHORIZED"
@@ -1177,139 +1039,98 @@ function resolveCanonicalConfirmation({
     );
   }
 
-  if (chainArmed) {
+  if (fiveMinuteReactionAligned) {
     reasonCodes.push(
-      "ENGINE26_CHAIN_ARMED"
+      `ENGINE3_5M_${fiveMinuteState}_${candidateDirection}_REACTION`
     );
   }
 
-  /*
-   * Keep structural branch alignment visible,
-   * but do not use it as a confirmation gate.
-   */
-  if (branchAligned) {
+  if (tenMinuteReactionAligned) {
     reasonCodes.push(
-      "ENGINE26_STRUCTURAL_DIRECTION_ALIGNED_DIAGNOSTIC"
+      `ENGINE3_10M_${tenMinuteState}_${candidateDirection}_CONFIRMATION`
     );
   }
-
-  if (oneMinuteAligned) {
-    reasonCodes.push(
-      "ONE_MINUTE_REACTION_ALIGNED_WITH_COMMITTED_DIRECTION"
-    );
-  }
-
-  if (oneMinuteQualityApproved) {
-    reasonCodes.push(
-      "ONE_MINUTE_QUALITY_GOOD_OR_STRONG"
-    );
-  }
-
-  if (candleDirectionAligned) {
-    reasonCodes.push(
-      "ONE_MINUTE_COMPLETED_CANDLE_ALIGNED"
-    );
-  }
-
-  if (!oneMinuteContradiction) {
-    reasonCodes.push(
-      "ONE_MINUTE_STATE_NOT_DIRECTIONALLY_CONTRADICTORY"
-    );
-  }
-
-  if (qualityApproved) {
-    reasonCodes.push(
-      "ENGINE3_CANONICAL_QUALITY_GOOD_OR_STRONG"
-    );
-  }
-
-  if (insideNegotiatedZone) {
-    reasonCodes.push(
-      "ENGINE3_NEGOTIATED_ZONE_REACTION_MODE"
-    );
-    reasonCodes.push(
-      "FIVE_MINUTE_DIAGNOSTIC_ONLY"
-    );
-  }
-
-  /*
-   * Confirmation persistence.
-   *
-   * BEFORE an active paper trade:
-   * - confirmation must come from the normal Engine 3 reaction rules;
-   * - EMA10 cannot create or preserve confirmation.
-   *
-   * AFTER an active paper trade exists:
-   * - prior confirmation may persist while the active trade direction
-   *   remains inside its completed-10m EMA10 hold lifecycle;
-   * - EMA10 still cannot create confirmation from scratch.
-   */
-  const previousConfirmed =
-    previousReactionConfirmed === true;
-
-  /*
-   * BEFORE a paper trade is active, confirmation is earned from
-   * current reaction evidence only.
-   *
-   * No previous-confirmation persistence is allowed here.
-   * Active-trade confirmation persistence is applied later by
-   * resolveFinalConfirmation(), after the actual open-trade direction
-   * is known.
-   */
-  const persistedConfirmation = false;
 
   const reactionConfirmed =
     blockers.length === 0;
 
   reasonCodes.push(
     reactionConfirmed
-      ? "ENGINE3_CANONICAL_REACTION_CONFIRMED"
-      : "ENGINE3_CANONICAL_REACTION_NOT_CONFIRMED"
+      ? "ENGINE3_BOOK_REACTION_CONFIRMED"
+      : "ENGINE3_BOOK_REACTION_NOT_CONFIRMED"
   );
 
   return {
     reactionConfirmed,
 
     previousReactionConfirmed:
-      previousConfirmed,
+      previousReactionConfirmed === true,
 
-    persistedConfirmation,
+    persistedConfirmation: false,
 
     blockers,
     reasonCodes,
+
     authorizationValid,
     identityMatched,
-    chainArmed,
 
-    canonicalDirectional,
-    branchAligned,
+    canonicalDirectional:
+      candidateDirectional,
 
-    oneMinuteAligned,
-    oneMinuteState,
-    oneMinuteDirection,
-    oneMinuteQuality,
-    oneMinuteQualityApproved,
+    fiveMinuteState,
+    fiveMinuteDirection,
+    fiveMinuteReactionAligned,
 
-    candleCompleted,
-    candleDirectionAligned,
+    tenMinuteState,
+    tenMinuteDirection,
+    tenMinuteReactionAligned,
 
-    oneMinuteContradiction,
-    approvedReactionState,
+    /*
+     * Compatibility fields.
+     *
+     * 1m no longer participates in canonical confirmation.
+     */
+    oneMinuteAligned: false,
+    oneMinuteState: "DIAGNOSTIC_ONLY",
+    oneMinuteDirection: "NEUTRAL",
+    oneMinuteQuality: "DIAGNOSTIC_ONLY",
+    oneMinuteQualityApproved: false,
+    candleCompleted: false,
+    candleDirectionAligned: false,
+    oneMinuteContradiction: false,
+    approvedReactionState:
+      reactionConfirmed,
 
-    validationPresent,
-    validationFresh,
-    validationResolved,
-    validationSupports,
-    validationConflicts,
+    validationPresent:
+      fiveMinuteActive,
 
-    qualityApproved,
+    validationFresh: true,
 
-    insideNegotiatedZone,
-    fiveMinuteValidationRequired:
+    validationResolved:
+      fiveMinuteReactionAligned,
+
+    validationSupports:
+      fiveMinuteReactionAligned,
+
+    validationConflicts:
       false,
 
-    expectedDirection,
-    expectedReactions,
+    qualityApproved: true,
+
+    fiveMinuteValidationRequired: true,
+
+    expectedDirection:
+      safeUpper(
+        authorizationContext?.expectedReactionDirection,
+        "NEUTRAL"
+      ),
+
+    expectedReactions:
+      Array.isArray(
+        authorizationContext?.expectedReactions
+      )
+        ? authorizationContext.expectedReactions
+        : [],
   };
 }
 
@@ -1546,6 +1367,58 @@ export function attachPaperScalpReactionToConfluence({
       ?.reaction
       ?.engine3ReactionValidation5m ||
     null;
+
+const confirmation10m =
+  patchedConfluence
+    ?.context
+    ?.reaction
+    ?.engine3ReactionConfirmation10m ||
+  null;
+
+const broaderConfirmation10m = {
+  active:
+    confirmation10m?.completedZoneReactionActive === true,
+
+  state:
+    safeUpper(
+      confirmation10m?.completedZoneReactionState,
+      "NO_SIGNAL"
+    ),
+
+  direction:
+    safeUpper(
+      confirmation10m?.completedZoneReactionDirection,
+      "NEUTRAL"
+    ),
+
+  quality:
+    safeUpper(
+      confirmation10m?.completedZoneReactionQuality,
+      "WEAK"
+    ),
+
+  role:
+    confirmation10m?.completedZoneReactionRole ||
+    "BROADER_ENGINE3_CONFIRMATION_EVIDENCE",
+
+  referenceType:
+    confirmation10m?.referenceType ||
+    null,
+
+  referenceLabel:
+    confirmation10m?.referenceLabel ||
+    null,
+
+  referenceLevel:
+    toNum(
+      confirmation10m?.referenceLevel
+    ),
+
+  sourceTimeframe:
+    "10m",
+
+  canonicalDirectionAuthority: false,
+};
 
 /*
  * Strategy 1 mature 5m price-reaction evidence.
