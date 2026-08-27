@@ -691,7 +691,7 @@ function readEngine25NewsEvents() {
         events: [],
         warnings: Array.isArray(raw?.warnings) && raw.warnings.length
           ? raw.warnings
-          : ["MASSIVE_BENZINGA_NEWS_UNAVAILABLE"],
+          : ["FINLIGHT_NEWS_UNAVAILABLE"],
       };
     }
 
@@ -921,7 +921,7 @@ export async function buildAndWriteEngine25IntradayMacro({
     eventCount: temporaryEventInput.events.length,
   };
 
-  providerDiagnostics.MASSIVE_BENZINGA_NEWS = {
+  providerDiagnostics.FINLIGHT_NEWS = {
     ok: newsEventInput.ok,
     generatedAtUtc: newsEventInput.generatedAtUtc,
     eventCount: newsEventInput.events.length,
@@ -985,7 +985,7 @@ export async function buildAndWriteEngine25IntradayMacro({
 
   canonical.providerDiagnostics = providerDiagnostics;
   canonical.newsEvents = {
-    source: "MASSIVE_BENZINGA_LICENSED_FEED",
+    source: "FINLIGHT_REUTERS_FEED",
     ok: newsEventInput.ok,
     generatedAtUtc: newsEventInput.generatedAtUtc,
     activeMaterialEvents: newsEventInput.events.filter((event) => {
@@ -1008,7 +1008,7 @@ export async function buildAndWriteEngine25IntradayMacro({
   };
   canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
   canonical.note =
-    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + Massive/Benzinga normalized news adapter. News identifies events; existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
+    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + Finlight normalized news adapter. News identifies events; existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
 
 
   atomicWriteJson(OUTPUT_FILE, canonical);
