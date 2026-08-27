@@ -8184,6 +8184,31 @@ const previousEngine3ReactionConfirmed =
         ?.paperScalpReaction
         ?.reactionConfirmed === true
     : false;
+const previousEngine3EstablishedTripDirection =
+  isEsIntradayScalp
+    ? previousSnapshot
+        ?.strategies
+        ?.[s.strategyId]
+        ?.confluence
+        ?.context
+        ?.reaction
+        ?.paperScalpReaction
+        ?.establishedTripDirection ||
+      "NEUTRAL"
+    : null;
+
+const previousEngine3EstablishedTripCandidateId =
+  isEsIntradayScalp
+    ? previousSnapshot
+        ?.strategies
+        ?.[s.strategyId]
+        ?.confluence
+        ?.context
+        ?.reaction
+        ?.paperScalpReaction
+        ?.establishedTripCandidateId ||
+      null
+    : null;
 
 const strategy1TenMinuteCompletedClose =
   isEsIntradayScalp
@@ -8715,13 +8740,19 @@ attachPaperScalpReactionToConfluence({
   engine26StructuralContext,
   paperShortResearchEnabled: isEsIntradayScalp,
 
-previousCanonicalDirection:
-  previousEngine3CanonicalDirection,
+  previousCanonicalDirection:
+    previousEngine3CanonicalDirection,
 
-previousReactionConfirmed:
-  previousEngine3ReactionConfirmed,
+  previousReactionConfirmed:
+    previousEngine3ReactionConfirmed,
 
-tenMinuteCompletedClose:
+  previousEstablishedTripDirection:
+    previousEngine3EstablishedTripDirection,
+
+  previousEstablishedTripCandidateId:
+    previousEngine3EstablishedTripCandidateId,
+
+  tenMinuteCompletedClose:
     strategy1TenMinuteCompletedClose,
 
   tenMinuteEma10:
