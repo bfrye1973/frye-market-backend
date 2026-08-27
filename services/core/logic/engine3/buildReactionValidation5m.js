@@ -1,5 +1,5 @@
 import { deriveCandleCompletionTruth } from "./candleCompletionTruth.js";
-import { buildCurrentLevelAction } from "../priceAction/currentLevelAction.js";
+import { buildExactZoneAction } from "../priceAction/currentLevelAction.js";
 
 const STALE_AFTER_MS = 10 * 60 * 1000;
 const MAX_SKEW_MS = 5 * 60 * 1000;
@@ -126,33 +126,24 @@ export function buildReactionValidation5m({
     engine26ReactionHandoff
   );
 
-  const action = buildCurrentLevelAction({
+  const action = buildExactZoneAction({
     symbol:
-      observation1m?.symbol || "ES",
+      observation1m?.symbol ||
+      "ES",
 
     tf: "5m",
 
-    bars10m:
+    bars:
       truth.allBars,
 
     currentPrice:
-      truth.allBars.at(-1)?.close ?? null,
+      truth.allBars.at(-1)?.close ??
+      null,
 
-    zones:
-      zone ? { zone } : null,
-
-    confirmationContext:
-      zone
-        ? {
-            reference: {
-              zone,
-            },
-          }
-        : null,
+    zone,
 
     evaluationTimeMs,
   });
-
   const identity = {
     symbol:
       engine26ReactionHandoff?.symbol ||
@@ -318,6 +309,39 @@ export function buildReactionValidation5m({
     // Preserve existing zone-relative quality diagnostics.
     quality:
       action.quality || "WEAK",
+
+    zoneReactionState:
+      action.state ||
+      "NO_SIGNAL",
+
+    zoneReactionDirection:
+      action.direction ||
+      "NEUTRAL",
+
+    zoneReactionQuality:
+      action.quality ||
+      "WEAK",
+
+    referenceType:
+      action.referenceType ||
+      null,
+
+    referenceLabel:
+      action.referenceLabel ||
+      null,
+
+    referenceLevel:
+      action.referenceLevel ??
+      null,
+
+    levelAction:
+      action.levelAction ||
+      null,
+
+    negotiatedZone:
+      action.zone ||
+      zone ||
+       null, 
 
     supports1mDirection:
       supports,
