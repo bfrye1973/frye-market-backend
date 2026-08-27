@@ -528,15 +528,14 @@ function resolveFinalCanonicalDirection({
     "NEUTRAL"
   );
 
-  const lockedTripDirection =
-  safeUpper(
+  const lockedTripDirection = safeUpper(
     establishedTripDirection,
     "NEUTRAL"
   );
 
-const lockedTripDirectional =
-  lockedTripDirection === "LONG" ||
-  lockedTripDirection === "SHORT";
+  const lockedTripDirectional =
+    lockedTripDirection === "LONG" ||
+    lockedTripDirection === "SHORT";
 
   const previousDirectional =
     previousDirection === "LONG" ||
@@ -576,12 +575,83 @@ const lockedTripDirectional =
     "ENGINE3_DIRECTION_REQUIRES_NEGOTIATED_ZONE_REACTION";
 
   /*
-   * ACTIVE PAPER TRADE:
-   * Existing contract remains unchanged.
-   * The open trade direction owns Engine 3 direction.
-   * Only a completed 10m close across EMA10 resets it.
+   * ESTABLISHED STRATEGY 1 TRIP
+   *
+   * Once Engine 3 has established LONG or SHORT, current reaction
+   * diagnostics cannot flip canonical Engine 3 direction.
+   *
+   * LONG stays LONG until a completed 10m close is below EMA10.
+   * SHORT stays SHORT until a completed 10m close is above EMA10.
+   *
+   * EMA10 never creates an initial direction.
    */
-  
+  if (
+    lockedTripDirectional &&
+    engine26MidpointReset !== true
+  ) {
+    const resetShort =
+      lockedTripDirection === "SHORT" &&
+      ema10DataAvailable &&
+      completedClose > ema10;
+
+    const resetLong =
+      lockedTripDirection === "LONG" &&
+      ema10DataAvailable &&
+      completedClose < ema10;
+
+    ema10ResetTriggered =
+      resetShort || resetLong;
+
+    if (ema10ResetTriggered) {
+      state = "ESTABLISHED_TRIP_DIRECTION_RESET";
+      direction = "NEUTRAL";
+      sourceTimeframe = "10m";
+      reactionTimeframe = "10m";
+      directionPersistenceActive = false;
+
+      resolutionStatus =
+        `ESTABLISHED_TRIP_${lockedTripDirection}_RESET_AT_10M_EMA10`;
+
+      resolutionReason =
+        lockedTripDirection === "SHORT"
+          ? "ESTABLISHED_SHORT_RESET_BY_COMPLETED_10M_CLOSE_ABOVE_EMA10"
+          : "ESTABLISHED_LONG_RESET_BY_COMPLETED_10M_CLOSE_BELOW_EMA10";
+    } else {
+      state = "ESTABLISHED_TRIP_DIRECTION_PERSISTED";
+      direction = lockedTripDirection;
+      sourceTimeframe = "10m_EMA10_HOLD";
+      reactionTimeframe = "10m";
+      directionPersistenceActive = true;
+
+      resolutionStatus =
+        `ESTABLISHED_TRIP_${lockedTripDirection}_PERSISTED`;
+
+      resolutionReason =
+        lockedTripDirection === "SHORT"
+          ? "ESTABLISHED_SHORT_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_ABOVE_EMA10"
+          : "ESTABLISHED_LONG_HELD_WHILE_COMPLETED_10M_CLOSE_NOT_BELOW_EMA10";
+    }
+  } else if (engine26MidpointReset === true) {
+    /*
+     * Engine 26 completed the old trip at the next negotiated midpoint.
+     * Clear the old Engine 3 trip and start fresh from NEUTRAL.
+     */
+    state = "ENGINE26_MIDPOINT_TRIP_RESET";
+    direction = "NEUTRAL";
+    sourceTimeframe = "ENGINE26_MIDPOINT_RESET";
+    reactionTimeframe = null;
+    directionPersistenceActive = false;
+    ema10ResetTriggered = false;
+
+    resolutionStatus =
+      "ENGINE26_MIDPOINT_COMPLETION_RESET_TO_NEUTRAL";
+
+    resolutionReason =
+      "ENGINE26_FULL_TARGET_COMPLETION_START_FRESH_ENGINE3_REACTION";
+  } else if (activePaperTrade) {
+    /*
+     * Existing active-paper-trade compatibility path.
+     */
     const resetShort =
       activeTradeDirection === "SHORT" &&
       ema10DataAvailable &&
@@ -626,22 +696,12 @@ const lockedTripDirectional =
           : `ACTIVE_${activeTradeDirection}_HELD_UNTIL_COMPLETED_10M_EMA10_RESET`;
     }
   } else if (
-    previousDirectional
+    previousDirectional &&
+    engine26MidpointReset !== true
   ) {
     /*
-     * AFTER PRICE LEAVES THE NEGOTIATED ZONE:
-     *
-     * The direction that was established in the negotiated zone stays
-     * locked. 1m and 5m are diagnostics only and cannot flip it.
-     *
-     * SHORT:
-     *   stay SHORT until a COMPLETED 10m candle closes ABOVE EMA10.
-     *
-     * LONG:
-     *   stay LONG until a COMPLETED 10m candle closes BELOW EMA10.
-     *
-     * EMA10 never creates the initial direction. It only holds/resets
-     * the already-established negotiated-zone direction.
+     * Legacy previous-canonical-direction fallback.
+     * This remains behind establishedTripDirection ownership.
      */
     const resetShort =
       previousDirection === "SHORT" &&
@@ -690,32 +750,22 @@ const lockedTripDirectional =
     (candidateDirection === "LONG" || candidateDirection === "SHORT")
   ) {
     /*
-     * INSIDE NEGOTIATED ZONE:
-     * The completed qualified 1m reaction establishes direction.
-     * 5m does not own confirmation and does not delay the reaction.
+     * Fresh negotiated-zone reaction establishment.
+     * EMA10 is not allowed to create this initial direction.
      */
     direction = candidateDirection;
-    sourceTimeframe = "1m";
-    reactionTimeframe = "1m";
-    directionEstablishedByFresh1m = true;
+    sourceTimeframe = "5m";
+    reactionTimeframe = "5m";
 
     resolutionStatus =
       `CANONICAL_${candidateDirection}_NEGOTIATED_ZONE_REACTION_CONFIRMED`;
 
     resolutionReason =
-      "ENGINE3_DIRECTION_ESTABLISHED_BY_COMPLETED_1M_REACTION_INSIDE_NEGOTIATED_ZONE";
+      "ENGINE3_DIRECTION_ESTABLISHED_BY_CONFIRMED_NEGOTIATED_ZONE_REACTION";
   } else if (
     negotiatedZonePositionKnown &&
     !insideNegotiatedZone
   ) {
-    /*
-     * Price is outside the negotiated zone but no prior canonical
-     * LONG/SHORT exists to hold.
-     *
-     * Do not manufacture a new direction from 1m, 5m, or EMA10.
-     * A fresh direction must first be established by reaction in a
-     * negotiated zone.
-     */
     state = "WAITING_FOR_NEGOTIATED_ZONE_DIRECTION";
     direction = "NEUTRAL";
     sourceTimeframe = null;
@@ -746,6 +796,7 @@ const lockedTripDirectional =
     resolutionReason,
   };
 }
+
 function resolveFinalConfirmation({
   candidateConfirmation,
   canonicalResolution,
@@ -1886,12 +1937,6 @@ const establishedTripDirectionLocked =
     establishedTripDirectionLocked,
 
     engine26MidpointReset,
-
-    activePaperTrade:
-      canonicalResolution.activePaperTrade,
-
-    previousCanonicalDirection:
-      canonicalResolution.previousCanonicalDirection,
 
     activePaperTrade:
       canonicalResolution.activePaperTrade,
