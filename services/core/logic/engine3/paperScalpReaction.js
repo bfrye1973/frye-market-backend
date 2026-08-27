@@ -1971,20 +1971,28 @@ const canonicalDirectionNow =
     "NEUTRAL"
   );
 
-const freshDirectionEstablished =
-  candidateConfirmation?.reactionConfirmed === true &&
-  (
-    canonicalDirectionNow === "LONG" ||
-    canonicalDirectionNow === "SHORT"
-  );
-
+/*
+ * Engine 3 travel-direction memory.
+ *
+ * IMPORTANT:
+ * A reaction direction is NOT automatically a travel direction.
+ *
+ * Travel memory exists only after:
+ * - two completed 10m candles cleanly depart the zone, or
+ * - an already-established travel direction continues.
+ *
+ * Re-entering a negotiated zone clears travel mode.
+ */
 const establishedTripDirection =
   engine26MidpointReset === true ||
+  insideNegotiatedZone === true ||
   canonicalResolution?.ema10ResetTriggered === true
     ? "NEUTRAL"
-    : priorEstablishedTripDirection !== "NEUTRAL"
-    ? priorEstablishedTripDirection
-    : freshDirectionEstablished
+    : canonicalResolution?.travelModeActive === true &&
+      (
+        canonicalDirectionNow === "LONG" ||
+        canonicalDirectionNow === "SHORT"
+      )
     ? canonicalDirectionNow
     : "NEUTRAL";
 
