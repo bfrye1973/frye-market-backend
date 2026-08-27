@@ -48,9 +48,18 @@ function zoneFrom(candidate = {}, handoff = {}) {
     );
 
     if (lo != null && hi != null) {
+      const mid =
+        number(
+          source?.mid ??
+          source?.midline ??
+          source?.zoneMid
+        ) ??
+        (Math.min(lo, hi) + Math.max(lo, hi)) / 2;
+
       return {
         lo: Math.min(lo, hi),
         hi: Math.max(lo, hi),
+        mid,
       };
     }
   }
@@ -59,10 +68,12 @@ function zoneFrom(candidate = {}, handoff = {}) {
 }
 
 /*
- * Strategy 1 validation direction is candle-owned.
+ * LEGACY / COMPATIBILITY DIRECTION
  *
- * Engine 26 zone/location remains available as context, but 5m validation
- * must compare actual 5m candle behavior against the 1m direction.
+ * This remains published so existing downstream/front-end code does not
+ * break while Strategy 1 is being rewired.
+ *
+ * It is NOT the new canonical Engine 3 reaction authority.
  */
 function candleDirectionFromBars(bars = []) {
   const recent = Array.isArray(bars)
@@ -126,9 +137,21 @@ export function buildReactionValidation5m({
     engine26ReactionHandoff
   );
 
-  const action = buildExactZoneAction({
+  /*
+   * LIVE 5m negotiated-zone observation.
+   *
+   * Uses all 5m bars, including the current forming bar.
+   * Purpose:
+   * - dashboard/watch visibility
+   * - show what Engine 3 is seeing right now
+   *
+   * This must NOT directly authorize canonical Engine 3.
+   */
+  const liveZoneAction = buildExactZoneAction({
     symbol:
       observation1m?.symbol ||
+      engine26ReactionHandoff?.symbol ||
+      engine26LocationCandidate?.symbol ||
       "ES",
 
     tf: "5m",
@@ -144,6 +167,39 @@ export function buildReactionValidation5m({
 
     evaluationTimeMs,
   });
+
+  /*
+   * COMPLETED 5m negotiated-zone reaction evidence.
+   *
+   * Uses completed 5m bars only.
+   * This is the stable/mature 5m price-reaction evidence that may later
+   * be consumed by canonical Engine 3 after the manager-approved wiring
+   * is implemented.
+   *
+   * IMPORTANT:
+   * This builder still does not authorize Engine 3.
+   */
+  const completedZoneAction = buildExactZoneAction({
+    symbol:
+      observation1m?.symbol ||
+      engine26ReactionHandoff?.symbol ||
+      engine26LocationCandidate?.symbol ||
+      "ES",
+
+    tf: "5m",
+
+    bars:
+      truth.completedBars,
+
+    currentPrice:
+      truth.completedBars.at(-1)?.close ??
+      null,
+
+    zone,
+
+    evaluationTimeMs,
+  });
+
   const identity = {
     symbol:
       engine26ReactionHandoff?.symbol ||
@@ -251,22 +307,29 @@ export function buildReactionValidation5m({
       ? "CROSS_TIMEFRAME_SKEW_EXCEEDED"
       : null;
 
-  const comparable =
-    identityAligned &&
-    !stale &&
-    observation1m?.active === true &&
-    action.active === true;
-
+  /*
+   * Legacy compatibility comparison.
+   *
+   * Keep publishing this while old downstream consumers still expect
+   * SUPPORT / CONFLICT / UNRESOLVED.
+   *
+   * This no longer represents the intended future canonical Engine 3
+   * reaction authority.
+   */
   const oneDirection =
     observation1m?.direction ||
     "NEUTRAL";
 
-  // Strategy 1 5m direction comes from completed 5m candle behavior,
-  // not from zone-relative CHOP/HELD classification.
   const fiveDirection =
     candleDirectionFromBars(
       truth.completedBars
     );
+
+  const comparable =
+    identityAligned &&
+    !stale &&
+    observation1m?.active === true &&
+    completedZoneAction?.active === true;
 
   const supports =
     comparable &&
@@ -294,8 +357,11 @@ export function buildReactionValidation5m({
 
   return {
     active:
-      action.active === true &&
-      zone != null,
+      zone != null &&
+      (
+        liveZoneAction?.active === true ||
+        completedZoneAction?.active === true
+      ),
 
     diagnosticOnly: true,
     noPermissionCreated: true,
@@ -303,45 +369,20 @@ export function buildReactionValidation5m({
 
     sourceTimeframe: "5m",
 
+    /*
+     * ------------------------------------------------------------------
+     * LEGACY COMPATIBILITY FIELDS
+     * ------------------------------------------------------------------
+     */
     validationState,
-    direction: fiveDirection,
 
-    // Preserve existing zone-relative quality diagnostics.
+    direction:
+      fiveDirection,
+
     quality:
-      action.quality || "WEAK",
-
-    zoneReactionState:
-      action.state ||
-      "NO_SIGNAL",
-
-    zoneReactionDirection:
-      action.direction ||
-      "NEUTRAL",
-
-    zoneReactionQuality:
-      action.quality ||
+      completedZoneAction?.quality ||
+      liveZoneAction?.quality ||
       "WEAK",
-
-    referenceType:
-      action.referenceType ||
-      null,
-
-    referenceLabel:
-      action.referenceLabel ||
-      null,
-
-    referenceLevel:
-      action.referenceLevel ??
-      null,
-
-    levelAction:
-      action.levelAction ||
-      null,
-
-    negotiatedZone:
-      action.zone ||
-      zone ||
-       null, 
 
     supports1mDirection:
       supports,
@@ -351,6 +392,103 @@ export function buildReactionValidation5m({
 
     maturityResolved:
       supports || conflicts,
+
+    /*
+     * ------------------------------------------------------------------
+     * NEW EXACT ENGINE 26 NEGOTIATED-ZONE REACTION FIELDS
+     * ------------------------------------------------------------------
+     */
+
+    referenceType:
+      liveZoneAction?.referenceType ||
+      completedZoneAction?.referenceType ||
+      "ENGINE26_NEGOTIATED_ZONE",
+
+    referenceLabel:
+      liveZoneAction?.referenceLabel ||
+      completedZoneAction?.referenceLabel ||
+      "Engine 26 Negotiated Zone",
+
+    referenceLevel:
+      liveZoneAction?.referenceLevel ??
+      completedZoneAction?.referenceLevel ??
+      zone?.mid ??
+      null,
+
+    negotiatedZone:
+      liveZoneAction?.zone ||
+      completedZoneAction?.zone ||
+      zone ||
+      null,
+
+    liveZoneReactionRole:
+      "WATCH_DISPLAY_ONLY",
+
+    liveZoneReactionState:
+      liveZoneAction?.state ||
+      "NO_SIGNAL",
+
+    liveZoneReactionDirection:
+      liveZoneAction?.direction ||
+      "NEUTRAL",
+
+    liveZoneReactionQuality:
+      liveZoneAction?.quality ||
+      "WEAK",
+
+    liveLevelAction:
+      liveZoneAction?.levelAction ||
+      null,
+
+    liveZoneAction:
+      liveZoneAction || null,
+
+    /*
+     * Backward-compatible aliases for the live exact-zone view.
+     */
+    zoneReactionState:
+      liveZoneAction?.state ||
+      "NO_SIGNAL",
+
+    zoneReactionDirection:
+      liveZoneAction?.direction ||
+      "NEUTRAL",
+
+    zoneReactionQuality:
+      liveZoneAction?.quality ||
+      "WEAK",
+
+    levelAction:
+      liveZoneAction?.levelAction ||
+      null,
+
+    /*
+     * COMPLETED / MATURE 5m VIEW
+     */
+    completedZoneReactionRole:
+      "MATURE_ENGINE3_REACTION_EVIDENCE",
+
+    completedZoneReactionState:
+      completedZoneAction?.state ||
+      "NO_SIGNAL",
+
+    completedZoneReactionDirection:
+      completedZoneAction?.direction ||
+      "NEUTRAL",
+
+    completedZoneReactionQuality:
+      completedZoneAction?.quality ||
+      "WEAK",
+
+    completedLevelAction:
+      completedZoneAction?.levelAction ||
+      null,
+
+    completedZoneAction:
+      completedZoneAction || null,
+
+    completedZoneReactionActive:
+      completedZoneAction?.active === true,
 
     candleState:
       truth.latestBarCompletionState,
@@ -369,17 +507,50 @@ export function buildReactionValidation5m({
     stale,
     staleReason,
 
+    currentCandleStatus:
+      truth.latestBarCompletionState ||
+      "NO_BARS",
+
+    completedBarCount:
+      Array.isArray(truth.completedBars)
+        ? truth.completedBars.length
+        : 0,
+
     ...identity,
+
+    canonicalDirectionAuthority:
+      false,
+
+    canonicalQualificationAuthority:
+      false,
+
+    liveReactionMayAuthorize:
+      false,
+
+    completedReactionMayAuthorize:
+      false,
 
     reasonCodes: [
       "ENGINE3_5M_DIAGNOSTIC_VALIDATION",
       "ENGINE3_STRATEGY1_CANDLE_DIRECTION_INDEPENDENT_OF_ZONE",
+
+      "ENGINE3_5M_EXACT_ENGINE26_NEGOTIATED_ZONE_REFERENCE",
+      "ENGINE3_5M_LIVE_ZONE_REACTION_WATCH_ONLY",
+      "ENGINE3_5M_COMPLETED_ZONE_REACTION_EVIDENCE",
+
+      "ENGINE3_5M_LIVE_REACTION_HAS_NO_CANONICAL_AUTHORITY",
+      "ENGINE3_5M_COMPLETED_REACTION_NOT_YET_WIRED_TO_CANONICAL_AUTHORITY",
+
       ...(!identityAligned
         ? ["IDENTITY_MISMATCH"]
         : []),
+
       ...(staleReason
         ? [staleReason]
         : []),
+
+      "NO_PERMISSION_CREATED",
+      "NO_EXECUTION",
     ],
   };
 }
