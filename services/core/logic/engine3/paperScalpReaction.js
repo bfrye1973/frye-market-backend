@@ -807,28 +807,7 @@ function resolveCanonicalQuality({
 
   return quality;
 }
-
-  /*
-   * 1m owns the immediate reaction candidate inside the negotiated zone.
-   * 5m remains diagnostic and does not own direction confirmation.
-   */
-  if (
-    !["LONG", "SHORT"].includes(
-      canonicalDirection
-    )
-  ) {
-    return "WEAK";
-  }
-
-  if (
-    oneMinuteFreshAligned &&
-    QUALIFYING_QUALITY.has(oneMinuteQuality)
-  ) {
-    return oneMinuteQuality;
-  }
-
-  return "WEAK";
-}
+  
 function setupTypeForCanonical({
   state,
   direction,
