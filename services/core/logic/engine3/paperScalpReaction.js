@@ -581,7 +581,7 @@ const lockedTripDirectional =
    * The open trade direction owns Engine 3 direction.
    * Only a completed 10m close across EMA10 resets it.
    */
-  if (activePaperTrade) {
+  else if (activePaperTrade) {
     const resetShort =
       activeTradeDirection === "SHORT" &&
       ema10DataAvailable &&
@@ -1644,6 +1644,12 @@ const engine26MidpointReset =
     resolveFinalCanonicalDirection({
       candidateResolution,
       candidateConfirmation,
+
+      establishedTripDirection:
+        priorEstablishedTripDirection,
+
+      engine26MidpointReset,
+
       insideNegotiatedZone,
       negotiatedZonePositionKnown:
         negotiatedZonePosition.known === true,
