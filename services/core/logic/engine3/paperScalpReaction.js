@@ -1450,6 +1450,73 @@ export function attachPaperScalpReactionToConfluence({
       ?.engine3ReactionValidation5m ||
     null;
 
+/*
+ * Strategy 1 mature 5m price-reaction evidence.
+ *
+ * This comes from COMPLETED 5m candles only.
+ * It is separate from the legacy SUPPORT / CONFLICT-with-1m fields.
+ *
+ * IMPORTANT:
+ * This is being transported into paperScalpReaction first.
+ * It does NOT own canonical Engine 3 direction yet.
+ */
+const matureReaction5m = {
+  active:
+    validation5m?.completedZoneReactionActive === true,
+
+  state:
+    safeUpper(
+      validation5m?.completedZoneReactionState,
+      "NO_SIGNAL"
+    ),
+
+  direction:
+    safeUpper(
+      validation5m?.completedZoneReactionDirection,
+      "NEUTRAL"
+    ),
+
+  quality:
+    safeUpper(
+      validation5m?.completedZoneReactionQuality,
+      "WEAK"
+    ),
+
+  role:
+    validation5m?.completedZoneReactionRole ||
+    "MATURE_ENGINE3_REACTION_EVIDENCE",
+
+  referenceType:
+    validation5m?.referenceType ||
+    null,
+
+  referenceLabel:
+    validation5m?.referenceLabel ||
+    null,
+
+  referenceLevel:
+    toNum(
+      validation5m?.referenceLevel
+    ),
+
+  negotiatedZone:
+    validation5m?.negotiatedZone ||
+    null,
+
+  levelAction:
+    validation5m?.completedLevelAction ||
+    null,
+
+  sourceTimeframe:
+    "5m",
+
+  canonicalDirectionAuthority:
+    false,
+
+  canonicalQualificationAuthority:
+    false,
+};
+
   const broaderReaction10m =
     resolveBroaderReaction10m({
       fastImbalanceReaction,
@@ -1976,8 +2043,15 @@ export function attachPaperScalpReactionToConfluence({
     reactionValidation5m:
       validation5m,
 
-    broaderReaction10m,
+    /*
+     * Completed 5m book-based price-reaction evidence.
+     *
+     * This is the future reaction-phase input.
+     * Canonical authority is NOT enabled in this edit.
+     */
+    matureReaction5m,
 
+    broaderReaction10m,
     currentLevelAction:
       currentLevelAction || null,
 
@@ -2151,6 +2225,11 @@ export function attachPaperScalpReactionToConfluence({
         "ENGINE3_STRATEGY1_CANONICAL_REACTION_V3",
         "ONE_CANONICAL_ENGINE3_DIRECTION_OWNER",
         "MANAGER_APPROVED_STRATEGY1_DIRECTION_CONTRACT",
+        "ENGINE3_5M_MATURE_REACTION_EVIDENCE_AVAILABLE",
+
+        matureReaction5m?.active === true
+          ? "ENGINE3_COMPLETED_5M_REACTION_ACTIVE"
+          : "ENGINE3_COMPLETED_5M_REACTION_NOT_ACTIVE",
         "ONE_MINUTE_PROPOSES_REACTION_DIRECTION",
 
         insideNegotiatedZone
