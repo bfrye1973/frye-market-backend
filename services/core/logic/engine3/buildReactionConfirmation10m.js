@@ -47,6 +47,96 @@ function zoneFrom(candidate = {}, handoff = {}) {
   return null;
 }
 
+/*
+ * CURRENT 10m PRICE ACTION
+ *
+ * Diagnostic only.
+ * - Does not use EMA10.
+ * - Does not create/hold/reset canonical Engine 3 travel direction.
+ * - Does not derive direction from negotiated-zone position.
+ */
+function directionalPair(previousBar, currentBar) {
+  const currentClose = number(currentBar?.close ?? currentBar?.c);
+  const previousClose = number(previousBar?.close ?? previousBar?.c);
+  const currentLow = number(currentBar?.low ?? currentBar?.l);
+  const previousLow = number(previousBar?.low ?? previousBar?.l);
+  const currentHigh = number(currentBar?.high ?? currentBar?.h);
+  const previousHigh = number(previousBar?.high ?? previousBar?.h);
+
+  if (
+    currentClose != null &&
+    previousClose != null &&
+    currentHigh != null &&
+    previousHigh != null &&
+    currentClose > previousClose &&
+    currentHigh >= previousHigh
+  ) {
+    return "LONG";
+  }
+
+  if (
+    currentClose != null &&
+    previousClose != null &&
+    currentLow != null &&
+    previousLow != null &&
+    currentClose < previousClose &&
+    currentLow <= previousLow
+  ) {
+    return "SHORT";
+  }
+
+  return "NEUTRAL";
+}
+
+function candleReactionFromBars(bars = []) {
+  const recent = Array.isArray(bars)
+    ? bars.filter(Boolean).slice(-3)
+    : [];
+
+  if (recent.length < 2) {
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
+  }
+
+  const latestDirection = directionalPair(
+    recent[recent.length - 2],
+    recent[recent.length - 1]
+  );
+
+  if (latestDirection === "NEUTRAL") {
+    return {
+      state: "NO_CLEAR_DIRECTION",
+      direction: "NEUTRAL",
+      quality: "WEAK",
+    };
+  }
+
+  let quality = "GOOD";
+
+  if (recent.length >= 3) {
+    const previousDirection = directionalPair(
+      recent[recent.length - 3],
+      recent[recent.length - 2]
+    );
+
+    if (previousDirection === latestDirection) {
+      quality = "STRONG";
+    }
+  }
+
+  return {
+    state:
+      latestDirection === "LONG"
+        ? "PUSHING_HIGHER"
+        : "PUSHING_LOWER",
+    direction: latestDirection,
+    quality,
+  };
+}
+
 export function buildReactionConfirmation10m({
   bars = [],
   evaluationTimeMs,
@@ -70,10 +160,8 @@ export function buildReactionConfirmation10m({
     "ES";
 
   /*
-   * LIVE 10m view.
-   *
-   * Uses the forming 10m candle when present.
-   * Timeline / watch visibility only.
+   * Keep exact-zone diagnostics for separate inspection.
+   * These are NOT the current 10m price-action read.
    */
   const liveZoneAction = buildExactZoneAction({
     symbol,
@@ -86,14 +174,6 @@ export function buildReactionConfirmation10m({
     evaluationTimeMs,
   });
 
-  /*
-   * COMPLETED 10m view.
-   *
-   * Uses completed 10m candles only.
-   * Stable broader reaction-confirmation evidence.
-   *
-   * This file does NOT authorize Engine 3.
-   */
   const completedZoneAction = buildExactZoneAction({
     symbol,
     tf: "10m",
@@ -105,20 +185,33 @@ export function buildReactionConfirmation10m({
     evaluationTimeMs,
   });
 
+  /*
+   * 10m timeline row is current price action.
+   * Use all 10m bars, including the current forming candle.
+   */
+  const currentPriceAction = candleReactionFromBars(
+    truth.allBars
+  );
+
+  /*
+   * Completed-only 10m read remains separately available.
+   */
+  const completedPriceAction = candleReactionFromBars(
+    truth.completedBars
+  );
+
   return {
     active:
-      zone != null &&
-      (
-        liveZoneAction?.active === true ||
-        completedZoneAction?.active === true
-      ),
+      Array.isArray(truth.allBars) &&
+      truth.allBars.length >= 2,
 
     diagnosticOnly: true,
+    currentPriceActionOnly: true,
     noPermissionCreated: true,
     noExecution: true,
 
     sourceTimeframe: "10m",
-    role: "BROADER_PRICE_REACTION_CONFIRMATION",
+    role: "BROADER_PRICE_ACTION_DIAGNOSTIC",
 
     symbol,
 
@@ -151,6 +244,39 @@ export function buildReactionConfirmation10m({
       engine26ReactionHandoff?.authorizeEngine3Evaluation === true ||
       engine26LocationCandidate?.authorizeEngine3Evaluation === true,
 
+    /*
+     * Primary 10m row: what price is doing NOW.
+     */
+    state:
+      currentPriceAction.state,
+
+    direction:
+      currentPriceAction.direction,
+
+    quality:
+      currentPriceAction.quality,
+
+    currentPriceActionState:
+      currentPriceAction.state,
+
+    currentPriceActionDirection:
+      currentPriceAction.direction,
+
+    currentPriceActionQuality:
+      currentPriceAction.quality,
+
+    completedPriceActionState:
+      completedPriceAction.state,
+
+    completedPriceActionDirection:
+      completedPriceAction.direction,
+
+    completedPriceActionQuality:
+      completedPriceAction.quality,
+
+    /*
+     * Exact-zone/reference diagnostics remain separate.
+     */
     referenceType:
       liveZoneAction?.referenceType ||
       completedZoneAction?.referenceType ||
@@ -173,9 +299,6 @@ export function buildReactionConfirmation10m({
       zone ||
       null,
 
-    /*
-     * LIVE / FORMING 10m VIEW
-     */
     liveZoneReactionRole:
       "WATCH_DISPLAY_ONLY",
 
@@ -198,9 +321,6 @@ export function buildReactionConfirmation10m({
     liveZoneAction:
       liveZoneAction || null,
 
-    /*
-     * COMPLETED / STABLE 10m VIEW
-     */
     completedZoneReactionRole:
       "BROADER_ENGINE3_CONFIRMATION_EVIDENCE",
 
@@ -226,6 +346,12 @@ export function buildReactionConfirmation10m({
     completedZoneReactionActive:
       completedZoneAction?.active === true,
 
+    currentCandle:
+      truth.allBars.at(-1) || null,
+
+    priorCandle:
+      truth.allBars.at(-2) || null,
+
     currentCandleStatus:
       truth.latestBarCompletionState ||
       "NO_BARS",
@@ -238,20 +364,17 @@ export function buildReactionConfirmation10m({
     observedAt:
       truth.evaluationTimeMs,
 
-    /*
-     * Safety: this sensor cannot authorize canonical Engine 3 by itself.
-     */
     canonicalDirectionAuthority: false,
     canonicalQualificationAuthority: false,
     liveReactionMayAuthorize: false,
     completedReactionMayAuthorize: false,
+    ema10Authority: false,
 
     reasonCodes: [
-      "ENGINE3_10M_BROADER_REACTION_SENSOR",
-      "ENGINE3_10M_EXACT_ENGINE26_NEGOTIATED_ZONE_REFERENCE",
-      "ENGINE3_10M_LIVE_ZONE_REACTION_WATCH_ONLY",
-      "ENGINE3_10M_COMPLETED_ZONE_REACTION_CONFIRMATION_EVIDENCE",
-      "ENGINE3_10M_HAS_NO_CANONICAL_AUTHORITY_YET",
+      "ENGINE3_10M_CURRENT_PRICE_ACTION_DIAGNOSTIC",
+      "ENGINE3_10M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_ZONE",
+      "ENGINE3_10M_CURRENT_PRICE_ACTION_INDEPENDENT_OF_EMA10",
+      "ENGINE3_10M_EXACT_ZONE_DIAGNOSTICS_PRESERVED_SEPARATELY",
       "NO_PERMISSION_CREATED",
       "NO_EXECUTION",
     ],
