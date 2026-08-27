@@ -54,6 +54,48 @@ const QUALIFYING_QUALITY = new Set([
   "STRONG",
 ]);
 
+/*
+ * Strategy 1 book-based reaction language.
+ *
+ * These states describe the developing PRICE REACTION.
+ * They are not legacy contradiction/veto lists.
+ *
+ * 5m completed reaction evidence uses these states to propose
+ * the current Engine 3 reaction direction.
+ */
+const BULLISH_REACTION_STATES = new Set([
+  "WICK_BELOW_AND_RECLAIM",
+  "DIP_BOUGHT_FAST",
+  "SELLERS_TRAPPED",
+  "RECLAIMED_LEVEL",
+  "HELD_LEVEL",
+  "ACCEPTING_VALUE",
+  "BREAKOUT_HOLDING",
+]);
+
+const BEARISH_REACTION_STATES = new Set([
+  "LOST_LEVEL",
+  "FAILED_RECLAIM",
+  "REJECTING_VALUE",
+  "BREAKOUT_FAILING",
+  "FAILED_ACCEPTANCE_SHORT",
+  "LOST_SHORT_TRIGGER_LEVEL",
+]);
+
+function directionFromReactionState(state) {
+  const normalized =
+    safeUpper(state, "NO_SIGNAL");
+
+  if (BULLISH_REACTION_STATES.has(normalized)) {
+    return "LONG";
+  }
+
+  if (BEARISH_REACTION_STATES.has(normalized)) {
+    return "SHORT";
+  }
+
+  return "NEUTRAL";
+}
 function safeUpper(value, fallback = "NONE") {
   const text = String(value ?? "").trim();
   return text ? text.toUpperCase() : fallback;
@@ -211,71 +253,73 @@ function resolveBroaderReaction10m({
 }
 
 function resolveCanonicalDirection({
-  observation1m = null,
+  matureReaction5m = null,
+  validation5m = null,
   previousCanonicalDirection = null,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
   engine26ReactionHandoff = null,
   activePaperTradeDirection = null,
 } = {}) {
-  const observedState = safeUpper(
-    observation1m?.state,
-    "NO_SIGNAL"
-  );
+  /*
+   * Strategy 1 reaction discovery:
+   *
+   * 1m has NO canonical direction authority here.
+   *
+   * Completed 5m book-based price-reaction evidence proposes
+   * the developing reaction direction.
+   *
+   * 10m confirmation is intentionally handled later.
+   */
+  const reactionState =
+    safeUpper(
+      matureReaction5m?.state,
+      "NO_SIGNAL"
+    );
 
-  const observedDirection = safeUpper(
-    observation1m?.direction,
-    "NEUTRAL"
-  );
+  const reactionQuality =
+    safeUpper(
+      matureReaction5m?.quality,
+      "WEAK"
+    );
 
-  const previousDirection = safeUpper(
-    previousCanonicalDirection,
-    "NEUTRAL"
-  );
+  const stateDirection =
+    directionFromReactionState(
+      reactionState
+    );
 
-  const activeTradeDirection = safeUpper(
-    activePaperTradeDirection,
-    "NEUTRAL"
-  );
+  /*
+   * The 5m sensor also publishes a direction.
+   *
+   * For the book-based reaction candidate, the reaction STATE is
+   * authoritative. The sensor direction remains diagnostic and must
+   * not override the book-state interpretation.
+   */
+  const observedFiveMinuteDirection =
+    safeUpper(
+      matureReaction5m?.direction,
+      "NEUTRAL"
+    );
+
+  const previousDirection =
+    safeUpper(
+      previousCanonicalDirection,
+      "NEUTRAL"
+    );
+
+  const activeTradeDirection =
+    safeUpper(
+      activePaperTradeDirection,
+      "NEUTRAL"
+    );
 
   const activePaperTrade =
     activeTradeDirection === "LONG" ||
     activeTradeDirection === "SHORT";
 
-  const observationPresent =
-    observation1m != null &&
-    typeof observation1m === "object";
-
-  const observationActive =
-    observation1m?.active === true;
-
-  const observationFresh =
-    observation1m?.stale === false;
-
-  const observationCompleted =
-    observation1m?.currentCandleStatus === "COMPLETED" ||
-    observation1m?.candleState === "COMPLETED";
-
-  const aligned =
-    identityAligned(
-      observation1m,
-      engine26ReactionHandoff
-    );
-
-  const observedDirectional =
-    observedDirection === "LONG" ||
-    observedDirection === "SHORT";
-
-  const observationUsable =
-    observationPresent &&
-    observationActive &&
-    observationFresh &&
-    observationCompleted &&
-    aligned;
-
-  const freshDirectionalEvidence =
-    observationUsable &&
-    observedDirectional;
+  const previousDirectional =
+    previousDirection === "LONG" ||
+    previousDirection === "SHORT";
 
   const completedClose =
     toNum(tenMinuteCompletedClose);
@@ -287,96 +331,144 @@ function resolveCanonicalDirection({
     completedClose != null &&
     ema10 != null;
 
-  const previousDirectional =
-    previousDirection === "LONG" ||
-    previousDirection === "SHORT";
-
   /*
-   * IMPORTANT:
+   * Exact Engine 26 identity remains mandatory.
    *
-   * This function builds a REACTION CANDIDATE before a paper trade.
-   * It does not publish the final Engine 3 direction by itself.
-   *
-   * 1m may propose LONG / SHORT.
-   * Zone-aware confirmation is evaluated later.
-   *
-   * The final Engine 3 direction stays NEUTRAL until the candidate
-   * actually passes confirmation.
-   *
-   * Once an actual paper trade is active, activePaperTradeDirection
-   * becomes the direction owner and completed 10m EMA10 becomes the
-   * hold/reset rule.
+   * The 5m validation object carries the same candidate identity
+   * supplied by Engine 26.
    */
-  let state =
-    observationUsable
-      ? observedState
-      : "NO_SIGNAL";
+  const fiveMinuteIdentityAligned =
+    identityAligned(
+      validation5m,
+      engine26ReactionHandoff
+    );
 
-  let candidateDirection =
-    freshDirectionalEvidence
-      ? observedDirection
+  const reactionPresent =
+    matureReaction5m != null &&
+    typeof matureReaction5m === "object";
+
+  const reactionActive =
+    matureReaction5m?.active === true;
+
+  const reactionDirectional =
+    stateDirection === "LONG" ||
+    stateDirection === "SHORT";
+
+  const reactionQualityApproved =
+    QUALIFYING_QUALITY.has(
+      reactionQuality
+    );
+
+  const reactionUsable =
+    reactionPresent &&
+    reactionActive &&
+    fiveMinuteIdentityAligned;
+
+  const candidateDirection =
+    reactionUsable &&
+    reactionDirectional
+      ? stateDirection
       : "NEUTRAL";
 
-  let sourceTimeframe =
-    observationUsable
-      ? "1m"
-      : null;
-
-  let reactionTimeframe =
-    observationUsable
-      ? "1m"
-      : null;
-
   let resolutionStatus =
-    freshDirectionalEvidence
-      ? "REACTION_CANDIDATE_FROM_1M"
-      : observationUsable
-      ? "REACTION_CANDIDATE_NEUTRAL"
-      : "NO_USABLE_1M_REACTION_CANDIDATE";
+    "NO_USABLE_5M_BOOK_REACTION_CANDIDATE";
 
   let resolutionReason =
-    freshDirectionalEvidence
-      ? "FRESH_COMPLETED_1M_DIRECTIONAL_REACTION_CANDIDATE"
-      : observationUsable
-      ? "FRESH_COMPLETED_1M_NON_DIRECTIONAL_REACTION"
-      : "ONE_MINUTE_EVIDENCE_UNUSABLE";
+    "COMPLETED_5M_BOOK_REACTION_NOT_USABLE";
 
-  if (!observationPresent) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_MISSING";
-  } else if (!aligned) {
-    resolutionReason = "ONE_MINUTE_IDENTITY_MISMATCH";
-  } else if (observation1m?.stale === true) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_STALE";
-  } else if (!observationCompleted) {
-    resolutionReason = "ONE_MINUTE_CANDLE_NOT_COMPLETED";
-  } else if (!observationActive) {
-    resolutionReason = "ONE_MINUTE_OBSERVATION_INACTIVE";
+  if (!reactionPresent) {
+    resolutionReason =
+      "COMPLETED_5M_BOOK_REACTION_MISSING";
+  } else if (!fiveMinuteIdentityAligned) {
+    resolutionReason =
+      "FIVE_MINUTE_ENGINE26_IDENTITY_MISMATCH";
+  } else if (!reactionActive) {
+    resolutionReason =
+      "COMPLETED_5M_BOOK_REACTION_INACTIVE";
+  } else if (!reactionDirectional) {
+    resolutionStatus =
+      "REACTION_CANDIDATE_NEUTRAL_FROM_5M_BOOK_STATE";
+
+    resolutionReason =
+      `COMPLETED_5M_BOOK_REACTION_${reactionState}_IS_NOT_DIRECTIONAL`;
+  } else {
+    resolutionStatus =
+      `REACTION_CANDIDATE_${candidateDirection}_FROM_5M_BOOK_REACTION`;
+
+    resolutionReason =
+      `COMPLETED_5M_BOOK_REACTION_${reactionState}_PROPOSES_${candidateDirection}`;
   }
 
   return {
-    state,
-
     /*
-     * Internal candidate direction only.
-     * attachPaperScalpReactionToConfluence() resolves final canonical
-     * direction after confirmation.
+     * Book-based reaction state is now the reaction candidate state.
      */
-    direction: candidateDirection,
+    state:
+      reactionUsable
+        ? reactionState
+        : "NO_SIGNAL",
+
+    direction:
+      candidateDirection,
+
     candidateDirection,
 
-    sourceTimeframe,
-    reactionTimeframe,
+    candidateQuality:
+      reactionQuality,
 
-    observationPresent,
-    observationActive,
-    observationFresh,
-    observationCompleted,
-    observationUsable,
-    identityAligned: aligned,
+    sourceTimeframe:
+      reactionUsable
+        ? "5m"
+        : null,
 
-    observedState,
-    observedDirection,
-    freshDirectionalEvidence,
+    reactionTimeframe:
+      reactionUsable
+        ? "5m"
+        : null,
+
+    /*
+     * New canonical reaction-candidate diagnostics.
+     */
+    reactionPresent,
+    reactionActive,
+    reactionUsable,
+    reactionDirectional,
+    reactionQualityApproved,
+
+    fiveMinuteIdentityAligned,
+
+    fiveMinuteBookState:
+      reactionState,
+
+    fiveMinuteBookDirection:
+      stateDirection,
+
+    fiveMinuteObservedDirection:
+      observedFiveMinuteDirection,
+
+    fiveMinuteBookQuality:
+      reactionQuality,
+
+    /*
+     * 1m no longer participates in canonical candidate ownership.
+     */
+    observationPresent: false,
+    observationActive: false,
+    observationFresh: false,
+    observationCompleted: false,
+    observationUsable: false,
+    identityAligned:
+      fiveMinuteIdentityAligned,
+
+    observedState:
+      reactionState,
+
+    observedDirection:
+      stateDirection,
+
+    freshDirectionalEvidence:
+      reactionUsable &&
+      reactionDirectional,
 
     previousCanonicalDirection:
       previousDirectional
@@ -384,13 +476,20 @@ function resolveCanonicalDirection({
         : "NEUTRAL",
 
     activePaperTrade,
+
     activePaperTradeDirection:
       activePaperTrade
         ? activeTradeDirection
         : "NEUTRAL",
 
     directionPersistenceActive: false,
-    directionEstablishedByFresh1m: false,
+
+    /*
+     * Preserve this legacy output field temporarily for schema
+     * compatibility, but it must now always be false.
+     */
+    directionEstablishedByFresh1m:
+      false,
 
     tenMinuteCompletedClose:
       completedClose,
@@ -401,13 +500,13 @@ function resolveCanonicalDirection({
     ema10ResetDataAvailable:
       ema10DataAvailable,
 
-    ema10ResetTriggered: false,
+    ema10ResetTriggered:
+      false,
 
     resolutionStatus,
     resolutionReason,
   };
 }
-
 function resolveFinalCanonicalDirection({
   candidateResolution,
   candidateConfirmation,
@@ -1531,7 +1630,8 @@ const matureReaction5m = {
    */
   const candidateResolution =
     resolveCanonicalDirection({
-      observation1m,
+      matureReaction5m,
+      validation5m,
       previousCanonicalDirection,
       tenMinuteCompletedClose,
       tenMinuteEma10,
