@@ -1,5 +1,5 @@
 // services/core/logic/engine25NewsFilter.js
-// Engine 25 Finlight News v0.1
+// Engine 25 Finlight News v0.2 — tightened Engine 25 market relevance
 // Pure relevance, classification, expiry, and dedupe logic.
 // No provider calls. No trade direction. No market confirmation thresholds.
 //
@@ -11,7 +11,7 @@
 
 import { createHash } from "crypto";
 
-export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.1";
+export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.2";
 export const ENGINE25_NEWS_SOURCE = "FINLIGHT_REUTERS_FEED";
 export const ENGINE25_NEWS_SOURCE_TIER = "PROFESSIONAL_NEWS";
 export const ENGINE25_NEWS_PROVIDER = "FINLIGHT";
@@ -195,20 +195,65 @@ function classifyCandidates(text) {
   ];
 
   const geopoliticalTerms = [
-    "war", "military", "attack", "airstrike", "missile", "drone",
-    "invasion", "retaliation", "ceasefire", "troops",
-    "conflict", "hostilities", "sanction", "sanctions",
-    "hormuz", "red sea"
-  ];
-
-  const militarySecurityTerms = [
-    "military", "attack", "attacks",
+    "war", "military", "attack", "attacks",
     "airstrike", "airstrikes",
     "missile", "missiles",
     "drone", "drones",
-    "invasion", "retaliation", "ceasefire",
-    "troops", "conflict", "hostilities",
-    "hormuz", "red sea"
+    "invasion", "retaliation", "retaliates",
+    "ceasefire", "troops", "conflict", "hostilities",
+    "blockade", "naval", "navy",
+    "hormuz", "red sea", "suez"
+  ];
+
+  // A generic crime/legal/historical story containing words like
+  // "war", "attack", "military", or "drone" is NOT enough.
+  // Engine 25 geopolitical discovery requires a strategic theater/entity
+  // plus a live escalation/action, or explicit market-transmission risk.
+  const strategicGeoContextTerms = [
+    "iran", "iranian",
+    "israel", "israeli",
+    "russia", "russian",
+    "ukraine", "ukrainian",
+    "china", "chinese", "beijing",
+    "taiwan", "taiwanese",
+    "north korea", "north korean", "pyongyang",
+    "saudi arabia", "saudi",
+    "yemen", "houthi", "houthis",
+    "nato",
+    "united states", "u.s.", "us",
+    "strait of hormuz", "hormuz",
+    "red sea", "suez canal", "suez",
+    "persian gulf", "gulf of oman"
+  ];
+
+  const liveEscalationActionTerms = [
+    "airstrike", "airstrikes",
+    "missile", "missiles",
+    "drone strike", "drone strikes",
+    "military strike", "military strikes",
+    "attack", "attacks",
+    "invasion",
+    "retaliation", "retaliates",
+    "troops deploy", "troops deployed",
+    "deploys troops", "deployed troops",
+    "blockade",
+    "closure",
+    "ship seized", "ships seized",
+    "tanker seized", "tankers seized",
+    "naval clash", "military clash",
+    "ceasefire collapses", "ceasefire breaks down",
+    "hostilities intensify", "conflict escalates"
+  ];
+
+  const geopoliticalTransmissionTerms = [
+    "oil", "crude", "brent", "wti", "fuel", "gas",
+    "shipping", "tanker", "tankers",
+    "strait of hormuz", "hormuz", "red sea", "suez",
+    "supply", "exports", "export",
+    "sanctions", "sanction",
+    "markets", "market", "stocks", "equities",
+    "futures", "bonds", "treasury", "treasuries",
+    "inflation", "prices", "trade"
   ];
 
   const treasuryContextTerms = [
@@ -253,6 +298,20 @@ function classifyCandidates(text) {
     "hawkish", "dovish", "tightening", "easing"
   ];
 
+  // Prevent market-preview stories such as "focus on Jackson Hole"
+  // from becoming a FED_POLICY_EVENT merely because Fed/rates are mentioned.
+  const fedSubstantiveActionTerms = [
+    "said", "says", "told", "remarks", "remarked",
+    "signals", "signaled", "backs", "backed",
+    "calls for", "called for",
+    "votes", "voted",
+    "decision", "statement", "minutes", "testimony",
+    "raises", "raised", "cuts", "cut",
+    "holds", "held", "keeps", "kept", "leaves", "left",
+    "projects", "projected", "forecast", "forecasts",
+    "speech", "press conference"
+  ];
+
   const fedOfficialActionTerms = [
     "fomc statement", "fomc decision", "fomc minutes",
     "fed statement", "fed decision", "fed minutes",
@@ -269,6 +328,14 @@ function classifyCandidates(text) {
     "pce", "personal consumption expenditures",
     "employment report", "unemployment rate",
     "ism manufacturing", "ism services"
+  ];
+
+  // Strategy 1 Engine 25 macro-data lane is U.S.-macro only.
+  // Finlight articleText includes the provider's countries metadata,
+  // so this can qualify either from headline/body or source metadata.
+  const usMacroContextTerms = [
+    "united states", "u.s.", "us",
+    "american", "america"
   ];
 
   const tradeTerms = [
@@ -300,7 +367,6 @@ function classifyCandidates(text) {
   ];
 
   const tradePolicyMatch = hasAny(text, tradeTerms);
-  const independentMilitarySecurityMatch = hasAny(text, militarySecurityTerms);
   const hormuzConcreteDisruption = isHormuzConcreteDisruption(text);
 
   const treasuryContextMatch = hasAny(text, treasuryContextTerms);
@@ -308,10 +374,18 @@ function classifyCandidates(text) {
 
   const fedEntityMatch = hasAny(text, fedEntityTerms);
   const fedPolicyMatch = hasAny(text, fedPolicyTerms);
+  const fedSubstantiveActionMatch = hasAny(text, fedSubstantiveActionTerms);
   const fedOfficialActionMatch = hasAny(text, fedOfficialActionTerms);
 
+  const strategicGeoContextMatch = hasAny(text, strategicGeoContextTerms);
+  const liveEscalationActionMatch = hasAny(text, liveEscalationActionTerms);
+  const geopoliticalTransmissionMatch = hasAny(
+    text,
+    geopoliticalTransmissionTerms
+  );
+
   if (
-    (hasAll(text, [oilTerms, supplyTerms]) && hasAny(text, geopoliticalTerms)) ||
+    (hasAll(text, [oilTerms, supplyTerms]) && strategicGeoContextMatch) ||
     hormuzConcreteDisruption
   ) {
     candidates.push("GEOPOLITICAL_OIL_SUPPLY_RISK");
@@ -321,9 +395,6 @@ function classifyCandidates(text) {
     candidates.push("FINANCIAL_STRESS_EVENT");
   }
 
-  // Treasury risk now requires both a Treasury/bond-market context AND
-  // a concrete rates/auction/selloff/liquidity action. Merely mentioning
-  // Treasury, bonds, or yields in a general market wrap is not enough.
   if (treasuryContextMatch && treasuryRiskActionMatch) {
     candidates.push("TREASURY_RATES_RISK");
   }
@@ -338,11 +409,9 @@ function classifyCandidates(text) {
     candidates.push("ENERGY_SUPPLY_EVENT");
   }
 
-  // Fed policy now requires an actual Fed entity + policy language,
-  // or an explicit official Fed/FOMC action phrase.
   if (
-    (fedEntityMatch && fedPolicyMatch) ||
-    fedOfficialActionMatch
+    fedOfficialActionMatch ||
+    (fedEntityMatch && fedPolicyMatch && fedSubstantiveActionMatch)
   ) {
     candidates.push("FED_POLICY_EVENT");
   }
@@ -351,22 +420,28 @@ function classifyCandidates(text) {
     candidates.push("TRADE_POLICY_RISK");
   }
 
-  // Explicit tariff/trade-war stories stay TRADE_POLICY_RISK unless the
-  // same article independently contains genuine military/security escalation.
+  // Require BOTH strategic geopolitical context and a live escalation.
+  // Pure crime/legal/historical stories are rejected.
+  // A trade-policy story is not promoted to geopolitical escalation unless
+  // there is an independent live military/security escalation.
   if (
-    hasAny(text, geopoliticalTerms) &&
-    (!tradePolicyMatch || independentMilitarySecurityMatch)
+    strategicGeoContextMatch &&
+    liveEscalationActionMatch &&
+    (!tradePolicyMatch || geopoliticalTransmissionMatch)
   ) {
     candidates.push("GEOPOLITICAL_ESCALATION");
   }
 
-  if (hasAny(text, macroTerms)) {
+  // U.S.-only macro lane. Foreign GDP/CPI/labor releases stay out.
+  if (
+    hasAny(text, macroTerms) &&
+    hasAny(text, usMacroContextTerms)
+  ) {
     candidates.push("MACRO_DATA_RELEASE");
   }
 
   return [...new Set(candidates)].sort((a, b) => PRIORITY[b] - PRIORITY[a]);
 }
-
 function themeFor(eventType, text) {
   if (eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK") {
     return "OIL_SUPPLY_GEOPOLITICAL_RISK";
@@ -412,10 +487,6 @@ function themeFor(eventType, text) {
 function materialFor(eventType, text) {
   if (!eventType) return false;
 
-  if (hasAny(text, MATERIAL_TERMS)) {
-    return true;
-  }
-
   if (
     eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK" &&
     isHormuzConcreteDisruption(text)
@@ -423,44 +494,52 @@ function materialFor(eventType, text) {
     return true;
   }
 
-  if (eventType === "FED_POLICY_EVENT") {
-    const fedPolicyMaterialTerms = [
-      "decision", "statement", "press conference",
-      "minutes", "testimony", "rate", "fomc",
-      "interest rates",
-      "raise interest rates",
-      "raises interest rates",
-      "raising interest rates",
-      "lower interest rates",
-      "cut interest rates",
-      "rates higher",
-      "rates lower",
-      "discount rate",
-      "primary credit rate"
-    ];
-
-    if (hasAny(text, fedPolicyMaterialTerms)) {
-      return true;
-    }
-
-    const explicitFedContext = hasAny(text, [
-      "federal reserve", "fomc",
-      "boston fed", "cleveland fed", "minneapolis fed",
-      "kansas city fed", "dallas fed", "new york fed",
-      "chicago fed", "st. louis fed", "san francisco fed",
-      "atlanta fed", "richmond fed", "philadelphia fed",
-      "collins", "powell",
-      "policy", "hike", "cut", "raise", "lower"
+  if (eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK") {
+    return hasAny(text, [
+      "attack", "airstrike", "missile", "blockade", "closure",
+      "disruption", "halt", "sanction", "sanctions",
+      "shipping", "tanker", "tankers", "supply", "exports"
     ]);
+  }
 
-    return explicitFedContext && hasTerm(text, "rates");
+  if (eventType === "GEOPOLITICAL_ESCALATION") {
+    // Classification already requires strategic context + live escalation.
+    // Materiality requires a concrete escalation/transmission term rather
+    // than a generic historic/legal reference to war or attack.
+    return hasAny(text, [
+      "airstrike", "airstrikes",
+      "missile", "missiles",
+      "drone strike", "drone strikes",
+      "military strike", "military strikes",
+      "invasion", "blockade",
+      "retaliation", "retaliates",
+      "troops deploy", "troops deployed",
+      "deploys troops", "deployed troops",
+      "hostilities intensify", "conflict escalates",
+      "oil", "crude", "shipping", "tanker", "tankers",
+      "hormuz", "red sea", "suez",
+      "sanction", "sanctions"
+    ]);
+  }
+
+  if (eventType === "FED_POLICY_EVENT") {
+    return hasAny(text, [
+      "decision", "statement", "press conference",
+      "minutes", "testimony", "speech",
+      "rate hike", "rate cut", "rates unchanged",
+      "raise interest rates", "raises interest rates",
+      "lower interest rates", "cut interest rates",
+      "discount rate", "primary credit rate",
+      "hawkish", "dovish", "tightening", "easing"
+    ]);
   }
 
   if (eventType === "TREASURY_RATES_RISK") {
     return hasAny(text, [
       "yield", "auction", "selloff",
       "surge", "spike", "jump", "plunge",
-      "record", "highest", "lowest"
+      "record", "highest", "lowest",
+      "liquidity", "disorder"
     ]);
   }
 
@@ -468,25 +547,42 @@ function materialFor(eventType, text) {
     return hasAny(text, [
       "rose", "fell", "increased", "decreased",
       "unchanged", "actual", "reported", "came in",
-      "above", "below", "unexpected", "surprise"
+      "above", "below", "unexpected", "surprise",
+      "accelerated", "slowed", "revised"
     ]);
   }
 
-  return false;
-}
+  if (eventType === "TRADE_POLICY_RISK") {
+    return hasAny(text, [
+      "tariff", "tariffs", "duties",
+      "export ban", "import ban", "export controls",
+      "trade restriction", "trade restrictions",
+      "embargo", "retaliation", "retaliates"
+    ]);
+  }
 
+  if (eventType === "FINANCIAL_STRESS_EVENT") {
+    return hasAny(text, [
+      "bank run", "bank failure", "banking crisis",
+      "liquidity crisis", "funding stress", "credit stress",
+      "credit crisis", "systemic risk", "default",
+      "deposit flight", "bailout", "bank rescue",
+      "repo stress"
+    ]);
+  }
+
+  if (eventType === "ENERGY_SUPPLY_EVENT") {
+    return hasAny(text, [
+      "outage", "production cut", "output cut",
+      "halt", "disruption", "shortage",
+      "attack", "sanction", "sanctions"
+    ]);
+  }
+
+  return hasAny(text, MATERIAL_TERMS);
+}
 function severityFor(eventType, text, material) {
   if (!material) return "LOW";
-
-  if (
-    hasAny(text, [
-      "war", "invasion", "blockade", "closure",
-      "bank run", "banking crisis", "liquidity crisis",
-      "systemic risk", "default", "attack on", "attacks on"
-    ])
-  ) {
-    return "HIGH";
-  }
 
   if (
     ["GEOPOLITICAL_OIL_SUPPLY_RISK", "FINANCIAL_STRESS_EVENT"].includes(eventType)
@@ -494,9 +590,35 @@ function severityFor(eventType, text, material) {
     return "HIGH";
   }
 
+  if (eventType === "GEOPOLITICAL_ESCALATION") {
+    if (
+      hasAny(text, [
+        "invasion",
+        "blockade",
+        "airstrike", "airstrikes",
+        "missile", "missiles",
+        "military strike", "military strikes",
+        "hostilities intensify", "conflict escalates"
+      ])
+    ) {
+      return "HIGH";
+    }
+
+    return "MODERATE";
+  }
+
+  if (
+    eventType === "TREASURY_RATES_RISK" &&
+    hasAny(text, [
+      "disorder", "liquidity crisis", "record high",
+      "yield spike", "yields surge", "weak auction"
+    ])
+  ) {
+    return "HIGH";
+  }
+
   return "MODERATE";
 }
-
 function oilSupplyRiskFor(eventType, text) {
   if (
     ["GEOPOLITICAL_OIL_SUPPLY_RISK", "ENERGY_SUPPLY_EVENT"].includes(eventType)
