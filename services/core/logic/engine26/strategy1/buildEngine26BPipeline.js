@@ -1,4 +1,5 @@
 import { evaluateStrategy1Geometry } from "./evaluateStrategy1Geometry.js";
+import { buildEngine26BTargetStopGeometry } from "./buildEngine26BTargetStopGeometry.js";
 
 function upper(value) {
   return String(value || "").trim().toUpperCase();
@@ -55,16 +56,54 @@ export function buildEngine26BPipeline({
   const lockedPackageValid =
     isLockedEngine6PaperPackageValid(permission);
 
+  const entryZone =
+    engine26GeometryHandoff?.entryZone ??
+    engine26LocationCandidate?.entryZone ??
+    null;
+
+  const approvedNegotiatedZones =
+    engine26GeometryHandoff?.approvedNegotiatedZoneInventory ??
+    engine26LocationCandidate?.approvedNegotiatedZoneInventory ??
+    [];
+
+  const targetStopGeometry = lockedPackageValid
+    ? buildEngine26BTargetStopGeometry({
+        direction: paper?.direction,
+        entryZone,
+        approvedNegotiatedZones,
+        tickSize: 0.25,
+      })
+    : null;
+
+  const geometryCandidate = lockedPackageValid
+    ? {
+        ...(engine26LocationCandidate || {}),
+        targetZone: targetStopGeometry?.targetZone ?? null,
+        locationInvalidationBoundary:
+          targetStopGeometry?.locationInvalidationBoundary ?? null,
+        locationStopReference:
+          targetStopGeometry?.locationStopReference ?? null,
+      }
+    : buildPreLockDiagnosticCandidate(engine26LocationCandidate);
+
+  const geometryHandoff = lockedPackageValid
+    ? {
+        ...(engine26GeometryHandoff || {}),
+        entryZone,
+        targetZone: targetStopGeometry?.targetZone ?? null,
+        locationInvalidationBoundary:
+          targetStopGeometry?.locationInvalidationBoundary ?? null,
+        locationStopReference:
+          targetStopGeometry?.locationStopReference ?? null,
+      }
+    : buildPreLockDiagnosticHandoff(engine26GeometryHandoff);
+
   const geometry = evaluateStrategy1Geometry({
     symbol,
     strategyId,
     permission,
-    engine26LocationCandidate: lockedPackageValid
-      ? engine26LocationCandidate
-      : buildPreLockDiagnosticCandidate(engine26LocationCandidate),
-    engine26GeometryHandoff: lockedPackageValid
-      ? engine26GeometryHandoff
-      : buildPreLockDiagnosticHandoff(engine26GeometryHandoff),
+    engine26LocationCandidate: geometryCandidate,
+    engine26GeometryHandoff: geometryHandoff,
   });
 
   if (!geometry) return null;
@@ -92,6 +131,11 @@ export function buildEngine26BPipeline({
     geometryInputSource: "ENGINE26A_LOCATION_CONTEXT",
     permissionAuthority: "ENGINE6",
 
+    targetStopGeometry,
+    targetStopGeometrySource: lockedPackageValid
+      ? "ENGINE26B_TARGET_STOP_GEOMETRY"
+      : "PRELOCK_NO_TARGET_STOP_AUTHORITY",
+
     reasonCodes: [
       ...(Array.isArray(geometry?.reasonCodes)
         ? geometry.reasonCodes
@@ -100,6 +144,9 @@ export function buildEngine26BPipeline({
         ? "ENGINE26B_PIPELINE_LOCKED_ENGINE6_PACKAGE_CONSUMED"
         : "ENGINE26B_PIPELINE_PRELOCK_DIAGNOSTIC_ONLY",
       "ENGINE26B_PIPELINE_GEOMETRY_INPUT_ENGINE26A_LOCATION_CONTEXT",
+      lockedPackageValid
+        ? "ENGINE26B_TARGET_STOP_MODULE_CONSUMED"
+        : null,
     ].filter(Boolean),
   };
 }
