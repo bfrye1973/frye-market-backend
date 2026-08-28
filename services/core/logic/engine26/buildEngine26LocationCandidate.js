@@ -5478,6 +5478,7 @@ export function buildEngine26AWaitingContract({
     entryZoneLow: null,
     entryZoneHigh: null,
     entryZoneMidline: null,
+    approvedNegotiatedZoneInventory: [],
     targetZone: null,
     targetZoneStatus: "TARGET_ZONE_UNAVAILABLE",
     targetZoneReasonCodes: [reasonCode],
