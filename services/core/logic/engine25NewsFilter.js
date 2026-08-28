@@ -211,12 +211,24 @@ function classifyCandidates(text) {
     "hormuz", "red sea"
   ];
 
-  const treasuryTerms = [
+  const treasuryContextTerms = [
     "treasury", "treasuries",
+    "treasury market", "treasury markets",
+    "treasury yield", "treasury yields",
+    "bond market", "bond markets",
     "bond yield", "bond yields",
     "10-year yield", "30-year yield",
-    "yield spike", "yields surge",
-    "auction", "duration selloff", "bond selloff"
+    "10-year treasury", "30-year treasury"
+  ];
+
+  const treasuryRiskActionTerms = [
+    "yield spike", "yield spikes", "yields surge", "yields surged",
+    "yield jump", "yield jumps", "yields jump", "yields jumped",
+    "selloff", "sell-off", "selling",
+    "auction", "auctions", "auction tail", "weak auction",
+    "duration selloff", "bond selloff",
+    "record high", "highest since", "liquidity", "disorder",
+    "buyback", "buybacks"
   ];
 
   const fedEntityTerms = [
@@ -230,12 +242,22 @@ function classifyCandidates(text) {
   ];
 
   const fedPolicyTerms = [
-    "rate decision", "rate hike", "rate cut", "rates unchanged", "dot plot",
+    "rate decision", "rate hike", "rate hikes",
+    "rate cut", "rate cuts", "rates unchanged", "dot plot",
     "interest rates",
     "raise interest rates", "raises interest rates", "raising interest rates",
     "lower interest rates", "cut interest rates",
     "rates higher", "rates lower",
-    "discount rate", "primary credit rate"
+    "discount rate", "primary credit rate",
+    "monetary policy", "policy rate", "policy rates",
+    "hawkish", "dovish", "tightening", "easing"
+  ];
+
+  const fedOfficialActionTerms = [
+    "fomc statement", "fomc decision", "fomc minutes",
+    "fed statement", "fed decision", "fed minutes",
+    "fed chair speech", "powell speech",
+    "fed testimony", "powell testimony"
   ];
 
   const macroTerms = [
@@ -281,6 +303,13 @@ function classifyCandidates(text) {
   const independentMilitarySecurityMatch = hasAny(text, militarySecurityTerms);
   const hormuzConcreteDisruption = isHormuzConcreteDisruption(text);
 
+  const treasuryContextMatch = hasAny(text, treasuryContextTerms);
+  const treasuryRiskActionMatch = hasAny(text, treasuryRiskActionTerms);
+
+  const fedEntityMatch = hasAny(text, fedEntityTerms);
+  const fedPolicyMatch = hasAny(text, fedPolicyTerms);
+  const fedOfficialActionMatch = hasAny(text, fedOfficialActionTerms);
+
   if (
     (hasAll(text, [oilTerms, supplyTerms]) && hasAny(text, geopoliticalTerms)) ||
     hormuzConcreteDisruption
@@ -292,7 +321,10 @@ function classifyCandidates(text) {
     candidates.push("FINANCIAL_STRESS_EVENT");
   }
 
-  if (hasAny(text, treasuryTerms)) {
+  // Treasury risk now requires both a Treasury/bond-market context AND
+  // a concrete rates/auction/selloff/liquidity action. Merely mentioning
+  // Treasury, bonds, or yields in a general market wrap is not enough.
+  if (treasuryContextMatch && treasuryRiskActionMatch) {
     candidates.push("TREASURY_RATES_RISK");
   }
 
@@ -306,7 +338,12 @@ function classifyCandidates(text) {
     candidates.push("ENERGY_SUPPLY_EVENT");
   }
 
-  if (hasAny(text, fedEntityTerms) || hasAny(text, fedPolicyTerms)) {
+  // Fed policy now requires an actual Fed entity + policy language,
+  // or an explicit official Fed/FOMC action phrase.
+  if (
+    (fedEntityMatch && fedPolicyMatch) ||
+    fedOfficialActionMatch
+  ) {
     candidates.push("FED_POLICY_EVENT");
   }
 
@@ -571,8 +608,23 @@ export function normalizeFinlightArticle(
     nowMs >= expiresMs;
 
   const fetchedAt = parseIso(providerFetchedAtUtc) || null;
+  const providerFirstSeenAt = parseIso(article?.createdAt) || null;
+
   const publishedMs = Date.parse(observedAt);
+  const firstSeenMs = Date.parse(providerFirstSeenAt || "");
   const fetchedMs = Date.parse(fetchedAt || "");
+
+  const publisherToFinlightLatencyMs =
+    Number.isFinite(publishedMs) && Number.isFinite(firstSeenMs)
+      ? Math.max(0, firstSeenMs - publishedMs)
+      : null;
+
+  const finlightToEngineFetchLatencyMs =
+    Number.isFinite(firstSeenMs) && Number.isFinite(fetchedMs)
+      ? Math.max(0, fetchedMs - firstSeenMs)
+      : null;
+
+  // Compatibility metric retained during the Finlight migration.
   const publishedToEngineFetchLatencyMs =
     Number.isFinite(publishedMs) && Number.isFinite(fetchedMs)
       ? Math.max(0, fetchedMs - publishedMs)
@@ -592,9 +644,11 @@ export function normalizeFinlightArticle(
     material,
     observedAt,
     providerPublishedAt: observedAt,
-    providerFirstSeenAt: null,
+    providerFirstSeenAt,
     engineFetchedAt: fetchedAt,
     normalizedAt: now instanceof Date ? now.toISOString() : parseIso(now),
+    publisherToFinlightLatencyMs,
+    finlightToEngineFetchLatencyMs,
     publishedToEngineFetchLatencyMs,
     expiresAt,
     requiresMarketConfirmation: true,
@@ -605,6 +659,7 @@ export function normalizeFinlightArticle(
     treasuryLiquidityRisk,
     severity: severityFor(eventType, text, material),
     sourceMetadata: {
+      finlightCreatedAt: providerFirstSeenAt,
       language: normalizeText(article?.language) || null,
       categories: Array.isArray(article?.categories)
         ? article.categories.filter(Boolean)
