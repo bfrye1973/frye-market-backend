@@ -5,6 +5,7 @@ import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
+import { startEngine25FinlightStream } from "./logic/engine25FinlightStream.js";
 
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";
@@ -293,6 +294,19 @@ app.listen(PORT, HOST, () => {
   setTimeout(() => {
     runStartupSnapshotBuild();
   }, 1500);
+
+  // Start Engine 25 Finlight Reuters WebSocket after the API is listening.
+  // This is the PRIMARY live-news lane. The REST job remains fallback/recovery.
+  setTimeout(() => {
+    try {
+      startEngine25FinlightStream();
+    } catch (error) {
+      console.error(
+        "[engine25-finlight-stream] startup error:",
+        error?.stack || error?.message || String(error)
+      );
+    }
+  }, 2500);
 });
 
 export default app;
