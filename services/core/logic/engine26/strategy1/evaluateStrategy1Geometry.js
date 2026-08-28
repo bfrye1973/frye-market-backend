@@ -88,49 +88,103 @@ export function evaluateStrategy1Geometry({
       ? permission.paper
       : null;
 
+  const paperIdentity =
+    paper?.identity &&
+    typeof paper.identity === "object"
+      ? paper.identity
+      : null;
+
+  const lockedPaperDirection = safeUpper(
+    paper?.direction
+  );
+
+  const lockedPaperPackageValid =
+    paper?.allowed === true &&
+    paper?.paperAllowed === true &&
+    paper?.locked === true &&
+    ["LONG", "SHORT"].includes(
+      lockedPaperDirection
+    );
+
   const setupClass =
+    (lockedPaperPackageValid
+      ? paper?.setupClass ??
+        paperIdentity?.setupClass
+      : null) ??
     candidate?.setupClass ??
     handoff?.setupClass ??
     null;
 
   const candidateIdentityVersion =
+    (lockedPaperPackageValid
+      ? paper?.candidateIdentityVersion ??
+        paperIdentity?.candidateIdentityVersion
+      : null) ??
     candidate?.candidateIdentityVersion ??
     handoff?.candidateIdentityVersion ??
     null;
+
+  const readableLaneId =
+    (lockedPaperPackageValid
+      ? paper?.laneId ?? paperIdentity?.laneId
+      : null) ??
+    candidate?.laneId ??
+    handoff?.laneId;
+
+  const readableStrategyId =
+    (lockedPaperPackageValid
+      ? paper?.strategyId ??
+        paperIdentity?.strategyId
+      : null) ??
+    candidate?.strategyId ??
+    handoff?.strategyId ??
+    strategyId;
 
   const isReadableStrategy1 =
     [V1_SETUP_CLASS, V2_SETUP_CLASS].includes(
       setupClass
     ) &&
-    (
-      candidate?.laneId ??
-      handoff?.laneId
-    ) === "minute" &&
-    (
-      candidate?.strategyId ??
-      handoff?.strategyId ??
-      strategyId
-    ) === "intraday_scalp@10m";
+    readableLaneId === "minute" &&
+    readableStrategyId === "intraday_scalp@10m";
 
   if (!isReadableStrategy1) return null;
 
   const laneId =
+    (lockedPaperPackageValid
+      ? paper?.laneId ?? paperIdentity?.laneId
+      : null) ??
     candidate?.laneId ??
     handoff?.laneId ??
     null;
 
   const candidateId =
-    candidate?.candidateId ?? null;
+    (lockedPaperPackageValid
+      ? paper?.candidateId ??
+        paperIdentity?.candidateId
+      : null) ??
+    candidate?.candidateId ??
+    null;
 
   const zoneId =
-    candidate?.zoneId ?? null;
+    (lockedPaperPackageValid
+      ? paper?.zoneId ?? paperIdentity?.zoneId
+      : null) ??
+    candidate?.zoneId ??
+    null;
 
   const resolvedStrategyId =
+    (lockedPaperPackageValid
+      ? paper?.strategyId ??
+        paperIdentity?.strategyId
+      : null) ??
     candidate?.strategyId ??
     strategyId ??
     null;
 
   const resolvedSymbol =
+    (lockedPaperPackageValid
+      ? paper?.symbol ?? paperIdentity?.symbol
+      : null) ??
     candidate?.symbol ??
     symbol ??
     null;
@@ -140,13 +194,15 @@ export function evaluateStrategy1Geometry({
     handoff?.snapshotTime ??
     null;
 
-  const direction = safeUpper(
-    candidate?.directionBias ??
-    candidate?.tradeDirectionBias ??
-    candidate?.direction ??
-    handoff?.direction ??
-    "NEUTRAL"
-  );
+  const direction = lockedPaperPackageValid
+    ? lockedPaperDirection
+    : safeUpper(
+        candidate?.directionBias ??
+        candidate?.tradeDirectionBias ??
+        candidate?.direction ??
+        handoff?.direction ??
+        "NEUTRAL"
+      );
 
   const directionState = safeUpper(
     candidate?.directionState ??
@@ -168,20 +224,31 @@ export function evaluateStrategy1Geometry({
     directionState === "SHORT_REVERSAL_WATCH";
 
   const directionalResolved =
-    longReversalWatch !== true &&
-    negotiatedLineContact !== true &&
-    ["LONG", "SHORT"].includes(direction);
+    lockedPaperPackageValid ||
+    (
+      longReversalWatch !== true &&
+      negotiatedLineContact !== true &&
+      ["LONG", "SHORT"].includes(direction)
+    );
 
   const setupType =
     candidate?.setupType ??
     setupClass;
 
   const setupGrade =
+    (lockedPaperPackageValid
+      ? paper?.setupGrade ??
+        paperIdentity?.setupGrade
+      : null) ??
     candidate?.setupGrade ??
     handoff?.setupGrade ??
     null;
 
   const identitySetupKey =
+    (lockedPaperPackageValid
+      ? paper?.identitySetupKey ??
+        paperIdentity?.identitySetupKey
+      : null) ??
     candidate?.identitySetupKey ??
     handoff?.identitySetupKey ??
     null;
@@ -203,10 +270,48 @@ export function evaluateStrategy1Geometry({
     );
 
   const permissionReady =
-    paper?.decision ===
-      "FAST_INTRADAY_PAPER_ALLOW" &&
-    paper?.allowed === true &&
-    paper?.planningAllowed === true;
+    lockedPaperPackageValid;
+
+  const lockedIdentityMatches =
+    !lockedPaperPackageValid ||
+    (
+      (paper?.candidateId ??
+        paperIdentity?.candidateId ??
+        candidate?.candidateId) ===
+        candidate?.candidateId &&
+      (paper?.zoneId ??
+        paperIdentity?.zoneId ??
+        candidate?.zoneId) ===
+        candidate?.zoneId &&
+      (paper?.laneId ??
+        paperIdentity?.laneId ??
+        candidate?.laneId) ===
+        candidate?.laneId &&
+      (paper?.strategyId ??
+        paperIdentity?.strategyId ??
+        candidate?.strategyId) ===
+        candidate?.strategyId &&
+      (paper?.symbol ??
+        paperIdentity?.symbol ??
+        candidate?.symbol) ===
+        candidate?.symbol &&
+      (paper?.setupClass ??
+        paperIdentity?.setupClass ??
+        candidate?.setupClass) ===
+        candidate?.setupClass &&
+      (paper?.setupGrade ??
+        paperIdentity?.setupGrade ??
+        candidate?.setupGrade) ===
+        candidate?.setupGrade &&
+      (paper?.identitySetupKey ??
+        paperIdentity?.identitySetupKey ??
+        candidate?.identitySetupKey) ===
+        candidate?.identitySetupKey &&
+      (paper?.candidateIdentityVersion ??
+        paperIdentity?.candidateIdentityVersion ??
+        candidate?.candidateIdentityVersion) ===
+        candidate?.candidateIdentityVersion
+    );
 
   const identityMatches =
     Boolean(candidate) &&
@@ -226,10 +331,14 @@ export function evaluateStrategy1Geometry({
     laneId === handoff?.laneId &&
     resolvedStrategyId === handoff?.strategyId &&
     resolvedSymbol === handoff?.symbol &&
-    direction === safeUpper(
-      handoff?.direction ??
-      candidate?.directionBias ??
-      candidate?.direction
+    lockedIdentityMatches &&
+    (
+      lockedPaperPackageValid ||
+      direction === safeUpper(
+        handoff?.direction ??
+        candidate?.directionBias ??
+        candidate?.direction
+      )
     ) &&
     setupClass === handoff?.setupClass &&
     setupGrade === handoff?.setupGrade &&
@@ -359,10 +468,16 @@ export function evaluateStrategy1Geometry({
     status = "IDENTITY_MISMATCH";
   } else if (candidateInvalidated) {
     status = "CANDIDATE_INVALIDATED";
-  } else if (negotiatedLineContact) {
+  } else if (
+    !lockedPaperPackageValid &&
+    negotiatedLineContact
+  ) {
     status =
       "WAITING_FOR_DIRECTIONAL_RESOLUTION";
-  } else if (longReversalWatch) {
+  } else if (
+    !lockedPaperPackageValid &&
+    longReversalWatch
+  ) {
     status =
       "WAITING_FOR_DIRECTIONAL_RESOLUTION";
   } else if (!directionalResolved) {
@@ -651,10 +766,12 @@ export function evaluateStrategy1Geometry({
     geometryObjectiveStatus,
 
     targetApproachWarningLow:
+      !lockedPaperPackageValid &&
       negotiatedLineContact
         ? null
         : targetApproachWarningLow,
     targetApproachWarningHigh:
+      !lockedPaperPackageValid &&
       negotiatedLineContact
         ? null
         : targetApproachWarningHigh,
@@ -692,6 +809,12 @@ export function evaluateStrategy1Geometry({
         : status,
 
     permissionReady,
+    lockedPaperPackageValid,
+    geometryDirectionSource:
+      lockedPaperPackageValid
+        ? "ENGINE6_LOCKED_PAPER_PERMISSION"
+        : "ENGINE26A_LOCATION_DIRECTION",
+    permissionAuthority: "ENGINE6",
     planningPermissionConsumed:
       permissionReady,
     plannerProgressionAllowed:
@@ -733,9 +856,11 @@ export function evaluateStrategy1Geometry({
       geometryReady
         ? "ENGINE26B_STRATEGY1_GEOMETRY_READY"
         : status,
+      !lockedPaperPackageValid &&
       longReversalWatch
         ? "ENGINE26B_LONG_REVERSAL_WATCH_NON_ACTIONABLE"
         : null,
+      !lockedPaperPackageValid &&
       negotiatedLineContact
         ? "ENGINE26B_NEGOTIATED_LINE_CONTACT_NON_ACTIONABLE"
         : null,
