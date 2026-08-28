@@ -1,5 +1,5 @@
 // services/core/jobs/updateEngine25NewsEvents.js
-// Engine 25 Finlight News v0.1
+// Engine 25 Finlight News v0.2
 // Finlight REST ingestion + normalization only.
 // NEWS IDENTIFIES THE EVENT. MARKETS CONFIRM THE EVENT. ENGINE 25 INTERPRETS THE RESULT.
 
@@ -30,10 +30,28 @@ const FINLIGHT_API_KEY =
 
 const FINLIGHT_QUERIES = Object.freeze([
   "Iran Strait of Hormuz oil shipping",
-  "Federal Reserve interest rates Treasury bond yields",
+  "Federal Reserve interest rates monetary policy",
+  "Treasury bond yields auction selloff liquidity",
   "inflation payrolls jobless claims GDP retail sales",
   "tariffs trade sanctions bank liquidity credit stress",
 ]);
+
+const DEFAULT_LIVE_LOOKBACK_HOURS = 8;
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function liveLookbackHours() {
+  return clampNumber(
+    process.env.FINLIGHT_LIVE_LOOKBACK_HOURS,
+    1,
+    24,
+    DEFAULT_LIVE_LOOKBACK_HOURS
+  );
+}
 
 function atomicWriteJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -46,6 +64,7 @@ function failureOutput({
   generatedAtUtc,
   httpStatus = null,
   warning = "FINLIGHT_NEWS_UNAVAILABLE",
+  window = null,
 } = {}) {
   return {
     ok: false,
@@ -53,9 +72,11 @@ function failureOutput({
     source: ENGINE25_NEWS_SOURCE,
     generatedAtUtc,
     feedAsOfUtc: null,
+    providerFetchedAtUtc: null,
     sourceEndpoint: SOURCE_ENDPOINT,
     sourceFilters: FINLIGHT_SOURCE_FILTER,
     sourceQueries: FINLIGHT_QUERIES,
+    liveWindow: window,
     httpStatus,
     itemsFetched: 0,
     itemsRelevant: 0,
@@ -88,7 +109,21 @@ async function readJsonResponse(response, label) {
   }
 }
 
-async function fetchFinlightQuery(query) {
+function buildLiveWindow(now = new Date()) {
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const lookbackHours = liveLookbackHours();
+
+  return {
+    lookbackHours,
+    from: new Date(
+      safeNowMs - lookbackHours * 60 * 60 * 1000
+    ).toISOString(),
+    to: new Date(safeNowMs + 2 * 60 * 1000).toISOString(),
+  };
+}
+
+async function fetchFinlightQuery(query, window) {
   if (!FINLIGHT_API_KEY) {
     const error = new Error("Missing FINLIGHT_API_KEY");
     error.httpStatus = null;
@@ -109,8 +144,12 @@ async function fetchFinlightQuery(query) {
     body: JSON.stringify({
       query,
       sources: FINLIGHT_SOURCE_FILTER,
+      from: window.from,
+      to: window.to,
+      language: "en",
+      orderBy: "createdAt",
       order: "DESC",
-      pageSize: 50,
+      pageSize: 100,
     }),
   });
 
@@ -148,13 +187,15 @@ function articleIdentity(article) {
   ].join("|");
 }
 
-async function fetchFinlightNews() {
+async function fetchFinlightNews({ now = new Date() } = {}) {
+  const window = buildLiveWindow(now);
   const queryResults = [];
   const combined = [];
   const seen = new Set();
 
   for (const query of FINLIGHT_QUERIES) {
-    const result = await fetchFinlightQuery(query);
+    const result = await fetchFinlightQuery(query, window);
+
     queryResults.push({
       query: result.query,
       httpStatus: result.httpStatus,
@@ -185,6 +226,20 @@ async function fetchFinlightNews() {
     providerFetchedAtUtc,
     results: combined,
     queryResults,
+    liveWindow: window,
+  };
+}
+
+function metricStats(values) {
+  const valid = values.map(Number).filter(Number.isFinite);
+
+  return {
+    eventCountMeasured: valid.length,
+    minMs: valid.length ? Math.min(...valid) : null,
+    maxMs: valid.length ? Math.max(...valid) : null,
+    averageMs: valid.length
+      ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)
+      : null,
   };
 }
 
@@ -193,9 +248,10 @@ export async function buildAndWriteEngine25NewsEvents({
   fetcher = fetchFinlightNews,
 } = {}) {
   const generatedAtUtc = now.toISOString();
+  const liveWindow = buildLiveWindow(now);
 
   try {
-    const fetched = await fetcher();
+    const fetched = await fetcher({ now });
     const normalized = normalizeFinlightNews(
       fetched.results,
       now,
@@ -211,9 +267,26 @@ export async function buildAndWriteEngine25NewsEvents({
         }, null)
       : null;
 
-    const latencyValues = normalized.events
-      .map((event) => Number(event?.publishedToEngineFetchLatencyMs))
-      .filter(Number.isFinite);
+    const publisherToFinlight = metricStats(
+      normalized.events.map((event) => event?.publisherToFinlightLatencyMs)
+    );
+
+    const finlightToEngine = metricStats(
+      normalized.events.map((event) => event?.finlightToEngineFetchLatencyMs)
+    );
+
+    const publishedToEngine = metricStats(
+      normalized.events.map((event) => event?.publishedToEngineFetchLatencyMs)
+    );
+
+    const activeMaterialCount = normalized.events.filter((event) => {
+      const expiresMs = Date.parse(event?.expiresAt || "");
+      return (
+        event?.material === true &&
+        Number.isFinite(expiresMs) &&
+        now.getTime() < expiresMs
+      );
+    }).length;
 
     const output = {
       ok: true,
@@ -225,24 +298,16 @@ export async function buildAndWriteEngine25NewsEvents({
       sourceEndpoint: SOURCE_ENDPOINT,
       sourceFilters: FINLIGHT_SOURCE_FILTER,
       sourceQueries: FINLIGHT_QUERIES,
+      liveWindow: fetched.liveWindow || liveWindow,
       httpStatus: fetched.httpStatus ?? 200,
       itemsFetched: normalized.itemsFetched,
       itemsRelevant: normalized.itemsRelevant,
       itemsMaterial: normalized.itemsMaterial,
+      activeMaterialCount,
       latency: {
-        eventCountMeasured: latencyValues.length,
-        minPublishedToEngineFetchLatencyMs: latencyValues.length
-          ? Math.min(...latencyValues)
-          : null,
-        maxPublishedToEngineFetchLatencyMs: latencyValues.length
-          ? Math.max(...latencyValues)
-          : null,
-        averagePublishedToEngineFetchLatencyMs: latencyValues.length
-          ? Math.round(
-              latencyValues.reduce((sum, value) => sum + value, 0) /
-                latencyValues.length
-            )
-          : null,
+        publisherToFinlight,
+        finlightToEngine,
+        publishedToEngine,
       },
       providerDiagnostics: {
         queries: fetched.queryResults || [],
@@ -259,6 +324,7 @@ export async function buildAndWriteEngine25NewsEvents({
       httpStatus: Number.isInteger(error?.httpStatus)
         ? error.httpStatus
         : null,
+      window: liveWindow,
     });
 
     output.error = error?.message || String(error);
