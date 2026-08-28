@@ -1,26 +1,14 @@
 // services/core/jobs/updateEngine25NewsEvents.js
-// Engine 25 Finlight News v0.3
-// Broad Reuters live-feed ingestion + Engine 25 normalization only.
+// Engine 25 Finlight News REST Fallback v0.4
 //
-// Architecture:
-// FINLIGHT / REUTERS DISCOVERY
-//        ↓
-// ENGINE 25 CLASSIFIER
-//        ↓
-// MATERIALITY / DEDUPE / EXPIRY
-//        ↓
-// MARKET CONFIRMATION
+// ROLE:
+// - WebSocket listener is PRIMARY live Reuters ingestion.
+// - This REST job is FALLBACK / RECOVERY / BACKFILL.
+// - It MUST merge with existing WebSocket events instead of replacing them.
 //
 // NEWS IDENTIFIES THE EVENT.
 // MARKETS CONFIRM THE EVENT.
 // ENGINE 25 INTERPRETS THE RESULT.
-//
-// Scope lock:
-// - No LONG/SHORT.
-// - No MACRO_SHOCK from news alone.
-// - No Engine 6 permission.
-// - No Engine 3/4/22/26 changes.
-// - Polygon market-data usage is untouched.
 
 import fs from "fs";
 import path from "path";
@@ -30,6 +18,7 @@ import {
   ENGINE25_NEWS_ENGINE,
   ENGINE25_NEWS_SOURCE,
   normalizeFinlightNews,
+  dedupeEngine25NewsEvents,
 } from "../logic/engine25NewsFilter.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -40,9 +29,6 @@ const OUTPUT_FILE = path.join(DATA_DIR, "engine25-news-events.json");
 
 const FINLIGHT_BASE = "https://api.finlight.me";
 const SOURCE_ENDPOINT = "/v2/articles";
-
-// Reuters remains the initial Engine 25 production source.
-// Other Finlight sources can be added later only after separate validation.
 const FINLIGHT_SOURCE_FILTER = Object.freeze(["www.reuters.com"]);
 
 const FINLIGHT_API_KEY =
@@ -52,6 +38,7 @@ const FINLIGHT_API_KEY =
 
 const DEFAULT_LIVE_LOOKBACK_HOURS = 24;
 const DEFAULT_PAGE_SIZE = 100;
+const RETENTION_HOURS = 48;
 
 function clampNumber(value, min, max, fallback) {
   const n = Number(value);
@@ -81,9 +68,42 @@ function pageSize() {
 
 function atomicWriteJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
   const tmp = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   fs.renameSync(tmp, filePath);
+}
+
+function readExistingFile() {
+  if (!fs.existsSync(OUTPUT_FILE)) {
+    return {
+      ok: true,
+      engine: ENGINE25_NEWS_ENGINE,
+      source: ENGINE25_NEWS_SOURCE,
+      events: [],
+      warnings: [],
+    };
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+
+    return {
+      ...raw,
+      events: Array.isArray(raw?.events) ? raw.events : [],
+      warnings: Array.isArray(raw?.warnings) ? raw.warnings : [],
+    };
+  } catch (error) {
+    return {
+      ok: true,
+      engine: ENGINE25_NEWS_ENGINE,
+      source: ENGINE25_NEWS_SOURCE,
+      events: [],
+      warnings: [
+        `ENGINE25_NEWS_EVENTS_FILE_RECOVERY:${error?.message || String(error)}`,
+      ],
+    };
+  }
 }
 
 function failureOutput({
@@ -92,24 +112,25 @@ function failureOutput({
   warning = "FINLIGHT_NEWS_UNAVAILABLE",
   window = null,
 } = {}) {
+  const existing = readExistingFile();
+
   return {
+    ...existing,
     ok: false,
     engine: ENGINE25_NEWS_ENGINE,
     source: ENGINE25_NEWS_SOURCE,
     generatedAtUtc,
-    providerFetchedAtUtc: null,
-    feedAsOfUtc: null,
     sourceEndpoint: SOURCE_ENDPOINT,
     sourceFilters: FINLIGHT_SOURCE_FILTER,
-    discoveryMode: "BROAD_REUTERS_LIVE_FEED",
+    discoveryMode: "FINLIGHT_REST_FALLBACK_MERGE",
     liveWindow: window,
     httpStatus,
-    itemsFetched: 0,
-    itemsRelevant: 0,
-    itemsMaterial: 0,
-    activeMaterialCount: 0,
-    events: [],
-    warnings: [warning],
+    warnings: [
+      ...new Set([
+        ...(existing.warnings || []),
+        warning,
+      ]),
+    ],
   };
 }
 
@@ -146,7 +167,6 @@ function buildLiveWindow(now = new Date()) {
     from: new Date(
       safeNowMs - lookbackHours * 60 * 60 * 1000
     ).toISOString(),
-    // Small future allowance prevents boundary loss from clock skew.
     to: new Date(safeNowMs + 2 * 60 * 1000).toISOString(),
   };
 }
@@ -162,15 +182,6 @@ async function fetchFinlightReutersFeed({ now = new Date() } = {}) {
   const url = `${FINLIGHT_BASE}${SOURCE_ENDPOINT}`;
   const requestedAtUtc = new Date().toISOString();
 
-  // IMPORTANT:
-  // There is intentionally NO semantic query here.
-  //
-  // The prior version searched five narrow phrases. That caused low recall
-  // because a Reuters story could be economically relevant while using
-  // different wording.
-  //
-  // This version asks Finlight for the broad recent Reuters feed and lets
-  // engine25NewsFilter.js own relevance/classification/materiality.
   const requestBody = {
     sources: FINLIGHT_SOURCE_FILTER,
     from: liveWindow.from,
@@ -203,7 +214,7 @@ async function fetchFinlightReutersFeed({ now = new Date() } = {}) {
     throw error;
   }
 
-  const json = await readJsonResponse(response, "Finlight Reuters live feed");
+  const json = await readJsonResponse(response, "Finlight Reuters REST fallback");
   const articles = Array.isArray(json?.articles) ? json.articles : [];
 
   return {
@@ -212,6 +223,8 @@ async function fetchFinlightReutersFeed({ now = new Date() } = {}) {
     results: articles,
     liveWindow,
     providerDiagnostics: {
+      transport: "REST",
+      role: "FALLBACK_RECOVERY_BACKFILL",
       requestedAtUtc,
       receivedAtUtc,
       page: Number.isFinite(Number(json?.page)) ? Number(json.page) : null,
@@ -219,11 +232,7 @@ async function fetchFinlightReutersFeed({ now = new Date() } = {}) {
         ? Number(json.pageSize)
         : requestBody.pageSize,
       articleCount: articles.length,
-      requestBody: {
-        ...requestBody,
-        // Explicitly document that no query filter was used.
-        query: null,
-      },
+      requestBody,
     },
   };
 }
@@ -236,11 +245,59 @@ function metricStats(values) {
     minMs: valid.length ? Math.min(...valid) : null,
     maxMs: valid.length ? Math.max(...valid) : null,
     averageMs: valid.length
-      ? Math.round(
-          valid.reduce((sum, value) => sum + value, 0) / valid.length
-        )
+      ? Math.round(valid.reduce((sum, value) => sum + value, 0) / valid.length)
       : null,
   };
+}
+
+function refreshEventStatus(event, nowMs) {
+  const expiresMs = Date.parse(event?.expiresAt || "");
+  const expired =
+    !Number.isFinite(expiresMs) ||
+    nowMs >= expiresMs;
+
+  return {
+    ...event,
+    status: expired ? "EVENT_EXPIRED" : "EVENT_DETECTED",
+  };
+}
+
+function retainRecentEvents(events, nowMs) {
+  const cutoffMs = nowMs - RETENTION_HOURS * 60 * 60 * 1000;
+
+  return events.filter((event) => {
+    const observedMs = Date.parse(event?.observedAt || "");
+    const expiresMs = Date.parse(event?.expiresAt || "");
+
+    const active =
+      Number.isFinite(expiresMs) &&
+      nowMs < expiresMs;
+
+    const recent =
+      Number.isFinite(observedMs) &&
+      observedMs >= cutoffMs;
+
+    return active || recent;
+  });
+}
+
+function maxIso(values = []) {
+  const valid = values
+    .map((value) => Date.parse(value || ""))
+    .filter(Number.isFinite);
+
+  if (!valid.length) return null;
+  return new Date(Math.max(...valid)).toISOString();
+}
+
+function mergeEvents(existingEvents, fetchedEvents, nowMs) {
+  return retainRecentEvents(
+    dedupeEngine25NewsEvents([
+      ...(existingEvents || []),
+      ...(fetchedEvents || []),
+    ]).map((event) => refreshEventStatus(event, nowMs)),
+    nowMs
+  );
 }
 
 export async function buildAndWriteEngine25NewsEvents({
@@ -259,35 +316,41 @@ export async function buildAndWriteEngine25NewsEvents({
       fetched.providerFetchedAtUtc
     );
 
-    const feedAsOfUtc = normalized.events.length
-      ? normalized.events.reduce((latest, event) => {
-          if (!latest) return event.observedAt;
-
-          return Date.parse(event.observedAt) > Date.parse(latest)
-            ? event.observedAt
-            : latest;
-        }, null)
+    // IMPORTANT:
+    // Read the existing file AFTER the network request so WebSocket events
+    // received while REST was fetching are less likely to be lost.
+    let existing = readExistingFile();
+    let existingMtimeMs = fs.existsSync(OUTPUT_FILE)
+      ? fs.statSync(OUTPUT_FILE).mtimeMs
       : null;
 
-    const publisherToFinlight = metricStats(
-      normalized.events.map(
-        (event) => event?.publisherToFinlightLatencyMs
-      )
+    let mergedEvents = mergeEvents(
+      existing.events,
+      normalized.events,
+      now.getTime()
     );
 
-    const finlightToEngine = metricStats(
-      normalized.events.map(
-        (event) => event?.finlightToEngineFetchLatencyMs
-      )
-    );
+    // One optimistic-concurrency retry:
+    // if the WebSocket updated the file after our read, merge that newer copy too.
+    const latestMtimeMs = fs.existsSync(OUTPUT_FILE)
+      ? fs.statSync(OUTPUT_FILE).mtimeMs
+      : null;
 
-    const publishedToEngine = metricStats(
-      normalized.events.map(
-        (event) => event?.publishedToEngineFetchLatencyMs
-      )
-    );
+    if (
+      Number.isFinite(existingMtimeMs) &&
+      Number.isFinite(latestMtimeMs) &&
+      latestMtimeMs > existingMtimeMs
+    ) {
+      existing = readExistingFile();
 
-    const activeMaterialEvents = normalized.events.filter((event) => {
+      mergedEvents = mergeEvents(
+        existing.events,
+        normalized.events,
+        now.getTime()
+      );
+    }
+
+    const activeMaterialEvents = mergedEvents.filter((event) => {
       const expiresMs = Date.parse(event?.expiresAt || "");
 
       return (
@@ -298,31 +361,57 @@ export async function buildAndWriteEngine25NewsEvents({
       );
     });
 
+    const publisherToFinlight = metricStats(
+      mergedEvents.map((event) => event?.publisherToFinlightLatencyMs)
+    );
+
+    const finlightToEngine = metricStats(
+      mergedEvents.map((event) => event?.finlightToEngineFetchLatencyMs)
+    );
+
+    const publishedToEngine = metricStats(
+      mergedEvents.map((event) => event?.publishedToEngineFetchLatencyMs)
+    );
+
     const output = {
+      ...existing,
       ok: true,
       engine: ENGINE25_NEWS_ENGINE,
       source: ENGINE25_NEWS_SOURCE,
       generatedAtUtc,
       providerFetchedAtUtc: fetched.providerFetchedAtUtc,
-      feedAsOfUtc,
+      feedAsOfUtc: maxIso(
+        mergedEvents.map((event) => event?.observedAt)
+      ),
       sourceEndpoint: SOURCE_ENDPOINT,
       sourceFilters: FINLIGHT_SOURCE_FILTER,
-      discoveryMode: "BROAD_REUTERS_LIVE_FEED",
+      discoveryMode: "FINLIGHT_REST_FALLBACK_MERGE",
       semanticQueryApplied: false,
       liveWindow: fetched.liveWindow || liveWindow,
       httpStatus: fetched.httpStatus ?? 200,
-      itemsFetched: normalized.itemsFetched,
-      itemsRelevant: normalized.itemsRelevant,
-      itemsMaterial: normalized.itemsMaterial,
+      itemsFetched: mergedEvents.length,
+      itemsRelevant: mergedEvents.length,
+      itemsMaterial: mergedEvents.filter(
+        (event) => event?.material === true
+      ).length,
       activeMaterialCount: activeMaterialEvents.length,
       latency: {
         publisherToFinlight,
         finlightToEngine,
         publishedToEngine,
       },
-      providerDiagnostics: fetched.providerDiagnostics || null,
-      events: normalized.events,
-      warnings: [],
+      providerDiagnostics: {
+        ...(existing.providerDiagnostics || {}),
+        restFallback: fetched.providerDiagnostics || null,
+      },
+      events: mergedEvents,
+      warnings: Array.isArray(existing.warnings)
+        ? existing.warnings.filter(
+            (warning) =>
+              warning !== "FINLIGHT_NEWS_UNAVAILABLE" &&
+              warning !== "MASSIVE_BENZINGA_NEWS_UNAVAILABLE"
+          )
+        : [],
     };
 
     atomicWriteJson(OUTPUT_FILE, output);
@@ -338,6 +427,7 @@ export async function buildAndWriteEngine25NewsEvents({
 
     output.error = error?.message || String(error);
 
+    // Failure remains non-fatal and preserves any existing WebSocket events.
     atomicWriteJson(OUTPUT_FILE, output);
     return output;
   }
