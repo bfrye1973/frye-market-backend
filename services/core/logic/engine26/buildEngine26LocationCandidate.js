@@ -4859,6 +4859,36 @@ const strategyFacts =
     entryZoneHigh: entryZone?.high ?? null,
     entryZoneMidline: entryZone?.midline ?? null,
 
+    approvedNegotiatedZoneInventory:
+      approvedNegotiatedZones.map((zone) => ({
+        id: buildCanonicalZoneId(normalizedSymbol, zone),
+        zoneId: buildCanonicalZoneId(normalizedSymbol, zone),
+
+        upstreamId:
+          zone.upstreamId ?? null,
+
+        source:
+          zone.source ?? null,
+
+        sourcePath:
+          zone.sourcePath ?? null,
+
+        type:
+          zone.type ?? null,
+
+        timeframe:
+          zone.timeframe ?? null,
+
+        low:
+          zone.lo ?? null,
+
+        high:
+          zone.hi ?? null,
+
+        midline:
+          zone.mid ?? null,
+      })),
+
     targetZone,
     targetZoneStatus: targetZone
       ? "TARGET_ZONE_AVAILABLE"
@@ -6073,8 +6103,15 @@ export function buildEngine26A(
       engine26LocationCandidate?.identitySetupKey ?? null,
     candidateIdentityVersion:
       engine26LocationCandidate?.candidateIdentityVersion ?? null,
-    entryZone: engine26LocationCandidate?.entryZone ?? null,
-    targetZone: engine26LocationCandidate?.targetZone ?? null,
+    entryZone:
+      engine26LocationCandidate?.entryZone ?? null,
+
+    approvedNegotiatedZoneInventory:
+      engine26LocationCandidate
+        ?.approvedNegotiatedZoneInventory ?? [],
+
+    targetZone:
+      engine26LocationCandidate?.targetZone ?? null,
     sweepFacts: engine26LocationCandidate?.sweepFacts ?? null,
     reclaimFacts: engine26LocationCandidate?.reclaimFacts ?? null,
     rejectionFacts: engine26LocationCandidate?.rejectionFacts ?? null,
