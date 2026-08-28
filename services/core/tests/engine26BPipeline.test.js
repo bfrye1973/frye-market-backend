@@ -44,15 +44,34 @@ function candidate(direction = "NEUTRAL") {
       high: 7760,
       midline: 7750,
     },
-    targetZone: {
-      id: "E26Z-PIPELINE-TARGET",
-      zoneId: "E26Z-PIPELINE-TARGET",
-      low: direction === "LONG" ? 7790 : 7690,
-      high: direction === "LONG" ? 7810 : 7710,
-      midline: direction === "LONG" ? 7800 : 7700,
-    },
-    locationInvalidationBoundary:
-      direction === "LONG" ? 7735 : 7765,
+    approvedNegotiatedZoneInventory: [
+      {
+        id: ZONE_ID,
+        zoneId: ZONE_ID,
+        type: "NEGOTIATED",
+        low: 7740,
+        high: 7760,
+        midline: 7750,
+      },
+      {
+        id: "E26Z-PIPELINE-LONG-TARGET",
+        zoneId: "E26Z-PIPELINE-LONG-TARGET",
+        type: "NEGOTIATED",
+        low: 7790,
+        high: 7810,
+        midline: 7800,
+      },
+      {
+        id: "E26Z-PIPELINE-SHORT-TARGET",
+        zoneId: "E26Z-PIPELINE-SHORT-TARGET",
+        type: "NEGOTIATED",
+        low: 7690,
+        high: 7710,
+        midline: 7700,
+      },
+    ],
+    targetZone: null,
+    locationInvalidationBoundary: null,
     invalidationFacts: {
       completedCloseInvalidationConfirmed: false,
     },
@@ -66,6 +85,7 @@ function handoff(c) {
     directionState: c.directionState,
     snapshotTime: c.snapshotTime,
     entryZone: c.entryZone,
+    approvedNegotiatedZoneInventory: c.approvedNegotiatedZoneInventory,
     targetZone: c.targetZone,
     locationInvalidationBoundary: c.locationInvalidationBoundary,
   };
@@ -88,14 +108,6 @@ function lockedPermission(direction) {
 
 test("locked Engine6 SHORT drives Engine26B while Engine26A is NEUTRAL", () => {
   const c = candidate("NEUTRAL");
-  c.targetZone = {
-    id: "E26Z-SHORT-TARGET",
-    zoneId: "E26Z-SHORT-TARGET",
-    low: 7690,
-    high: 7710,
-    midline: 7700,
-  };
-  c.locationInvalidationBoundary = 7765;
 
   const result = buildEngine26BPipeline({
     symbol: "ES",
@@ -118,14 +130,6 @@ test("locked Engine6 SHORT drives Engine26B while Engine26A is NEUTRAL", () => {
 
 test("locked Engine6 LONG drives Engine26B while Engine26A is NEUTRAL", () => {
   const c = candidate("NEUTRAL");
-  c.targetZone = {
-    id: "E26Z-LONG-TARGET",
-    zoneId: "E26Z-LONG-TARGET",
-    low: 7790,
-    high: 7810,
-    midline: 7800,
-  };
-  c.locationInvalidationBoundary = 7735;
 
   const result = buildEngine26BPipeline({
     symbol: "ES",
@@ -168,26 +172,6 @@ test("unlocked permission cannot fall back to Engine26A as downstream authorized
 test("locked LONG/SHORT can never publish WAITING_FOR_DIRECTIONAL_RESOLUTION", () => {
   for (const direction of ["LONG", "SHORT"]) {
     const c = candidate("NEUTRAL");
-
-    if (direction === "LONG") {
-      c.targetZone = {
-        id: "E26Z-LONG-INVARIANT",
-        zoneId: "E26Z-LONG-INVARIANT",
-        low: 7790,
-        high: 7810,
-        midline: 7800,
-      };
-      c.locationInvalidationBoundary = 7735;
-    } else {
-      c.targetZone = {
-        id: "E26Z-SHORT-INVARIANT",
-        zoneId: "E26Z-SHORT-INVARIANT",
-        low: 7690,
-        high: 7710,
-        midline: 7700,
-      };
-      c.locationInvalidationBoundary = 7765;
-    }
 
     const result = buildEngine26BPipeline({
       symbol: "ES",
