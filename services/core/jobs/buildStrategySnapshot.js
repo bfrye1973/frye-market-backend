@@ -66,6 +66,9 @@ import {
   buildSubminuteEngine26,
 } from "../logic/engine26/subminute/buildSubminuteEngine26.js";
 import {
+  buildEngine26BPipeline,
+} from "../logic/engine26/strategy1/buildEngine26BPipeline.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -9741,7 +9744,24 @@ if (isEsIntradayScalp) {
       };
     }
   }
+ /*
+   * Engine 26B dedicated Strategy 1 pipeline.
+   *
+   * This is intentionally rebuilt only after Engine 6 has completed
+   * its final canonical Engine 3/4 recalculation and approved lock.
+   * Engine 26B consumes the finalized locked paper package plus the
+   * canonical Engine 26A location/zone facts.
+   */
+  engine26ProposedGeometry =
+    buildEngine26BPipeline({
+      symbol,
+      strategyId: s.strategyId,
+      permission: finalPermission,
+      engine26LocationCandidate,
+      engine26GeometryHandoff,
+    });
 }
+  
 
 if (
   String(symbol || "").toUpperCase() === "ES" &&
