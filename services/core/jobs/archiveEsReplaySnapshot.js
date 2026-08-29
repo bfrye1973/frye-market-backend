@@ -585,6 +585,11 @@ function buildCanonicalReplaySnapshot(
       source?.engine25Context ??
       null,
 
+    // Engine 27 canonical Replay preservation:
+    // preserve the complete already-built root object unchanged.
+    engine27Strategies:
+      source?.engine27Strategies,
+
     // Canonical contract:
     // preserve every emitted strategy lane from one build.
     strategies,
