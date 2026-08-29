@@ -7,13 +7,27 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DATA_DIR = path.resolve(__dirname, "../../data");
-const JOURNAL_FILE = path.resolve(DATA_DIR, "trade-journal.json");
-const SNAPSHOT_FILE = path.resolve(DATA_DIR, "strategy-snapshot.json");
 
+const JOURNAL_DIR =
+  process.env.TRADE_JOURNAL_DIR ||
+  "/var/data/replay/journal";
+
+const JOURNAL_FILE = path.resolve(
+  JOURNAL_DIR,
+  "trade-journal.json"
+);
+
+const SNAPSHOT_FILE = path.resolve(
+  DATA_DIR,
+  "strategy-snapshot.json"
+);
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
+  if (!fs.existsSync(JOURNAL_DIR)) {
+  fs.mkdirSync(JOURNAL_DIR, { recursive: true });
+}
 }
 
 function readJson(file, fallback) {
