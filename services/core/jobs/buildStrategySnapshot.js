@@ -41,12 +41,12 @@ import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastIm
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
 import { fetchEngine3DiagnosticBarStack } from "../logic/engine3/fetchEngine3DiagnosticBars.js";
+import { buildEngine10JournalAttachment } from "../logic/journal/snapshot/buildEngine10JournalAttachment.js";
 import { buildReactionObservation1m } from "../logic/engine3/buildReactionObservation1m.js";
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
-import { listTrades } from "../logic/journal/tradeJournalStore.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
 import {
