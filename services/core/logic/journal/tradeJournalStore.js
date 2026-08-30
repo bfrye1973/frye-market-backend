@@ -26,8 +26,8 @@ function ensureDataDir() {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
   if (!fs.existsSync(JOURNAL_DIR)) {
-  fs.mkdirSync(JOURNAL_DIR, { recursive: true });
-}
+    fs.mkdirSync(JOURNAL_DIR, { recursive: true });
+  }
 }
 
 function readJson(file, fallback) {
@@ -1467,6 +1467,1678 @@ function updateSummary(trade) {
         )
       : null;
 }
+
+
+/* =========================================================
+   ENGINE 10 REAL SCHWAB JOURNAL INGESTION
+   ---------------------------------------------------------
+   Read-only broker observation boundary.
+
+   Engine 8 owns:
+   - Schwab authentication
+   - broker transaction reads
+   - account-label normalization
+   - signed-quantity semantics
+   - side / direction normalization
+   - fee extraction
+
+   Engine 10 owns:
+   - durable broker-fill idempotency
+   - REAL campaign assembly
+   - tradeId
+   - scale-in / scale-out lifecycle
+   - FIFO realized P&L from actual fills
+   - final CLOSED acknowledgement
+
+   This path is intentionally separate from Engine 8 PAPER
+   execution functions below.
+========================================================= */
+
+function normalizeRealJournalAccount(value) {
+  const account = toUpper(value);
+
+  if (account === "INTRADAY" || account === "SWING") {
+    return account;
+  }
+
+  return null;
+}
+
+function normalizeRealInstrumentRoot(symbol, explicitRoot = null) {
+  const directRoot = toUpper(explicitRoot);
+
+  if (directRoot) {
+    return directRoot.replace(/^\//, "");
+  }
+
+  const raw = toUpper(symbol)
+    .replace(/:.*$/, "")
+    .replace(/^\//, "");
+
+  if (!raw) return null;
+
+  const futuresMatch = raw.match(/^([A-Z0-9]+?)[FGHJKMNQUVXZ]\d{1,2}$/);
+
+  if (futuresMatch?.[1]) {
+    return futuresMatch[1];
+  }
+
+  return raw;
+}
+
+function realFuturesDollarsPerPoint(rootSymbol) {
+  switch (toUpper(rootSymbol)) {
+    case "MES":
+      return 5;
+    case "ES":
+      return 50;
+    case "MNQ":
+      return 2;
+    case "NQ":
+      return 20;
+    case "MYM":
+      return 0.5;
+    case "YM":
+      return 5;
+    case "M2K":
+      return 5;
+    case "RTY":
+      return 50;
+    default:
+      return null;
+  }
+}
+
+function normalizeRealFee(value) {
+  const n = toNumberOrNull(value);
+  return n === null ? 0 : Math.abs(n);
+}
+
+function normalizeRealBrokerFill(fill = {}) {
+  const broker = toUpper(fill?.broker || "SCHWAB");
+  const source = toUpper(fill?.source || "SCHWAB_BROKER_FILL");
+  const accountMode = toUpper(fill?.accountMode || "REAL");
+  const journalAccount = normalizeRealJournalAccount(fill?.journalAccount);
+
+  const brokerTransactionId = normalizeId(
+    firstDefined(
+      fill?.brokerTransactionId,
+      fill?.activityId,
+      fill?.transactionId
+    )
+  );
+
+  const brokerOrderId = normalizeId(
+    firstDefined(
+      fill?.brokerOrderId,
+      fill?.orderId
+    )
+  );
+
+  const symbol = normalizeId(fill?.symbol);
+  const instrumentRoot = normalizeRealInstrumentRoot(
+    symbol,
+    firstDefined(
+      fill?.instrumentRoot,
+      fill?.rootSymbol
+    )
+  );
+
+  const positionEffect = toUpper(fill?.positionEffect);
+  const side = toUpper(fill?.side);
+  const direction = toUpper(fill?.direction);
+  const quantity = toNumberOrNull(fill?.quantity);
+  const fillPrice = toNumberOrNull(fill?.fillPrice);
+  const fillTime = normalizeId(fill?.fillTime);
+  const brokerStatus = toUpper(fill?.brokerStatus || "VALID");
+  const eventType = toUpper(fill?.eventType || "TRADE");
+  const assetType = toUpper(fill?.assetType || "FUTURE");
+
+  const commission = normalizeRealFee(fill?.commission);
+  const futuresExchangeFee = normalizeRealFee(
+    fill?.futuresExchangeFee
+  );
+
+  const explicitOtherFees = normalizeRealFee(fill?.otherFees);
+
+  const explicitTotalFees = toNumberOrNull(fill?.totalFees);
+
+  const totalFees =
+    explicitTotalFees !== null
+      ? Math.abs(explicitTotalFees)
+      : round2(
+          commission +
+          futuresExchangeFee +
+          explicitOtherFees
+        );
+
+  const dollarsPerPoint =
+    toNumberOrNull(fill?.dollarsPerPoint) ??
+    realFuturesDollarsPerPoint(instrumentRoot);
+
+  const brokerDedupeKey =
+    broker &&
+    journalAccount &&
+    brokerTransactionId
+      ? `${broker}|${journalAccount}|${brokerTransactionId}`
+      : null;
+
+  return {
+    source,
+    broker,
+    accountMode,
+    journalAccount,
+
+    brokerAccountLabel:
+      normalizeId(fill?.brokerAccountLabel),
+
+    brokerTransactionId,
+    brokerOrderId,
+    brokerDedupeKey,
+
+    brokerStatus,
+    eventType,
+
+    symbol,
+    instrumentRoot,
+    assetType,
+
+    positionEffect,
+    side,
+    direction,
+    quantity,
+    fillPrice,
+    fillTime,
+
+    commission,
+    futuresExchangeFee,
+    otherFees: explicitOtherFees,
+    totalFees,
+
+    dollarsPerPoint,
+
+    paper: fill?.paper === true,
+    readOnlyBrokerObservation:
+      fill?.readOnlyBrokerObservation === true,
+  };
+}
+
+function validateRealBrokerFill(fill) {
+  const errors = [];
+
+  if (fill.source !== "SCHWAB_BROKER_FILL") {
+    errors.push("INVALID_REAL_FILL_SOURCE");
+  }
+
+  if (fill.broker !== "SCHWAB") {
+    errors.push("INVALID_REAL_FILL_BROKER");
+  }
+
+  if (fill.accountMode !== "REAL") {
+    errors.push("INVALID_REAL_ACCOUNT_MODE");
+  }
+
+  if (!fill.journalAccount) {
+    errors.push("INVALID_REAL_JOURNAL_ACCOUNT");
+  }
+
+  if (!fill.brokerTransactionId) {
+    errors.push("MISSING_BROKER_TRANSACTION_ID");
+  }
+
+  if (!fill.brokerDedupeKey) {
+    errors.push("MISSING_BROKER_DEDUPE_KEY");
+  }
+
+  if (fill.eventType !== "TRADE") {
+    errors.push("INVALID_BROKER_EVENT_TYPE");
+  }
+
+  if (fill.brokerStatus !== "VALID") {
+    errors.push("BROKER_TRANSACTION_NOT_VALID");
+  }
+
+  if (fill.assetType !== "FUTURE") {
+    errors.push("UNSUPPORTED_REAL_ASSET_TYPE");
+  }
+
+  if (!fill.symbol || !fill.instrumentRoot) {
+    errors.push("MISSING_REAL_INSTRUMENT");
+  }
+
+  if (
+    fill.positionEffect !== "OPENING" &&
+    fill.positionEffect !== "CLOSING"
+  ) {
+    errors.push("INVALID_POSITION_EFFECT");
+  }
+
+  if (fill.side !== "BUY" && fill.side !== "SELL") {
+    errors.push("INVALID_NORMALIZED_SIDE");
+  }
+
+  if (
+    fill.direction !== "LONG" &&
+    fill.direction !== "SHORT"
+  ) {
+    errors.push("INVALID_NORMALIZED_DIRECTION");
+  }
+
+  const expectedSide =
+    fill.positionEffect === "OPENING"
+      ? (
+          fill.direction === "LONG"
+            ? "BUY"
+            : "SELL"
+        )
+      : (
+          fill.direction === "LONG"
+            ? "SELL"
+            : "BUY"
+        );
+
+  if (fill.side && fill.side !== expectedSide) {
+    errors.push("REAL_FILL_SIDE_DIRECTION_MISMATCH");
+  }
+
+  if (
+    fill.quantity === null ||
+    fill.quantity <= 0
+  ) {
+    errors.push("INVALID_REAL_FILL_QUANTITY");
+  }
+
+  if (fill.fillPrice === null) {
+    errors.push("MISSING_REAL_FILL_PRICE");
+  }
+
+  if (
+    !fill.fillTime ||
+    !Number.isFinite(Date.parse(fill.fillTime))
+  ) {
+    errors.push("INVALID_REAL_FILL_TIME");
+  }
+
+  if (fill.paper === true) {
+    errors.push("REAL_FILL_MARKED_PAPER");
+  }
+
+  if (fill.readOnlyBrokerObservation !== true) {
+    errors.push("REAL_FILL_NOT_READ_ONLY_OBSERVATION");
+  }
+
+  return errors;
+}
+
+function realCampaignMatches(trade, fill) {
+  return (
+    toUpper(trade?.accountMode) === "REAL" &&
+    toUpper(trade?.source) === "SCHWAB_BROKER_FILL" &&
+    toUpper(
+      trade?.journalAccount ||
+      trade?.brokerImport?.accountAlias
+    ) === fill.journalAccount &&
+    toUpper(
+      trade?.normalizedInstrumentRoot ||
+      trade?.instrumentRoot ||
+      trade?.symbol
+    ) === fill.instrumentRoot &&
+    toUpper(trade?.direction) === fill.direction
+  );
+}
+
+function findRealOpenCampaigns(trades, fill) {
+  return trades.filter(
+    (trade) =>
+      toUpper(trade?.status) === "OPEN" &&
+      realCampaignMatches(trade, fill)
+  );
+}
+
+function findMostRecentRealCampaign(trades, fill) {
+  const candidates = trades
+    .filter((trade) => realCampaignMatches(trade, fill))
+    .sort((a, b) => {
+      const left = Date.parse(
+        a?.updatedAt ||
+        a?.summary?.closeTime ||
+        a?.createdAt ||
+        0
+      ) || 0;
+
+      const right = Date.parse(
+        b?.updatedAt ||
+        b?.summary?.closeTime ||
+        b?.createdAt ||
+        0
+      ) || 0;
+
+      return right - left;
+    });
+
+  return candidates[0] || null;
+}
+
+function findRealFillDuplicate(trades, fill) {
+  for (const trade of trades) {
+    const events = Array.isArray(trade?.events)
+      ? trade.events
+      : [];
+
+    const event = events.find(
+      (row) =>
+        sameNonEmpty(
+          row?.brokerDedupeKey,
+          fill.brokerDedupeKey
+        ) ||
+        (
+          toUpper(row?.broker) === fill.broker &&
+          toUpper(row?.journalAccount) ===
+            fill.journalAccount &&
+          sameNonEmpty(
+            row?.brokerTransactionId,
+            fill.brokerTransactionId
+          )
+        )
+    );
+
+    if (event) {
+      return {
+        trade,
+        event,
+      };
+    }
+  }
+
+  return null;
+}
+
+function realEventTimeIsOutOfOrder(trade, fillTime) {
+  const incoming = Date.parse(fillTime || "");
+
+  if (!Number.isFinite(incoming)) {
+    return false;
+  }
+
+  const brokerEvents = (
+    Array.isArray(trade?.events)
+      ? trade.events
+      : []
+  )
+    .filter((event) =>
+      normalizeId(event?.brokerTransactionId)
+    )
+    .map((event) => Date.parse(event?.ts || ""))
+    .filter(Number.isFinite);
+
+  if (!brokerEvents.length) {
+    return false;
+  }
+
+  return incoming < Math.max(...brokerEvents);
+}
+
+function weightedAverageLots(lots) {
+  const rows = Array.isArray(lots) ? lots : [];
+
+  let quantity = 0;
+  let weighted = 0;
+
+  for (const lot of rows) {
+    const qty = toNumberOrNull(lot?.qty);
+    const price = toNumberOrNull(lot?.price);
+
+    if (
+      qty === null ||
+      qty <= 0 ||
+      price === null
+    ) {
+      continue;
+    }
+
+    quantity += qty;
+    weighted += qty * price;
+  }
+
+  return quantity > 0
+    ? round2(weighted / quantity)
+    : null;
+}
+
+function cloneRemainingLots(trade) {
+  const lots =
+    trade?.brokerImport?.remainingLots ||
+    trade?.realBroker?.remainingLots ||
+    [];
+
+  return Array.isArray(lots)
+    ? clone(lots)
+    : [];
+}
+
+function consumeRealFifoLots({
+  lots,
+  quantity,
+  closePrice,
+  direction,
+  dollarsPerPoint,
+}) {
+  const working = clone(lots || []);
+  let remainingToClose = quantity;
+  let realizedPoints = 0;
+
+  while (remainingToClose > 0 && working.length) {
+    const lot = working[0];
+    const lotQty = toNumberOrNull(lot?.qty) ?? 0;
+    const lotPrice = toNumberOrNull(lot?.price);
+
+    if (lotQty <= 0 || lotPrice === null) {
+      working.shift();
+      continue;
+    }
+
+    const matchedQty = Math.min(
+      remainingToClose,
+      lotQty
+    );
+
+    const pointsPerContract =
+      direction === "SHORT"
+        ? lotPrice - closePrice
+        : closePrice - lotPrice;
+
+    realizedPoints +=
+      pointsPerContract *
+      matchedQty;
+
+    const nextLotQty =
+      lotQty - matchedQty;
+
+    if (nextLotQty <= 0) {
+      working.shift();
+    } else {
+      working[0] = {
+        ...lot,
+        qty: nextLotQty,
+      };
+    }
+
+    remainingToClose -= matchedQty;
+  }
+
+  if (remainingToClose > 0) {
+    return {
+      ok: false,
+      error: "REAL_FIFO_LOTS_INSUFFICIENT",
+      remainingToClose,
+    };
+  }
+
+  const roundedPoints =
+    round2(realizedPoints);
+
+  const grossRealizedPnL =
+    dollarsPerPoint !== null
+      ? round2(
+          realizedPoints *
+          dollarsPerPoint
+        )
+      : null;
+
+  return {
+    ok: true,
+    remainingLots: working,
+    eventRealizedPoints:
+      roundedPoints,
+    grossEventRealizedPnL:
+      grossRealizedPnL,
+  };
+}
+
+function sumRealEventFees(events) {
+  let commission = 0;
+  let futuresExchangeFee = 0;
+  let otherFees = 0;
+  let totalFees = 0;
+
+  for (const event of Array.isArray(events) ? events : []) {
+    commission +=
+      normalizeRealFee(event?.commission);
+
+    futuresExchangeFee +=
+      normalizeRealFee(
+        event?.futuresExchangeFee
+      );
+
+    otherFees +=
+      normalizeRealFee(event?.otherFees);
+
+    totalFees +=
+      normalizeRealFee(event?.totalFees);
+  }
+
+  return {
+    commission: round2(commission),
+    futuresExchangeFee:
+      round2(futuresExchangeFee),
+    otherFees: round2(otherFees),
+    totalFees: round2(totalFees),
+  };
+}
+
+function updateRealTradeAccounting(trade) {
+  trade.events =
+    Array.isArray(trade?.events)
+      ? trade.events
+      : [];
+
+  trade.summary =
+    trade.summary || {};
+
+  trade.brokerImport =
+    trade.brokerImport || {};
+
+  const grossRealizedPoints =
+    sumEventField(
+      trade.events,
+      "eventRealizedPoints"
+    );
+
+  const grossRealizedPnL =
+    sumEventField(
+      trade.events,
+      "grossEventRealizedPnL"
+    );
+
+  const fees =
+    sumRealEventFees(trade.events);
+
+  trade.summary.realizedPoints =
+    grossRealizedPoints;
+
+  // Existing Journal semantics:
+  // realizedPnL remains GROSS realized trade P&L.
+  trade.summary.realizedPnL =
+    grossRealizedPnL;
+
+  trade.summary.grossRealizedPnL =
+    grossRealizedPnL;
+
+  trade.summary.actualCommission =
+    fees.commission;
+
+  trade.summary.futuresExchangeFees =
+    fees.futuresExchangeFee;
+
+  trade.summary.otherBrokerFees =
+    fees.otherFees;
+
+  trade.summary.actualFees =
+    fees.totalFees;
+
+  trade.summary.netRealizedPnL =
+    grossRealizedPnL !== null
+      ? round2(
+          grossRealizedPnL -
+          fees.totalFees
+        )
+      : round2(
+          0 -
+          fees.totalFees
+        );
+
+  trade.brokerImport.grossRealizedTradePnL =
+    trade.summary.grossRealizedPnL;
+
+  trade.brokerImport.actualCommission =
+    trade.summary.actualCommission;
+
+  trade.brokerImport.futuresExchangeFees =
+    trade.summary.futuresExchangeFees;
+
+  trade.brokerImport.actualFees =
+    trade.summary.actualFees;
+
+  trade.brokerImport.netRealizedTradePnL =
+    trade.summary.netRealizedPnL;
+
+  const remainingLots =
+    cloneRemainingLots(trade);
+
+  trade.brokerImport.remainingLots =
+    remainingLots;
+
+  trade.brokerImport.remainingAverageEntry =
+    weightedAverageLots(remainingLots);
+}
+
+function buildRealBrokerEvent({
+  trade,
+  fill,
+  eventType,
+  remainingQty,
+  eventRealizedPoints = null,
+  grossEventRealizedPnL = null,
+}) {
+  const netEventRealizedPnL =
+    grossEventRealizedPnL !== null
+      ? round2(
+          grossEventRealizedPnL -
+          fill.totalFees
+        )
+      : null;
+
+  return {
+    eventType,
+    ts: fill.fillTime,
+
+    tradeId: trade.tradeId,
+
+    broker: fill.broker,
+    source: fill.source,
+    accountMode: "REAL",
+    journalAccount: fill.journalAccount,
+
+    brokerTransactionId:
+      fill.brokerTransactionId,
+
+    brokerOrderId:
+      fill.brokerOrderId,
+
+    brokerDedupeKey:
+      fill.brokerDedupeKey,
+
+    brokerStatus:
+      fill.brokerStatus,
+
+    symbol: fill.symbol,
+    instrumentRoot:
+      fill.instrumentRoot,
+
+    positionEffect:
+      fill.positionEffect,
+
+    side:
+      fill.side,
+
+    direction:
+      fill.direction,
+
+    price:
+      fill.fillPrice,
+
+    fillQuantity:
+      fill.quantity,
+
+    qtyClosed:
+      fill.positionEffect === "CLOSING"
+        ? fill.quantity
+        : 0,
+
+    remainingQty,
+
+    commission:
+      fill.commission,
+
+    futuresExchangeFee:
+      fill.futuresExchangeFee,
+
+    otherFees:
+      fill.otherFees,
+
+    totalFees:
+      fill.totalFees,
+
+    eventRealizedPoints,
+
+    grossEventRealizedPnL,
+
+    // Compatibility with existing Journal event readers.
+    eventRealizedPnL:
+      grossEventRealizedPnL,
+
+    netEventRealizedPnL,
+
+    pnlBasis:
+      fill.dollarsPerPoint !== null
+        ? "FUTURES_CONTRACT"
+        : "FUTURES_POINTS_ONLY",
+
+    action:
+      fill.positionEffect === "OPENING"
+        ? (
+            eventType === "REAL_ENTRY_FILL"
+              ? "NEW_ENTRY"
+              : "SCALE_IN"
+          )
+        : (
+            remainingQty === 0
+              ? "EXIT"
+              : "REDUCE"
+          ),
+
+    reason:
+      eventType,
+
+    readOnlyBrokerObservation: true,
+  };
+}
+
+function makeRealTradeId(fill) {
+  return makeTradeId({
+    symbol:
+      fill.instrumentRoot,
+
+    strategyId:
+      "schwab_real@broker",
+
+    eventTime:
+      fill.fillTime,
+  });
+}
+
+function createRealCampaign({
+  trades,
+  fill,
+}) {
+  const tradeId =
+    makeRealTradeId(fill);
+
+  const lot = {
+    brokerTransactionId:
+      fill.brokerTransactionId,
+    qty:
+      fill.quantity,
+    price:
+      fill.fillPrice,
+    fillTime:
+      fill.fillTime,
+  };
+
+  const trade = {
+    tradeId,
+
+    identity: {
+      tradeId,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      brokerOrderId:
+        fill.brokerOrderId,
+      brokerDedupeKey:
+        fill.brokerDedupeKey,
+      strategyId:
+        "schwab_real@broker",
+      symbol:
+        fill.instrumentRoot,
+      direction:
+        fill.direction,
+      setupType:
+        "SCHWAB_REAL_BROKER_CAMPAIGN",
+    },
+
+    source:
+      "SCHWAB_BROKER_FILL",
+
+    broker:
+      "SCHWAB",
+
+    accountMode:
+      "REAL",
+
+    journalAccount:
+      fill.journalAccount,
+
+    brokerAccountLabel:
+      fill.brokerAccountLabel,
+
+    symbol:
+      fill.instrumentRoot,
+
+    brokerSymbol:
+      fill.symbol,
+
+    normalizedInstrumentRoot:
+      fill.instrumentRoot,
+
+    strategyId:
+      "schwab_real@broker",
+
+    timeframe:
+      "BROKER",
+
+    direction:
+      fill.direction,
+
+    setupType:
+      "SCHWAB_REAL_BROKER_CAMPAIGN",
+
+    assetType:
+      "FUTURES",
+
+    status:
+      "OPEN",
+
+    result:
+      null,
+
+    entry: {
+      time:
+        fill.fillTime,
+
+      firstFillPrice:
+        fill.fillPrice,
+
+      price:
+        fill.fillPrice,
+
+      qty:
+        fill.quantity,
+
+      fillStatus:
+        "FILLED",
+
+      source:
+        "SCHWAB_BROKER_FILL",
+
+      orderType:
+        "BROKER_EXECUTION",
+
+      brokerTransactionId:
+        fill.brokerTransactionId,
+
+      brokerOrderId:
+        fill.brokerOrderId,
+    },
+
+    realBroker: {
+      broker:
+        "SCHWAB",
+
+      journalAccount:
+        fill.journalAccount,
+
+      brokerAccountLabel:
+        fill.brokerAccountLabel,
+
+      brokerSymbol:
+        fill.symbol,
+
+      normalizedInstrumentRoot:
+        fill.instrumentRoot,
+
+      dollarsPerPoint:
+        fill.dollarsPerPoint,
+
+      remainingLots: [
+        clone(lot),
+      ],
+    },
+
+    // Kept for Journal frontend compatibility with earlier TOS imports.
+    brokerImport: {
+      broker:
+        "SCHWAB_THINKORSWIM",
+
+      accountAlias:
+        fill.journalAccount,
+
+      brokerSymbol:
+        fill.symbol,
+
+      dollarsPerPoint:
+        fill.dollarsPerPoint,
+
+      remainingLots: [
+        clone(lot),
+      ],
+
+      remainingAverageEntry:
+        fill.fillPrice,
+
+      grossRealizedTradePnL:
+        null,
+
+      actualCommission:
+        fill.commission,
+
+      futuresExchangeFees:
+        fill.futuresExchangeFee,
+
+      actualFees:
+        fill.totalFees,
+
+      netRealizedTradePnL:
+        round2(
+          0 -
+          fill.totalFees
+        ),
+
+      dailyAccountPnL:
+        null,
+    },
+
+    events: [],
+
+    qty: {
+      originalQty:
+        fill.quantity,
+
+      remainingQty:
+        fill.quantity,
+
+      cumulativeOpeningQuantity:
+        fill.quantity,
+
+      cumulativeFilledQuantity:
+        fill.quantity,
+
+      cumulativeExitQuantity:
+        0,
+    },
+
+    summary: {
+      openTime:
+        fill.fillTime,
+
+      closeTime:
+        null,
+
+      durationMinutes:
+        null,
+
+      realizedPoints:
+        null,
+
+      realizedPnL:
+        null,
+
+      grossRealizedPnL:
+        null,
+
+      actualCommission:
+        fill.commission,
+
+      futuresExchangeFees:
+        fill.futuresExchangeFee,
+
+      otherBrokerFees:
+        fill.otherFees,
+
+      actualFees:
+        fill.totalFees,
+
+      netRealizedPnL:
+        round2(
+          0 -
+          fill.totalFees
+        ),
+
+      realizedR:
+        null,
+
+      percentReturn:
+        null,
+
+      // Daily futures settlement/account P&L is a separate
+      // concept and is not manufactured by broker-fill ingestion.
+      dailyAccountPnL:
+        null,
+    },
+
+    review:
+      baseReview(),
+
+    createdAt:
+      fill.fillTime,
+
+    updatedAt:
+      fill.fillTime,
+  };
+
+  trade.events.push(
+    buildRealBrokerEvent({
+      trade,
+      fill,
+      eventType:
+        "REAL_ENTRY_FILL",
+      remainingQty:
+        fill.quantity,
+    })
+  );
+
+  updateRealTradeAccounting(trade);
+
+  trades.unshift(trade);
+
+  return trade;
+}
+
+function applyRealScaleIn({
+  trade,
+  fill,
+}) {
+  const previousRemaining =
+    toNumberOrNull(
+      trade?.qty?.remainingQty
+    ) ?? 0;
+
+  const nextRemaining =
+    round2(
+      previousRemaining +
+      fill.quantity
+    );
+
+  const currentLots =
+    cloneRemainingLots(trade);
+
+  currentLots.push({
+    brokerTransactionId:
+      fill.brokerTransactionId,
+    qty:
+      fill.quantity,
+    price:
+      fill.fillPrice,
+    fillTime:
+      fill.fillTime,
+  });
+
+  trade.realBroker =
+    trade.realBroker || {};
+
+  trade.realBroker.remainingLots =
+    clone(currentLots);
+
+  trade.brokerImport =
+    trade.brokerImport || {};
+
+  trade.brokerImport.remainingLots =
+    clone(currentLots);
+
+  trade.qty =
+    trade.qty || {};
+
+  trade.qty.remainingQty =
+    nextRemaining;
+
+  trade.qty.cumulativeOpeningQuantity =
+    round2(
+      (
+        toNumberOrNull(
+          trade?.qty?.cumulativeOpeningQuantity
+        ) ?? 0
+      ) +
+      fill.quantity
+    );
+
+  trade.qty.cumulativeFilledQuantity =
+    trade.qty.cumulativeOpeningQuantity;
+
+  trade.qty.originalQty =
+    Math.max(
+      toNumberOrNull(
+        trade?.qty?.originalQty
+      ) ?? 0,
+      nextRemaining
+    );
+
+  trade.entry =
+    trade.entry || {};
+
+  trade.entry.qty =
+    trade.qty.originalQty;
+
+  trade.entry.price =
+    weightedAverageLots(
+      currentLots
+    );
+
+  trade.events.push(
+    buildRealBrokerEvent({
+      trade,
+      fill,
+      eventType:
+        "REAL_SCALE_IN_FILL",
+      remainingQty:
+        nextRemaining,
+    })
+  );
+
+  trade.updatedAt =
+    fill.fillTime;
+
+  updateRealTradeAccounting(trade);
+
+  return {
+    trade,
+    remainingQty:
+      nextRemaining,
+    eventType:
+      "REAL_SCALE_IN_FILL",
+  };
+}
+
+function applyRealClosingFill({
+  trade,
+  fill,
+}) {
+  const previousRemaining =
+    toNumberOrNull(
+      trade?.qty?.remainingQty
+    ) ?? 0;
+
+  if (
+    fill.quantity >
+    previousRemaining
+  ) {
+    return {
+      ok: false,
+      error:
+        "REAL_EXIT_QUANTITY_EXCEEDS_REMAINING_QUANTITY",
+      previousRemaining,
+      fillQuantity:
+        fill.quantity,
+    };
+  }
+
+  const fifo =
+    consumeRealFifoLots({
+      lots:
+        cloneRemainingLots(trade),
+      quantity:
+        fill.quantity,
+      closePrice:
+        fill.fillPrice,
+      direction:
+        fill.direction,
+      dollarsPerPoint:
+        fill.dollarsPerPoint,
+    });
+
+  if (!fifo.ok) {
+    return fifo;
+  }
+
+  const nextRemaining =
+    round2(
+      previousRemaining -
+      fill.quantity
+    );
+
+  trade.realBroker =
+    trade.realBroker || {};
+
+  trade.realBroker.remainingLots =
+    clone(fifo.remainingLots);
+
+  trade.brokerImport =
+    trade.brokerImport || {};
+
+  trade.brokerImport.remainingLots =
+    clone(fifo.remainingLots);
+
+  trade.qty =
+    trade.qty || {};
+
+  trade.qty.remainingQty =
+    nextRemaining;
+
+  trade.qty.cumulativeExitQuantity =
+    round2(
+      (
+        toNumberOrNull(
+          trade?.qty?.cumulativeExitQuantity
+        ) ?? 0
+      ) +
+      fill.quantity
+    );
+
+  const eventType =
+    nextRemaining === 0
+      ? "REAL_FINAL_EXIT"
+      : "REAL_PARTIAL_EXIT";
+
+  trade.events.push(
+    buildRealBrokerEvent({
+      trade,
+      fill,
+      eventType,
+      remainingQty:
+        nextRemaining,
+      eventRealizedPoints:
+        fifo.eventRealizedPoints,
+      grossEventRealizedPnL:
+        fifo.grossEventRealizedPnL,
+    })
+  );
+
+  updateRealTradeAccounting(trade);
+
+  if (nextRemaining === 0) {
+    trade.status =
+      "CLOSED";
+
+    trade.summary.closeTime =
+      fill.fillTime;
+
+    trade.summary.durationMinutes =
+      minutesBetweenIso(
+        trade.summary.openTime ||
+        trade.entry?.time,
+        fill.fillTime
+      );
+
+    trade.result =
+      computeResultFromRealizedPnL(
+        firstDefined(
+          trade.summary.netRealizedPnL,
+          trade.summary.realizedPnL
+        )
+      );
+
+    const alreadyClosed =
+      trade.events.some(
+        (event) =>
+          event?.eventType ===
+          "TRADE_CLOSED"
+      );
+
+    if (!alreadyClosed) {
+      trade.events.push({
+        eventType:
+          "TRADE_CLOSED",
+
+        ts:
+          fill.fillTime,
+
+        tradeId:
+          trade.tradeId,
+
+        broker:
+          fill.broker,
+
+        source:
+          "engine10_journal",
+
+        accountMode:
+          "REAL",
+
+        journalAccount:
+          fill.journalAccount,
+
+        brokerTransactionId:
+          fill.brokerTransactionId,
+
+        brokerOrderId:
+          fill.brokerOrderId,
+
+        brokerDedupeKey:
+          `${fill.brokerDedupeKey}|TRADE_CLOSED`,
+
+        price:
+          fill.fillPrice,
+
+        fillQuantity:
+          0,
+
+        qtyClosed:
+          0,
+
+        remainingQty:
+          0,
+
+        eventRealizedPoints:
+          null,
+
+        grossEventRealizedPnL:
+          null,
+
+        eventRealizedPnL:
+          null,
+
+        netEventRealizedPnL:
+          null,
+
+        commission:
+          0,
+
+        futuresExchangeFee:
+          0,
+
+        otherFees:
+          0,
+
+        totalFees:
+          0,
+
+        finalResult:
+          trade.result,
+
+        realizedPoints:
+          trade.summary.realizedPoints,
+
+        grossRealizedPnL:
+          trade.summary.grossRealizedPnL,
+
+        realizedPnL:
+          trade.summary.realizedPnL,
+
+        actualFees:
+          trade.summary.actualFees,
+
+        netRealizedPnL:
+          trade.summary.netRealizedPnL,
+
+        action:
+          "CLOSE",
+
+        reason:
+          "TRADE_CLOSED",
+
+        readOnlyBrokerObservation:
+          true,
+      });
+    }
+  } else {
+    trade.status =
+      "OPEN";
+
+    trade.result =
+      null;
+  }
+
+  trade.updatedAt =
+    fill.fillTime;
+
+  return {
+    ok: true,
+    trade,
+    remainingQty:
+      nextRemaining,
+    eventType,
+  };
+}
+
+export async function ingestRealBrokerFill(
+  normalizedFill = {}
+) {
+  const fill =
+    normalizeRealBrokerFill(
+      normalizedFill
+    );
+
+  const validationErrors =
+    validateRealBrokerFill(fill);
+
+  if (validationErrors.length) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      journalCompleted: false,
+      error:
+        "INVALID_REAL_BROKER_FILL",
+      reasonCodes:
+        validationErrors,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+    };
+  }
+
+  const trades =
+    readJournalTrades();
+
+  const duplicate =
+    findRealFillDuplicate(
+      trades,
+      fill
+    );
+
+  if (duplicate) {
+    return {
+      ok: true,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      tradeId:
+        duplicate.trade.tradeId,
+      created: false,
+      updated: false,
+      duplicate: true,
+      status:
+        duplicate.trade.status,
+      remainingQty:
+        toNumberOrNull(
+          duplicate.trade?.qty?.remainingQty
+        ) ?? 0,
+      journalCompleted: true,
+      eventType:
+        duplicate.event.eventType,
+      reason:
+        "REAL_BROKER_FILL_ALREADY_RECORDED",
+      trade:
+        duplicate.trade,
+    };
+  }
+
+  const openCampaigns =
+    findRealOpenCampaigns(
+      trades,
+      fill
+    );
+
+  if (openCampaigns.length > 1) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      journalCompleted: false,
+      error:
+        "AMBIGUOUS_REAL_CAMPAIGN_MATCH",
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      journalAccount:
+        fill.journalAccount,
+      instrumentRoot:
+        fill.instrumentRoot,
+      direction:
+        fill.direction,
+      matchingTradeIds:
+        openCampaigns.map(
+          (trade) =>
+            trade.tradeId
+        ),
+    };
+  }
+
+  const openTrade =
+    openCampaigns[0] || null;
+
+  if (
+    openTrade &&
+    realEventTimeIsOutOfOrder(
+      openTrade,
+      fill.fillTime
+    )
+  ) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      journalCompleted: false,
+      error:
+        "REAL_FILL_OUT_OF_ORDER",
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      tradeId:
+        openTrade.tradeId,
+      fillTime:
+        fill.fillTime,
+    };
+  }
+
+  if (fill.positionEffect === "OPENING") {
+    if (!openTrade) {
+      const latestCampaign =
+        findMostRecentRealCampaign(
+          trades,
+          fill
+        );
+
+      const latestCloseTime =
+        normalizeId(
+          latestCampaign?.summary?.closeTime
+        );
+
+      if (
+        latestCampaign &&
+        latestCloseTime &&
+        Date.parse(fill.fillTime) <=
+          Date.parse(latestCloseTime)
+      ) {
+        return {
+          ok: false,
+          created: false,
+          updated: false,
+          duplicate: false,
+          journalCompleted: false,
+          error:
+            "REAL_FILL_OUT_OF_ORDER_AFTER_CLOSED_CAMPAIGN",
+          brokerTransactionId:
+            fill.brokerTransactionId,
+          priorTradeId:
+            latestCampaign.tradeId,
+          fillTime:
+            fill.fillTime,
+          priorCloseTime:
+            latestCloseTime,
+        };
+      }
+
+      const trade =
+        createRealCampaign({
+          trades,
+          fill,
+        });
+
+      writeJournalTrades(trades);
+
+      return {
+        ok: true,
+        brokerTransactionId:
+          fill.brokerTransactionId,
+        tradeId:
+          trade.tradeId,
+        created: true,
+        updated: false,
+        duplicate: false,
+        status:
+          "OPEN",
+        remainingQty:
+          trade.qty.remainingQty,
+        journalCompleted: true,
+        eventType:
+          "REAL_ENTRY_FILL",
+        trade,
+      };
+    }
+
+    const applied =
+      applyRealScaleIn({
+        trade:
+          openTrade,
+        fill,
+      });
+
+    writeJournalTrades(trades);
+
+    return {
+      ok: true,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      tradeId:
+        openTrade.tradeId,
+      created: false,
+      updated: true,
+      duplicate: false,
+      status:
+        openTrade.status,
+      remainingQty:
+        applied.remainingQty,
+      journalCompleted: true,
+      eventType:
+        applied.eventType,
+      trade:
+        openTrade,
+    };
+  }
+
+  if (!openTrade) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      journalCompleted: false,
+      error:
+        "REAL_OPEN_CAMPAIGN_NOT_FOUND",
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      journalAccount:
+        fill.journalAccount,
+      instrumentRoot:
+        fill.instrumentRoot,
+      direction:
+        fill.direction,
+    };
+  }
+
+  const applied =
+    applyRealClosingFill({
+      trade:
+        openTrade,
+      fill,
+    });
+
+  if (!applied.ok) {
+    return {
+      ok: false,
+      created: false,
+      updated: false,
+      duplicate: false,
+      journalCompleted: false,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      tradeId:
+        openTrade.tradeId,
+      ...applied,
+    };
+  }
+
+  writeJournalTrades(trades);
+
+  return {
+    ok: true,
+    brokerTransactionId:
+      fill.brokerTransactionId,
+    tradeId:
+      openTrade.tradeId,
+    created: false,
+    updated: true,
+    duplicate: false,
+    status:
+      openTrade.status,
+    remainingQty:
+      applied.remainingQty,
+    journalCompleted: true,
+    eventType:
+      applied.eventType,
+    trade:
+      openTrade,
+  };
+}
+
 
 export async function listTrades(
   filters = {}
