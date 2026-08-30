@@ -281,14 +281,30 @@ function normalizeCWaveInternalStructure({
   targetModel = null,
   currentPrice = null,
 } = {}) {
-  const source =
-    targetModel?.internalCStructure && typeof targetModel.internalCStructure === "object"
-      ? targetModel.internalCStructure
-      : structure?.cWaveInternalStructure && typeof structure.cWaveInternalStructure === "object"
-      ? structure.cWaveInternalStructure
-      : structure?.internalCStructure && typeof structure.internalCStructure === "object"
+  const rootInternalC =
+    structure?.internalCStructure && typeof structure.internalCStructure === "object"
       ? structure.internalCStructure
       : null;
+
+  const publishedCWaveInternal =
+    structure?.cWaveInternalStructure && typeof structure.cWaveInternalStructure === "object"
+      ? structure.cWaveInternalStructure
+      : null;
+
+  const targetInternalC =
+    targetModel?.internalCStructure && typeof targetModel.internalCStructure === "object"
+      ? targetModel.internalCStructure
+      : null;
+
+  const rootIsManualMinuteCActive =
+    rootInternalC?.active === true &&
+    String(rootInternalC?.source || "").includes("BRIAN_MANUAL_2026_08_28") &&
+    rootInternalC?.currentInternalWave === "Minute-C" &&
+    rootInternalC?.cWaveState === "MINUTE_C_DOWN_ACTIVE";
+
+  const source = rootIsManualMinuteCActive
+    ? rootInternalC
+    : targetInternalC || publishedCWaveInternal || rootInternalC || null;
 
   if (!source || source.active !== true) return null;
 
@@ -340,6 +356,52 @@ function normalizeCWaveInternalStructure({
 
     currentPrice: round2(source.currentPrice ?? currentPrice),
 
+    parentStructure:
+      source.parentStructure && typeof source.parentStructure === "object"
+        ? {
+            ...source.parentStructure,
+            invalidationLevel: round2(source.parentStructure.invalidationLevel),
+          }
+        : null,
+
+    minuteA:
+      source.minuteA && typeof source.minuteA === "object"
+        ? {
+            ...source.minuteA,
+            low: round2(source.minuteA.low),
+          }
+        : null,
+
+    minuteB:
+      source.minuteB && typeof source.minuteB === "object"
+        ? {
+            ...source.minuteB,
+            high: round2(source.minuteB.high),
+            invalidationLevel: round2(source.minuteB.invalidationLevel),
+          }
+        : null,
+
+    minuteC:
+      source.minuteC && typeof source.minuteC === "object"
+        ? {
+            ...source.minuteC,
+            start: round2(source.minuteC.start),
+            targetModel:
+              source.minuteC.targetModel && typeof source.minuteC.targetModel === "object"
+                ? {
+                    ...source.minuteC.targetModel,
+                    anchorHigh: round2(source.minuteC.targetModel.anchorHigh),
+                    anchorLow: round2(source.minuteC.targetModel.anchorLow),
+                    aLegLength: round2(source.minuteC.targetModel.aLegLength),
+                    levels: copyPriceMap(source.minuteC.targetModel.levels),
+                    primaryTarget: round2(source.minuteC.targetModel.primaryTarget),
+                    deepTarget: round2(source.minuteC.targetModel.deepTarget),
+                    invalidationLevel: round2(source.minuteC.targetModel.invalidationLevel),
+                  }
+                : null,
+          }
+        : null,
+
     waveA: source.waveA && typeof source.waveA === "object"
       ? { ...source.waveA, price: round2(source.waveA.price) }
       : null,
@@ -388,6 +450,16 @@ function normalizeCWaveInternalStructure({
 
     invalidationLevel: round2(source.invalidationLevel),
     invalidationRule: source.invalidationRule || null,
+
+    finalMinuteABC:
+      source.finalMinuteABC && typeof source.finalMinuteABC === "object"
+        ? source.finalMinuteABC
+        : null,
+
+    largerCDownTargets: copyPriceMap(source.largerCDownTargets),
+
+    largerInvalidationLevel: round2(source.largerInvalidationLevel),
+    largerInvalidationRule: source.largerInvalidationRule || null,
 
     noExecution: true,
     noPermissionCreated: true,
@@ -987,7 +1059,7 @@ function buildActiveDegreeState({
 
   const cWaveInternalStructure = normalizeCWaveInternalStructure({
     structure,
-    targetModel: sourceTargetModel,
+    targetModel: normalizedTargetModel,
     currentPrice,
   });
 
@@ -1035,6 +1107,22 @@ function buildActiveDegreeState({
     structure,
     currentPrice,
   });
+
+  const normalizedTargetModel = sourceTargetModel
+    ? {
+        ...sourceTargetModel,
+        internalCStructure:
+          cWaveInternalStructure || sourceTargetModel.internalCStructure || null,
+      }
+    : null;
+
+  const normalizedActiveFibModel = activeFibModel
+    ? {
+        ...activeFibModel,
+        internalCStructure:
+          cWaveInternalStructure || activeFibModel.internalCStructure || null,
+      }
+    : activeFibModel;
 
   return {
     degree,
@@ -1103,7 +1191,7 @@ function buildActiveDegreeState({
     // read this field instead of deciding between targetModel and
     // w4RetracementMap themselves. Historical/source models remain published
     // separately for auditability and backward compatibility.
-    activeFibModel,
+    activeFibModel: normalizedActiveFibModel,
 
      // Preferred compact display model.
      correctionModel,
