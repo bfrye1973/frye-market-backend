@@ -1057,11 +1057,23 @@ function buildActiveDegreeState({
 
   const internalStructure = normalizeInternalStructure(structure);
 
-  const cWaveInternalStructure = normalizeCWaveInternalStructure({
-    structure,
-    targetModel: normalizedTargetModel,
-    currentPrice,
-  });
+  let normalizedTargetModel =
+    sourceTargetModel && typeof sourceTargetModel === "object"
+      ? { ...sourceTargetModel }
+      : null;
+
+   const cWaveInternalStructure = normalizeCWaveInternalStructure({
+     structure,
+     targetModel: normalizedTargetModel,
+     currentPrice,
+   });
+
+   if (normalizedTargetModel && cWaveInternalStructure) {
+     normalizedTargetModel = {
+       ...normalizedTargetModel,
+       internalCStructure: cWaveInternalStructure,
+     };
+   }
 
   const parentDegree =
     normalizeDegree(structure?.parentDegree) ||
