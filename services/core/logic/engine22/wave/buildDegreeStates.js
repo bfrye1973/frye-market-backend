@@ -1119,15 +1119,7 @@ function buildActiveDegreeState({
     structure,
     currentPrice,
   });
-
-  const normalizedTargetModel = sourceTargetModel
-    ? {
-        ...sourceTargetModel,
-        internalCStructure:
-          cWaveInternalStructure || sourceTargetModel.internalCStructure || null,
-      }
-    : null;
-
+  
   const normalizedActiveFibModel = activeFibModel
     ? {
         ...activeFibModel,
