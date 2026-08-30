@@ -1,5 +1,5 @@
 // services/core/logic/engine25NewsFilter.js
-// Engine 25 Finlight News v0.2 — tightened Engine 25 market relevance
+// Engine 25 Finlight News v0.3 — strategic escalation materiality fix
 // Pure relevance, classification, expiry, and dedupe logic.
 // No provider calls. No trade direction. No market confirmation thresholds.
 //
@@ -11,7 +11,7 @@
 
 import { createHash } from "crypto";
 
-export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.2";
+export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.3";
 export const ENGINE25_NEWS_SOURCE = "FINLIGHT_REUTERS_FEED";
 export const ENGINE25_NEWS_SOURCE_TIER = "PROFESSIONAL_NEWS";
 export const ENGINE25_NEWS_PROVIDER = "FINLIGHT";
@@ -176,6 +176,66 @@ function primaryEntity(text) {
   return null;
 }
 
+
+function isMajorStrategicEscalation(text) {
+  const usIran =
+    hasAny(text, ["iran", "iranian"]) &&
+    hasAny(text, ["united states", "u.s.", "usa", "american", "us forces", "u.s. forces"]);
+
+  const israelIran =
+    hasAny(text, ["iran", "iranian"]) &&
+    hasAny(text, ["israel", "israeli"]);
+
+  const chinaTaiwan =
+    hasAny(text, ["china", "chinese", "beijing"]) &&
+    hasAny(text, ["taiwan", "taiwanese"]);
+
+  const russiaNatoOrUs =
+    hasAny(text, ["russia", "russian"]) &&
+    hasAny(text, [
+      "nato",
+      "united states", "u.s.", "usa",
+      "us forces", "u.s. forces", "american"
+    ]);
+
+  const northKoreaStrategic =
+    hasAny(text, ["north korea", "north korean", "pyongyang"]) &&
+    hasAny(text, [
+      "united states", "u.s.", "usa",
+      "south korea", "japan",
+      "us forces", "u.s. forces"
+    ]);
+
+  const strategicPair =
+    usIran ||
+    israelIran ||
+    chinaTaiwan ||
+    russiaNatoOrUs ||
+    northKoreaStrategic;
+
+  if (!strategicPair) {
+    return false;
+  }
+
+  return hasAny(text, [
+    "attack", "attacks", "attacked",
+    "strike", "strikes", "struck",
+    "airstrike", "airstrikes",
+    "missile", "missiles",
+    "drone strike", "drone strikes",
+    "military strike", "military strikes",
+    "military action",
+    "retaliation", "retaliates", "retaliated",
+    "vow response", "vows response", "vowed response",
+    "vow retaliation", "vows retaliation", "vowed retaliation",
+    "response to attack",
+    "invasion",
+    "blockade",
+    "naval clash", "military clash",
+    "hostilities intensify", "conflict escalates"
+  ]);
+}
+
 function classifyCandidates(text) {
   const candidates = [];
 
@@ -231,9 +291,13 @@ function classifyCandidates(text) {
     "missile", "missiles",
     "drone strike", "drone strikes",
     "military strike", "military strikes",
-    "attack", "attacks",
+    "attack", "attacks", "attacked",
+    "strike", "strikes", "struck",
     "invasion",
-    "retaliation", "retaliates",
+    "retaliation", "retaliates", "retaliated",
+    "vow response", "vows response", "vowed response",
+    "vow retaliation", "vows retaliation", "vowed retaliation",
+    "response to attack",
     "troops deploy", "troops deployed",
     "deploys troops", "deployed troops",
     "blockade",
@@ -379,6 +443,7 @@ function classifyCandidates(text) {
 
   const strategicGeoContextMatch = hasAny(text, strategicGeoContextTerms);
   const liveEscalationActionMatch = hasAny(text, liveEscalationActionTerms);
+  const majorStrategicEscalationMatch = isMajorStrategicEscalation(text);
   const geopoliticalTransmissionMatch = hasAny(
     text,
     geopoliticalTransmissionTerms
@@ -425,8 +490,10 @@ function classifyCandidates(text) {
   // A trade-policy story is not promoted to geopolitical escalation unless
   // there is an independent live military/security escalation.
   if (
-    strategicGeoContextMatch &&
-    liveEscalationActionMatch &&
+    (
+      (strategicGeoContextMatch && liveEscalationActionMatch) ||
+      majorStrategicEscalationMatch
+    ) &&
     (!tradePolicyMatch || geopoliticalTransmissionMatch)
   ) {
     candidates.push("GEOPOLITICAL_ESCALATION");
@@ -503,16 +570,24 @@ function materialFor(eventType, text) {
   }
 
   if (eventType === "GEOPOLITICAL_ESCALATION") {
-    // Classification already requires strategic context + live escalation.
-    // Materiality requires a concrete escalation/transmission term rather
-    // than a generic historic/legal reference to war or attack.
+    // Major strategic pairings (for example U.S.-Iran) are material when
+    // paired with a concrete attack/strike/retaliation/response action.
+    // This stays separate from generic crime/legal/historical use of
+    // words such as "attack" or "war".
+    if (isMajorStrategicEscalation(text)) {
+      return true;
+    }
+
     return hasAny(text, [
       "airstrike", "airstrikes",
       "missile", "missiles",
       "drone strike", "drone strikes",
       "military strike", "military strikes",
       "invasion", "blockade",
-      "retaliation", "retaliates",
+      "retaliation", "retaliates", "retaliated",
+      "vow response", "vows response", "vowed response",
+      "vow retaliation", "vows retaliation", "vowed retaliation",
+      "response to attack",
       "troops deploy", "troops deployed",
       "deploys troops", "deployed troops",
       "hostilities intensify", "conflict escalates",
@@ -591,6 +666,10 @@ function severityFor(eventType, text, material) {
   }
 
   if (eventType === "GEOPOLITICAL_ESCALATION") {
+    if (isMajorStrategicEscalation(text)) {
+      return "HIGH";
+    }
+
     if (
       hasAny(text, [
         "invasion",
