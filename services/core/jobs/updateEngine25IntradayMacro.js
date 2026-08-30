@@ -1,5 +1,5 @@
 // services/core/jobs/updateEngine25IntradayMacro.js
-// Engine 25 Intraday Macro v0.1
+// Engine 25 Intraday Macro v0.2 — canonical Finlight event handoff
 //
 // Approved Phase 2-4 implementation:
 // - Resolve nearby CL / BZ / ZN / ZB outright futures.
@@ -716,27 +716,45 @@ function readEngine25NewsEvents() {
 export function adaptEngine25NewsEventsForIntradayMacro(events = []) {
   const out = [];
 
+  const geopoliticalTypes = new Set([
+    "GEOPOLITICAL_OIL_SUPPLY_RISK",
+    "GEOPOLITICAL_ESCALATION",
+    "ENERGY_SUPPLY_EVENT",
+  ]);
+
+  const treasuryPolicyTypes = new Set([
+    "TREASURY_RATES_RISK",
+    "FED_POLICY_EVENT",
+    "FINANCIAL_STRESS_EVENT",
+  ]);
+
+  const passthroughTypes = new Set([
+    ...geopoliticalTypes,
+    ...treasuryPolicyTypes,
+    "MACRO_DATA_RELEASE",
+    "TRADE_POLICY_RISK",
+  ]);
+
   for (const event of Array.isArray(events) ? events : []) {
     if (!event || typeof event !== "object") continue;
 
-    if (event.oilSupplyRisk === true) {
-      out.push({
-        ...event,
-        normalizedEventType: event.eventType,
-        eventType: "GEOPOLITICAL_OIL_SUPPLY_RISK",
-        integrationFamily: "OIL_GEOPOLITICAL",
-      });
-      continue;
+    const eventType = String(event?.eventType || "").trim().toUpperCase();
+    if (!passthroughTypes.has(eventType)) continue;
+
+    let integrationFamily = "GENERAL_MACRO";
+
+    if (geopoliticalTypes.has(eventType)) {
+      integrationFamily = "OIL_GEOPOLITICAL";
+    } else if (treasuryPolicyTypes.has(eventType)) {
+      integrationFamily = "TREASURY_LIQUIDITY";
     }
 
-    if (event.treasuryLiquidityRisk === true) {
-      out.push({
-        ...event,
-        normalizedEventType: event.eventType,
-        eventType: "TREASURY_LIQUIDITY_ACTION",
-        integrationFamily: "TREASURY_LIQUIDITY",
-      });
-    }
+    out.push({
+      ...event,
+      normalizedEventType: eventType,
+      eventType,
+      integrationFamily,
+    });
   }
 
   return out;
@@ -1008,7 +1026,7 @@ export async function buildAndWriteEngine25IntradayMacro({
   };
   canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
   canonical.note =
-    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + Finlight normalized news adapter. News identifies events; existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
+    "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + canonical Finlight news handoff. Finlight event types are preserved unchanged; news identifies events and existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
 
 
   atomicWriteJson(OUTPUT_FILE, canonical);
@@ -1062,7 +1080,7 @@ if (isDirectRun) {
       JSON.stringify(
         {
           ok: false,
-          engine: "engine25.intradayMacro.v0.1",
+          engine: "engine25.intradayMacro.v0.2",
           phase: "ENGINE25_INTRADAY_MACRO_PHASE_5",
           error: error?.message || String(error),
         },
