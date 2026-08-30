@@ -1,8 +1,8 @@
 // services/core/logic/engine25IntradayMacro.js
-// Engine 25 Intraday Macro v0.1
+// Engine 25 Intraday Macro v0.2 — Finlight canonical event handoff
 // Pure classification/normalization logic. No provider calls, no trade permission.
 
-export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.1";
+export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.2";
 
 export const MACRO_STATES = Object.freeze([
   "MACRO_SUPPORTIVE",
@@ -394,11 +394,22 @@ export function buildIntradayMacro({
   const events = normalizeTemporaryEvents(temporaryEvents, Date.parse(generatedAtUtc) || Date.now());
   const activeEvents = events.filter((e) => e.usable);
 
+  // Canonical Finlight/Engine 25 event families.
+  // News identifies the event; market data confirms transmission.
   const geopoliticalEvents = activeEvents.filter((e) =>
-    ["GEOPOLITICAL_OIL_SUPPLY_RISK", "OIL_SHIPPING_DISRUPTION"].includes(e.eventType)
+    [
+      "GEOPOLITICAL_OIL_SUPPLY_RISK",
+      "GEOPOLITICAL_ESCALATION",
+      "ENERGY_SUPPLY_EVENT",
+    ].includes(e.eventType)
   );
+
   const treasuryEvents = activeEvents.filter((e) =>
-    ["TREASURY_BUYBACK_ACTION", "TREASURY_LIQUIDITY_ACTION", "TREASURY_SUPPLY_DEVELOPMENT", "LONG_BOND_DISORDER", "FED_LIQUIDITY_ACTION"].includes(e.eventType)
+    [
+      "TREASURY_RATES_RISK",
+      "FED_POLICY_EVENT",
+      "FINANCIAL_STRESS_EVENT",
+    ].includes(e.eventType)
   );
 
   const geopoliticsActive = geopoliticalEvents.length > 0;
@@ -520,12 +531,26 @@ export function buildIntradayMacro({
         reasonCodes: treasuryMarketConfirmed ? ["TREASURY_EVENT_MARKET_CONFIRMED"] : treasuryActive ? ["TREASURY_EVENT_ACTIVE"] : [],
       },
       geopolitics: {
-        state: geopoliticsMarketConfirmed ? "ELEVATED" : geopoliticsActive ? "WATCH" : "NORMAL",
-        severity: geopoliticsMarketConfirmed ? maxSeverity("MODERATE", oilRead.severity) : geopoliticsActive ? "LOW" : "LOW",
-        materialOilSupplyRisk: geopoliticsMarketConfirmed,
+        state: geopoliticsMarketConfirmed
+          ? "ELEVATED"
+          : geopoliticsActive
+            ? "ACTIVE_ESCALATION"
+            : "NORMAL",
+        severity: geopoliticsActive
+          ? maxSeverity(
+              ...enrichedGeopoliticalEvents.map((event) => event?.severity || "LOW"),
+              geopoliticsMarketConfirmed ? oilRead.severity : "LOW"
+            )
+          : "LOW",
+        materialOilSupplyRisk:
+          enrichedGeopoliticalEvents.some((event) => event?.oilSupplyRisk === true),
         activeEvents: enrichedGeopoliticalEvents,
         marketConfirmed: geopoliticsMarketConfirmed,
-        reasonCodes: geopoliticsMarketConfirmed ? ["GEOPOLITICAL_EVENT_OIL_MARKET_CONFIRMED"] : geopoliticsActive ? ["GEOPOLITICAL_EVENT_AWAITING_MARKET_CONFIRMATION"] : [],
+        reasonCodes: geopoliticsMarketConfirmed
+          ? ["GEOPOLITICAL_EVENT_OIL_MARKET_CONFIRMED"]
+          : geopoliticsActive
+            ? ["GEOPOLITICAL_EVENT_ACTIVE_AWAITING_MARKET_CONFIRMATION"]
+            : [],
       },
     },
     marketConfirmation: {
@@ -534,7 +559,47 @@ export function buildIntradayMacro({
       oilConfirmed,
       crossMarketConfluence,
     },
-    reasonCodes: [...new Set(reasonCodes)],
+
+    // Root-level diagnostic mirrors for Engine 25 consumers.
+    // Canonical detailed objects remain under components.*.
+    geopolitics: {
+      state: geopoliticsMarketConfirmed
+        ? "ELEVATED"
+        : geopoliticsActive
+          ? "ACTIVE_ESCALATION"
+          : "NORMAL",
+      severity: geopoliticsActive
+        ? maxSeverity(
+            ...enrichedGeopoliticalEvents.map((event) => event?.severity || "LOW"),
+            geopoliticsMarketConfirmed ? oilRead.severity : "LOW"
+          )
+        : "LOW",
+      eventCount: enrichedGeopoliticalEvents.length,
+      primaryEntity: enrichedGeopoliticalEvents[0]?.primaryEntity || null,
+      marketConfirmed: geopoliticsMarketConfirmed,
+      materialOilSupplyRisk:
+        enrichedGeopoliticalEvents.some((event) => event?.oilSupplyRisk === true),
+    },
+
+    confirmationFamilies: {
+      oilGeopolitical: geopoliticalEvents.length,
+      treasuryLiquidity: treasuryEvents.length,
+    },
+
+    reasonCodes: [
+      ...new Set([
+        ...reasonCodes,
+        ...(geopoliticsActive
+          ? ["GEOPOLITICAL_EVENT_ACTIVE"]
+          : []),
+        ...(geopoliticsMarketConfirmed
+          ? ["GEOPOLITICAL_EVENT_OIL_MARKET_CONFIRMED"]
+          : []),
+        ...(treasuryActive
+          ? ["TREASURY_OR_POLICY_EVENT_ACTIVE"]
+          : []),
+      ]),
+    ],
     warnings: [...new Set(outputWarnings)],
   };
 }
