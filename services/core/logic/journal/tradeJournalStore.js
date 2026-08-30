@@ -1922,6 +1922,9 @@ function consumeRealFifoLots({
   closePrice,
   direction,
   dollarsPerPoint,
+  closingBrokerTransactionId = null,
+  closingBrokerOrderId = null,
+  closingFillTime = null,
 }) {
   const working = clone(lots || []);
   const closedContracts = [];
@@ -1929,20 +1932,36 @@ function consumeRealFifoLots({
   let remainingToClose = quantity;
   let realizedPoints = 0;
 
-  while (remainingToClose > 0 && working.length) {
-    const lot = working[0];
-    const lotQty = toNumberOrNull(lot?.qty) ?? 0;
-    const lotPrice = toNumberOrNull(lot?.price);
+  while (
+    remainingToClose > 0 &&
+    working.length
+  ) {
+    const lot =
+      working[0];
 
-    if (lotQty <= 0 || lotPrice === null) {
+    const lotQty =
+      toNumberOrNull(
+        lot?.qty
+      ) ?? 0;
+
+    const lotPrice =
+      toNumberOrNull(
+        lot?.price
+      );
+
+    if (
+      lotQty <= 0 ||
+      lotPrice === null
+    ) {
       working.shift();
       continue;
     }
 
-    const matchedQty = Math.min(
-      remainingToClose,
-      lotQty
-    );
+    const matchedQty =
+      Math.min(
+        remainingToClose,
+        lotQty
+      );
 
     const pointsPerContract =
       direction === "SHORT"
@@ -1950,21 +1969,39 @@ function consumeRealFifoLots({
         : closePrice - lotPrice;
 
     /*
-     * Canonical Journal performance unit:
-     * one CLOSED contract = one statistical observation.
+     * Canonical Engine 10 per-contract identity.
      *
-     * A broker lot may contain qty > 1. Because every contract
-     * in that lot has the same opening fill price, and this
-     * closing broker fill has one close price, each matched
-     * contract has the same exact per-contract gross result.
-     *
-     * This is not averaging a combined event P&L.
-     * It is preserving the exact FIFO entry/exit pair for each
-     * contract consumed from the lot.
+     * New REAL opening fills are expanded to qty:1 lots and each lot
+     * carries its own durable contractId. Legacy qty>1 lots remain
+     * readable, but exact contractId analytics require one contractId
+     * per unit.
      */
-    for (let i = 0; i < matchedQty; i += 1) {
+    for (
+      let i = 0;
+      i < matchedQty;
+      i += 1
+    ) {
+      const contractId =
+        normalizeId(
+          lot?.contractId
+        );
+
+      if (!contractId) {
+        return {
+          ok: false,
+          error:
+            "REAL_FIFO_CONTRACT_ID_MISSING",
+          openingBrokerTransactionId:
+            normalizeId(
+              lot?.brokerTransactionId
+            ),
+        };
+      }
+
       const contractRealizedPoints =
-        round2(pointsPerContract);
+        round2(
+          pointsPerContract
+        );
 
       const contractGrossRealizedPnL =
         dollarsPerPoint !== null
@@ -1975,6 +2012,8 @@ function consumeRealFifoLots({
           : null;
 
       closedContracts.push({
+        contractId,
+
         openingBrokerTransactionId:
           normalizeId(
             lot?.brokerTransactionId
@@ -1983,6 +2022,21 @@ function consumeRealFifoLots({
         openingFillTime:
           normalizeId(
             lot?.fillTime
+          ),
+
+        closingBrokerTransactionId:
+          normalizeId(
+            closingBrokerTransactionId
+          ),
+
+        closingBrokerOrderId:
+          normalizeId(
+            closingBrokerOrderId
+          ),
+
+        closingFillTime:
+          normalizeId(
+            closingFillTime
           ),
 
         entryPrice:
@@ -1995,6 +2049,9 @@ function consumeRealFifoLots({
           1,
 
         direction,
+
+        status:
+          "CLOSED",
 
         realizedPoints:
           contractRealizedPoints,
@@ -2014,30 +2071,44 @@ function consumeRealFifoLots({
       matchedQty;
 
     const nextLotQty =
-      lotQty - matchedQty;
+      lotQty -
+      matchedQty;
 
-    if (nextLotQty <= 0) {
+    if (
+      nextLotQty <= 0
+    ) {
       working.shift();
     } else {
+      /*
+       * This branch exists only for legacy qty>1 lots.
+       * New contractId-aware REAL lots are always qty:1.
+       */
       working[0] = {
         ...lot,
-        qty: nextLotQty,
+        qty:
+          nextLotQty,
       };
     }
 
-    remainingToClose -= matchedQty;
+    remainingToClose -=
+      matchedQty;
   }
 
-  if (remainingToClose > 0) {
+  if (
+    remainingToClose > 0
+  ) {
     return {
       ok: false,
-      error: "REAL_FIFO_LOTS_INSUFFICIENT",
+      error:
+        "REAL_FIFO_LOTS_INSUFFICIENT",
       remainingToClose,
     };
   }
 
   const roundedPoints =
-    round2(realizedPoints);
+    round2(
+      realizedPoints
+    );
 
   const grossRealizedPnL =
     dollarsPerPoint !== null
@@ -2053,7 +2124,8 @@ function consumeRealFifoLots({
         sum +
         (
           toNumberOrNull(
-            contract?.grossRealizedPnL
+            contract
+              ?.grossRealizedPnL
           ) || 0
         ),
       0
@@ -2061,8 +2133,9 @@ function consumeRealFifoLots({
 
   if (
     grossRealizedPnL !== null &&
-    round2(closedContractsGrossPnL) !==
-      grossRealizedPnL
+    round2(
+      closedContractsGrossPnL
+    ) !== grossRealizedPnL
   ) {
     return {
       ok: false,
@@ -2071,7 +2144,9 @@ function consumeRealFifoLots({
       grossEventRealizedPnL:
         grossRealizedPnL,
       closedContractsGrossPnL:
-        round2(closedContractsGrossPnL),
+        round2(
+          closedContractsGrossPnL
+        ),
     };
   }
 
@@ -2291,8 +2366,12 @@ function buildRealBrokerEvent({
     grossEventRealizedPnL,
 
     closedContracts:
-      Array.isArray(closedContracts)
-        ? clone(closedContracts)
+      Array.isArray(
+        closedContracts
+      )
+        ? clone(
+            closedContracts
+          )
         : [],
 
     // Compatibility with existing Journal event readers.
@@ -2339,6 +2418,257 @@ function makeRealTradeId(fill) {
   });
 }
 
+
+function makeRealContractId({
+  tradeId,
+  openingBrokerTransactionId,
+  ordinal,
+}) {
+  const safeTradeId =
+    normalizeId(tradeId) ||
+    "UNKNOWN_TRADE";
+
+  const safeOpeningId =
+    normalizeId(
+      openingBrokerTransactionId
+    ) ||
+    "UNKNOWN_OPENING";
+
+  const safeOrdinal =
+    Number.isInteger(ordinal) &&
+    ordinal > 0
+      ? ordinal
+      : 1;
+
+  return `${safeTradeId}|CTR|${safeOpeningId}|${safeOrdinal}`;
+}
+
+function buildRealOpeningContracts({
+  tradeId,
+  fill,
+}) {
+  const quantity =
+    toNumberOrNull(
+      fill?.quantity
+    ) ?? 0;
+
+  const contracts = [];
+
+  for (
+    let ordinal = 1;
+    ordinal <= quantity;
+    ordinal += 1
+  ) {
+    contracts.push({
+      contractId:
+        makeRealContractId({
+          tradeId,
+          openingBrokerTransactionId:
+            fill.brokerTransactionId,
+          ordinal,
+        }),
+
+      tradeId,
+
+      broker:
+        fill.broker,
+
+      journalAccount:
+        fill.journalAccount,
+
+      brokerAccountLabel:
+        fill.brokerAccountLabel,
+
+      symbol:
+        fill.instrumentRoot,
+
+      brokerSymbol:
+        fill.symbol,
+
+      direction:
+        fill.direction,
+
+      status:
+        "OPEN",
+
+      openingBrokerTransactionId:
+        fill.brokerTransactionId,
+
+      openingBrokerOrderId:
+        fill.brokerOrderId,
+
+      openingFillTime:
+        fill.fillTime,
+
+      entryPrice:
+        fill.fillPrice,
+
+      closingBrokerTransactionId:
+        null,
+
+      closingBrokerOrderId:
+        null,
+
+      closingFillTime:
+        null,
+
+      exitPrice:
+        null,
+
+      realizedPoints:
+        null,
+
+      grossRealizedPnL:
+        null,
+
+      pnlBasis:
+        fill.dollarsPerPoint !== null
+          ? "FUTURES_CONTRACT"
+          : "FUTURES_POINTS_ONLY",
+    });
+  }
+
+  return contracts;
+}
+
+function getRealContractRegistry(trade) {
+  const contracts =
+    trade?.realBroker?.contracts ||
+    trade?.brokerImport?.contracts ||
+    [];
+
+  return Array.isArray(contracts)
+    ? clone(contracts)
+    : [];
+}
+
+function setRealContractRegistry(
+  trade,
+  contracts
+) {
+  const rows =
+    Array.isArray(contracts)
+      ? clone(contracts)
+      : [];
+
+  trade.realBroker =
+    trade.realBroker || {};
+
+  trade.realBroker.contracts =
+    clone(rows);
+
+  trade.brokerImport =
+    trade.brokerImport || {};
+
+  // Mirror for Journal/frontend compatibility while realBroker.contracts
+  // remains the canonical Engine 10 REAL per-contract registry.
+  trade.brokerImport.contracts =
+    clone(rows);
+}
+
+function closeRealContractRegistry({
+  trade,
+  closedContracts,
+  fill,
+}) {
+  const registry =
+    getRealContractRegistry(
+      trade
+    );
+
+  if (!registry.length) {
+    return {
+      ok: false,
+      error:
+        "REAL_CONTRACT_REGISTRY_MISSING",
+    };
+  }
+
+  const byId =
+    new Map(
+      registry.map(
+        (contract) => [
+          contract?.contractId,
+          contract,
+        ]
+      )
+    );
+
+  for (
+    const closed
+    of Array.isArray(
+      closedContracts
+    )
+      ? closedContracts
+      : []
+  ) {
+    const contractId =
+      normalizeId(
+        closed?.contractId
+      );
+
+    const contract =
+      byId.get(
+        contractId
+      );
+
+    if (!contract) {
+      return {
+        ok: false,
+        error:
+          "REAL_CONTRACT_ID_NOT_FOUND_FOR_CLOSE",
+        contractId,
+      };
+    }
+
+    if (
+      toUpper(
+        contract?.status
+      ) !== "OPEN"
+    ) {
+      return {
+        ok: false,
+        error:
+          "REAL_CONTRACT_ALREADY_CLOSED",
+        contractId,
+      };
+    }
+
+    contract.status =
+      "CLOSED";
+
+    contract.closingBrokerTransactionId =
+      fill.brokerTransactionId;
+
+    contract.closingBrokerOrderId =
+      fill.brokerOrderId;
+
+    contract.closingFillTime =
+      fill.fillTime;
+
+    contract.exitPrice =
+      fill.fillPrice;
+
+    contract.realizedPoints =
+      closed.realizedPoints;
+
+    contract.grossRealizedPnL =
+      closed.grossRealizedPnL;
+
+    contract.pnlBasis =
+      closed.pnlBasis;
+  }
+
+  setRealContractRegistry(
+    trade,
+    registry
+  );
+
+  return {
+    ok: true,
+  };
+}
+
 function createRealCampaign({
   trades,
   fill,
@@ -2346,16 +2676,31 @@ function createRealCampaign({
   const tradeId =
     makeRealTradeId(fill);
 
-  const lot = {
-    brokerTransactionId:
-      fill.brokerTransactionId,
-    qty:
-      fill.quantity,
-    price:
-      fill.fillPrice,
-    fillTime:
-      fill.fillTime,
-  };
+  const openingContracts =
+    buildRealOpeningContracts({
+      tradeId,
+      fill,
+    });
+
+  const openingLots =
+    openingContracts.map(
+      (contract) => ({
+        contractId:
+          contract.contractId,
+
+        brokerTransactionId:
+          fill.brokerTransactionId,
+
+        qty:
+          1,
+
+        price:
+          fill.fillPrice,
+
+        fillTime:
+          fill.fillTime,
+      })
+    );
 
   const trade = {
     tradeId,
@@ -2471,9 +2816,11 @@ function createRealCampaign({
       dollarsPerPoint:
         fill.dollarsPerPoint,
 
-      remainingLots: [
-        clone(lot),
-      ],
+      remainingLots:
+        clone(openingLots),
+
+      contracts:
+        clone(openingContracts),
     },
 
     // Kept for Journal frontend compatibility with earlier TOS imports.
@@ -2490,9 +2837,11 @@ function createRealCampaign({
       dollarsPerPoint:
         fill.dollarsPerPoint,
 
-      remainingLots: [
-        clone(lot),
-      ],
+      remainingLots:
+        clone(openingLots),
+
+      contracts:
+        clone(openingContracts),
 
       remainingAverageEntry:
         fill.fillPrice,
@@ -2633,16 +2982,46 @@ function applyRealScaleIn({
   const currentLots =
     cloneRemainingLots(trade);
 
-  currentLots.push({
-    brokerTransactionId:
-      fill.brokerTransactionId,
-    qty:
-      fill.quantity,
-    price:
-      fill.fillPrice,
-    fillTime:
-      fill.fillTime,
-  });
+  const newContracts =
+    buildRealOpeningContracts({
+      tradeId:
+        trade.tradeId,
+      fill,
+    });
+
+  for (
+    const contract
+    of newContracts
+  ) {
+    currentLots.push({
+      contractId:
+        contract.contractId,
+
+      brokerTransactionId:
+        fill.brokerTransactionId,
+
+      qty:
+        1,
+
+      price:
+        fill.fillPrice,
+
+      fillTime:
+        fill.fillTime,
+    });
+  }
+
+  const contractRegistry = [
+    ...getRealContractRegistry(
+      trade
+    ),
+    ...newContracts,
+  ];
+
+  setRealContractRegistry(
+    trade,
+    contractRegistry
+  );
 
   trade.realBroker =
     trade.realBroker || {};
@@ -2754,6 +3133,12 @@ function applyRealClosingFill({
         fill.direction,
       dollarsPerPoint:
         fill.dollarsPerPoint,
+      closingBrokerTransactionId:
+        fill.brokerTransactionId,
+      closingBrokerOrderId:
+        fill.brokerOrderId,
+      closingFillTime:
+        fill.fillTime,
     });
 
   if (!fifo.ok) {
@@ -2814,6 +3199,18 @@ function applyRealClosingFill({
         fifo.closedContracts,
     })
   );
+
+  const registryClose =
+    closeRealContractRegistry({
+      trade,
+      closedContracts:
+        fifo.closedContracts,
+      fill,
+    });
+
+  if (!registryClose.ok) {
+    return registryClose;
+  }
 
   updateRealTradeAccounting(trade);
 
