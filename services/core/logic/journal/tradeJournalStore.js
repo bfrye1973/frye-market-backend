@@ -1924,6 +1924,8 @@ function consumeRealFifoLots({
   dollarsPerPoint,
 }) {
   const working = clone(lots || []);
+  const closedContracts = [];
+
   let remainingToClose = quantity;
   let realizedPoints = 0;
 
@@ -1946,6 +1948,66 @@ function consumeRealFifoLots({
       direction === "SHORT"
         ? lotPrice - closePrice
         : closePrice - lotPrice;
+
+    /*
+     * Canonical Journal performance unit:
+     * one CLOSED contract = one statistical observation.
+     *
+     * A broker lot may contain qty > 1. Because every contract
+     * in that lot has the same opening fill price, and this
+     * closing broker fill has one close price, each matched
+     * contract has the same exact per-contract gross result.
+     *
+     * This is not averaging a combined event P&L.
+     * It is preserving the exact FIFO entry/exit pair for each
+     * contract consumed from the lot.
+     */
+    for (let i = 0; i < matchedQty; i += 1) {
+      const contractRealizedPoints =
+        round2(pointsPerContract);
+
+      const contractGrossRealizedPnL =
+        dollarsPerPoint !== null
+          ? round2(
+              pointsPerContract *
+              dollarsPerPoint
+            )
+          : null;
+
+      closedContracts.push({
+        openingBrokerTransactionId:
+          normalizeId(
+            lot?.brokerTransactionId
+          ),
+
+        openingFillTime:
+          normalizeId(
+            lot?.fillTime
+          ),
+
+        entryPrice:
+          lotPrice,
+
+        exitPrice:
+          closePrice,
+
+        quantity:
+          1,
+
+        direction,
+
+        realizedPoints:
+          contractRealizedPoints,
+
+        grossRealizedPnL:
+          contractGrossRealizedPnL,
+
+        pnlBasis:
+          dollarsPerPoint !== null
+            ? "FUTURES_CONTRACT"
+            : "FUTURES_POINTS_ONLY",
+      });
+    }
 
     realizedPoints +=
       pointsPerContract *
@@ -1985,11 +2047,45 @@ function consumeRealFifoLots({
         )
       : null;
 
+  const closedContractsGrossPnL =
+    closedContracts.reduce(
+      (sum, contract) =>
+        sum +
+        (
+          toNumberOrNull(
+            contract?.grossRealizedPnL
+          ) || 0
+        ),
+      0
+    );
+
+  if (
+    grossRealizedPnL !== null &&
+    round2(closedContractsGrossPnL) !==
+      grossRealizedPnL
+  ) {
+    return {
+      ok: false,
+      error:
+        "REAL_CLOSED_CONTRACT_RECONCILIATION_FAILED",
+      grossEventRealizedPnL:
+        grossRealizedPnL,
+      closedContractsGrossPnL:
+        round2(closedContractsGrossPnL),
+    };
+  }
+
   return {
     ok: true,
-    remainingLots: working,
+
+    remainingLots:
+      working,
+
+    closedContracts,
+
     eventRealizedPoints:
       roundedPoints,
+
     grossEventRealizedPnL:
       grossRealizedPnL,
   };
@@ -2119,6 +2215,7 @@ function buildRealBrokerEvent({
   remainingQty,
   eventRealizedPoints = null,
   grossEventRealizedPnL = null,
+  closedContracts = [],
 }) {
   const netEventRealizedPnL =
     grossEventRealizedPnL !== null
@@ -2192,6 +2289,11 @@ function buildRealBrokerEvent({
     eventRealizedPoints,
 
     grossEventRealizedPnL,
+
+    closedContracts:
+      Array.isArray(closedContracts)
+        ? clone(closedContracts)
+        : [],
 
     // Compatibility with existing Journal event readers.
     eventRealizedPnL:
@@ -2708,6 +2810,8 @@ function applyRealClosingFill({
         fifo.eventRealizedPoints,
       grossEventRealizedPnL:
         fifo.grossEventRealizedPnL,
+      closedContracts:
+        fifo.closedContracts,
     })
   );
 
