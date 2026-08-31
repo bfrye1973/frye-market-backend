@@ -720,18 +720,24 @@ else if (insideNegotiatedZone === true) {
     reactionConfirmed &&
     candidateDirectional
   ) {
-    direction = candidateDirection;
+    /*
+     * Completed 1m remains diagnostic reaction evidence only.
+     * It may NOT establish or flip canonical Engine 3 direction.
+     */
+    direction = "NEUTRAL";
 
-    sourceTimeframe = "1m";
+    sourceTimeframe =
+      "NEGOTIATED_ZONE_REACTION";
+
     reactionTimeframe = "1m";
 
-    directionEstablishedByFresh1m = true;
+    directionEstablishedByFresh1m = false;
 
     resolutionStatus =
-      `NEGOTIATED_ZONE_REACTION_${candidateDirection}_CONFIRMED`;
+      "NEGOTIATED_ZONE_REACTION_WAITING_FOR_CANONICAL_DIRECTION";
 
     resolutionReason =
-      "COMPLETED_1M_NEGOTIATED_ZONE_REACTION_ESTABLISHED_INITIAL_DIRECTION";
+      "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION";
   }
 
   /*
