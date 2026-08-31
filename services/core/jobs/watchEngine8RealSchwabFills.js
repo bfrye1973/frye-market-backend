@@ -4,6 +4,10 @@
 // Active CME-style session cadence defaults to 30 seconds.
 // Quiet/maintenance cadence defaults to 60 seconds.
 // Broker access remains GET-only; Engine 10 delivery is a Journal write only.
+//
+// The first iteration is restart/recovery mode and uses the durable
+// per-account Engine 8 watermark. Later iterations return to the short
+// rolling lookback window.
 
 import {
   observeSchwabRealFills,
@@ -15,75 +19,43 @@ function positiveInt(value, fallback) {
     10
   );
 
-  return Number.isFinite(parsed) &&
-    parsed > 0
+  return Number.isFinite(parsed) && parsed > 0
     ? parsed
     : fallback;
 }
 
 function newYorkClock(date = new Date()) {
-  const parts =
-    new Intl.DateTimeFormat(
-      "en-US",
-      {
-        timeZone:
-          "America/New_York",
-        weekday: "short",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }
-    ).formatToParts(date);
+  const parts = new Intl.DateTimeFormat(
+    "en-US",
+    {
+      timeZone: "America/New_York",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }
+  ).formatToParts(date);
 
   const get = (type) =>
-    parts.find(
-      (part) =>
-        part.type === type
-    )?.value;
+    parts.find((part) => part.type === type)?.value;
 
   return {
-    weekday:
-      get("weekday"),
-
-    hour:
-      Number(get("hour")),
-
-    minute:
-      Number(get("minute")),
+    weekday: get("weekday"),
+    hour: Number(get("hour")),
+    minute: Number(get("minute")),
   };
 }
 
-function cmeSessionActive(
-  date = new Date()
-) {
-  const {
-    weekday,
-    hour,
-  } = newYorkClock(date);
+function cmeSessionActive(date = new Date()) {
+  const { weekday, hour } = newYorkClock(date);
 
-  if (weekday === "Sat") {
-    return false;
-  }
-
-  if (weekday === "Sun") {
-    return hour >= 18;
-  }
-
-  if (weekday === "Fri") {
-    return hour < 17;
-  }
+  if (weekday === "Sat") return false;
+  if (weekday === "Sun") return hour >= 18;
+  if (weekday === "Fri") return hour < 17;
 
   // Monday-Thursday:
-  // treat the daily 17:00-18:00 ET
-  // maintenance hour as quiet.
-  if (
-    [
-      "Mon",
-      "Tue",
-      "Wed",
-      "Thu",
-    ].includes(weekday)
-  ) {
+  // treat the daily 17:00-18:00 ET maintenance hour as quiet.
+  if (["Mon", "Tue", "Wed", "Thu"].includes(weekday)) {
     return hour !== 17;
   }
 
@@ -91,108 +63,81 @@ function cmeSessionActive(
 }
 
 function sleep(ms) {
-  return new Promise(
-    (resolve) =>
-      setTimeout(resolve, ms)
-  );
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const activeSeconds =
-  positiveInt(
-    process.env
-      .ENGINE8_REAL_FILL_ACTIVE_POLL_SECONDS,
-    30
-  );
+const activeSeconds = positiveInt(
+  process.env.ENGINE8_REAL_FILL_ACTIVE_POLL_SECONDS,
+  30
+);
 
-const quietSeconds =
-  positiveInt(
-    process.env
-      .ENGINE8_REAL_FILL_QUIET_POLL_SECONDS,
-    60
-  );
+const quietSeconds = positiveInt(
+  process.env.ENGINE8_REAL_FILL_QUIET_POLL_SECONDS,
+  60
+);
 
 console.log(
   JSON.stringify(
     {
-      engine:
-        "engine8.schwabRealFillWatcher.v1",
-
-      activePollSeconds:
-        activeSeconds,
-
-      quietPollSeconds:
-        quietSeconds,
-
+      engine: "engine8.schwabRealFillWatcher.v2",
+      activePollSeconds: activeSeconds,
+      quietPollSeconds: quietSeconds,
       deliveryEnabled:
-        process.env
-          .ENGINE8_REAL_FILL_DELIVERY_ENABLED ===
-        "1",
-
-      startedAt:
-        new Date().toISOString(),
+        process.env.ENGINE8_REAL_FILL_DELIVERY_ENABLED === "1",
+      recoveryOverlapMinutes: positiveInt(
+        process.env.ENGINE8_REAL_FILL_RECOVERY_OVERLAP_MINUTES,
+        5
+      ),
+      firstIterationRecoveryMode: true,
+      startedAt: new Date().toISOString(),
     },
     null,
     2
   )
 );
 
+let firstIteration = true;
+
 while (true) {
-  const startedAt =
-    new Date();
+  const startedAt = new Date();
 
   try {
-    const out =
-      await observeSchwabRealFills({
-        now: startedAt,
-      });
+    const out = await observeSchwabRealFills({
+      now: startedAt,
+      recoveryMode: firstIteration,
+    });
 
     console.log(
       JSON.stringify({
-        ts:
-          new Date().toISOString(),
-
-        status:
-          out.status,
-
-        ok:
-          out.ok,
-
-        accountsRead:
-          out.accountsRead,
-
-        transactionsRead:
-          out.transactionsRead,
-
+        ts: new Date().toISOString(),
+        status: out.status,
+        ok: out.ok,
+        recoveryMode: out.recoveryMode,
+        bootstrapStartedAt: out.bootstrapStartedAt,
+        accountsRead: out.accountsRead,
+        transactionsRead: out.transactionsRead,
         futuresFillsNormalized:
           out.futuresFillsNormalized,
-
-        delivered:
-          out.delivered,
-
-        alreadyDelivered:
-          out.alreadyDelivered,
-
-        pending:
-          out.pending,
-
-        errors:
-          out.errors,
+        delivered: out.delivered,
+        alreadyDelivered: out.alreadyDelivered,
+        pending: out.pending,
+        watermarkAdvanced: out.watermarkAdvanced,
+        watermarkHeld: out.watermarkHeld,
+        errors: out.errors,
       })
     );
   } catch (error) {
     console.error(
       "[engine8 real fill watcher] iteration failed:",
-      error?.stack ||
-        error
+      error?.stack || error
     );
   }
 
-  const delaySeconds =
-    cmeSessionActive()
-      ? activeSeconds
-      : quietSeconds;
+  firstIteration = false;
 
-  await sleep(
-    delaySeconds * 1000
-  );
+  const delaySeconds = cmeSessionActive()
+    ? activeSeconds
+    : quietSeconds;
+
+  await sleep(delaySeconds * 1000);
 }
