@@ -259,6 +259,30 @@ function readEngine26(candidate) {
     directionState: firstUpper(candidate?.directionState),
     currentPrice: firstNumber(candidate?.currentPrice, candidate?.price),
     entryZoneMidline: entryZoneMidline(candidate),
+
+    objectiveCompletedAt: text(
+      candidate?.zoneMemorySummary?.objectiveCompletedAt ||
+      candidate?.objectiveCompletedAt
+    ),
+
+    targetTouchedAt: text(
+      candidate?.zoneMemorySummary?.targetTouchedAt ||
+      candidate?.targetTouchedAt
+    ),
+
+    releaseReason: text(
+      candidate?.zoneMemorySummary?.releaseReason ||
+      candidate?.releaseReason
+    ),
+
+    priorRotationFullyComplete:
+      candidate?.priorRotationFullyComplete === true ||
+      candidate?.zoneMemorySummary?.priorRotationFullyComplete === true,
+
+    promotedFromTargetCompletion:
+      candidate?.promotedFromTargetCompletion === true ||
+      candidate?.zoneMemorySummary?.promotedFromTargetCompletion === true,
+
     candidateInvalidated: candidateInvalidated(candidate),
     locationInvalidated: locationInvalidated(candidate),
   };
@@ -767,18 +791,59 @@ export function evaluateEngine6Strategy1Phase4Contract({
     }
 
 const engine26TripAlreadyCleared =
-  e26.direction === "NEUTRAL" &&
   (
-    e26.directionState === "NEUTRAL" ||
-    e26.directionState === "NEUTRAL_NO_DIRECTIONAL_EDGE"
+    e26.direction === "NEUTRAL" &&
+    (
+      e26.directionState === "NEUTRAL" ||
+      e26.directionState === "NEUTRAL_NO_DIRECTIONAL_EDGE"
+    )
+  ) ||
+  e26.objectiveCompletedAt != null ||
+  e26.releaseReason != null ||
+  e26.priorRotationFullyComplete === true ||
+  e26.promotedFromTargetCompletion === true;
+
+const freshEngine3BranchConfirmed =
+  ["LONG", "SHORT"].includes(e3.direction) &&
+  engine3Qualification.qualified === true &&
+  e3.allowed === true &&
+  e3.reactionConfirmed === true &&
+  e3.authorizedReactionState === "REACTION_CONFIRMED";
+
+const freshEngine4BranchConfirmed =
+  e4.participationConfirmed === true &&
+  e4.allowed === true &&
+  e4.hardBlocked !== true &&
+  (
+    !e4.direction ||
+    e4.direction === e3.direction ||
+    e4.direction === finalDirection
   );
 
-if (midline.satisfied === true && engine26TripAlreadyCleared !== true) {
+const freshConfirmedBranchAfterMidline =
+  freshEngine3BranchConfirmed === true &&
+  freshEngine4BranchConfirmed === true &&
+  ["LONG", "SHORT"].includes(finalDirection);
+
+if (
+  midline.satisfied === true &&
+  engine26TripAlreadyCleared !== true &&
+  freshConfirmedBranchAfterMidline !== true
+) {
   blockers.push("ENGINE26_NEGOTIATED_MIDLINE_ALREADY_REACHED");
   reasonCodes.push("ENGINE26_TRIP_COMPLETION_BOUNDARY_REACHED");
-} else if (midline.satisfied === true && engine26TripAlreadyCleared === true) {
+} else if (
+  midline.satisfied === true &&
+  engine26TripAlreadyCleared === true
+) {
   reasonCodes.push("ENGINE26_PRIOR_TRIP_ALREADY_CLEARED");
-  reasonCodes.push("WAITING_FOR_FRESH_ENGINE3_ENGINE4_DIRECTION");
+  reasonCodes.push("FRESH_ENGINE3_ENGINE4_BRANCH_MAY_REQUALIFY");
+} else if (
+  midline.satisfied === true &&
+  freshConfirmedBranchAfterMidline === true
+) {
+  reasonCodes.push("ENGINE26_MIDLINE_COMPLETION_NOT_BLOCKING_FRESH_BRANCH");
+  reasonCodes.push("FRESH_ENGINE3_ENGINE4_BRANCH_CONFIRMED_AFTER_MIDLINE");
 } else {
   reasonCodes.push("ENGINE26_NEGOTIATED_MIDLINE_NOT_YET_REACHED");
   reasonCodes.push("TARGET_ROOM_REMAINS_TO_MIDLINE");
@@ -852,6 +917,11 @@ if (midline.satisfied === true && engine26TripAlreadyCleared !== true) {
       candidateIdentityVersionCompatible,
       direction: e26.direction,
       directionState: e26.directionState,
+      objectiveCompletedAt: e26.objectiveCompletedAt,
+      targetTouchedAt: e26.targetTouchedAt,
+      releaseReason: e26.releaseReason,
+      priorRotationFullyComplete: e26.priorRotationFullyComplete,
+      promotedFromTargetCompletion: e26.promotedFromTargetCompletion,
     },
 
     reaction: {
@@ -888,6 +958,11 @@ if (midline.satisfied === true && engine26TripAlreadyCleared !== true) {
     invalidation: {
       candidateInvalidated: e26.candidateInvalidated,
       locationInvalidated: e26.locationInvalidated,
+      objectiveCompletedAt: e26.objectiveCompletedAt,
+      targetTouchedAt: e26.targetTouchedAt,
+      releaseReason: e26.releaseReason,
+      priorRotationFullyComplete: e26.priorRotationFullyComplete,
+      promotedFromTargetCompletion: e26.promotedFromTargetCompletion,
     },
 
     midlineTrigger: midline,
