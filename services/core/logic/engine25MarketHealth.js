@@ -61,6 +61,53 @@ function getFredValue(macroData, key) {
   return macroData?.sources?.fred?.latest?.[key]?.value ?? null;
 }
 
+function getFredHistory(macroData, key) {
+  const rows = macroData?.sources?.fred?.history?.[key];
+  if (!Array.isArray(rows)) return [];
+
+  return rows
+    .map((row) => ({ date: row?.date || null, value: Number(row?.value) }))
+    .filter(
+      (row) =>
+        row.date &&
+        Number.isFinite(row.value) &&
+        Number.isFinite(Date.parse(`${row.date}T00:00:00Z`))
+    )
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+}
+
+function fredChangeOverDays(macroData, key, days = 28) {
+  const rows = getFredHistory(macroData, key);
+
+  if (!rows.length) {
+    return { latest: null, prior: null, change: null, latestDate: null, priorDate: null, requestedDays: days };
+  }
+
+  const latest = rows[rows.length - 1];
+  const latestMs = Date.parse(`${latest.date}T00:00:00Z`);
+  const targetMs = latestMs - days * 24 * 60 * 60 * 1000;
+  let prior = null;
+
+  for (const row of rows) {
+    const rowMs = Date.parse(`${row.date}T00:00:00Z`);
+    if (rowMs <= targetMs) prior = row;
+    else break;
+  }
+
+  if (!prior) {
+    return { latest: latest.value, prior: null, change: null, latestDate: latest.date, priorDate: null, requestedDays: days };
+  }
+
+  return {
+    latest: latest.value,
+    prior: prior.value,
+    change: Number((latest.value - prior.value).toFixed(6)),
+    latestDate: latest.date,
+    priorDate: prior.date,
+    requestedDays: days,
+  };
+}
+
 function getTgaBalance(macroData) {
   return (
     macroData?.quickRead?.liquidityConditions?.treasuryOperatingCashBalance
@@ -116,22 +163,88 @@ function scoreCreditStress(macroData) {
   const stlfsi = getFredValue(macroData, "STLFSI4");
   const highYieldSpread = getFredValue(macroData, "BAMLH0A0HYM2");
 
+  // Systemic level: preserve the approved absolute thresholds.
   const nfciScore = scoreInverse(nfci, -0.7, 0.5);
   const stlfsiScore = scoreInverse(stlfsi, -1.0, 1.0);
   const hyScore = scoreInverse(highYieldSpread, 2.0, 6.0);
 
-  const score = weightedAvg([
+  const systemicLevelScore = weightedAvg([
     { value: nfciScore, weight: 0.35 },
     { value: stlfsiScore, weight: 0.35 },
     { value: hyScore, weight: 0.3 },
   ]);
 
+  // Responsive 4-week direction layer, tested against the actual 2026
+  // three-month history before production use. Lower is healthier for all 3.
+  const nfci4w = fredChangeOverDays(macroData, "NFCI", 28);
+  const stlfsi4w = fredChangeOverDays(macroData, "STLFSI4", 28);
+  const hy4w = fredChangeOverDays(macroData, "BAMLH0A0HYM2", 28);
+
+  const nfciTrendScore = isNum(nfci4w.change)
+    ? scoreInverse(nfci4w.change, -0.04, 0.04)
+    : null;
+  const stlfsiTrendScore = isNum(stlfsi4w.change)
+    ? scoreInverse(stlfsi4w.change, -0.20, 0.20)
+    : null;
+  const hyTrendScore = isNum(hy4w.change)
+    ? scoreInverse(hy4w.change, -0.30, 0.30)
+    : null;
+
+  const trendItems = [
+    { value: nfciTrendScore, weight: 0.35 },
+    { value: stlfsiTrendScore, weight: 0.35 },
+    { value: hyTrendScore, weight: 0.30 },
+  ].filter((item) => isNum(item.value));
+
+  const trendAvailable = trendItems.length > 0;
+  const trendScore = trendAvailable ? weightedAvg(trendItems) : null;
+
+  // Final Macro Credit Health = 50% current systemic level + 50% 4-week trend.
+  // If history is unavailable, fall back to the approved systemic score.
+  const score = trendAvailable
+    ? weightedAvg([
+        { value: systemicLevelScore, weight: 0.50 },
+        { value: trendScore, weight: 0.50 },
+      ])
+    : systemicLevelScore;
+
   const warnings = [];
+
   if (isNum(nfci) && Number(nfci) > 0) warnings.push("Financial conditions tightening");
   if (isNum(stlfsi) && Number(stlfsi) > 0.5) warnings.push("Financial stress elevated");
   if (isNum(highYieldSpread) && Number(highYieldSpread) > 4.5) {
-    warnings.push("High-yield credit spread widening");
+    warnings.push("High-yield credit spread elevated");
   }
+
+  if (trendAvailable && trendScore < 45) {
+    warnings.push("Macro credit trend deteriorating over the last four weeks");
+  }
+  if (isNum(nfci4w.change) && Number(nfci4w.change) >= 0.03) {
+    warnings.push("NFCI deteriorating over four weeks");
+  }
+  if (isNum(stlfsi4w.change) && Number(stlfsi4w.change) >= 0.15) {
+    warnings.push("STLFSI financial stress deteriorating over four weeks");
+  }
+  if (isNum(hy4w.change) && Number(hy4w.change) >= 0.20) {
+    warnings.push("High-yield spreads widening over four weeks");
+  }
+
+  const systemicLabel =
+    systemicLevelScore >= 75
+      ? "SYSTEMIC_STRESS_LOW"
+      : systemicLevelScore >= 50
+        ? "SYSTEMIC_STRESS_NORMAL"
+        : "SYSTEMIC_STRESS_HIGH";
+
+  const trendLabel = !trendAvailable
+    ? "MACRO_CREDIT_TREND_UNAVAILABLE"
+    : trendScore >= 70
+      ? "MACRO_CREDIT_TREND_IMPROVING"
+      : trendScore >= 55
+        ? "MACRO_CREDIT_TREND_STABLE_TO_IMPROVING"
+        : trendScore >= 45
+          ? "MACRO_CREDIT_TREND_MIXED"
+          : "MACRO_CREDIT_TREND_DETERIORATING";
 
   return {
     score,
@@ -141,6 +254,14 @@ function scoreCreditStress(macroData) {
         : score >= 50
           ? "CREDIT_STRESS_NORMAL"
           : "CREDIT_STRESS_HIGH",
+    systemicLevelScore,
+    systemicLabel,
+    trendScore,
+    trendLabel,
+    trendAvailable,
+    responsiveFormula: trendAvailable
+      ? "50PCT_SYSTEMIC_LEVEL_PLUS_50PCT_FOUR_WEEK_TREND"
+      : "SYSTEMIC_LEVEL_FALLBACK_HISTORY_UNAVAILABLE",
     inputs: {
       nfci,
       stlfsi,
@@ -148,6 +269,16 @@ function scoreCreditStress(macroData) {
       nfciScore,
       stlfsiScore,
       hyScore,
+      fourWeekChange: {
+        NFCI: nfci4w,
+        STLFSI4: stlfsi4w,
+        BAMLH0A0HYM2: hy4w,
+      },
+      fourWeekTrendScores: {
+        NFCI: nfciTrendScore,
+        STLFSI4: stlfsiTrendScore,
+        BAMLH0A0HYM2: hyTrendScore,
+      },
     },
     warnings,
   };
@@ -316,6 +447,8 @@ function scoreMarketTrend(marketData) {
     const ema50DistancePct = emaDistancePct(item.close, item.ema50);
     const ema200DistancePct = emaDistancePct(item.close, item.ema200);
 
+    // Tactical EMAs are intentionally more sensitive.
+    // Merely sitting a fraction above EMA10/EMA20 no longer earns a near-perfect score.
     const ema10Score = scoreDirect(ema10DistancePct, -2, 2);
     const ema20Score = scoreDirect(ema20DistancePct, -3, 3);
     const ema50Score = scoreDirect(ema50DistancePct, -6, 6);
@@ -1292,7 +1425,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.2",
+    engine: "engine25.marketHealth.v0.3",
     updatedAt: new Date().toISOString(),
     score,
     regime,
