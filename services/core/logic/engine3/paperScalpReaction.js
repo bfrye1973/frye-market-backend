@@ -895,8 +895,8 @@ function resolveFinalConfirmation({
 
   if (
     activePaperTrade ||
-    directionPersistenceActive
-    insideZoneDirectionLocked 
+    directionPersistenceActive ||
+    insideZoneDirectionLocked
   ) {
     /*
      * Once direction is locked to either:
