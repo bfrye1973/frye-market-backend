@@ -11,391 +11,198 @@ const IDENTITY = Object.freeze({
   candidateId: "E26C-TEST",
   zoneId: "E26Z-TEST",
   symbol: "ES",
-  setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-  setupGrade: "A_PLUS",
-  identitySetupKey: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
-  candidateIdentityVersion: "engine26.strategy1.v1",
+  setupClass: "NEGOTIATED_ZONE_ROTATION",
+  setupGrade: "A+++",
+  identitySetupKey: "NEGOTIATED_ZONE_ROTATION",
+  candidateIdentityVersion: "engine26.strategy1.v2",
 });
 
-function makeInputs(overrides = {}) {
-  const identity = { ...IDENTITY };
-
-  const base = {
+function makeInputs() {
+  return {
     engine26LocationCandidate: {
-      ...identity,
-      direction: "LONG",
-      snapshotTime: "2026-07-23T20:00:00.000Z",
-      entryZone: {
-        low: 7573,
-        high: 7575,
-        midline: 7574,
-      },
-      targetZone: {
-        low: 7600,
-        high: 7610,
-        midline: 7605,
-      },
+      ...IDENTITY,
+      direction: "SHORT",
+      snapshotTime: "2026-08-31T04:31:09.771Z",
     },
     engine26ProposedGeometry: {
-      ...identity,
+      ...IDENTITY,
       direction: "LONG",
-      snapshotTime: "2026-07-23T20:00:00.000Z",
+      snapshotTime: "2026-08-31T04:31:09.771Z",
       geometryReady: true,
-      proposedEntryPrice: 7574,
-      proposedStopPrice: 7564,
-      proposedStopDistancePoints: 10,
+      candidateIdentityPreserved: true,
+      proposedEntryPrice: 7696.5,
+      proposedStopPrice: 7687,
+      proposedStopDistancePoints: 9.5,
+      target1Price: 7753.25,
+      target2Price: 7763.5,
+      target3Price: 7763.5,
       proposedTargets: [
+        { sequence: 1, price: 7753.25 },
+        { sequence: 2, price: 7763.5 },
         {
-          targetId: "TARGET_1",
-          sequence: 1,
-          purpose: "TARGET_1_ZONE_TOUCH",
-          price: 7600,
-        },
-        {
-          targetId: "TARGET_2",
-          sequence: 2,
-          purpose: "TARGET_2_ZONE_MIDLINE",
-          price: 7605,
-        },
-        {
-          targetId: "RUNNER_HANDOFF",
           sequence: 3,
-          purpose: "ENGINE9_RUNNER_HANDOFF",
           price: null,
-          runnerHandoffRequired: true,
+          purpose: "THIRD_PROFIT_TARGET_ZONE_MIDLINE_TESTING",
+          runnerHandoffRequired: false,
         },
       ],
+      testingExitLifecycle: {
+        active: true,
+        mode: "SIMPLIFIED_THREE_BLOCK_TESTING",
+        block1: { price: 7753.25 },
+        block2: { price: 7763.5 },
+        block3: { price: 7763.5 },
+        remainingRunnerExpected: false,
+      },
     },
     engine7SizingPreview: {
-      ...identity,
+      ...IDENTITY,
       direction: "LONG",
-
-      productionRiskBudgetDollars: 150,
-      productionRiskSupportedContracts: 2,
-      productionEstimatedRiskDollars: 180,
+      productionRiskBudgetDollars: 1000,
+      productionRiskSupportedContracts: 1,
+      productionEstimatedRiskDollars: 642.5,
       productionThreeContractPlanQualified: false,
       productionRiskLimited: true,
-
-      testingDataCollectionMode: true,
-      testingRiskOverrideApplied: true,
-      paperTestingContracts: 3,
-      testingThreeContractPlanQualified: true,
-
+      testingDataCollectionMode: false,
+      testingRiskOverrideApplied: false,
+      paperTestingContracts: 0,
+      testingThreeContractPlanQualified: false,
       threeContractAllocation: {
-        block1Contracts: 1,
-        block2Contracts: 1,
-        block3Contracts: 1,
+        block1Contracts: 0,
+        block2Contracts: 0,
+        block3Contracts: 0,
       },
     },
     engine6PaperPermission: {
-      planningAllowed: true,
-      allowed: true,
       decision: "FAST_INTRADAY_PAPER_ALLOW",
+      direction: "LONG",
+      allowed: true,
+      locked: true,
+      planningAllowed: true,
     },
     engine27MinuteDecision: {
-      ...identity,
+      ...IDENTITY,
       direction: "LONG",
+      decisionState: "ALMOST_READY",
       readiness: {
         reactionReady: true,
         participationReady: true,
         permissionReady: true,
-        plannerReady: true,
+        plannerReady: false,
         invalidated: false,
       },
     },
-    engine27MinuteFib: {
-      degree: "minute",
-      activeLadder: "EXTENSION",
-      validation: {
-        available: true,
-        matches: true,
-      },
-      extensions: {
-        e100: { price: 7605 },
-        e1168: { price: 7604.75 },
-        e1272: { price: "not-a-number" },
-        e1618: { price: 7612.25 },
-        e200: { price: 7620 },
-        e2618: { price: 7630 },
-      },
-    },
-    snapshotTime: "2026-07-23T20:00:00.000Z",
-  };
-
-  return {
-    ...base,
-    ...overrides,
+    engine27MinuteFib: null,
+    snapshotTime: "2026-08-31T04:31:09.771Z",
   };
 }
 
-function build(overrides = {}) {
-  return buildEngine9OfficialManagementPlan(makeInputs(overrides));
-}
-
-test("accepts two priced targets plus a null runner handoff", () => {
-  const plan = build();
-  assert.equal(plan.upstreamState.runnerHandoffAccepted, true);
-  assert.ok(plan.reasonCodes.includes("ENGINE26B_NULL_RUNNER_HANDOFF_ACCEPTED"));
+test("current Strategy 1 identity enters PHASE_8A", () => {
+  const plan = buildEngine9OfficialManagementPlan(makeInputs());
+  assert.equal(plan.phase, "PHASE_8A");
+  assert.equal(plan.setupClass, "NEGOTIATED_ZONE_ROTATION");
 });
 
-test("preserves Target 1 and Target 2 exactly from the Engine 26A target zone", () => {
-  const plan = build();
-  assert.equal(plan.officialTargets[0].price, 7600);
-  assert.equal(plan.officialTargets[1].price, 7605);
-  assert.equal(plan.openingManagementPlan.blocks[0].targetPrice, 7600);
-  assert.equal(plan.openingManagementPlan.blocks[1].targetPrice, 7605);
-});
-
-test("selects the first approved numeric Minute Fib target strictly above Target 2", () => {
-  const plan = build();
-  assert.equal(plan.runnerTargetPrice, 7612.25);
-  assert.equal(plan.runnerPlan.sourceTargetId, "e1618");
-  assert.equal(plan.runnerTargetStatus, "RUNNER_TARGET_SELECTED");
-});
-
-test("rejects targets equal to or below Target 2 and non-numeric candidates", () => {
-  const plan = build();
-  assert.notEqual(plan.runnerPlan.sourceTargetId, "e100");
-  assert.notEqual(plan.runnerPlan.sourceTargetId, "e1168");
-  assert.notEqual(plan.runnerPlan.sourceTargetId, "e1272");
-  assert.equal(plan.runnerPlan.sourceTargetId, "e1618");
-});
-
-test("does not invent a runner target when no approved target qualifies", () => {
-  const inputs = makeInputs();
-  for (const level of Object.values(inputs.engine27MinuteFib.extensions)) {
-    level.price = 7605;
-  }
-  const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.runnerTargetPrice, null);
-  assert.equal(plan.runnerTargetStatus, "RUNNER_TARGET_UNAVAILABLE");
-  assert.equal(plan.managementReady, false);
-  assert.ok(plan.blockers.includes("RUNNER_TARGET_UNAVAILABLE"));
-});
-
-test("requires an exact qualified 1 + 1 + 1 Engine 7A allocation", () => {
-  const ready = build();
-  assert.deepEqual(ready.threeContractAllocation, {
-    block1Contracts: 1,
-    block2Contracts: 1,
-    block3Contracts: 1,
-  });
-  assert.equal(ready.upstreamState.allocationValid, true);
-
-  const missingInputs = makeInputs();
-  delete missingInputs.engine7SizingPreview.threeContractAllocation;
-  const missing = buildEngine9OfficialManagementPlan(missingInputs);
-  assert.equal(missing.managementReady, false);
-  assert.ok(missing.blockers.includes("ENGINE7A_ALLOCATION_INVALID"));
-
-  const unqualifiedInputs = makeInputs();
-  unqualifiedInputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
-  const unqualified = buildEngine9OfficialManagementPlan(unqualifiedInputs);
-  assert.equal(unqualified.managementReady, false);
-  assert.ok(
-    unqualified.blockers.includes("ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED")
-  );
-});
-
-test("blocks identity mismatch without repairing identity", () => {
-  const inputs = makeInputs();
-  inputs.engine27MinuteDecision.zoneId = "DIFFERENT-ZONE";
-  const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.planStatus, "IDENTITY_MISMATCH");
-  assert.equal(plan.managementReady, false);
-  assert.ok(plan.blockers.includes("PIPELINE_IDENTITY_MISMATCH"));
-  assert.equal(plan.zoneId, IDENTITY.zoneId);
-});
-
-test("blocks candidate invalidation", () => {
-  const inputs = makeInputs();
-  inputs.engine27MinuteDecision.readiness.invalidated = true;
-  const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.managementReady, false);
-  assert.ok(plan.blockers.includes("CANDIDATE_INVALIDATED"));
-});
-
-test("blocks invalid entry and invalid stop", () => {
-  const entryInputs = makeInputs();
-  entryInputs.engine26ProposedGeometry.proposedEntryPrice = null;
-  const badEntry = buildEngine9OfficialManagementPlan(entryInputs);
-  assert.ok(badEntry.blockers.includes("INVALID_ENTRY_GEOMETRY"));
-
-  const stopInputs = makeInputs();
-  stopInputs.engine26ProposedGeometry.proposedStopPrice = 7575;
-  const badStop = buildEngine9OfficialManagementPlan(stopInputs);
-  assert.ok(badStop.blockers.includes("INVALID_STOP_GEOMETRY"));
-});
-
-test("blocks missing or malformed Engine 26B runner handoff", () => {
-  const missingInputs = makeInputs();
-  missingInputs.engine26ProposedGeometry.proposedTargets.pop();
-  const missing = buildEngine9OfficialManagementPlan(missingInputs);
-  assert.ok(missing.blockers.includes("ENGINE26B_RUNNER_HANDOFF_MISSING"));
-
-  const malformedInputs = makeInputs();
-  malformedInputs.engine26ProposedGeometry.proposedTargets[2].price = 7610;
-  const malformed = buildEngine9OfficialManagementPlan(malformedInputs);
-  assert.ok(malformed.blockers.includes("ENGINE26B_RUNNER_HANDOFF_MISSING"));
-});
-
-test("blocks missing or changed Target 1 and Target 2", () => {
-  const changed1Inputs = makeInputs();
-  changed1Inputs.engine26ProposedGeometry.proposedTargets[0].price = 7600.25;
-  const changed1 = buildEngine9OfficialManagementPlan(changed1Inputs);
-  assert.ok(changed1.blockers.includes("TARGET_1_CHANGED"));
-
-  const changed2Inputs = makeInputs();
-  changed2Inputs.engine26ProposedGeometry.proposedTargets[1].price = 7605.25;
-  const changed2 = buildEngine9OfficialManagementPlan(changed2Inputs);
-  assert.ok(changed2.blockers.includes("TARGET_2_CHANGED"));
-});
-
-test("non-Strategy-1 and Subminute inputs stay on legacy behavior", () => {
-  const legacy = buildEngine9OfficialManagementPlan({});
-  assert.equal(legacy.phase, undefined);
-  assert.equal(legacy.planStatus, "WAITING_FOR_PROPOSED_GEOMETRY");
-
-  const subminute = buildEngine9OfficialManagementPlan({
-    engine26LocationCandidate: {
-      ...IDENTITY,
-      laneId: "subminute",
-      strategyId: "subminute_scalp@10m",
-    },
-  });
-  assert.equal(subminute.phase, undefined);
-  assert.equal(subminute.planStatus, "WAITING_FOR_PROPOSED_GEOMETRY");
-});
-
-test("does not mutate any input and creates no execution authority", () => {
-  const inputs = makeInputs();
-  const before = structuredClone(inputs);
-  const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.deepEqual(inputs, before);
-  assert.equal(plan.noPermissionCreated, true);
-  assert.equal(plan.noSizingCreated, true);
-  assert.equal(plan.noExecution, true);
-  assert.equal(plan.noOrderCreated, true);
-  assert.equal(plan.noJournalWrite, true);
-  assert.equal(plan.phase8BImplemented, false);
-  assert.equal(plan.dynamicManagementImplemented, false);
-});
-
-test("ready fixture publishes the official non-executable opening plan", () => {
-  const plan = build();
+test("locked Engine 6 plus ready Engine 26B creates official plan", () => {
+  const plan = buildEngine9OfficialManagementPlan(makeInputs());
   assert.equal(plan.planStatus, "OFFICIAL_PLAN_READY");
   assert.equal(plan.managementReady, true);
   assert.equal(plan.official, true);
-  assert.equal(plan.openingManagementPlan.totalContracts, 3);
-  assert.deepEqual(
-    plan.openingManagementPlan.blocks.map((block) => block.contracts),
-    [1, 1, 1]
-  );
+  assert.match(plan.planId, /^E9P-/);
 });
 
-
-test("valid explicit testing path qualifies allocation and preserves production risk truth", () => {
-  const plan = build();
-  assert.equal(plan.testingDataCollectionMode, true);
-  assert.equal(plan.testingRiskOverrideApplied, true);
-  assert.equal(plan.paperTestingContracts, 3);
-  assert.equal(plan.testingThreeContractPlanQualified, true);
-  assert.equal(plan.testingAllocationAccepted, true);
-  assert.equal(
-    plan.allocationQualificationSource,
-    "ENGINE7A_TESTING_DATA_COLLECTION"
-  );
-  assert.equal(plan.productionRiskBudgetDollars, 150);
-  assert.equal(plan.productionRiskSupportedContracts, 2);
-  assert.equal(plan.productionEstimatedRiskDollars, 180);
-  assert.equal(plan.productionThreeContractPlanQualified, false);
-  assert.equal(plan.productionRiskLimited, true);
-  assert.equal(plan.productionRiskApproved, undefined);
-  assert.equal(plan.managementReady, true);
-});
-
-test("testing mode off falls back to valid production qualification", () => {
+test("Engine 27 planner readiness is context only", () => {
   const inputs = makeInputs();
-  inputs.engine7SizingPreview.testingDataCollectionMode = false;
-  inputs.engine7SizingPreview.testingRiskOverrideApplied = false;
-  inputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
-  inputs.engine7SizingPreview.paperTestingContracts = 0;
-  inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
-
+  inputs.engine27MinuteDecision.decisionState = "ALMOST_READY";
+  inputs.engine27MinuteDecision.readiness.plannerReady = false;
   const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.testingAllocationAccepted, false);
-  assert.equal(
-    plan.allocationQualificationSource,
-    "ENGINE7A_PRODUCTION_RISK_APPROVAL"
-  );
   assert.equal(plan.managementReady, true);
+  assert.equal(plan.upstreamState.engine27HardGateApplied, false);
+  assert.ok(plan.warnings.includes("ENGINE27_PLANNER_NOT_READY_CONTEXT_ONLY"));
 });
 
-test("missing or invalid testing evidence does not block valid production qualification", () => {
+test("Engine 7 sizing preview does not veto Engine 9 management", () => {
   const inputs = makeInputs();
-  delete inputs.engine7SizingPreview.testingRiskOverrideApplied;
-  inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
-
+  inputs.engine7SizingPreview.threeContractAllocation = {
+    block1Contracts: 0,
+    block2Contracts: 0,
+    block3Contracts: 0,
+  };
   const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.testingAllocationAccepted, false);
-  assert.equal(
-    plan.allocationQualificationSource,
-    "ENGINE7A_PRODUCTION_RISK_APPROVAL"
-  );
   assert.equal(plan.managementReady, true);
+  assert.equal(plan.upstreamState.engine7HardGateApplied, false);
 });
 
-test("neither testing nor production qualification remains waiting", () => {
-  const inputs = makeInputs();
-  inputs.engine7SizingPreview.testingThreeContractPlanQualified = false;
-  inputs.engine7SizingPreview.productionThreeContractPlanQualified = false;
+test("uses Engine 26B locked direction rather than candidate directional watch", () => {
+  const plan = buildEngine9OfficialManagementPlan(makeInputs());
+  assert.equal(plan.upstreamState.candidateDirection, "SHORT");
+  assert.equal(plan.direction, "LONG");
+  assert.equal(plan.upstreamState.geometryDirection, "LONG");
+});
 
+test("publishes simplified three-block lifecycle with no runner", () => {
+  const plan = buildEngine9OfficialManagementPlan(makeInputs());
+  assert.deepEqual(plan.officialTargets.map((t) => t.price), [
+    7753.25,
+    7763.5,
+    7763.5,
+  ]);
+  assert.deepEqual(plan.officialTargets.map((t) => t.contracts), [1, 1, 1]);
+  assert.equal(plan.runnerPlan.enabled, false);
+  assert.equal(plan.runnerTargetStatus, "NO_RUNNER_REQUIRED");
+  assert.equal(plan.openingManagementPlan.runnerExpected, false);
+});
+
+test("does not require numeric Engine 26B third proposed target", () => {
+  const inputs = makeInputs();
+  inputs.engine26ProposedGeometry.proposedTargets[2].price = null;
   const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.testingAllocationAccepted, false);
-  assert.equal(plan.allocationQualificationSource, null);
+  assert.equal(plan.managementReady, true);
+  assert.equal(plan.officialTargets[2].price, 7763.5);
+});
+
+test("fails closed only when official management geometry is impossible", () => {
+  const inputs = makeInputs();
+  inputs.engine26ProposedGeometry.proposedEntryPrice = null;
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.planStatus, "INVALID_ENTRY_GEOMETRY");
   assert.equal(plan.managementReady, false);
-  assert.equal(plan.official, false);
-  assert.ok(
-    plan.blockers.includes("ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED")
-  );
+  assert.equal(plan.planId, null);
 });
 
-test("testing and production evidence are never blended", () => {
+test("fails closed on candidate/geometry identity corruption", () => {
   const inputs = makeInputs();
-  inputs.engine7SizingPreview.testingDataCollectionMode = true;
-  inputs.engine7SizingPreview.testingRiskOverrideApplied = false;
-  inputs.engine7SizingPreview.testingThreeContractPlanQualified = true;
-  inputs.engine7SizingPreview.paperTestingContracts = 3;
-  inputs.engine7SizingPreview.productionThreeContractPlanQualified = false;
-
+  inputs.engine26ProposedGeometry.zoneId = "WRONG-ZONE";
   const plan = buildEngine9OfficialManagementPlan(inputs);
-  assert.equal(plan.testingAllocationAccepted, false);
-  assert.equal(plan.allocationQualificationSource, null);
+  assert.equal(plan.planStatus, "IDENTITY_MISMATCH");
   assert.equal(plan.managementReady, false);
 });
 
-test("all non-risk gate failures block both testing and production paths", () => {
-  const mutations = [
-    (inputs) => { inputs.engine6PaperPermission.allowed = false; },
-    (inputs) => { inputs.engine26ProposedGeometry.geometryReady = false; },
-    (inputs) => { inputs.engine27MinuteDecision.readiness.reactionReady = false; },
-    (inputs) => { inputs.engine27MinuteDecision.readiness.participationReady = false; },
-    (inputs) => { inputs.engine27MinuteDecision.readiness.permissionReady = false; },
-    (inputs) => { inputs.engine27MinuteDecision.readiness.plannerReady = false; },
-    (inputs) => {
-      for (const level of Object.values(inputs.engine27MinuteFib.extensions)) {
-        level.price = 7605;
-      }
-    },
-  ];
+test("SHORT geometry is supported", () => {
+  const inputs = makeInputs();
+  inputs.engine26LocationCandidate.direction = "LONG";
+  inputs.engine26ProposedGeometry.direction = "SHORT";
+  inputs.engine26ProposedGeometry.proposedEntryPrice = 7696.5;
+  inputs.engine26ProposedGeometry.proposedStopPrice = 7705.75;
+  inputs.engine26ProposedGeometry.target1Price = 7690.75;
+  inputs.engine26ProposedGeometry.target2Price = 7650.25;
+  inputs.engine26ProposedGeometry.target3Price = 7650.25;
+  inputs.engine26ProposedGeometry.testingExitLifecycle.block3.price = 7650.25;
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.equal(plan.direction, "SHORT");
+  assert.equal(plan.managementReady, true);
+  assert.deepEqual(plan.officialTargets.map((t) => t.price), [
+    7690.75,
+    7650.25,
+    7650.25,
+  ]);
+});
 
-  for (const mutate of mutations) {
-    const inputs = makeInputs();
-    inputs.engine7SizingPreview.productionThreeContractPlanQualified = true;
-    mutate(inputs);
-    const plan = buildEngine9OfficialManagementPlan(inputs);
-    assert.equal(plan.testingAllocationAccepted, false);
-    assert.equal(plan.allocationQualificationSource, null);
-    assert.equal(plan.managementReady, false);
-  }
+test("does not create downstream authority", () => {
+  const plan = buildEngine9OfficialManagementPlan(makeInputs());
+  assert.equal(plan.noPermissionCreated, true);
+  assert.equal(plan.noSizingCreated, true);
+  assert.equal(plan.noOrderCreated, true);
+  assert.equal(plan.noExecution, true);
+  assert.equal(plan.noJournalWrite, true);
 });
