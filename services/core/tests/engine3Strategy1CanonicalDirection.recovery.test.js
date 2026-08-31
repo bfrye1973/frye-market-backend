@@ -453,3 +453,121 @@ test("15 two clean 10m closes outside zone cannot manufacture direction from NEU
   assert.equal(short.direction, "NEUTRAL");
   assert.equal(short.travelModeActivated, false);
 });
+
+test("16 established SHORT inside zone cannot be reversed by opposite completed 1m LONG", () => {
+  const result = build({
+    oneMinute: observation1m({
+      completedState: "PUSHING_HIGHER",
+      completedDirection: "LONG",
+      completedQuality: "GOOD",
+      currentState: "PUSHING_HIGHER",
+      currentDirection: "LONG",
+      currentQuality: "GOOD",
+      price: 100,
+    }),
+    fiveMinute: validation5m({
+      state: "PUSHING_HIGHER",
+      direction: "LONG",
+      quality: "STRONG",
+    }),
+    tenMinuteDiagnostic: confirmation10m({
+      state: "PUSHING_HIGHER",
+      direction: "LONG",
+      quality: "STRONG",
+    }),
+    engine26: handoff({
+      bias: "SHORT",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "INSIDE_ZONE" },
+    }),
+    previousCanonicalDirection: "SHORT",
+    previousReactionConfirmed: true,
+  });
+
+  assert.equal(result.insideNegotiatedZone, true);
+
+  // Current 1m evidence is still analyzed and may propose LONG.
+  assert.equal(result.reactionCandidateDirection, "LONG");
+  assert.equal(result.reactionCandidateQuality, "GOOD");
+  assert.equal(result.reactionCandidateConfirmed, true);
+
+  // But 1m alone may not reverse the already-confirmed SHORT.
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.insideZoneDirectionLocked, true);
+  assert.equal(result.directionEstablishedByFresh1m, false);
+
+  assert.equal(
+    result.canonicalResolutionStatus,
+    "NEGOTIATED_ZONE_REACTION_SHORT_PERSISTED"
+  );
+
+  assert.equal(
+    result.canonicalResolutionReason,
+    "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_1M_ALONE"
+  );
+
+  assert.ok(
+    result.reasonCodes.includes(
+      "ENGINE3_ESTABLISHED_ZONE_REACTION_DIRECTION_LOCKED"
+    )
+  );
+});
+
+test("17 established LONG inside zone cannot be reversed by opposite completed 1m SHORT", () => {
+  const result = build({
+    oneMinute: observation1m({
+      completedState: "PUSHING_LOWER",
+      completedDirection: "SHORT",
+      completedQuality: "GOOD",
+      currentState: "PUSHING_LOWER",
+      currentDirection: "SHORT",
+      currentQuality: "GOOD",
+      price: 100,
+    }),
+    fiveMinute: validation5m({
+      state: "PUSHING_LOWER",
+      direction: "SHORT",
+      quality: "STRONG",
+    }),
+    tenMinuteDiagnostic: confirmation10m({
+      state: "PUSHING_LOWER",
+      direction: "SHORT",
+      quality: "STRONG",
+    }),
+    engine26: handoff({
+      bias: "LONG",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "INSIDE_ZONE" },
+    }),
+    previousCanonicalDirection: "LONG",
+    previousReactionConfirmed: true,
+  });
+
+  assert.equal(result.insideNegotiatedZone, true);
+
+  // Current 1m evidence is still analyzed and may propose SHORT.
+  assert.equal(result.reactionCandidateDirection, "SHORT");
+  assert.equal(result.reactionCandidateQuality, "GOOD");
+  assert.equal(result.reactionCandidateConfirmed, true);
+
+  // But 1m alone may not reverse the already-confirmed LONG.
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.insideZoneDirectionLocked, true);
+  assert.equal(result.directionEstablishedByFresh1m, false);
+
+  assert.equal(
+    result.canonicalResolutionStatus,
+    "NEGOTIATED_ZONE_REACTION_LONG_PERSISTED"
+  );
+
+  assert.equal(
+    result.canonicalResolutionReason,
+    "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_1M_ALONE"
+  );
+
+  assert.ok(
+    result.reasonCodes.includes(
+      "ENGINE3_ESTABLISHED_ZONE_REACTION_DIRECTION_LOCKED"
+    )
+  );
+});
