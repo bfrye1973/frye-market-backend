@@ -585,6 +585,17 @@ function resolveFinalCanonicalDirection({
   const previousDirectional =
     previousDirection === "LONG" ||
     previousDirection === "SHORT";
+/*
+ * Once Engine 3 has already confirmed a directional reaction
+ * for this negotiated-zone cycle, later 1m candles remain
+ * diagnostic and may NOT reverse that established direction.
+ *
+ * Engine 26 midpoint completion is handled before this lock,
+ * so a completed trip still resets Engine 3 to NEUTRAL.
+ */
+const previousConfirmedDirectional =
+  previousReactionConfirmed === true &&
+  previousDirectional;
 
   /*
    * First snapshot after a qualified negotiated-zone direction leaves
@@ -630,6 +641,14 @@ function resolveFinalCanonicalDirection({
   let reactionTimeframe = null;
   let directionPersistenceActive = false;
   let directionEstablishedByFresh1m = false;
+
+  /*
+   * Inside-zone lock:
+   * the previously confirmed Engine 3 reaction remains authoritative.
+   * Current 1m evidence continues to update diagnostics only.
+   */
+  let insideZoneDirectionLocked = false;
+
   let ema10ResetTriggered = false;
   let travelModeActive = false;
   const travelModeActivated = false;
