@@ -1140,18 +1140,9 @@ const engine27DirectionMatched =
 const STRATEGY1_IDENTITY = Object.freeze({
   laneId: "minute",
   strategyId: "intraday_scalp@10m",
-  setupClass: "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+  setupClass: "NEGOTIATED_ZONE_ROTATION",
   symbol: "ES",
 });
-
-const APPROVED_MINUTE_RUNNER_LABELS = Object.freeze([
-  "e100",
-  "e1168",
-  "e1272",
-  "e1618",
-  "e200",
-  "e2618",
-]);
 
 const REQUIRED_IDENTITY_FIELDS = Object.freeze([
   "laneId",
@@ -1197,76 +1188,9 @@ function targetPrice(target) {
   return toNumber(target?.price ?? target?.targetPrice);
 }
 
-function targetPurpose(target) {
-  return safeUpper(target?.purpose ?? target?.sourcePurpose);
-}
-
-function findTargetByPurpose(targets, purpose) {
-  if (!Array.isArray(targets)) return null;
-  const expected = safeUpper(purpose);
-  return targets.find((target) => targetPurpose(target) === expected) || null;
-}
-
 function findTargetBySequence(targets, sequence) {
   if (!Array.isArray(targets)) return null;
   return targets.find((target) => Number(target?.sequence) === sequence) || null;
-}
-
-function resolveStrategy1Targets(rawTargets) {
-  const target1 =
-    findTargetByPurpose(rawTargets, "TARGET_1_ZONE_TOUCH") ||
-    findTargetByPurpose(rawTargets, "TARGET_1") ||
-    findTargetBySequence(rawTargets, 1) ||
-    rawTargets?.[0] ||
-    null;
-
-  const target2 =
-    findTargetByPurpose(rawTargets, "TARGET_2_ZONE_MIDLINE") ||
-    findTargetByPurpose(rawTargets, "TARGET_2") ||
-    findTargetBySequence(rawTargets, 2) ||
-    rawTargets?.[1] ||
-    null;
-
-  const runnerHandoff =
-    findTargetByPurpose(rawTargets, "ENGINE9_RUNNER_HANDOFF") ||
-    null;
-
-  return { target1, target2, runnerHandoff };
-}
-
-function validRunnerHandoff(target) {
-  return (
-    targetPurpose(target) === "ENGINE9_RUNNER_HANDOFF" &&
-    target?.price === null &&
-    target?.runnerHandoffRequired === true
-  );
-}
-
-function selectMinuteRunnerTarget({ minuteFib, target2Price }) {
-  if (
-    minuteFib?.degree !== "minute" ||
-    safeUpper(minuteFib?.activeLadder) !== "EXTENSION" ||
-    minuteFib?.validation?.available !== true ||
-    minuteFib?.validation?.matches !== true ||
-    target2Price == null
-  ) {
-    return null;
-  }
-
-  for (const label of APPROVED_MINUTE_RUNNER_LABELS) {
-    const level = minuteFib?.extensions?.[label] || null;
-    const price = toNumber(level?.price);
-    if (price != null && price > target2Price) {
-      return {
-        label,
-        price: round2(price),
-        purpose: level?.purpose ?? null,
-        source: "ENGINE27B_MINUTE_EXTENSION",
-      };
-    }
-  }
-
-  return null;
 }
 
 function readThreeContractAllocation(engine7SizingPreview) {
@@ -1289,12 +1213,60 @@ function readThreeContractAllocation(engine7SizingPreview) {
   return { block1, block2, block3 };
 }
 
-function buildStrategy1OfficialTargets({
+function directionallyValidStop({ direction, entryPrice, stopPrice }) {
+  if (entryPrice == null || stopPrice == null) return false;
+  if (direction === "LONG") return stopPrice < entryPrice;
+  if (direction === "SHORT") return stopPrice > entryPrice;
+  return false;
+}
+
+function directionallyValidTarget({ direction, entryPrice, price }) {
+  if (entryPrice == null || price == null) return false;
+  if (direction === "LONG") return price > entryPrice;
+  if (direction === "SHORT") return price < entryPrice;
+  return false;
+}
+
+function resolveSimplifiedTestingTargets(geometry) {
+  const proposedTargets = Array.isArray(geometry?.proposedTargets)
+    ? geometry.proposedTargets
+    : [];
+
+  const proposed1 = findTargetBySequence(proposedTargets, 1);
+  const proposed2 = findTargetBySequence(proposedTargets, 2);
+
+  const target1Price =
+    toNumber(geometry?.target1Price) ??
+    toNumber(geometry?.targetStopGeometry?.target1Price) ??
+    targetPrice(proposed1);
+
+  const target2Price =
+    toNumber(geometry?.target2Price) ??
+    toNumber(geometry?.targetStopGeometry?.target2Price) ??
+    targetPrice(proposed2);
+
+  // Frozen Strategy 1 testing lifecycle:
+  // Block 3 exits at the same target-zone midline as Block 2.
+  // No runner target is required or created by Engine 9.
+  const target3Price =
+    toNumber(geometry?.target3Price) ??
+    toNumber(geometry?.testingExitLifecycle?.block3?.price) ??
+    target2Price;
+
+  return {
+    target1Price,
+    target2Price,
+    target3Price,
+  };
+}
+
+function buildSimplifiedTestingOfficialTargets({
+  direction,
   entryPrice,
   stopDistancePoints,
   target1Price,
   target2Price,
-  runnerTarget,
+  target3Price,
 }) {
   const definitions = [
     {
@@ -1305,8 +1277,8 @@ function buildStrategy1OfficialTargets({
       allocationPct: 33,
       role: "FIRST_SCALE",
       purpose: "TARGET_1_ZONE_TOUCH",
-      source: "ENGINE26A_TARGET_ZONE_LOW",
-      sourceTargetId: "TARGET_1",
+      source: "ENGINE26B_TARGET_1",
+      sourceTargetId: "TARGET_1_ZONE_TOUCH",
     },
     {
       targetId: "T2",
@@ -1316,19 +1288,19 @@ function buildStrategy1OfficialTargets({
       allocationPct: 33,
       role: "SECOND_SCALE",
       purpose: "TARGET_2_ZONE_MIDLINE",
-      source: "ENGINE26A_TARGET_ZONE_MIDLINE",
-      sourceTargetId: "TARGET_2",
+      source: "ENGINE26B_TARGET_2",
+      sourceTargetId: "TARGET_2_ZONE_MIDLINE",
     },
     {
       targetId: "T3",
       sequence: 3,
-      price: runnerTarget?.price ?? null,
+      price: target3Price,
       contracts: 1,
       allocationPct: 34,
-      role: "RUNNER_OBJECTIVE",
-      purpose: "ENGINE9_RUNNER",
-      source: runnerTarget?.source ?? "ENGINE27B_MINUTE_EXTENSION",
-      sourceTargetId: runnerTarget?.label ?? null,
+      role: "FINAL_SCALE",
+      purpose: "TARGET_3_ZONE_MIDLINE_TESTING",
+      source: "ENGINE26B_SIMPLIFIED_TESTING_LIFECYCLE",
+      sourceTargetId: "TARGET_3_ZONE_MIDLINE_TESTING",
     },
   ];
 
@@ -1336,6 +1308,8 @@ function buildStrategy1OfficialTargets({
     const distancePoints =
       target.price == null
         ? null
+        : direction === "SHORT"
+        ? round2(entryPrice - target.price)
         : round2(target.price - entryPrice);
 
     const rMultiple =
@@ -1375,6 +1349,7 @@ function buildStrategy1Phase8APlan({
 }) {
   const candidate = engine26LocationCandidate;
   const geometry = engine26ProposedGeometry;
+
   const referenceIdentity = copyIdentity(candidate);
   const geometryIdentity = copyIdentity(geometry);
   const sizingIdentity = copyIdentity(engine7SizingPreview);
@@ -1383,6 +1358,8 @@ function buildStrategy1Phase8APlan({
   const blockers = [];
   const reasonCodes = [
     "ENGINE9_STRATEGY1_PHASE8A",
+    "ENGINE9_NON_BLOCKING_MANAGEMENT_CONTRACT",
+    "SIMPLIFIED_THREE_BLOCK_TESTING_LIFECYCLE",
     "OPENING_MANAGEMENT_PLAN_ONLY",
     "NO_DYNAMIC_MANAGEMENT",
     "NO_PERMISSION_CREATED",
@@ -1400,18 +1377,27 @@ function buildStrategy1Phase8APlan({
     referenceIdentity.symbol === STRATEGY1_IDENTITY.symbol;
 
   const completeIdentity = identityComplete(referenceIdentity);
-  const geometryIdentityMatched = completeIdentity && identityMatches(referenceIdentity, geometryIdentity);
-  const sizingIdentityMatched = completeIdentity && identityMatches(referenceIdentity, sizingIdentity);
-  const traderIdentityMatched = completeIdentity && identityMatches(referenceIdentity, traderIdentity);
+  const geometryIdentityMatched =
+    completeIdentity && identityMatches(referenceIdentity, geometryIdentity);
+
+  // Engine 7A and Engine 27 are context only for Engine 9 plan creation.
+  // Their identity/readiness may be published diagnostically but cannot veto
+  // an already locked Engine 6 + Engine 26B package.
+  const sizingIdentityMatched =
+    completeIdentity && identityMatches(referenceIdentity, sizingIdentity);
+  const traderIdentityMatched =
+    completeIdentity && identityMatches(referenceIdentity, traderIdentity);
+
   const identityAgreement =
     requiredIdentityCorrect &&
     completeIdentity &&
-    geometryIdentityMatched &&
-    sizingIdentityMatched &&
-    traderIdentityMatched;
+    geometryIdentityMatched;
 
-  if (!identityAgreement) blockers.push("PIPELINE_IDENTITY_MISMATCH");
+  if (!identityAgreement) {
+    blockers.push("PIPELINE_IDENTITY_MISMATCH");
+  }
 
+  const direction = safeUpper(geometry?.direction);
   const entryPrice = toNumber(geometry?.proposedEntryPrice);
   const stopPrice = toNumber(geometry?.proposedStopPrice);
   const stopDistancePoints =
@@ -1419,56 +1405,160 @@ function buildStrategy1Phase8APlan({
       ? round2(Math.abs(entryPrice - stopPrice))
       : null;
 
+  const directionValid = ["LONG", "SHORT"].includes(direction);
   const entryValid = entryPrice != null && entryPrice > 0;
   const stopValid =
+    directionValid &&
     stopPrice != null &&
     stopPrice > 0 &&
-    referenceIdentity?.direction !== "SHORT" &&
-    stopPrice < entryPrice;
+    directionallyValidStop({ direction, entryPrice, stopPrice });
 
+  if (!directionValid) blockers.push("INVALID_DIRECTION");
   if (!entryValid) blockers.push("INVALID_ENTRY_GEOMETRY");
   if (!stopValid) blockers.push("INVALID_STOP_GEOMETRY");
 
-  if (geometry?.geometryReady !== true) {
+  const geometryReady = geometry?.geometryReady === true;
+  if (!geometryReady) {
     blockers.push("ENGINE26B_GEOMETRY_INCOMPLETE");
   }
 
-  const targetZone = candidate?.targetZone || null;
-  const targetZoneLow = toNumber(targetZone?.low);
-  const targetZoneMidline = toNumber(targetZone?.midline);
-  if (targetZoneLow == null || targetZoneMidline == null) {
-    blockers.push("TARGET_ZONE_UNAVAILABLE");
-  }
+  const {
+    target1Price,
+    target2Price,
+    target3Price,
+  } = resolveSimplifiedTestingTargets(geometry);
 
-  const { target1, target2, runnerHandoff } = resolveStrategy1Targets(
-    geometry?.proposedTargets
-  );
-  const target1Price = targetPrice(target1);
-  const target2Price = targetPrice(target2);
-
-  if (target1Price == null) blockers.push("TARGET_1_MISSING");
-  if (target2Price == null) blockers.push("TARGET_2_MISSING");
-
-  if (
-    target1Price != null &&
-    targetZoneLow != null &&
-    target1Price !== targetZoneLow
-  ) {
-    blockers.push("TARGET_1_CHANGED");
-  }
-
-  if (
+  const target1Valid = directionallyValidTarget({
+    direction,
+    entryPrice,
+    price: target1Price,
+  });
+  const target2Valid = directionallyValidTarget({
+    direction,
+    entryPrice,
+    price: target2Price,
+  });
+  const target3Valid =
+    target3Price != null &&
     target2Price != null &&
-    targetZoneMidline != null &&
-    target2Price !== targetZoneMidline
-  ) {
-    blockers.push("TARGET_2_CHANGED");
+    target3Price === target2Price &&
+    directionallyValidTarget({
+      direction,
+      entryPrice,
+      price: target3Price,
+    });
+
+  if (!target1Valid) blockers.push("TARGET_1_INVALID");
+  if (!target2Valid) blockers.push("TARGET_2_INVALID");
+  if (!target3Valid) blockers.push("TARGET_3_INVALID");
+
+  const engine6Decision = safeUpper(engine6PaperPermission?.decision);
+  const engine6LockedGo =
+    engine6PaperPermission?.allowed === true &&
+    engine6PaperPermission?.locked === true &&
+    VALID_PERMISSION_DECISIONS.has(engine6Decision);
+
+  if (!engine6LockedGo) {
+    blockers.push("ENGINE6_LOCKED_GO_REQUIRED");
   }
 
-  if (!validRunnerHandoff(runnerHandoff)) {
-    blockers.push("ENGINE26B_RUNNER_HANDOFF_MISSING");
-  }
+  const officialTargets = buildSimplifiedTestingOfficialTargets({
+    direction,
+    entryPrice,
+    stopDistancePoints,
+    target1Price,
+    target2Price,
+    target3Price,
+  });
 
+  const targetsValid =
+    officialTargets.length === 3 &&
+    officialTargets.every((target) => target.price != null);
+
+  const openingManagementPlan = {
+    planType: "OPENING_OFFICIAL_MANAGEMENT_PLAN",
+    lifecycleMode: "SIMPLIFIED_THREE_BLOCK_TESTING",
+    contracts: 3,
+    officialEntryPrice: entryPrice,
+    officialStopPrice: stopPrice,
+    sharedProtectiveStopPrice: stopPrice,
+    blocks: [
+      {
+        blockId: "BLOCK_1",
+        contractId: "CONTRACT_1",
+        contracts: 1,
+        purpose: "TARGET_1_ZONE_TOUCH",
+        targetId: "T1",
+        targetPrice: target1Price,
+      },
+      {
+        blockId: "BLOCK_2",
+        contractId: "CONTRACT_2",
+        contracts: 1,
+        purpose: "TARGET_2_ZONE_MIDLINE",
+        targetId: "T2",
+        targetPrice: target2Price,
+      },
+      {
+        blockId: "BLOCK_3",
+        contractId: "CONTRACT_3",
+        contracts: 1,
+        purpose: "TARGET_3_ZONE_MIDLINE_TESTING",
+        targetId: "T3",
+        targetPrice: target3Price,
+      },
+    ],
+    totalContracts: 3,
+    runnerExpected: false,
+    frozenAtOpening: false,
+    dynamicManagementImplemented: false,
+  };
+
+  const threeBlockManagement = {
+    enabled: targetsValid,
+    allocationMode: "EXACT_CONTRACTS",
+    totalContracts: 3,
+    totalAllocationPct: 100,
+    blocks: openingManagementPlan.blocks.map((block, index) => ({
+      ...block,
+      allocationPct: TARGET_ALLOCATIONS[index],
+      exitAtTargetId: block.targetId,
+      afterExitAction:
+        index === 0
+          ? "MOVE_STOP_TO_BREAKEVEN"
+          : index === 1
+          ? "HOLD_FINAL_CONTRACT_TO_MIDLINE"
+          : "CLOSE_REMAINDER",
+      status: block.targetPrice == null ? "UNAVAILABLE" : "PLANNED",
+    })),
+    status: targetsValid
+      ? "THREE_BLOCK_PLAN_AVAILABLE"
+      : "WAITING_FOR_VALID_TARGETS",
+  };
+
+  const runnerPlan = {
+    enabled: false,
+    blockId: null,
+    contracts: 0,
+    allocationPct: 0,
+    purpose: "NO_RUNNER_SIMPLIFIED_TESTING_LIFECYCLE",
+    runnerTargetPrice: null,
+    runnerTargetStatus: "NO_RUNNER_REQUIRED",
+    targetSource: "NONE",
+    sourceTargetId: null,
+    activationCondition: null,
+    initialProtection: null,
+    trailing: {
+      enabled: false,
+      type: "NOT_CONFIGURED",
+      value: null,
+    },
+    dynamicManagementImplemented: false,
+    status: "NO_RUNNER_REQUIRED",
+  };
+
+  // Preserve Engine 7A facts for downstream consumers, but never use them to
+  // veto Engine 9's official management plan.
   const allocation = readThreeContractAllocation(engine7SizingPreview);
   const threeContractAllocation = {
     block1Contracts: allocation.block1,
@@ -1480,8 +1570,6 @@ function buildStrategy1Phase8APlan({
     allocation.block2 === 1 &&
     allocation.block3 === 1;
 
-  // Preserve Engine 7A production-risk truth exactly. Engine 9 does not
-  // reinterpret, recalculate, or convert these values into approval.
   const productionRiskBudgetDollars =
     toNumber(engine7SizingPreview?.productionRiskBudgetDollars);
   const productionRiskSupportedContracts =
@@ -1501,8 +1589,6 @@ function buildStrategy1Phase8APlan({
       ? false
       : null;
 
-  // Testing qualification is explicit and may never be inferred from the
-  // requested size, allocation shape, environment, or production-risk state.
   const testingDataCollectionMode =
     engine7SizingPreview?.testingDataCollectionMode === true;
   const testingRiskOverrideApplied =
@@ -1512,152 +1598,17 @@ function buildStrategy1Phase8APlan({
   const testingThreeContractPlanQualified =
     engine7SizingPreview?.testingThreeContractPlanQualified === true;
 
-  const explicitTestingContractValid =
+  const testingAllocationAccepted =
     testingDataCollectionMode &&
     testingRiskOverrideApplied &&
     testingThreeContractPlanQualified &&
     paperTestingContracts === 3 &&
     allocationValid;
 
-  const productionAllocationContractValid =
-    productionThreeContractPlanQualified &&
-    allocationValid;
-
-  const engine6Decision = safeUpper(engine6PaperPermission?.decision);
-  const planningAllowed =
-    engine6PaperPermission?.planningAllowed === true &&
-    engine6PaperPermission?.allowed === true &&
-    VALID_PERMISSION_DECISIONS.has(engine6Decision);
-
-  if (!planningAllowed) blockers.push("ENGINE6_PLANNING_PERMISSION_REQUIRED");
-
-  const readiness = engine27MinuteDecision?.readiness || {};
-  const invalidated = readiness.invalidated === true;
-  if (invalidated) blockers.push("CANDIDATE_INVALIDATED");
-  if (readiness.reactionReady !== true) blockers.push("ENGINE27_REACTION_NOT_READY");
-  if (readiness.participationReady !== true) blockers.push("ENGINE27_PARTICIPATION_NOT_READY");
-  if (readiness.permissionReady !== true) blockers.push("ENGINE27_PERMISSION_NOT_READY");
-  if (readiness.plannerReady !== true) blockers.push("ENGINE27_PLANNER_NOT_READY");
-
-  const runnerTarget = selectMinuteRunnerTarget({
-    minuteFib: engine27MinuteFib,
-    target2Price: targetZoneMidline,
-  });
-  const runnerTargetPrice = runnerTarget?.price ?? null;
-  const runnerTargetStatus = runnerTarget
-    ? "RUNNER_TARGET_SELECTED"
-    : "RUNNER_TARGET_UNAVAILABLE";
-  if (!runnerTarget) blockers.push("RUNNER_TARGET_UNAVAILABLE");
-
-  const officialTargets = buildStrategy1OfficialTargets({
-    entryPrice,
-    stopDistancePoints,
-    target1Price: targetZoneLow,
-    target2Price: targetZoneMidline,
-    runnerTarget,
-  });
-
-  const openingManagementPlan = {
-    planType: "OPENING_OFFICIAL_MANAGEMENT_PLAN",
-    contracts: 3,
-    officialEntryPrice: entryPrice,
-    officialStopPrice: stopPrice,
-    sharedProtectiveStopPrice: stopPrice,
-    blocks: [
-      {
-        blockId: "BLOCK_1",
-        contractId: "CONTRACT_1",
-        contracts: 1,
-        purpose: "TARGET_1_ZONE_TOUCH",
-        targetId: "T1",
-        targetPrice: targetZoneLow,
-      },
-      {
-        blockId: "BLOCK_2",
-        contractId: "CONTRACT_2",
-        contracts: 1,
-        purpose: "TARGET_2_ZONE_MIDLINE",
-        targetId: "T2",
-        targetPrice: targetZoneMidline,
-      },
-      {
-        blockId: "BLOCK_3",
-        contractId: "CONTRACT_3",
-        contracts: 1,
-        purpose: "ENGINE9_RUNNER",
-        targetId: "T3",
-        targetPrice: runnerTargetPrice,
-      },
-    ],
-    totalContracts: 3,
-    allocationValid,
-    frozenAtOpening: false,
-    dynamicManagementImplemented: false,
-  };
-
-  const threeBlockManagement = {
-    enabled: officialTargets.every((target) => target.price != null),
-    allocationMode: "EXACT_CONTRACTS",
-    totalContracts: 3,
-    totalAllocationPct: 100,
-    blocks: openingManagementPlan.blocks.map((block, index) => ({
-      ...block,
-      allocationPct: TARGET_ALLOCATIONS[index],
-      exitAtTargetId: block.targetId,
-      afterExitAction:
-        index === 0
-          ? "MOVE_STOP_TO_BREAKEVEN"
-          : index === 1
-          ? "ARM_RUNNER_MANAGEMENT"
-          : "CLOSE_REMAINDER",
-      status: block.targetPrice == null ? "UNAVAILABLE" : "PLANNED",
-    })),
-    status: allocationValid
-      ? "THREE_BLOCK_PLAN_AVAILABLE"
-      : "WAITING_FOR_EXACT_THREE_CONTRACT_ALLOCATION",
-  };
-
-  const runnerPlan = {
-    enabled: runnerTarget != null,
-    blockId: "BLOCK_3",
-    contracts: 1,
-    allocationPct: 34,
-    purpose: "ENGINE9_RUNNER",
-    runnerTargetPrice,
-    runnerTargetStatus,
-    targetSource: runnerTarget?.source ?? "ENGINE27B_MINUTE_EXTENSION",
-    sourceTargetId: runnerTarget?.label ?? null,
-    activationCondition: {
-      type: "TARGET_FILLED",
-      targetId: "T2",
-    },
-    initialProtection: {
-      type: "BREAKEVEN_OR_BETTER",
-      referencePrice: entryPrice,
-    },
-    trailing: {
-      enabled: false,
-      type: "NOT_CONFIGURED",
-      value: null,
-    },
-    dynamicManagementImplemented: false,
-    status: runnerTargetStatus,
-  };
-
-  // Non-risk gates are the existing identity, geometry, permission,
-  // readiness, target, runner, and invalidation gates. Testing may bypass
-  // only production risk/contract limits, never these gates.
-  const nonRiskBlockers = unique(blockers);
-  const nonRiskGatesPassed = nonRiskBlockers.length === 0;
-
-  const testingAllocationAccepted =
-    explicitTestingContractValid &&
-    nonRiskGatesPassed;
-
   const productionAllocationAccepted =
     testingAllocationAccepted !== true &&
-    productionAllocationContractValid &&
-    nonRiskGatesPassed;
+    productionThreeContractPlanQualified === true &&
+    allocationValid;
 
   const allocationQualificationSource =
     testingAllocationAccepted
@@ -1666,65 +1617,104 @@ function buildStrategy1Phase8APlan({
       ? "ENGINE7A_PRODUCTION_RISK_APPROVAL"
       : null;
 
-  const qualificationBlockers = [];
-  if (!allocationValid) {
-    qualificationBlockers.push("ENGINE7A_ALLOCATION_INVALID");
-  }
-  if (
-    !explicitTestingContractValid &&
-    !productionAllocationContractValid
-  ) {
-    qualificationBlockers.push(
-      "ENGINE7A_THREE_CONTRACT_PLAN_NOT_QUALIFIED"
-    );
-  }
+  const readiness = engine27MinuteDecision?.readiness || {};
+  const invalidated = readiness.invalidated === true;
 
-  const uniqueBlockers = unique([
-    ...nonRiskBlockers,
-    ...qualificationBlockers,
-  ]);
+  // Engine 27 is context/warning only after Engine 6 has locked GO and
+  // Engine 26B has valid geometry. It cannot block plan creation.
+  const engine27Context = {
+    decisionState: safeUpper(engine27MinuteDecision?.decisionState),
+    direction: safeUpper(engine27MinuteDecision?.direction),
+    reactionReady: readiness.reactionReady === true,
+    participationReady: readiness.participationReady === true,
+    permissionReady: readiness.permissionReady === true,
+    plannerReady: readiness.plannerReady === true,
+    invalidated,
+  };
+
   const managementReady =
-    allocationQualificationSource != null &&
-    uniqueBlockers.length === 0;
+    identityAgreement &&
+    engine6LockedGo &&
+    geometryReady &&
+    directionValid &&
+    entryValid &&
+    stopValid &&
+    targetsValid;
 
   let planStatus = "OFFICIAL_PLAN_READY";
   if (!identityAgreement) planStatus = "IDENTITY_MISMATCH";
-  else if (invalidated) planStatus = "MANAGEMENT_BLOCKED";
+  else if (!engine6LockedGo) planStatus = "WAITING_FOR_ENGINE6_LOCKED_GO";
+  else if (!geometryReady) planStatus = "WAITING_FOR_PROPOSED_GEOMETRY";
+  else if (!directionValid) planStatus = "INVALID_DIRECTION";
   else if (!entryValid) planStatus = "INVALID_ENTRY_GEOMETRY";
   else if (!stopValid) planStatus = "INVALID_STOP_GEOMETRY";
-  else if (!runnerTarget) planStatus = "WAITING_FOR_RUNNER_TARGET";
-  else if (!managementReady) planStatus = "WAITING_FOR_UPSTREAM_CONFIRMATION";
+  else if (!targetsValid) planStatus = "WAITING_FOR_VALID_TARGETS";
 
   const planId =
-    identityAgreement && entryValid && stopValid && runnerTarget
+    managementReady
       ? buildPlanId({
           candidateId: referenceIdentity.candidateId,
           zoneId: referenceIdentity.zoneId,
           strategyId: referenceIdentity.strategyId,
-          direction: "LONG",
+          direction,
           entryPrice,
           stopPrice,
           targets: officialTargets,
         })
       : null;
 
+  const waitingFor = unique([
+    !engine6LockedGo ? "ENGINE6_LOCKED_GO" : null,
+    !geometryReady ? "ENGINE26B_GEOMETRY_READY" : null,
+    !identityAgreement ? "PIPELINE_IDENTITY" : null,
+    !entryValid || !stopValid || !targetsValid
+      ? "VALID_MANAGEMENT_GEOMETRY"
+      : null,
+  ]);
+
+  const warnings = unique([
+    sizingIdentityMatched !== true
+      ? "ENGINE7A_IDENTITY_CONTEXT_MISMATCH"
+      : null,
+    traderIdentityMatched !== true
+      ? "ENGINE27_IDENTITY_CONTEXT_MISMATCH"
+      : null,
+    engine27Context.plannerReady !== true
+      ? "ENGINE27_PLANNER_NOT_READY_CONTEXT_ONLY"
+      : null,
+    engine27Context.decisionState !== "READY"
+      ? "ENGINE27_MINUTE_NOT_READY_CONTEXT_ONLY"
+      : null,
+    invalidated
+      ? "ENGINE27_INVALIDATED_CONTEXT_ONLY_AFTER_LOCKED_PACKAGE"
+      : null,
+  ]);
+
   return {
-    active: candidate != null,
+    active: candidate != null || geometry != null,
     engine: ENGINE,
     contractVersion: CONTRACT_VERSION,
     phase: "PHASE_8A",
     mode: "PAPER_MANAGEMENT_PLAN",
     planId,
     ...referenceIdentity,
-    direction: candidate?.direction ?? geometry?.direction ?? null,
-    snapshotTime: candidate?.snapshotTime ?? geometry?.snapshotTime ?? snapshotTime ?? null,
+    direction,
+    snapshotTime:
+      geometry?.snapshotTime ??
+      candidate?.snapshotTime ??
+      snapshotTime ??
+      null,
     tradeId: null,
     idempotencyKey: null,
     orderId: null,
     planStatus,
     managementReady,
     official: managementReady,
-    geometryValidated: entryValid && stopValid,
+    geometryValidated:
+      geometryReady &&
+      entryValid &&
+      stopValid &&
+      targetsValid,
     openingManagementPlan,
     officialEntryPrice: entryPrice,
     officialStopPrice: stopPrice,
@@ -1732,9 +1722,9 @@ function buildStrategy1Phase8APlan({
     officialTargets,
     threeBlockManagement,
     runnerPlan,
-    runnerTargetPrice,
-    runnerTargetStatus,
-    targetSource: runnerTarget?.source ?? "NONE",
+    runnerTargetPrice: null,
+    runnerTargetStatus: "NO_RUNNER_REQUIRED",
+    targetSource: "ENGINE26B_SIMPLIFIED_TESTING_LIFECYCLE",
     identityValidation: {
       requiredIdentityCorrect,
       completeIdentity,
@@ -1744,22 +1734,22 @@ function buildStrategy1Phase8APlan({
       completeIdentityAgreement: identityAgreement,
     },
     upstreamState: {
-      planningAllowed,
-      geometryReady: geometry?.geometryReady === true,
-      reactionReady: readiness.reactionReady === true,
-      participationReady: readiness.participationReady === true,
-      permissionReady: readiness.permissionReady === true,
-      plannerReady: readiness.plannerReady === true,
-      invalidated,
       engine6Decision,
-      allocation,
-      allocationValid,
-      testingContractValid: explicitTestingContractValid,
-      productionAllocationContractValid,
+      engine6LockedGo,
+      engine6Allowed: engine6PaperPermission?.allowed === true,
+      engine6Locked: engine6PaperPermission?.locked === true,
+      geometryReady,
+      candidateDirection: safeUpper(candidate?.direction),
+      geometryDirection: direction,
+      engine27: engine27Context,
+      engine7Allocation: allocation,
+      engine7AllocationValid: allocationValid,
       testingAllocationAccepted,
       productionAllocationAccepted,
       allocationQualificationSource,
-      runnerHandoffAccepted: validRunnerHandoff(runnerHandoff),
+      engine27HardGateApplied: false,
+      engine7HardGateApplied: false,
+      runnerHardGateApplied: false,
     },
     testingDataCollectionMode,
     testingRiskOverrideApplied,
@@ -1768,25 +1758,33 @@ function buildStrategy1Phase8APlan({
     testingAllocationAccepted,
     threeContractAllocation,
     allocationQualificationSource,
-
     productionRiskBudgetDollars,
     productionRiskSupportedContracts,
     productionEstimatedRiskDollars,
     productionThreeContractPlanQualified,
     productionRiskLimited,
-
-    blockers: uniqueBlockers,
-    warnings: [],
+    blockers: unique(blockers),
+    waitingFor,
+    warnings,
     reasonCodes: unique([
       ...reasonCodes,
-      identityAgreement ? "PIPELINE_IDENTITY_MATCHED" : "PIPELINE_IDENTITY_MISMATCH",
-      validRunnerHandoff(runnerHandoff)
-        ? "ENGINE26B_NULL_RUNNER_HANDOFF_ACCEPTED"
-        : "ENGINE26B_RUNNER_HANDOFF_REQUIRED",
-      target1Price === targetZoneLow ? "TARGET_1_PRESERVED" : null,
-      target2Price === targetZoneMidline ? "TARGET_2_PRESERVED" : null,
-      runnerTarget ? "ENGINE27B_MINUTE_RUNNER_SELECTED" : "RUNNER_TARGET_UNAVAILABLE",
-      allocationValid ? "ENGINE7A_EXACT_1_1_1_ALLOCATION" : "ENGINE7A_ALLOCATION_INVALID",
+      identityAgreement
+        ? "PIPELINE_IDENTITY_MATCHED"
+        : "PIPELINE_IDENTITY_MISMATCH",
+      engine6LockedGo
+        ? "ENGINE6_LOCKED_GO_CONSUMED"
+        : "ENGINE6_LOCKED_GO_REQUIRED",
+      geometryReady
+        ? "ENGINE26B_GEOMETRY_READY_CONSUMED"
+        : "ENGINE26B_GEOMETRY_READY_REQUIRED",
+      target1Valid ? "TARGET_1_PRESERVED" : "TARGET_1_INVALID",
+      target2Valid ? "TARGET_2_PRESERVED" : "TARGET_2_INVALID",
+      target3Valid
+        ? "TARGET_3_MIDLINE_TESTING_PRESERVED"
+        : "TARGET_3_INVALID",
+      "ENGINE27_READINESS_CONTEXT_ONLY",
+      "ENGINE7_SIZING_CONTEXT_ONLY_FOR_ENGINE9",
+      "NO_RUNNER_REQUIRED",
       testingAllocationAccepted
         ? "ENGINE7A_TESTING_ALLOCATION_ACCEPTED"
         : "ENGINE7A_TESTING_ALLOCATION_NOT_ACCEPTED",
@@ -1794,7 +1792,9 @@ function buildStrategy1Phase8APlan({
         ? "ENGINE7A_PRODUCTION_ALLOCATION_ACCEPTED"
         : null,
       allocationQualificationSource,
-      managementReady ? "ENGINE9_OFFICIAL_PLAN_READY" : "ENGINE9_MANAGEMENT_NOT_READY",
+      managementReady
+        ? "ENGINE9_OFFICIAL_PLAN_READY"
+        : "ENGINE9_MANAGEMENT_NOT_READY",
     ]),
     noPermissionCreated: true,
     noSizingCreated: true,
