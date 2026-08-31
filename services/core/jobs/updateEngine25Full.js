@@ -47,6 +47,35 @@ function safeLatest(sourceBlock, key) {
   return sourceBlock?.results?.[key]?.latest || null;
 }
 
+function safeFredHistory(sourceBlock, key, lookbackDays = 180) {
+  const rows = Array.isArray(sourceBlock?.results?.[key]?.observations)
+    ? sourceBlock.results[key].observations
+    : [];
+
+  const valid = rows
+    .filter(
+      (row) =>
+        row &&
+        Number.isFinite(Number(row.value)) &&
+        row.date &&
+        Number.isFinite(Date.parse(`${row.date}T00:00:00Z`))
+    )
+    .map((row) => ({
+      date: row.date,
+      value: Number(row.value),
+    }))
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+  if (!valid.length) return [];
+
+  const latestMs = Date.parse(`${valid[valid.length - 1].date}T00:00:00Z`);
+  const cutoffMs = latestMs - lookbackDays * 24 * 60 * 60 * 1000;
+
+  return valid.filter(
+    (row) => Date.parse(`${row.date}T00:00:00Z`) >= cutoffMs
+  );
+}
+
 function summarizeSymbol(bundle, symbol) {
   const item = bundle?.results?.[symbol];
 
@@ -210,6 +239,15 @@ async function writeMacroFile() {
           M2SL: safeLatest(fred, "M2SL"),
           CPIAUCSL: safeLatest(fred, "CPIAUCSL"),
           PPIACO: safeLatest(fred, "PPIACO"),
+        },
+
+        // Only preserve the historical observations required by the
+        // responsive Macro Credit Health calculation. These observations
+        // were already fetched above, so this makes no additional API calls.
+        history: {
+          NFCI: safeFredHistory(fred, "NFCI", 180),
+          STLFSI4: safeFredHistory(fred, "STLFSI4", 180),
+          BAMLH0A0HYM2: safeFredHistory(fred, "BAMLH0A0HYM2", 180),
         },
       },
       fiscalData: {
