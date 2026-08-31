@@ -671,31 +671,87 @@ const previousConfirmedDirectional =
       "ENGINE26_FULL_TARGET_COMPLETION_START_FRESH_ENGINE3_REACTION";
   }
 
+/*
+ * 2 — Negotiated-zone reaction mode.
+ *
+ * FIRST ESTABLISHMENT:
+ * A qualified completed 1m reaction may establish LONG / SHORT
+ * while Engine 3 is still NEUTRAL.
+ *
+ * AFTER ESTABLISHMENT:
+ * Once a previous Engine 3 reaction is already confirmed,
+ * later 1m candles remain diagnostic only.
+ *
+ * An opposite 1m candle may NOT flip the established
+ * canonical reaction LONG <-> SHORT.
+ *
+ * Engine 26 midpoint completion above this branch remains
+ * the lifecycle reset that starts a fresh reaction cycle.
+ */
+else if (insideNegotiatedZone === true) {
   /*
-   * 2 — Negotiated-zone reaction mode.
-   * Completed qualified 1m owns fresh canonical establishment.
-   * 5m/10m semantic diagnostics cannot create or veto direction.
+   * Existing confirmed reaction owns the remainder
+   * of this negotiated-zone reaction cycle.
    */
-  else if (insideNegotiatedZone === true) {
-    if (reactionConfirmed && candidateDirectional) {
-      direction = candidateDirection;
-      sourceTimeframe = "1m";
-      reactionTimeframe = "1m";
-      directionEstablishedByFresh1m = true;
-      resolutionStatus =
-        `NEGOTIATED_ZONE_REACTION_${candidateDirection}_CONFIRMED`;
-      resolutionReason =
-        "COMPLETED_1M_NEGOTIATED_ZONE_REACTION_OWNS_DIRECTION";
-    } else {
-      direction = "NEUTRAL";
-      sourceTimeframe = "NEGOTIATED_ZONE_REACTION";
-      reactionTimeframe = "1m";
-      resolutionStatus = "NEGOTIATED_ZONE_REACTION_WAITING";
-      resolutionReason =
-        "WAITING_FOR_QUALIFIED_COMPLETED_1M_NEGOTIATED_ZONE_REACTION";
-    }
+  if (previousConfirmedDirectional) {
+    direction = previousDirection;
+
+    sourceTimeframe =
+      "ESTABLISHED_NEGOTIATED_ZONE_REACTION";
+
+    reactionTimeframe = "1m";
+
+    insideZoneDirectionLocked = true;
+
+    directionEstablishedByFresh1m = false;
+
+    resolutionStatus =
+      `NEGOTIATED_ZONE_REACTION_${previousDirection}_PERSISTED`;
+
+    resolutionReason =
+      "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_1M_ALONE";
   }
 
+  /*
+   * No established reaction yet:
+   * completed qualified 1m may establish the FIRST direction.
+   */
+  else if (
+    reactionConfirmed &&
+    candidateDirectional
+  ) {
+    direction = candidateDirection;
+
+    sourceTimeframe = "1m";
+    reactionTimeframe = "1m";
+
+    directionEstablishedByFresh1m = true;
+
+    resolutionStatus =
+      `NEGOTIATED_ZONE_REACTION_${candidateDirection}_CONFIRMED`;
+
+    resolutionReason =
+      "COMPLETED_1M_NEGOTIATED_ZONE_REACTION_ESTABLISHED_INITIAL_DIRECTION";
+  }
+
+  /*
+   * Still no qualified reaction.
+   */
+  else {
+    direction = "NEUTRAL";
+
+    sourceTimeframe =
+      "NEGOTIATED_ZONE_REACTION";
+
+    reactionTimeframe = "1m";
+
+    resolutionStatus =
+      "NEGOTIATED_ZONE_REACTION_WAITING";
+
+    resolutionReason =
+      "WAITING_FOR_QUALIFIED_COMPLETED_1M_NEGOTIATED_ZONE_REACTION";
+  }
+}
   /*
    * 3 — Outside the zone with an already-established direction.
    * Completed 10m close vs EMA10 owns HOLD / RESET only.
@@ -779,6 +835,7 @@ const previousConfirmedDirectional =
     reactionTimeframe,
     directionPersistenceActive,
     directionEstablishedByFresh1m,
+    insideZoneDirectionLocked,
     ema10ResetTriggered,
     travelModeActive,
     travelModeActivated,
@@ -814,6 +871,9 @@ function resolveFinalConfirmation({
   const directionPersistenceActive =
     canonicalResolution?.directionPersistenceActive === true;
 
+  const insideZoneDirectionLocked =
+  canonicalResolution?.insideZoneDirectionLocked === true;
+
   const ema10ResetTriggered =
     canonicalResolution?.ema10ResetTriggered === true;
 
@@ -836,6 +896,7 @@ function resolveFinalConfirmation({
   if (
     activePaperTrade ||
     directionPersistenceActive
+    insideZoneDirectionLocked 
   ) {
     /*
      * Once direction is locked to either:
@@ -851,7 +912,9 @@ function resolveFinalConfirmation({
       blockers: [],
       reasonCodes: unique([
         ...(candidateConfirmation?.reasonCodes || []),
-        directionPersistenceActive
+        insideZoneDirectionLocked
+          ? `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_LOCKED_TO_ESTABLISHED_ZONE_REACTION`
+          : directionPersistenceActive
           ? `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_PERSISTED_BY_10M_EMA10`
           : `ENGINE3_${canonicalResolution?.direction}_CONFIRMATION_LOCKED_TO_ACTIVE_PAPER_TRADE`,
         "ENGINE3_CANONICAL_REACTION_CONFIRMED",
