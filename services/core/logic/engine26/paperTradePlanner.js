@@ -1,7 +1,6 @@
 // services/core/logic/engine26/paperTradePlanner.js
 
 import { deriveEngine22StructuralPlaybook } from "./deriveEngine22StructuralPlaybook.js";
-import { evaluateStrategy1Geometry } from "./strategy1/evaluateStrategy1Geometry.js";
 import { buildStrategy1GeometryPreviews } from "./strategy1/buildStrategy1GeometryPreviews.js";
 
 const ENGINE = "engine26.paperTradePlanner.v1";
@@ -2173,246 +2172,20 @@ function buildEngine7SizingPreviewV1({ permission, confluence, engine15Decision 
   };
 }
 
-function buildEngine26Strategy1ProposedGeometry({
-  symbol,
-  strategyId,
-  permission,
-  engine26LocationCandidate,
-  engine26GeometryHandoff,
-}) {
-  return evaluateStrategy1Geometry({
-    symbol,
-    strategyId,
-    permission,
-    engine26LocationCandidate,
-    engine26GeometryHandoff,
-  });
-}
-
-function buildEngine26ProposedGeometry({
-  symbol,
-  strategyId,
-  tf,
-  permission,
-  engine26LocationCandidate = null,
-  engine26GeometryHandoff = null,
-  engine26TradePlanPreview,
-  candidateId = null,
-  zoneId = null,
-  snapshotTime = null,
-  candidateDirection = null,
-  candidateSetupType = null,
-}) {
-  const strategy1Geometry =
-    buildEngine26Strategy1ProposedGeometry({
-      symbol,
-      strategyId,
-      tf,
-      permission,
-      engine26LocationCandidate,
-      engine26GeometryHandoff,
-    });
-
-  if (strategy1Geometry) {
-    return strategy1Geometry;
-  }
-  const preview = engine26TradePlanPreview || null;
-  const geometry = preview?.geometryPreview || null;
-
-  /*
-   * Engine 26A owns candidate direction and setup identity.
-   * Planner preview remains fallback-only for compatibility.
-   */
-  const direction =
-    candidateDirection ||
-    preview?.structure?.direction ||
-    preview?.direction ||
-    null;
-
-  const setupType =
-    candidateSetupType ||
-    preview?.structure?.setupType ||
-    preview?.setupType ||
-    null;
-
-  const proposedEntryPrice =
-    toNum(geometry?.entryReference);
-
-  const proposedStopPrice =
-    toNum(geometry?.stopReference);
-
-  const proposedStopDistancePoints =
-    toNum(geometry?.riskPoints);
-
-  const rawTargetMap =
-    preview?.targetMap ?? null;
-
-  /*
-   * Normalize both supported Engine 26 preview target formats:
-   *
-   * 1. Array targets
-   * 2. Legacy targetMap object:
-   *    {
-   *      firstReaction,
-   *      aLowBreak,
-   *      preferredCPressure,
-   *      stretchC,
-   *      labels
-   *    }
-   *
-   * This is transport normalization only. No targets are recalculated.
-   */
-  const proposedTargets =
-    Array.isArray(rawTargetMap)
-      ? rawTargetMap
-          .map((target, index) => {
-            const price =
-              toNum(target?.price) ??
-              toNum(target);
-
-            if (price == null) {
-              return null;
-            }
-
-            return {
-              targetId:
-                safeString(target?.targetId) ||
-                `T${index + 1}`,
-
-              sequence:
-                Number.isInteger(target?.sequence)
-                  ? target.sequence
-                  : index + 1,
-
-              price:
-                roundToTick(price),
-
-              label:
-                target?.label || null,
-            };
-          })
-          .filter(Boolean)
-      : rawTargetMap &&
-        typeof rawTargetMap === "object"
-      ? Object.entries(rawTargetMap)
-          .filter(
-            ([key]) =>
-              key !== "labels"
-          )
-          .map(([targetId, value], index) => {
-            const price =
-              toNum(value?.price) ??
-              toNum(value);
-
-            if (price == null) {
-              return null;
-            }
-
-            return {
-              targetId,
-
-              sequence:
-                index + 1,
-
-              price:
-                roundToTick(price),
-
-              label:
-                rawTargetMap?.labels?.[targetId] ??
-                value?.label ??
-                null,
-            };
-          })
-          .filter(Boolean)
-      : [];
-
-  const directionValid =
-    direction === "LONG" || direction === "SHORT";
-
-  const geometryDirectionallyValid =
-    proposedEntryPrice != null &&
-    proposedEntryPrice > 0 &&
-    proposedStopPrice != null &&
-    proposedStopPrice > 0 &&
-    proposedStopDistancePoints != null &&
-    proposedStopDistancePoints > 0 &&
-    (
-      (direction === "LONG" &&
-        proposedStopPrice < proposedEntryPrice) ||
-      (direction === "SHORT" &&
-        proposedStopPrice > proposedEntryPrice)
-    );
-
-  const identityComplete =
-    Boolean(candidateId) &&
-    Boolean(zoneId) &&
-    Boolean(strategyId) &&
-    Boolean(symbol) &&
-    Boolean(snapshotTime);
-
-  const active =
-    identityComplete &&
-    directionValid &&
-    geometryDirectionallyValid;
-
-  const warnings = [];
-
-  if (!candidateId) warnings.push("CANDIDATE_ID_UNAVAILABLE");
-  if (!zoneId) warnings.push("ZONE_ID_UNAVAILABLE");
-  if (!snapshotTime) warnings.push("SNAPSHOT_TIME_UNAVAILABLE");
-  if (!directionValid) warnings.push("DIRECTION_UNAVAILABLE");
-  if (!geometryDirectionallyValid) {
-    warnings.push("PROPOSED_GEOMETRY_INVALID");
-  }
-  if (proposedTargets.length === 0) {
-    warnings.push("PROPOSED_TARGETS_UNAVAILABLE");
-  }
-
-  return {
-    active,
-
-    engine: "engine26B.proposedGeometry.v1",
-    contractVersion: "engine26.proposedGeometry.v1",
-
-    candidateId,
-    zoneId,
-    strategyId,
-    symbol,
-    direction,
-    setupType,
-
-    proposedEntryPrice,
-    proposedStopPrice,
-    proposedStopDistancePoints,
-    proposedTargets,
-
-    candidateStatus:
-      candidateId ? "ACTIVE" : "IDENTITY_UNAVAILABLE",
-
-    lifecycleStatus:
-      active
-        ? "PROPOSED_GEOMETRY_AVAILABLE"
-        : geometry
-        ? "PROPOSED_GEOMETRY_PARTIAL"
-        : "PROPOSED_GEOMETRY_UNAVAILABLE",
-
-    proposalOnly: true,
-    plannerOnly: true,
-    official: false,
-    officialPlanOwner: "ENGINE9",
-
-    nonExecutable: true,
-    noPermissionCreated: true,
-    noOrderCreated: true,
-    noExecution: true,
-
-    candidateIdentityPreserved: identityComplete,
-    snapshotTime,
-
-    warnings,
-    reasonCodes: [],
-  };
-}
+/*
+ * Canonical Engine 26B geometry is intentionally NOT built in this planner.
+ *
+ * Strategy 1 canonical geometry is built only after final Engine 6 permission
+ * has been recalculated and the approved paper lock has been applied:
+ *
+ *   Engine 6 FINAL LOCK
+ *     -> buildEngine26BPipeline.js
+ *     -> buildEngine26BTargetStopGeometry.js
+ *     -> evaluateStrategy1Geometry.js
+ *
+ * This planner may continue to publish geometry previews for diagnostics, but
+ * it must never publish a competing/stale canonical engine26ProposedGeometry.
+ */
 
 function buildEngine26TradePlanPreview({
   symbol,
@@ -3614,105 +3387,15 @@ const engine26GeometryPreviews =
       null,
   });
 
-const engine26ProposedGeometry =
-  buildEngine26ProposedGeometry({
-    symbol:
-      authorizedCandidate?.symbol ??
-      normalizedSymbol,
+const engine26ProposedGeometry = null;
 
-    strategyId:
-      authorizedCandidate?.strategyId ??
-      normalizedStrategyId,
+/*
+ * Canonical Engine 26B geometry is deferred to buildEngine26BPipeline()
+ * after final Engine 6 lock application in buildStrategySnapshot.js.
+ *
+ * Do not rebuild geometry here from a preliminary or unlocked permission.
+ */
 
-    tf: normalizedTf,
-    permission,
-    engine26LocationCandidate:
-      authorizedCandidate,
-    engine26GeometryHandoff,
-
-    engine26TradePlanPreview,
-
-      /*
-       * Do not attach candidate identity unless the planner raw zone
-       * matches the Engine 26A candidate's upstream source identity.
-       */
-      candidateId:
-        candidateMatchesPlannerZone
-          ? authorizedCandidate.candidateId
-          : null,
-
-      zoneId:
-        candidateMatchesPlannerZone
-          ? authorizedCandidate.zoneId
-          : null,
-
-      snapshotTime:
-        candidateMatchesPlannerZone
-          ? authorizedCandidate.snapshotTime
-          : null,
-
-      candidateDirection:
-        candidateMatchesPlannerZone
-          ? authorizedCandidate.directionBias
-          : null,
-
-      candidateSetupType:
-        candidateMatchesPlannerZone
-          ? authorizedCandidate.setupType
-          : null,
-    });
-
-const isStrategy1ProposedGeometry =
-  [
-    "engine26b.strategy1.v1",
-    "engine26b.strategy1.v2",
-  ].includes(
-    engine26ProposedGeometry?.geometryContractVersion
-  );
-
-if (!isStrategy1ProposedGeometry) {
-  engine26ProposedGeometry.reasonCodes =
-    candidateMatchesPlannerZone
-      ? [
-          "ENGINE26A_CANDIDATE_IDENTITY_CONSUMED",
-          "ENGINE26A_ENGINE26B_UPSTREAM_ZONE_MATCH",
-          "ENGINE26A_SETUP_IDENTITY_PRESERVED",
-          "ENGINE26A_SNAPSHOT_IDENTITY_PRESERVED",
-        ]
-      : [
-          "ENGINE26A_ENGINE26B_IDENTITY_NOT_PROVEN",
-        ];
-
-  if (!candidateMatchesPlannerZone) {
-    engine26ProposedGeometry.warnings = [
-      ...new Set([
-        ...(Array.isArray(
-          engine26ProposedGeometry.warnings
-        )
-          ? engine26ProposedGeometry.warnings
-          : []),
-
-        authorizedCandidate?.active !== true
-          ? "ENGINE26A_CANDIDATE_NOT_ACTIVE"
-          : null,
-
-        !authorizedUpstreamId
-          ? "ENGINE26A_UPSTREAM_ZONE_ID_UNAVAILABLE"
-          : null,
-
-        !plannerUpstreamId
-          ? "ENGINE26B_PLANNER_ZONE_ID_UNAVAILABLE"
-          : null,
-
-        authorizedUpstreamId &&
-        plannerUpstreamId &&
-        authorizedUpstreamId !== plannerUpstreamId
-          ? "ENGINE26A_ENGINE26B_ZONE_MISMATCH"
-          : null,
-      ].filter(Boolean)),
-    ];
-  }
-}
   const engine26PaperTrialCandidate =
     engine26TradePlanPreview?.paperTrialCandidate || null;
 
@@ -3721,6 +3404,7 @@ if (!isStrategy1ProposedGeometry) {
   const reasonCodes = [
     "PAPER_ONLY_RESEARCH_LANE",
     "ENGINE26_PLANNER_ONLY_V1",
+    "ENGINE26B_CANONICAL_GEOMETRY_DEFERRED_TO_FINAL_LOCK_PIPELINE",
     "NO_ENGINE8_CALL_IN_SNAPSHOT_BUILD",
     "NO_REAL_EXECUTION",
   ];
