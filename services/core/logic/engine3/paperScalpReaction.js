@@ -1903,6 +1903,9 @@ const establishedTripDirectionLocked =
     directionEstablishedByFresh1m:
       canonicalResolution.directionEstablishedByFresh1m,
 
+    insideZoneDirectionLocked:
+      canonicalResolution.insideZoneDirectionLocked === true,
+
     previousCanonicalDirection:
       canonicalResolution.previousCanonicalDirection,
 
@@ -2358,6 +2361,10 @@ const establishedTripDirectionLocked =
 
         canonicalResolution.directionPersistenceActive
           ? "ENGINE3_DIRECTION_PERSISTENCE_ACTIVE"
+          : null,
+
+        canonicalResolution.insideZoneDirectionLocked
+          ? "ENGINE3_ESTABLISHED_ZONE_REACTION_DIRECTION_LOCKED"
           : null,
 
         activePaperTradeLocked
