@@ -8,14 +8,28 @@
 //
 // Journal boundary:
 // - one Schwab activityId -> one normalized Engine 10 delivery
-// - Engine 10 owns campaign tradeId and durable REAL Journal assembly
+// - Engine 10 owns tradeId, contractId, FIFO, and contract lifecycle
 // - delivery is marked complete only after Engine 10 acknowledgement
+//
+// Restart boundary:
+// - normal polling uses the short rolling lookback
+// - first run after process start may use durable recovery watermark + overlap
+// - pre-bootstrap transactions are never automatically delivered
 
-import { getSchwabAccountNumbers, schwabApiRequest } from "./schwabClient.js";
-import { getSchwabConfig } from "./schwabConfig.js";
-import { normalizeSchwabRealFutureTransaction } from "./engine8RealFillNormalizer.js";
 import {
+  getSchwabAccountNumbers,
+  schwabApiRequest,
+} from "./schwabClient.js";
+import { getSchwabConfig } from "./schwabConfig.js";
+import {
+  normalizeSchwabRealFutureTransaction,
+  resolveSchwabJournalAccount,
+} from "./engine8RealFillNormalizer.js";
+import {
+  getEngine8RealFillAccountWatermark,
+  getEngine8RealFillBootstrapStartedAt,
   getEngine8RealFillRecord,
+  updateEngine8RealFillAccountWatermark,
   upsertEngine8RealFillRecord,
 } from "./engine8RealFillStore.js";
 
@@ -38,11 +52,16 @@ function boolEnv(name, fallback = false) {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
+function validDateMs(value) {
+  const parsed = Date.parse(text(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function journalBaseUrl(explicitBaseUrl) {
   const base = text(
     explicitBaseUrl ||
-    process.env.ENGINE8_REAL_JOURNAL_BASE_URL ||
-    process.env.CORE_BASE
+      process.env.ENGINE8_REAL_JOURNAL_BASE_URL ||
+      process.env.CORE_BASE
   );
 
   return base ? base.replace(/\/+$/, "") : null;
@@ -110,11 +129,11 @@ async function deliverToEngine10({
 function isEngine10Acknowledgement(fill, delivery) {
   return Boolean(
     delivery?.httpOk === true &&
-    delivery?.body?.ok === true &&
-    delivery?.body?.journalCompleted === true &&
-    text(delivery?.body?.brokerTransactionId) ===
-      text(fill?.brokerTransactionId) &&
-    text(delivery?.body?.tradeId)
+      delivery?.body?.ok === true &&
+      delivery?.body?.journalCompleted === true &&
+      text(delivery?.body?.brokerTransactionId) ===
+        text(fill?.brokerTransactionId) &&
+      text(delivery?.body?.tradeId)
   );
 }
 
@@ -138,8 +157,74 @@ function summarizeFill(fill) {
   };
 }
 
+export function computeEngine8RealFillQueryStart({
+  deliveryEnabled,
+  recoveryMode,
+  bootstrapStartedAt,
+  lastBrokerFillTimeSeen,
+  now,
+  lookbackMinutes,
+  recoveryOverlapMinutes,
+} = {}) {
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+
+  if (!Number.isFinite(nowMs)) {
+    throw new Error("ENGINE8_REAL_FILL_QUERY_NOW_INVALID");
+  }
+
+  const lookback = positiveInt(lookbackMinutes, 15);
+  const overlap = positiveInt(recoveryOverlapMinutes, 5);
+  const rollingStartMs = nowMs - lookback * 60_000;
+
+  if (!deliveryEnabled) {
+    return new Date(rollingStartMs).toISOString();
+  }
+
+  const bootstrapMs = validDateMs(bootstrapStartedAt);
+
+  if (bootstrapMs === null) {
+    throw new Error("ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED");
+  }
+
+  if (!recoveryMode) {
+    return new Date(Math.max(bootstrapMs, rollingStartMs)).toISOString();
+  }
+
+  const lastFillMs = validDateMs(lastBrokerFillTimeSeen);
+
+  if (lastFillMs === null) {
+    return new Date(bootstrapMs).toISOString();
+  }
+
+  return new Date(
+    Math.max(
+      bootstrapMs,
+      lastFillMs - overlap * 60_000
+    )
+  ).toISOString();
+}
+
+function latestFillForAccount(candidates) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
+    return null;
+  }
+
+  return [...candidates].sort((left, right) => {
+    const leftTime = Date.parse(left.fill.fillTime);
+    const rightTime = Date.parse(right.fill.fillTime);
+
+    if (leftTime !== rightTime) return rightTime - leftTime;
+
+    return text(right.fill.brokerTransactionId).localeCompare(
+      text(left.fill.brokerTransactionId)
+    );
+  })[0];
+}
+
 export async function observeSchwabRealFills({
   lookbackMinutes = null,
+  recoveryOverlapMinutes = null,
+  recoveryMode = false,
   deliver = null,
   engine10BaseUrl = null,
   now = new Date(),
@@ -149,31 +234,40 @@ export async function observeSchwabRealFills({
     lookbackMinutes ?? process.env.ENGINE8_REAL_FILL_LOOKBACK_MINUTES,
     15
   );
+  const resolvedRecoveryOverlapMinutes = positiveInt(
+    recoveryOverlapMinutes ??
+      process.env.ENGINE8_REAL_FILL_RECOVERY_OVERLAP_MINUTES,
+    5
+  );
   const deliveryEnabled =
     deliver === null
       ? boolEnv("ENGINE8_REAL_FILL_DELIVERY_ENABLED", false)
       : deliver === true;
 
   const endDate = now.toISOString();
-  const startDate = new Date(
-    now.getTime() - resolvedLookbackMinutes * 60_000
-  ).toISOString();
+  const bootstrapStartedAt =
+    getEngine8RealFillBootstrapStartedAt();
 
   const result = {
     active: true,
-    engine: "engine8.schwabRealFillObserver.v1",
-    contractVersion: "engine8.schwabRealFillObserver.v1",
+    engine: "engine8.schwabRealFillObserver.v2",
+    contractVersion: "engine8.schwabRealFillObserver.v2",
     mode: deliveryEnabled
-      ? "READ_ONLY_BROKER_OBSERVER_WITH_ENGINE10_DELIVERY"
+      ? recoveryMode
+        ? "READ_ONLY_BROKER_RECOVERY_WITH_ENGINE10_DELIVERY"
+        : "READ_ONLY_BROKER_OBSERVER_WITH_ENGINE10_DELIVERY"
       : "READ_ONLY_BROKER_OBSERVER_DRY_RUN",
     broker: "SCHWAB",
     accountMode: "REAL",
     readOnlyBrokerObservation: true,
     brokerWritesAllowed: false,
     paperExecutionUsed: false,
+    contractIdsCreated: false,
     deliveryEnabled,
+    recoveryMode: recoveryMode === true,
     lookbackMinutes: resolvedLookbackMinutes,
-    startDate,
+    recoveryOverlapMinutes: resolvedRecoveryOverlapMinutes,
+    bootstrapStartedAt,
     endDate,
     accountsRead: 0,
     transactionsRead: 0,
@@ -184,6 +278,9 @@ export async function observeSchwabRealFills({
     skipped: 0,
     normalizationErrors: 0,
     accountErrors: 0,
+    watermarkAdvanced: 0,
+    watermarkHeld: 0,
+    accountWindows: [],
     fills: [],
     errors: [],
     evaluatedAt: nowIso(),
@@ -192,6 +289,15 @@ export async function observeSchwabRealFills({
   let baseUrl = null;
 
   if (deliveryEnabled) {
+    if (!bootstrapStartedAt) {
+      return {
+        ...result,
+        ok: false,
+        status: "BLOCKED_ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED",
+        errors: ["ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED"],
+      };
+    }
+
     baseUrl = journalBaseUrl(engine10BaseUrl);
 
     if (!baseUrl) {
@@ -208,7 +314,9 @@ export async function observeSchwabRealFills({
         ...result,
         ok: false,
         status: "BLOCKED_ENGINE8_ADMIN_SECRET_MISSING",
-        errors: ["ENGINE8_ADMIN_SECRET_REQUIRED_FOR_ENGINE10_REAL_FILL_ROUTE"],
+        errors: [
+          "ENGINE8_ADMIN_SECRET_REQUIRED_FOR_ENGINE10_REAL_FILL_ROUTE",
+        ],
       };
     }
   }
@@ -227,12 +335,73 @@ export async function observeSchwabRealFills({
   }
 
   const candidates = [];
+  const accountRuns = new Map();
 
   for (const account of accountsResult.accounts || []) {
     if (!account?.accountHash || !account?.maskedAccountNumber) {
       result.skipped += 1;
       continue;
     }
+
+    const accountIdentity = resolveSchwabJournalAccount(
+      account.maskedAccountNumber
+    );
+
+    if (!accountIdentity.ok) {
+      result.accountErrors += 1;
+      result.errors.push({
+        account: account.maskedAccountNumber,
+        error: accountIdentity.reason,
+      });
+      continue;
+    }
+
+    const brokerAccountLabel =
+      accountIdentity.brokerAccountLabel;
+    const existingWatermark =
+      getEngine8RealFillAccountWatermark(brokerAccountLabel);
+
+    let startDate;
+
+    try {
+      startDate = computeEngine8RealFillQueryStart({
+        deliveryEnabled,
+        recoveryMode,
+        bootstrapStartedAt,
+        lastBrokerFillTimeSeen:
+          existingWatermark?.lastBrokerFillTimeSeen || null,
+        now,
+        lookbackMinutes: resolvedLookbackMinutes,
+        recoveryOverlapMinutes:
+          resolvedRecoveryOverlapMinutes,
+      });
+    } catch (error) {
+      result.accountErrors += 1;
+      result.errors.push({
+        account: account.maskedAccountNumber,
+        error: String(error?.message || error),
+      });
+      continue;
+    }
+
+    const accountRun = {
+      brokerAccountLabel,
+      journalAccount: accountIdentity.journalAccount,
+      startDate,
+      endDate,
+      existingWatermark,
+      candidates: [],
+      failed: false,
+    };
+
+    accountRuns.set(brokerAccountLabel, accountRun);
+    result.accountWindows.push({
+      brokerAccountLabel,
+      journalAccount: accountIdentity.journalAccount,
+      startDate,
+      endDate,
+      recoveryMode: recoveryMode === true,
+    });
 
     let transactions;
 
@@ -245,6 +414,7 @@ export async function observeSchwabRealFills({
       result.accountsRead += 1;
       result.transactionsRead += transactions.length;
     } catch (error) {
+      accountRun.failed = true;
       result.accountErrors += 1;
       result.errors.push({
         account: account.maskedAccountNumber,
@@ -264,16 +434,19 @@ export async function observeSchwabRealFills({
         if (normalized.skipped) {
           result.skipped += 1;
         } else {
+          accountRun.failed = true;
           result.normalizationErrors += 1;
           result.errors.push({
             account: account.maskedAccountNumber,
-            brokerTransactionId: normalized.brokerTransactionId || null,
+            brokerTransactionId:
+              normalized.brokerTransactionId || null,
             error: normalized.reason,
           });
         }
         continue;
       }
 
+      accountRun.candidates.push(normalized);
       candidates.push(normalized);
     }
   }
@@ -291,6 +464,7 @@ export async function observeSchwabRealFills({
 
   for (const candidate of candidates) {
     const { fill, dedupeKey } = candidate;
+    const accountRun = accountRuns.get(fill.brokerAccountLabel);
     result.futuresFillsNormalized += 1;
 
     const existing = getEngine8RealFillRecord(dedupeKey);
@@ -314,7 +488,9 @@ export async function observeSchwabRealFills({
       fillTime: fill.fillTime,
       normalizedFill: fill,
       delivered: false,
-      deliveryStatus: deliveryEnabled ? "PENDING_ENGINE10" : "DRY_RUN_ONLY",
+      deliveryStatus: deliveryEnabled
+        ? "PENDING_ENGINE10"
+        : "DRY_RUN_ONLY",
     });
 
     if (!deliveryEnabled) {
@@ -335,6 +511,7 @@ export async function observeSchwabRealFills({
         adminSecret: config.adminSecret,
       });
     } catch (error) {
+      if (accountRun) accountRun.failed = true;
       result.pending += 1;
       upsertEngine8RealFillRecord(dedupeKey, {
         delivered: false,
@@ -366,7 +543,8 @@ export async function observeSchwabRealFills({
             ? Number(delivery.body.remainingQty)
             : null,
         engine10Duplicate: delivery.body.duplicate === true,
-        engine10EventType: text(delivery.body.eventType) || null,
+        engine10EventType:
+          text(delivery.body.eventType) || null,
         lastError: null,
       });
       result.fills.push({
@@ -378,6 +556,7 @@ export async function observeSchwabRealFills({
         duplicate: delivery.body.duplicate === true,
       });
     } else {
+      if (accountRun) accountRun.failed = true;
       result.pending += 1;
       upsertEngine8RealFillRecord(dedupeKey, {
         delivered: false,
@@ -399,19 +578,58 @@ export async function observeSchwabRealFills({
     }
   }
 
+  if (deliveryEnabled) {
+    for (const accountRun of accountRuns.values()) {
+      if (accountRun.failed) {
+        result.watermarkHeld += 1;
+        continue;
+      }
+
+      const latest = latestFillForAccount(accountRun.candidates);
+
+      updateEngine8RealFillAccountWatermark(
+        accountRun.brokerAccountLabel,
+        {
+          brokerAccountLabel:
+            accountRun.brokerAccountLabel,
+          journalAccount:
+            accountRun.journalAccount,
+          lastSuccessfulPollAt: endDate,
+          ...(latest
+            ? {
+                lastBrokerFillTimeSeen:
+                  latest.fill.fillTime,
+                lastBrokerTransactionIdSeen:
+                  latest.fill.brokerTransactionId,
+              }
+            : {}),
+        }
+      );
+
+      result.watermarkAdvanced += 1;
+    }
+  }
+
   return {
     ...result,
-    ok: result.accountErrors === 0,
+    ok:
+      result.accountErrors === 0 &&
+      result.pending === 0,
     status:
       result.accountErrors > 0
         ? "COMPLETED_WITH_ACCOUNT_ERRORS"
-        : deliveryEnabled
-          ? "REAL_FILL_OBSERVER_DELIVERY_COMPLETE"
-          : "REAL_FILL_OBSERVER_DRY_RUN_COMPLETE",
+        : result.pending > 0
+          ? "COMPLETED_WITH_PENDING_ENGINE10_DELIVERIES"
+          : deliveryEnabled
+            ? recoveryMode
+              ? "REAL_FILL_RECOVERY_COMPLETE"
+              : "REAL_FILL_OBSERVER_DELIVERY_COMPLETE"
+            : "REAL_FILL_OBSERVER_DRY_RUN_COMPLETE",
     evaluatedAt: nowIso(),
   };
 }
 
 export default {
+  computeEngine8RealFillQueryStart,
   observeSchwabRealFills,
 };
