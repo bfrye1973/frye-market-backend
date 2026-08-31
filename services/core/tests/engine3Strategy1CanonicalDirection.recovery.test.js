@@ -160,32 +160,45 @@ function build({
   return patchedConfluence.context.reaction.paperScalpReaction;
 }
 
-test("1 SHORT GOOD inside zone establishes from completed 1m", () => {
+test("1 SHORT GOOD completed 1m inside zone remains diagnostic only", () => {
   const result = build({
     oneMinute: observation1m({
       completedDirection: "SHORT",
       completedQuality: "GOOD",
     }),
   });
-  assert.equal(result.direction, "SHORT");
-  assert.equal(result.quality, "GOOD");
-  assert.equal(result.reactionConfirmed, true);
-  assert.equal(result.directionEstablishedByFresh1m, true);
+
+  assert.equal(result.reactionCandidateDirection, "SHORT");
+  assert.equal(result.reactionCandidateQuality, "GOOD");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
+  assert.equal(
+    result.canonicalResolutionReason,
+    "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION"
+  );
 });
 
-test("2 SHORT STRONG inside zone establishes from completed 1m", () => {
+test("2 SHORT STRONG completed 1m inside zone remains diagnostic only", () => {
   const result = build({
     oneMinute: observation1m({
       completedDirection: "SHORT",
       completedQuality: "STRONG",
     }),
   });
-  assert.equal(result.direction, "SHORT");
-  assert.equal(result.quality, "STRONG");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "SHORT");
+  assert.equal(result.reactionCandidateQuality, "STRONG");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
+  assert.equal(
+    result.canonicalResolutionReason,
+    "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION"
+  );
 });
 
-test("3 LONG GOOD inside zone establishes from completed 1m", () => {
+test("3 LONG GOOD completed 1m inside zone remains diagnostic only", () => {
   const result = build({
     oneMinute: observation1m({
       completedState: "PUSHING_HIGHER",
@@ -194,12 +207,19 @@ test("3 LONG GOOD inside zone establishes from completed 1m", () => {
     }),
     engine26: handoff({ bias: "LONG" }),
   });
-  assert.equal(result.direction, "LONG");
-  assert.equal(result.quality, "GOOD");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "LONG");
+  assert.equal(result.reactionCandidateQuality, "GOOD");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
+  assert.equal(
+    result.canonicalResolutionReason,
+    "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION"
+  );
 });
 
-test("4 LONG STRONG inside zone establishes from completed 1m", () => {
+test("4 LONG STRONG completed 1m inside zone remains diagnostic only", () => {
   const result = build({
     oneMinute: observation1m({
       completedState: "PUSHING_HIGHER",
@@ -208,9 +228,16 @@ test("4 LONG STRONG inside zone establishes from completed 1m", () => {
     }),
     engine26: handoff({ bias: "LONG" }),
   });
-  assert.equal(result.direction, "LONG");
-  assert.equal(result.quality, "STRONG");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "LONG");
+  assert.equal(result.reactionCandidateQuality, "STRONG");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
+  assert.equal(
+    result.canonicalResolutionReason,
+    "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION"
+  );
 });
 
 test("5 forming/live 1m cannot establish when completed 1m is neutral", () => {
@@ -229,7 +256,7 @@ test("5 forming/live 1m cannot establish when completed 1m is neutral", () => {
   assert.equal(result.directionEstablishedByFresh1m, false);
 });
 
-test("6 bullish semantic label alone cannot veto completed SHORT", () => {
+test("6 bullish semantic label does not erase completed SHORT diagnostic evidence", () => {
   const result = build({
     oneMinute: observation1m({
       completedState: "WICK_BELOW_AND_RECLAIM",
@@ -237,11 +264,15 @@ test("6 bullish semantic label alone cannot veto completed SHORT", () => {
       completedQuality: "STRONG",
     }),
   });
-  assert.equal(result.direction, "SHORT");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "SHORT");
+  assert.equal(result.reactionCandidateQuality, "STRONG");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
 });
 
-test("7 bearish semantic label alone cannot veto completed LONG", () => {
+test("7 bearish semantic label does not erase completed LONG diagnostic evidence", () => {
   const result = build({
     oneMinute: observation1m({
       completedState: "REJECTING_VALUE",
@@ -250,11 +281,15 @@ test("7 bearish semantic label alone cannot veto completed LONG", () => {
     }),
     engine26: handoff({ bias: "LONG" }),
   });
-  assert.equal(result.direction, "LONG");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "LONG");
+  assert.equal(result.reactionCandidateQuality, "STRONG");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
 });
 
-test("8 5m conflict and opposing 10m diagnostic cannot create or flip direction", () => {
+test("8 1m, 5m, and 10m diagnostics cannot manufacture canonical direction from NEUTRAL", () => {
   const result = build({
     oneMinute: observation1m({
       completedDirection: "SHORT",
@@ -271,8 +306,12 @@ test("8 5m conflict and opposing 10m diagnostic cannot create or flip direction"
       quality: "STRONG",
     }),
   });
-  assert.equal(result.direction, "SHORT");
-  assert.equal(result.reactionConfirmed, true);
+
+  assert.equal(result.reactionCandidateDirection, "SHORT");
+  assert.equal(result.reactionCandidateQuality, "GOOD");
+  assert.equal(result.reactionCandidateConfirmed, true);
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.directionEstablishedByFresh1m, false);
   assert.equal(result.fiveMinuteValidationRequired, false);
 });
 
