@@ -1,5 +1,6 @@
 // services/core/tests/engine8RealSchwabObserver.test.js
-// Read-only unit proof for Engine 8 Schwab REAL futures normalization.
+// Read-only unit proof for Engine 8 Schwab REAL futures normalization
+// and restart query-window behavior.
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -8,6 +9,9 @@ import {
   normalizeSchwabRealFutureTransaction,
   resolveSchwabJournalAccount,
 } from "../logic/trading/schwab/engine8RealFillNormalizer.js";
+import {
+  computeEngine8RealFillQueryStart,
+} from "../logic/trading/schwab/engine8RealFillObserver.js";
 
 function tx({
   activityId = 129430040346,
@@ -58,37 +62,88 @@ function tx({
 
 test("frozen four-way Schwab futures side/direction mapping", () => {
   assert.deepEqual(
-    normalizeSchwabFutureSide({ positionEffect: "OPENING", signedAmount: 1 }),
-    { ok: true, positionEffect: "OPENING", side: "BUY", direction: "LONG", quantity: 1 }
+    normalizeSchwabFutureSide({
+      positionEffect: "OPENING",
+      signedAmount: 1,
+    }),
+    {
+      ok: true,
+      positionEffect: "OPENING",
+      side: "BUY",
+      direction: "LONG",
+      quantity: 1,
+    }
   );
+
   assert.deepEqual(
-    normalizeSchwabFutureSide({ positionEffect: "OPENING", signedAmount: -2 }),
-    { ok: true, positionEffect: "OPENING", side: "SELL", direction: "SHORT", quantity: 2 }
+    normalizeSchwabFutureSide({
+      positionEffect: "OPENING",
+      signedAmount: -2,
+    }),
+    {
+      ok: true,
+      positionEffect: "OPENING",
+      side: "SELL",
+      direction: "SHORT",
+      quantity: 2,
+    }
   );
+
   assert.deepEqual(
-    normalizeSchwabFutureSide({ positionEffect: "CLOSING", signedAmount: -1 }),
-    { ok: true, positionEffect: "CLOSING", side: "SELL", direction: "LONG", quantity: 1 }
+    normalizeSchwabFutureSide({
+      positionEffect: "CLOSING",
+      signedAmount: -1,
+    }),
+    {
+      ok: true,
+      positionEffect: "CLOSING",
+      side: "SELL",
+      direction: "LONG",
+      quantity: 1,
+    }
   );
+
   assert.deepEqual(
-    normalizeSchwabFutureSide({ positionEffect: "CLOSING", signedAmount: 2 }),
-    { ok: true, positionEffect: "CLOSING", side: "BUY", direction: "SHORT", quantity: 2 }
+    normalizeSchwabFutureSide({
+      positionEffect: "CLOSING",
+      signedAmount: 2,
+    }),
+    {
+      ok: true,
+      positionEffect: "CLOSING",
+      side: "BUY",
+      direction: "SHORT",
+      quantity: 2,
+    }
   );
 });
 
 test("frozen Schwab account mapping", () => {
-  assert.equal(resolveSchwabJournalAccount("****6380").journalAccount, "INTRADAY");
-  assert.equal(resolveSchwabJournalAccount("****0747").journalAccount, "SWING");
+  assert.equal(
+    resolveSchwabJournalAccount("****6380").journalAccount,
+    "INTRADAY"
+  );
+  assert.equal(
+    resolveSchwabJournalAccount("****0747").journalAccount,
+    "SWING"
+  );
 });
 
 test("normalizes actual-style Schwab short closing fill and fees", () => {
   const out = normalizeSchwabRealFutureTransaction({
-    transaction: tx({ positionEffect: "CLOSING", amount: 1 }),
+    transaction: tx({
+      positionEffect: "CLOSING",
+      amount: 1,
+    }),
     maskedAccountNumber: "****0747",
     observedAt: "2026-08-30T15:00:00.000Z",
   });
 
   assert.equal(out.ok, true);
-  assert.equal(out.dedupeKey, "SCHWAB|SWING|129430040346");
+  assert.equal(
+    out.dedupeKey,
+    "SCHWAB|SWING|129430040346"
+  );
   assert.equal(out.fill.brokerAccountLabel, "SCHWAB_0747");
   assert.equal(out.fill.journalAccount, "SWING");
   assert.equal(out.fill.positionEffect, "CLOSING");
@@ -120,4 +175,62 @@ test("normalizes long opening fill for INTRADAY account", () => {
   assert.equal(out.fill.side, "BUY");
   assert.equal(out.fill.direction, "LONG");
   assert.equal(out.fill.quantity, 2);
+});
+
+test("normal polling uses short lookback but never crosses bootstrap", () => {
+  const start = computeEngine8RealFillQueryStart({
+    deliveryEnabled: true,
+    recoveryMode: false,
+    bootstrapStartedAt: "2026-08-31T16:00:00.000Z",
+    lastBrokerFillTimeSeen: "2026-08-31T16:20:00.000Z",
+    now: new Date("2026-08-31T16:30:00.000Z"),
+    lookbackMinutes: 15,
+    recoveryOverlapMinutes: 5,
+  });
+
+  assert.equal(start, "2026-08-31T16:15:00.000Z");
+});
+
+test("restart recovery resumes five minutes before last broker fill", () => {
+  const start = computeEngine8RealFillQueryStart({
+    deliveryEnabled: true,
+    recoveryMode: true,
+    bootstrapStartedAt: "2026-08-31T16:00:00.000Z",
+    lastBrokerFillTimeSeen: "2026-08-31T16:20:00.000Z",
+    now: new Date("2026-08-31T18:00:00.000Z"),
+    lookbackMinutes: 15,
+    recoveryOverlapMinutes: 5,
+  });
+
+  assert.equal(start, "2026-08-31T16:15:00.000Z");
+});
+
+test("restart recovery never queries before bootstrap", () => {
+  const start = computeEngine8RealFillQueryStart({
+    deliveryEnabled: true,
+    recoveryMode: true,
+    bootstrapStartedAt: "2026-08-31T16:00:00.000Z",
+    lastBrokerFillTimeSeen: "2026-08-31T16:02:00.000Z",
+    now: new Date("2026-08-31T18:00:00.000Z"),
+    lookbackMinutes: 15,
+    recoveryOverlapMinutes: 5,
+  });
+
+  assert.equal(start, "2026-08-31T16:00:00.000Z");
+});
+
+test("delivery fails closed until bootstrap is initialized", () => {
+  assert.throws(
+    () =>
+      computeEngine8RealFillQueryStart({
+        deliveryEnabled: true,
+        recoveryMode: true,
+        bootstrapStartedAt: null,
+        lastBrokerFillTimeSeen: null,
+        now: new Date("2026-08-31T18:00:00.000Z"),
+        lookbackMinutes: 15,
+        recoveryOverlapMinutes: 5,
+      }),
+    /ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED/
+  );
 });
