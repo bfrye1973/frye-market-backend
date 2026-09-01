@@ -1,5 +1,5 @@
 // services/core/logic/engine25FinlightStream.js
-// Engine 25 Finlight Reuters WebSocket v0.1
+// Engine 25 Finlight Reuters WebSocket v0.2 — continuation-thread aware
 //
 // PRIMARY LIVE NEWS LANE
 // Finlight raw WebSocket -> Reuters-only -> existing Engine 25 classifier
@@ -23,6 +23,7 @@ import {
   ENGINE25_NEWS_SOURCE,
   normalizeFinlightArticle,
   dedupeEngine25NewsEvents,
+  buildEngine25NewsThreads,
 } from "./engine25NewsFilter.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -185,6 +186,8 @@ function buildMergedOutput(newEvent, receivedAtUtc) {
       ? current.providerDiagnostics.stream
       : {};
 
+  const eventThreads = buildEngine25NewsThreads(retained);
+
   return {
     ...current,
     ok: true,
@@ -202,6 +205,7 @@ function buildMergedOutput(newEvent, receivedAtUtc) {
     itemsRelevant: retained.length,
     itemsMaterial: retained.filter((event) => event?.material === true).length,
     activeMaterialCount: activeMaterialEvents.length,
+    eventThreads,
     providerDiagnostics: {
       ...(current.providerDiagnostics || {}),
       stream: {
