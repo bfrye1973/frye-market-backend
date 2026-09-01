@@ -5,9 +5,9 @@
 // Canonical Strategy 1 ownership:
 // - Engine 26 owns location, candidate identity, lifecycle authorization,
 //   authorized branch, trigger/reclaim/invalidation geometry.
-// - 1m proposes a reaction direction; it does NOT directly publish canonical LONG/SHORT.
-// - INSIDE the negotiated zone, completed 1m reaction evidence may confirm without
-//   waiting for a completed 5m validation candle.
+// - 1m is immediate diagnostic reaction evidence only; it never establishes or flips canonical LONG/SHORT.
+// - INSIDE the negotiated zone, completed 5m price-action evidence may establish the
+//   initial canonical LONG/SHORT when Engine 26 authorization/identity also pass.
 // - Once price leaves the negotiated zone, the established direction is held
 //   by completed 10m close vs EMA10; 1m/5m become diagnostic only.
 // - Before a paper trade is active, 1m/5m own reaction discovery/validation only.
@@ -60,8 +60,8 @@ const QUALIFYING_QUALITY = new Set([
  * These states describe the developing PRICE REACTION.
  * They are not legacy contradiction/veto lists.
  *
- * 5m completed reaction evidence uses these states to propose
- * the current Engine 3 reaction direction.
+ * Completed 5m reaction evidence uses these states as descriptive
+ * price-action language for the canonical reaction candidate.
  */
 const BULLISH_REACTION_STATES = new Set([
   "WICK_BELOW_AND_RECLAIM",
@@ -369,26 +369,28 @@ function resolveCanonicalDirection({
   /*
    * Strategy 1 canonical reaction discovery.
    *
-   * Only COMPLETED 1m price-action evidence may establish a fresh
-   * canonical LONG / SHORT at the negotiated zone.
+   * COMPLETED 5m price-action evidence owns fresh canonical
+   * LONG / SHORT establishment at the negotiated zone.
    *
-   * Forming 1m, semantic level-action labels, 5m, 10m, Engine 26 bias,
-   * and EMA10 do not create canonical direction here.
+   * 1m remains immediate diagnostic evidence only.
+   * Forming 5m, 10m diagnostics, Engine 26 bias, and EMA10
+   * do not create canonical direction here.
    */
-const completedState = safeUpper(
-  validation5m?.completedPriceActionState,
-  "NO_CLEAR_DIRECTION"
-);
+  const completedState = safeUpper(
+    validation5m?.completedPriceActionState,
+    "NO_CLEAR_DIRECTION"
+  );
 
-const completedDirection = safeUpper(
-  validation5m?.completedPriceActionDirection,
-  "NEUTRAL"
-);
+  const completedDirection = safeUpper(
+    validation5m?.completedPriceActionDirection,
+    "NEUTRAL"
+  );
 
-const completedQuality = safeUpper(
-  validation5m?.completedPriceActionQuality,
-  "WEAK"
-);
+  const completedQuality = safeUpper(
+    validation5m?.completedPriceActionQuality,
+    "WEAK"
+  );
+
   const previousDirection = safeUpper(
     previousCanonicalDirection,
     "NEUTRAL"
@@ -415,18 +417,18 @@ const completedQuality = safeUpper(
     ema10 != null;
 
   const observationPresent =
-    observation1m != null &&
-    typeof observation1m === "object";
+    validation5m != null &&
+    typeof validation5m === "object";
 
   const observationActive =
-    observation1m?.active === true;
+    validation5m?.active === true;
 
   const observationFresh =
-    observation1m?.stale !== true;
+    validation5m?.stale !== true;
 
-  const oneMinuteIdentityAligned =
+  const fiveMinuteIdentityAligned =
     identityAligned(
-      observation1m,
+      validation5m,
       engine26ReactionHandoff
     );
 
@@ -441,7 +443,7 @@ const completedQuality = safeUpper(
     observationPresent &&
     observationActive &&
     observationFresh &&
-    oneMinuteIdentityAligned &&
+    fiveMinuteIdentityAligned &&
     reactionDirectional &&
     reactionQualityApproved;
 
@@ -451,38 +453,38 @@ const completedQuality = safeUpper(
       : "NEUTRAL";
 
   let resolutionStatus =
-    "NO_USABLE_COMPLETED_1M_REACTION_CANDIDATE";
+    "NO_USABLE_COMPLETED_5M_REACTION_CANDIDATE";
 
   let resolutionReason =
-    "COMPLETED_1M_REACTION_NOT_USABLE";
+    "COMPLETED_5M_REACTION_NOT_USABLE";
 
   if (!observationPresent) {
     resolutionReason =
-      "COMPLETED_1M_REACTION_MISSING";
-  } else if (!oneMinuteIdentityAligned) {
+      "COMPLETED_5M_REACTION_MISSING";
+  } else if (!fiveMinuteIdentityAligned) {
     resolutionReason =
-      "ONE_MINUTE_ENGINE26_IDENTITY_MISMATCH";
+      "FIVE_MINUTE_ENGINE26_IDENTITY_MISMATCH";
   } else if (!observationActive) {
     resolutionReason =
-      "ONE_MINUTE_REACTION_INACTIVE";
+      "FIVE_MINUTE_REACTION_INACTIVE";
   } else if (!observationFresh) {
     resolutionReason =
-      "ONE_MINUTE_REACTION_STALE";
+      "FIVE_MINUTE_REACTION_STALE";
   } else if (!reactionDirectional) {
     resolutionStatus =
-      "REACTION_CANDIDATE_NEUTRAL_FROM_COMPLETED_1M";
+      "REACTION_CANDIDATE_NEUTRAL_FROM_COMPLETED_5M";
     resolutionReason =
-      "COMPLETED_1M_PRICE_ACTION_NOT_DIRECTIONAL";
+      "COMPLETED_5M_PRICE_ACTION_NOT_DIRECTIONAL";
   } else if (!reactionQualityApproved) {
     resolutionStatus =
       `REACTION_CANDIDATE_${completedDirection}_QUALITY_NOT_APPROVED`;
     resolutionReason =
-      `COMPLETED_1M_${completedDirection}_${completedQuality}_NOT_QUALIFIED`;
+      `COMPLETED_5M_${completedDirection}_${completedQuality}_NOT_QUALIFIED`;
   } else {
     resolutionStatus =
-      `REACTION_CANDIDATE_${candidateDirection}_FROM_COMPLETED_1M`;
+      `REACTION_CANDIDATE_${candidateDirection}_FROM_COMPLETED_5M`;
     resolutionReason =
-      `COMPLETED_1M_PRICE_ACTION_${candidateDirection}_${completedQuality}`;
+      `COMPLETED_5M_PRICE_ACTION_${candidateDirection}_${completedQuality}`;
   }
 
   return {
@@ -497,12 +499,12 @@ const completedQuality = safeUpper(
 
     sourceTimeframe:
       observationUsable
-        ? "1m"
+        ? "5m"
         : null,
 
     reactionTimeframe:
       observationUsable
-        ? "1m"
+        ? "5m"
         : null,
 
     reactionPresent: observationPresent,
@@ -516,7 +518,7 @@ const completedQuality = safeUpper(
     observationFresh,
     observationCompleted: reactionDirectional,
     observationUsable,
-    identityAligned: oneMinuteIdentityAligned,
+    identityAligned: fiveMinuteIdentityAligned,
 
     observedState: completedState,
     observedDirection: completedDirection,
@@ -535,7 +537,15 @@ const completedQuality = safeUpper(
         : "NEUTRAL",
 
     directionPersistenceActive: false,
-    directionEstablishedByFresh1m: observationUsable,
+
+    /*
+     * 1m can no longer establish canonical direction.
+     * This compatibility field remains false by contract.
+     */
+    directionEstablishedByFresh1m: false,
+
+    directionEstablishedByCompleted5m:
+      observationUsable,
 
     tenMinuteCompletedClose: completedClose,
     tenMinuteEma10: ema10,
@@ -585,22 +595,24 @@ function resolveFinalCanonicalDirection({
   const previousDirectional =
     previousDirection === "LONG" ||
     previousDirection === "SHORT";
-/*
- * Once Engine 3 has already confirmed a directional reaction
- * for this negotiated-zone cycle, later 1m candles remain
- * diagnostic and may NOT reverse that established direction.
- *
- * Engine 26 midpoint completion is handled before this lock,
- * so a completed trip still resets Engine 3 to NEUTRAL.
- */
-const previousConfirmedDirectional =
-  previousReactionConfirmed === true &&
-  previousDirectional;
 
   /*
-   * First snapshot after a qualified negotiated-zone direction leaves
-   * the zone: seed persistence from the previously confirmed canonical
-   * direction. Once seeded, establishedTripDirection carries it forward.
+   * Once Engine 3 has already confirmed a directional reaction
+   * for this negotiated-zone cycle, later 1m/5m diagnostics may
+   * continue updating but may NOT reverse the established direction.
+   *
+   * Engine 26 midpoint completion is handled before this lock,
+   * so a completed trip still resets Engine 3 to NEUTRAL.
+   */
+  const previousConfirmedDirectional =
+    previousReactionConfirmed === true &&
+    previousDirectional;
+
+  /*
+   * First snapshot after an established negotiated-zone direction
+   * leaves the zone: seed persistence from the previously confirmed
+   * canonical direction. Once seeded, establishedTripDirection
+   * carries it forward.
    */
   const persistedDirection =
     lockedTripDirectional
@@ -641,12 +653,7 @@ const previousConfirmedDirectional =
   let reactionTimeframe = null;
   let directionPersistenceActive = false;
   let directionEstablishedByFresh1m = false;
-
-  /*
-   * Inside-zone lock:
-   * the previously confirmed Engine 3 reaction remains authoritative.
-   * Current 1m evidence continues to update diagnostics only.
-   */
+  let directionEstablishedByCompleted5m = false;
   let insideZoneDirectionLocked = false;
 
   let ema10ResetTriggered = false;
@@ -671,93 +678,79 @@ const previousConfirmedDirectional =
       "ENGINE26_FULL_TARGET_COMPLETION_START_FRESH_ENGINE3_REACTION";
   }
 
-/*
- * 2 — Negotiated-zone reaction mode.
- *
- * FIRST ESTABLISHMENT:
- * A qualified completed 1m reaction may establish LONG / SHORT
- * while Engine 3 is still NEUTRAL.
- *
- * AFTER ESTABLISHMENT:
- * Once a previous Engine 3 reaction is already confirmed,
- * later 1m candles remain diagnostic only.
- *
- * An opposite 1m candle may NOT flip the established
- * canonical reaction LONG <-> SHORT.
- *
- * Engine 26 midpoint completion above this branch remains
- * the lifecycle reset that starts a fresh reaction cycle.
- */
-else if (insideNegotiatedZone === true) {
   /*
-   * Existing confirmed reaction owns the remainder
-   * of this negotiated-zone reaction cycle.
+   * 2 — Negotiated-zone reaction mode.
+   *
+   * FIRST ESTABLISHMENT:
+   * A qualified COMPLETED 5m reaction may establish LONG / SHORT
+   * while Engine 3 is still NEUTRAL.
+   *
+   * 1m remains diagnostic-only and cannot establish or reverse
+   * canonical direction.
+   *
+   * AFTER ESTABLISHMENT:
+   * The previously confirmed Engine 3 reaction remains locked
+   * for the current negotiated-zone cycle.
    */
-  if (previousConfirmedDirectional) {
-    direction = previousDirection;
+  else if (insideNegotiatedZone === true) {
+    if (previousConfirmedDirectional) {
+      direction = previousDirection;
 
-    sourceTimeframe =
-      "ESTABLISHED_NEGOTIATED_ZONE_REACTION";
+      sourceTimeframe =
+        "ESTABLISHED_NEGOTIATED_ZONE_REACTION";
 
-    reactionTimeframe = "1m";
+      reactionTimeframe = "5m";
 
-    insideZoneDirectionLocked = true;
+      insideZoneDirectionLocked = true;
 
-    directionEstablishedByFresh1m = false;
+      directionEstablishedByFresh1m = false;
+      directionEstablishedByCompleted5m = false;
 
-    resolutionStatus =
-      `NEGOTIATED_ZONE_REACTION_${previousDirection}_PERSISTED`;
+      resolutionStatus =
+        `NEGOTIATED_ZONE_REACTION_${previousDirection}_PERSISTED`;
 
-    resolutionReason =
-      "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_1M_ALONE";
+      resolutionReason =
+        "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_DIAGNOSTIC_TIMEFRAMES";
+    }
+
+    else if (
+      reactionConfirmed &&
+      candidateDirectional
+    ) {
+      direction = candidateDirection;
+
+      sourceTimeframe = "5m";
+      reactionTimeframe = "5m";
+
+      directionEstablishedByFresh1m = false;
+      directionEstablishedByCompleted5m = true;
+
+      resolutionStatus =
+        `NEGOTIATED_ZONE_REACTION_${candidateDirection}_CONFIRMED`;
+
+      resolutionReason =
+        "COMPLETED_5M_NEGOTIATED_ZONE_REACTION_ESTABLISHED_INITIAL_DIRECTION";
+    }
+
+    else {
+      direction = "NEUTRAL";
+
+      sourceTimeframe =
+        "NEGOTIATED_ZONE_REACTION";
+
+      reactionTimeframe = "5m";
+
+      directionEstablishedByFresh1m = false;
+      directionEstablishedByCompleted5m = false;
+
+      resolutionStatus =
+        "NEGOTIATED_ZONE_REACTION_WAITING";
+
+      resolutionReason =
+        "WAITING_FOR_QUALIFIED_COMPLETED_5M_NEGOTIATED_ZONE_REACTION";
+    }
   }
 
-  /*
-   * No established reaction yet:
-   * completed qualified 1m may establish the FIRST direction.
-   */
-  else if (
-    reactionConfirmed &&
-    candidateDirectional
-  ) {
-    /*
-     * Completed 1m remains diagnostic reaction evidence only.
-     * It may NOT establish or flip canonical Engine 3 direction.
-     */
-    direction = "NEUTRAL";
-
-    sourceTimeframe =
-      "NEGOTIATED_ZONE_REACTION";
-
-    reactionTimeframe = "1m";
-
-    directionEstablishedByFresh1m = false;
-
-    resolutionStatus =
-      "NEGOTIATED_ZONE_REACTION_WAITING_FOR_CANONICAL_DIRECTION";
-
-    resolutionReason =
-      "COMPLETED_1M_REACTION_DIAGNOSTIC_ONLY_CANNOT_ESTABLISH_CANONICAL_DIRECTION";
-  }
-
-  /*
-   * Still no qualified reaction.
-   */
-  else {
-    direction = "NEUTRAL";
-
-    sourceTimeframe =
-      "NEGOTIATED_ZONE_REACTION";
-
-    reactionTimeframe = "1m";
-
-    resolutionStatus =
-      "NEGOTIATED_ZONE_REACTION_WAITING";
-
-    resolutionReason =
-      "WAITING_FOR_QUALIFIED_COMPLETED_1M_NEGOTIATED_ZONE_REACTION";
-  }
-}
   /*
    * 3 — Outside the zone with an already-established direction.
    * Completed 10m close vs EMA10 owns HOLD / RESET only.
@@ -817,8 +810,10 @@ else if (insideNegotiatedZone === true) {
     direction = "NEUTRAL";
     sourceTimeframe = "NEGOTIATED_ZONE_REACTION_REQUIRED";
     reactionTimeframe = null;
-    resolutionStatus = "OUTSIDE_ZONE_NEUTRAL_WAITING_FOR_NEW_REACTION";
-    resolutionReason = "EMA10_CANNOT_CREATE_INITIAL_DIRECTION";
+    resolutionStatus =
+      "OUTSIDE_ZONE_NEUTRAL_WAITING_FOR_NEW_REACTION";
+    resolutionReason =
+      "EMA10_CANNOT_CREATE_INITIAL_DIRECTION";
   }
 
   /* 5 — Unknown zone geometry: do not invent a fresh direction. */
@@ -827,7 +822,8 @@ else if (insideNegotiatedZone === true) {
     direction = "NEUTRAL";
     sourceTimeframe = null;
     reactionTimeframe = null;
-    resolutionStatus = "ZONE_POSITION_UNKNOWN_REACTION_WAITING";
+    resolutionStatus =
+      "ZONE_POSITION_UNKNOWN_REACTION_WAITING";
     resolutionReason =
       "NO_NEW_CANONICAL_DIRECTION_WITHOUT_NEGOTIATED_ZONE_POSITION";
   }
@@ -841,6 +837,7 @@ else if (insideNegotiatedZone === true) {
     reactionTimeframe,
     directionPersistenceActive,
     directionEstablishedByFresh1m,
+    directionEstablishedByCompleted5m,
     insideZoneDirectionLocked,
     ema10ResetTriggered,
     travelModeActive,
@@ -878,7 +875,7 @@ function resolveFinalConfirmation({
     canonicalResolution?.directionPersistenceActive === true;
 
   const insideZoneDirectionLocked =
-  canonicalResolution?.insideZoneDirectionLocked === true;
+    canonicalResolution?.insideZoneDirectionLocked === true;
 
   const ema10ResetTriggered =
     canonicalResolution?.ema10ResetTriggered === true;
@@ -938,10 +935,10 @@ function resolveFinalConfirmation({
   };
 }
 function resolveCanonicalQuality({
-  observation1m = null,
+  validation5m = null,
 } = {}) {
   return safeUpper(
-    observation1m?.completedPriceActionQuality,
+    validation5m?.completedPriceActionQuality,
     "WEAK"
   );
 }
@@ -1054,11 +1051,11 @@ function resolveCanonicalConfirmation({
   }
 
   if (!candidateDirectional) {
-    blockers.push("ENGINE3_COMPLETED_1M_REACTION_NOT_DIRECTIONAL");
+    blockers.push("ENGINE3_COMPLETED_5M_REACTION_NOT_DIRECTIONAL");
   }
 
   if (!qualityApproved) {
-    blockers.push("ENGINE3_COMPLETED_1M_REACTION_NOT_GOOD_OR_STRONG");
+    blockers.push("ENGINE3_COMPLETED_5M_REACTION_NOT_GOOD_OR_STRONG");
   }
 
   if (authorizationValid) {
@@ -1071,7 +1068,7 @@ function resolveCanonicalConfirmation({
 
   if (candidateDirectional && qualityApproved) {
     reasonCodes.push(
-      `ENGINE3_COMPLETED_1M_${candidateDirection}_${candidateQuality}_REACTION`
+      `ENGINE3_COMPLETED_5M_${candidateDirection}_${candidateQuality}_REACTION`
     );
   }
 
@@ -1080,8 +1077,8 @@ function resolveCanonicalConfirmation({
 
   reasonCodes.push(
     reactionConfirmed
-      ? "ENGINE3_COMPLETED_1M_REACTION_CONFIRMED"
-      : "ENGINE3_COMPLETED_1M_REACTION_NOT_CONFIRMED"
+      ? "ENGINE3_COMPLETED_5M_REACTION_CONFIRMED"
+      : "ENGINE3_COMPLETED_5M_REACTION_NOT_CONFIRMED"
   );
 
   return {
@@ -1099,22 +1096,32 @@ function resolveCanonicalConfirmation({
     identityMatched,
     canonicalDirectional: candidateDirectional,
 
-    oneMinuteAligned:
+    /*
+     * Canonical confirmation now belongs to completed 5m evidence.
+     * 1m remains diagnostic-only and has no confirmation authority.
+     */
+    fiveMinuteAligned:
       candidateDirectional &&
       qualityApproved,
 
-    oneMinuteState:
+    fiveMinuteState:
       canonicalResolution?.observedState ||
       "NO_SIGNAL",
 
-    oneMinuteDirection:
+    fiveMinuteDirection:
       candidateDirection,
 
-    oneMinuteQuality:
+    fiveMinuteQuality:
       candidateQuality,
 
-    oneMinuteQualityApproved:
+    fiveMinuteQualityApproved:
       qualityApproved,
+
+    oneMinuteAligned: false,
+    oneMinuteState: null,
+    oneMinuteDirection: null,
+    oneMinuteQuality: null,
+    oneMinuteQualityApproved: false,
 
     candleCompleted:
       canonicalResolution?.observationUsable === true,
@@ -1443,8 +1450,9 @@ const broaderConfirmation10m = {
  * It is separate from the legacy SUPPORT / CONFLICT-with-1m fields.
  *
  * IMPORTANT:
- * This is being transported into paperScalpReaction first.
- * It does NOT own canonical Engine 3 direction yet.
+ * Canonical Engine 3 may consume these completed 5m fields for
+ * INITIAL direction establishment only while price is inside the
+ * Engine 26 negotiated zone.
  */
 const matureReaction5m = {
   active:
@@ -1509,14 +1517,16 @@ const matureReaction5m = {
     });
 
   /*
-   * STEP 1 — build the current reaction candidate.
+   * STEP 1 — build the canonical reaction candidate.
    *
-   * A 1m candle may propose LONG / SHORT, but it does NOT publish
-   * canonical Engine 3 direction yet.
+   * Completed 5m price action may propose the initial canonical
+   * LONG / SHORT while price is inside the negotiated zone.
+   * 1m remains immediate diagnostic evidence only.
    */
   const candidateResolution =
     resolveCanonicalDirection({
       observation1m,
+      validation5m,
       previousCanonicalDirection,
       tenMinuteCompletedClose,
       tenMinuteEma10,
@@ -1619,13 +1629,13 @@ const engine26MidpointReset =
   /*
    * STEP 2 — score the candidate.
    *
-   * Canonical candidate quality comes only from completed 1m price action.
+   * Canonical candidate quality comes only from completed 5m price action.
    * Outside the zone, fresh 1m/5m quality is diagnostic and cannot create
    * a new canonical direction.
    */
   const candidateQuality =
     resolveCanonicalQuality({
-      observation1m,
+      validation5m,
     });
 
   /*
@@ -1647,9 +1657,11 @@ const engine26MidpointReset =
   /*
    * STEP 4 — earn fresh reaction confirmation.
    *
-   * Completed qualified 1m + Engine 26 authorization/identity must pass.
-   * 5m and 10m remain diagnostic only and cannot create, flip, veto, or
-   * delay canonical Strategy 1 direction.
+   * Completed qualified 5m + Engine 26 authorization/identity must pass
+   * for INITIAL canonical direction establishment inside the negotiated zone.
+   *
+   * 1m remains diagnostic-only. 10m remains broader context / post-zone
+   * EMA10 hold-reset only.
    */
   const candidateConfirmation =
     resolveCanonicalConfirmation({
@@ -1710,7 +1722,7 @@ const canonicalDirectionNow =
  * Engine 3 post-zone direction memory.
  *
  * Only a direction already established from a qualified negotiated-zone
- * completed-1m reaction may seed this memory. Two completed 10m departure
+ * completed-5m reaction may seed this memory. Two completed 10m departure
  * candles are diagnostic only and never seed canonical direction.
  *
  * Re-entering a negotiated zone returns Engine 3 to fresh reaction mode.
@@ -1755,8 +1767,8 @@ const establishedTripDirectionLocked =
       engine26StructuralContext,
       reactionInput: {
         state:
-          confirmation.oneMinuteAligned
-            ? confirmation.oneMinuteState
+          confirmation.fiveMinuteAligned
+            ? confirmation.fiveMinuteState
             : canonicalResolution.state,
         quality:
           canonicalQuality,
@@ -1855,13 +1867,13 @@ const establishedTripDirectionLocked =
      */
     directionEstablishmentTimeframe:
       insideNegotiatedZone
-        ? "1m_NEGOTIATED_ZONE_REACTION"
+        ? "5m_COMPLETED_NEGOTIATED_ZONE_REACTION"
         : canonicalResolution.directionPersistenceActive
         ? "10m_EMA10_POST_ZONE_HOLD"
         : "NEGOTIATED_ZONE_REACTION_REQUIRED",
 
     validationTimeframe:
-      "5m_DIAGNOSTIC_ONLY",
+      "5m_COMPLETED_CANONICAL_ESTABLISHMENT",
 
     directionResetTimeframe:
       "10m_ACTIVE_PAPER_TRADE_ONLY",
@@ -1908,9 +1920,6 @@ const establishedTripDirectionLocked =
 
     directionEstablishedByFresh1m:
       canonicalResolution.directionEstablishedByFresh1m,
-
-    insideZoneDirectionLocked:
-      canonicalResolution.insideZoneDirectionLocked === true,
 
     previousCanonicalDirection:
       canonicalResolution.previousCanonicalDirection,
@@ -2166,8 +2175,8 @@ const establishedTripDirectionLocked =
     /*
      * Completed 5m book-based price-reaction evidence.
      *
-     * This is the future reaction-phase input.
-     * Canonical authority is NOT enabled in this edit.
+     * This is the INITIAL canonical direction-establishment evidence
+     * while price is inside the negotiated zone.
      */
     matureReaction5m,
 
@@ -2200,6 +2209,14 @@ const establishedTripDirectionLocked =
         confirmation.branchAligned,
       oneMinuteAligned:
         confirmation.oneMinuteAligned,
+      fiveMinuteAligned:
+        confirmation.fiveMinuteAligned,
+      fiveMinuteState:
+        confirmation.fiveMinuteState,
+      fiveMinuteDirection:
+        confirmation.fiveMinuteDirection,
+      fiveMinuteQuality:
+        confirmation.fiveMinuteQuality,
       approvedReactionState:
         confirmation.approvedReactionState,
       qualityApproved:
@@ -2237,7 +2254,7 @@ const establishedTripDirectionLocked =
       validation5m?.maturityResolved === true,
 
     validationTimeframe:
-      "5m_DIAGNOSTIC_ONLY",
+      "5m_COMPLETED_CANONICAL_ESTABLISHMENT",
 
     broaderContextDirection:
       broaderReaction10m?.direction ||
@@ -2350,15 +2367,15 @@ const establishedTripDirectionLocked =
         matureReaction5m?.active === true
           ? "ENGINE3_COMPLETED_5M_REACTION_ACTIVE"
           : "ENGINE3_COMPLETED_5M_REACTION_NOT_ACTIVE",
-        "ONE_MINUTE_PROPOSES_REACTION_DIRECTION",
+        "ONE_MINUTE_DIAGNOSTIC_ONLY_NO_CANONICAL_AUTHORITY",
 
         insideNegotiatedZone
-          ? "NEGOTIATED_ZONE_1M_REACTION_MODE"
+          ? "NEGOTIATED_ZONE_COMPLETED_5M_REACTION_MODE"
           : canonicalResolution.directionPersistenceActive
           ? "POST_ZONE_10M_EMA10_DIRECTION_HOLD"
           : "OUTSIDE_ZONE_WAITING_FOR_ESTABLISHED_DIRECTION",
 
-        "FIVE_MINUTE_DIAGNOSTIC_ONLY",
+        "COMPLETED_5M_INITIAL_CANONICAL_DIRECTION_AUTHORITY",
 
         "CANONICAL_DIRECTION_REQUIRES_REACTION_CONFIRMATION",
         "TEN_MINUTE_EMA10_ACTIVE_TRADE_HOLD_RESET_ONLY",
@@ -2371,6 +2388,10 @@ const establishedTripDirectionLocked =
 
         canonicalResolution.insideZoneDirectionLocked
           ? "ENGINE3_ESTABLISHED_ZONE_REACTION_DIRECTION_LOCKED"
+          : null,
+
+        canonicalResolution.directionEstablishedByCompleted5m
+          ? "ENGINE3_DIRECTION_ESTABLISHED_BY_COMPLETED_5M"
           : null,
 
         activePaperTradeLocked
