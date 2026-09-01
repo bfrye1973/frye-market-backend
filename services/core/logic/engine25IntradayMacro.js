@@ -1,8 +1,8 @@
 // services/core/logic/engine25IntradayMacro.js
-// Engine 25 Intraday Macro v0.3 — event intensity / pressure model
+// Engine 25 Intraday Macro v0.4 — event intensity + broad market confirmation
 // Pure classification/normalization logic. No provider calls, no trade permission.
 
-export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.3";
+export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.4";
 
 export const MACRO_STATES = Object.freeze([
   "MACRO_SUPPORTIVE",
@@ -374,6 +374,28 @@ function maxSeverity(...values) {
   return best;
 }
 
+function capNonShockMacroSeverity(
+  candidateSeverity,
+  broadMarketConfirmed
+) {
+  // EXTREME is reserved for broad confirmed macro transmission.
+  //
+  // Event Pressure itself can still be EXTREME.
+  // Geopolitical severity can still be HIGH.
+  // Individual market components can still report their own EXTREME state.
+  //
+  // But the combined MACRO_HEADWIND severity cannot become EXTREME
+  // unless at least two independent market-confirmation families confirm.
+  if (
+    candidateSeverity === "EXTREME" &&
+    broadMarketConfirmed !== true
+  ) {
+    return "HIGH";
+  }
+
+  return candidateSeverity;
+}
+
 const EVENT_PRESSURE_STATES = Object.freeze([
   "LOW",
   "MODERATE",
@@ -392,15 +414,26 @@ function eventPressureLabel(score) {
   return "EXTREME";
 }
 
-function eventPressureMacroSeverity(label, marketConfirmed = false) {
+function eventPressureMacroSeverity(
+  label,
+  broadMarketConfirmed = false
+) {
   switch (label) {
     case "EXTREME":
-      return marketConfirmed ? "EXTREME" : "HIGH";
+      // EXTREME event/news intensity alone is not enough to make
+      // the overall macro transmission EXTREME.
+      //
+      // At least two independent market-confirmation families
+      // must agree before EXTREME macro severity is allowed.
+      return broadMarketConfirmed ? "EXTREME" : "HIGH";
+
     case "VERY_HIGH":
     case "HIGH":
       return "HIGH";
+
     case "MODERATE":
       return "MODERATE";
+
     default:
       return "LOW";
   }
@@ -681,10 +714,38 @@ export function buildIntradayMacro({
     reactionState: evaluateEventLifecycle({ event, oil: oilRead, rates: ratesRead, tlt: tltRead }),
   }));
 
-  const ratesConfirmed = ratesRead.state === "NEGATIVE" && tltRead.state === "NEGATIVE";
-  const tltConfirmed = tltRead.state === "NEGATIVE";
-  const oilConfirmed = oilRead.marketConfirmed === true;
-  const crossMarketConfluence = ratesConfirmed && oilConfirmed;
+  const ratesConfirmed =
+    ratesRead.state === "NEGATIVE" &&
+    tltRead.state === "NEGATIVE";
+
+  const tltConfirmed =
+    tltRead.state === "NEGATIVE";
+
+  const oilConfirmed =
+    oilRead.marketConfirmed === true;
+
+  const crossMarketConfluence =
+    ratesConfirmed && oilConfirmed;
+
+  // Count independent market-confirmation families.
+  //
+  // Oil      = CL/BZ
+  // Rates    = ZN/ZB pressure
+  // Duration = TLT pressure
+  //
+  // One confirming family = PARTIAL confirmation.
+  // Two or more = BROAD confirmation.
+  const marketConfirmationCount = [
+    oilConfirmed,
+    ratesRead.state === "NEGATIVE",
+    tltConfirmed,
+  ].filter(Boolean).length;
+
+  const broadMarketConfirmed =
+    marketConfirmationCount >= 2;
+
+  // Keep the existing concept because it is still useful for saying
+  // that an event has at least SOME market confirmation.
   const eventMarketConfirmed =
     geopoliticsMarketConfirmed ||
     treasuryMarketConfirmed ||
@@ -692,10 +753,18 @@ export function buildIntradayMacro({
 
   const eventPressure = {
     ...eventPressureBase,
+
+    // At least one related market family is reacting.
     marketConfirmed: eventMarketConfirmed,
+
+    // Two or more independent market families are confirming.
+    broadMarketConfirmed,
+
+    marketConfirmationCount,
+
     macroSeverity: eventPressureMacroSeverity(
       eventPressureBase.state,
-      eventMarketConfirmed
+      broadMarketConfirmed
     ),
   };
 
@@ -754,12 +823,17 @@ export function buildIntradayMacro({
           ? "EQUITY_NEGATIVE"
           : "MIXED";
 
-      severity = maxSeverity(
+      const headwindSeverityCandidate = maxSeverity(
         "MODERATE",
         ratesRead.severity,
         tltRead.severity,
         oilRead.severity,
         eventPressure.macroSeverity
+      );
+
+      severity = capNonShockMacroSeverity(
+        headwindSeverityCandidate,
+        broadMarketConfirmed
       );
 
       reasonCodes.push(
@@ -787,7 +861,7 @@ export function buildIntradayMacro({
       state = "MACRO_HEADWIND";
       equityImpact = negativeCount === 1 ? "EQUITY_NEGATIVE" : "MIXED";
 
-      severity = maxSeverity(
+      const headwindSeverityCandidate = maxSeverity(
         "LOW",
         ratesRead.severity,
         tltRead.severity,
@@ -795,11 +869,32 @@ export function buildIntradayMacro({
         eventPressure.macroSeverity
       );
 
+      severity = capNonShockMacroSeverity(
+        headwindSeverityCandidate,
+        broadMarketConfirmed
+      );
+
       reasonCodes.push("SINGLE_COMPONENT_OR_EVENT_HEADWIND");
     }
   }
 
   reasonCodes.push(...eventPressure.reasonCodes);
+
+  if (marketConfirmationCount === 1) {
+    reasonCodes.push("PARTIAL_MARKET_CONFIRMATION");
+  }
+
+  if (broadMarketConfirmed) {
+    reasonCodes.push("BROAD_MARKET_CONFIRMATION");
+  }
+
+  if (
+    eventPressure.state === "EXTREME" &&
+    !broadMarketConfirmed &&
+    !macroShock
+  ) {
+    reasonCodes.push("EXTREME_EVENT_PRESSURE_CAPPED_AT_HIGH_MACRO_HEADWIND");
+  }
 
   if (eventPressure.state === "VERY_HIGH") {
     reasonCodes.push("EVENT_PRESSURE_VERY_HIGH");
@@ -863,7 +958,7 @@ export function buildIntradayMacro({
       eventPressure: {
         ...eventPressure,
         note:
-          "News intensity only. Market confirmation remains separate and is still required for MACRO_SHOCK.",
+          "News intensity only. EXTREME Macro Headwind requires broad market confirmation; MACRO_SHOCK still requires the existing dedicated shock conditions.",
       },
 
       treasuryLiquidity: {
@@ -901,6 +996,8 @@ export function buildIntradayMacro({
       tltConfirmed,
       oilConfirmed,
       crossMarketConfluence,
+      marketConfirmationCount,
+      broadMarketConfirmed,
     },
 
     // Root-level diagnostic mirrors for Engine 25 consumers.
