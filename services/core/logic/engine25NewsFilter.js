@@ -1,5 +1,5 @@
 // services/core/logic/engine25NewsFilter.js
-// Engine 25 Finlight News v0.3 — strategic escalation materiality fix
+// Engine 25 Finlight News v0.4 — strike morphology / Hormuz escalation fix
 // Pure relevance, classification, expiry, and dedupe logic.
 // No provider calls. No trade direction. No market confirmation thresholds.
 //
@@ -11,7 +11,7 @@
 
 import { createHash } from "crypto";
 
-export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.3";
+export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.4";
 export const ENGINE25_NEWS_SOURCE = "FINLIGHT_REUTERS_FEED";
 export const ENGINE25_NEWS_SOURCE_TIER = "PROFESSIONAL_NEWS";
 export const ENGINE25_NEWS_PROVIDER = "FINLIGHT";
@@ -50,7 +50,7 @@ const PRIORITY = Object.freeze({
 });
 
 const MATERIAL_TERMS = [
-  "attack", "attacks", "airstrike", "airstrikes", "strike", "strikes",
+  "attack", "attacks", "airstrike", "airstrikes", "air strike", "air strikes", "strike", "strikes", "struck", "striking",
   "missile", "missiles", "drone", "drones", "war", "invasion", "military",
   "blockade", "blocked", "closure", "closed", "disruption", "disrupted",
   "halt", "halted", "suspend", "suspended", "sanction", "sanctions",
@@ -124,7 +124,9 @@ function isHormuzConcreteDisruption(text) {
     "detonated", "detonation",
     "blockade",
     "closure", "closed",
-    "attack",
+    "attack", "attacks", "attacked",
+    "strike", "strikes", "struck", "striking",
+    "airstrike", "airstrikes", "air strike", "air strikes",
     "ship", "ships",
     "shipping disruption",
     "tanker", "tankers",
@@ -219,8 +221,8 @@ function isMajorStrategicEscalation(text) {
 
   return hasAny(text, [
     "attack", "attacks", "attacked",
-    "strike", "strikes", "struck",
-    "airstrike", "airstrikes",
+    "strike", "strikes", "struck", "striking",
+    "airstrike", "airstrikes", "air strike", "air strikes",
     "missile", "missiles",
     "drone strike", "drone strikes",
     "military strike", "military strikes",
@@ -250,13 +252,16 @@ function classifyCandidates(text) {
     "production", "exports", "export",
     "hormuz", "red sea", "suez",
     "blockade", "closure", "disruption", "disrupted",
-    "halt", "halted", "attack", "attacks",
+    "halt", "halted", "attack", "attacks", "attacked",
+    "strike", "strikes", "struck", "striking",
+    "airstrike", "airstrikes", "air strike", "air strikes",
     "sanction", "sanctions"
   ];
 
   const geopoliticalTerms = [
-    "war", "military", "attack", "attacks",
-    "airstrike", "airstrikes",
+    "war", "military", "attack", "attacks", "attacked",
+    "strike", "strikes", "struck", "striking",
+    "airstrike", "airstrikes", "air strike", "air strikes",
     "missile", "missiles",
     "drone", "drones",
     "invasion", "retaliation", "retaliates",
@@ -287,12 +292,12 @@ function classifyCandidates(text) {
   ];
 
   const liveEscalationActionTerms = [
-    "airstrike", "airstrikes",
+    "airstrike", "airstrikes", "air strike", "air strikes",
     "missile", "missiles",
     "drone strike", "drone strikes",
     "military strike", "military strikes",
     "attack", "attacks", "attacked",
-    "strike", "strikes", "struck",
+    "strike", "strikes", "struck", "striking",
     "invasion",
     "retaliation", "retaliates", "retaliated",
     "vow response", "vows response", "vowed response",
@@ -468,7 +473,9 @@ function classifyCandidates(text) {
     hasAny(text, energyTerms) &&
     hasAny(text, [
       "supply", "outage", "cut", "halt",
-      "disruption", "shortage", "attack", "sanction"
+      "disruption", "shortage", "attack", "attacks", "attacked",
+      "strike", "strikes", "struck", "striking",
+      "airstrike", "airstrikes", "sanction"
     ])
   ) {
     candidates.push("ENERGY_SUPPLY_EVENT");
@@ -563,7 +570,10 @@ function materialFor(eventType, text) {
 
   if (eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK") {
     return hasAny(text, [
-      "attack", "airstrike", "missile", "blockade", "closure",
+      "attack", "attacks", "attacked",
+      "strike", "strikes", "struck", "striking",
+      "airstrike", "airstrikes", "air strike", "air strikes",
+      "missile", "blockade", "closure",
       "disruption", "halt", "sanction", "sanctions",
       "shipping", "tanker", "tankers", "supply", "exports"
     ]);
@@ -579,7 +589,8 @@ function materialFor(eventType, text) {
     }
 
     return hasAny(text, [
-      "airstrike", "airstrikes",
+      "airstrike", "airstrikes", "air strike", "air strikes",
+      "strike", "strikes", "struck", "striking",
       "missile", "missiles",
       "drone strike", "drone strikes",
       "military strike", "military strikes",
@@ -674,7 +685,8 @@ function severityFor(eventType, text, material) {
       hasAny(text, [
         "invasion",
         "blockade",
-        "airstrike", "airstrikes",
+        "airstrike", "airstrikes", "air strike", "air strikes",
+        "strike", "strikes", "struck", "striking",
         "missile", "missiles",
         "military strike", "military strikes",
         "hostilities intensify", "conflict escalates"
@@ -716,8 +728,9 @@ function oilSupplyRiskFor(eventType, text) {
       "hormuz", "red sea", "suez"
     ],
     [
-      "supply", "disruption", "attack", "closure",
-      "blockade", "sanction", "shipping", "exports"
+      "supply", "disruption", "attack", "attacks", "attacked",
+      "strike", "strikes", "struck", "striking",
+      "closure", "blockade", "sanction", "shipping", "exports"
     ],
   ]);
 }
