@@ -1,8 +1,8 @@
 // services/core/logic/engine25IntradayMacro.js
-// Engine 25 Intraday Macro v0.2 — Finlight canonical event handoff
+// Engine 25 Intraday Macro v0.3 — event intensity / pressure model
 // Pure classification/normalization logic. No provider calls, no trade permission.
 
-export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.2";
+export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.3";
 
 export const MACRO_STATES = Object.freeze([
   "MACRO_SUPPORTIVE",
@@ -374,6 +374,254 @@ function maxSeverity(...values) {
   return best;
 }
 
+const EVENT_PRESSURE_STATES = Object.freeze([
+  "LOW",
+  "MODERATE",
+  "HIGH",
+  "VERY_HIGH",
+  "EXTREME",
+]);
+
+function eventPressureLabel(score) {
+  const n = Number(score);
+
+  if (!Number.isFinite(n) || n < 20) return "LOW";
+  if (n < 40) return "MODERATE";
+  if (n < 60) return "HIGH";
+  if (n < 80) return "VERY_HIGH";
+  return "EXTREME";
+}
+
+function eventPressureMacroSeverity(label, marketConfirmed = false) {
+  switch (label) {
+    case "EXTREME":
+      return marketConfirmed ? "EXTREME" : "HIGH";
+    case "VERY_HIGH":
+    case "HIGH":
+      return "HIGH";
+    case "MODERATE":
+      return "MODERATE";
+    default:
+      return "LOW";
+  }
+}
+
+function eventSeverityPoints(severity) {
+  return {
+    LOW: 10,
+    MODERATE: 25,
+    HIGH: 40,
+    EXTREME: 55,
+  }[String(severity || "").toUpperCase()] ?? 0;
+}
+
+function eventFamily(event) {
+  const type = String(event?.eventType || "").toUpperCase();
+
+  if (
+    [
+      "GEOPOLITICAL_ESCALATION",
+      "GEOPOLITICAL_OIL_SUPPLY_RISK",
+      "ENERGY_SUPPLY_EVENT",
+    ].includes(type)
+  ) {
+    return "GEOPOLITICAL";
+  }
+
+  if (
+    [
+      "TREASURY_RATES_RISK",
+      "FED_POLICY_EVENT",
+      "FINANCIAL_STRESS_EVENT",
+    ].includes(type)
+  ) {
+    return "RATES_FINANCIAL";
+  }
+
+  if (type === "TRADE_POLICY_RISK") return "TRADE_POLICY";
+  if (type === "MACRO_DATA_RELEASE") return "MACRO_DATA";
+
+  return type || "OTHER";
+}
+
+function isStrategicEntity(entity) {
+  return [
+    "Iran",
+    "Israel",
+    "Russia",
+    "Ukraine",
+    "China",
+    "Taiwan",
+    "North Korea",
+    "United States",
+    "Strait of Hormuz",
+    "Red Sea",
+    "Suez Canal",
+    "Federal Reserve",
+    "U.S. Treasury",
+  ].includes(String(entity || ""));
+}
+
+export function buildEventPressure(activeEvents = []) {
+  const events = (Array.isArray(activeEvents) ? activeEvents : [])
+    .filter((event) => event && event.usable !== false);
+
+  if (!events.length) {
+    return {
+      score: 0,
+      state: "LOW",
+      macroSeverity: "LOW",
+      activeEventCount: 0,
+      highestEventSeverity: null,
+      distinctFamilyCount: 0,
+      distinctEntityCount: 0,
+      strategicEventCount: 0,
+      oilSupplyRiskCount: 0,
+      treasuryLiquidityRiskCount: 0,
+      persistenceHours: 0,
+      marketConfirmed: false,
+      components: {
+        severityBase: 0,
+        additionalEvents: 0,
+        familyBreadth: 0,
+        entityBreadth: 0,
+        strategicImportance: 0,
+        transmissionRisk: 0,
+        persistence: 0,
+      },
+      reasonCodes: [],
+    };
+  }
+
+  const severityBase = Math.max(
+    ...events.map((event) => eventSeverityPoints(event?.severity))
+  );
+
+  const additionalEvents = Math.min(
+    20,
+    Math.max(0, events.length - 1) * 5
+  );
+
+  const families = new Set(
+    events.map(eventFamily).filter(Boolean)
+  );
+
+  const familyBreadth = Math.min(
+    10,
+    Math.max(0, families.size - 1) * 4
+  );
+
+  const entities = new Set(
+    events
+      .map((event) => event?.primaryEntity)
+      .filter(Boolean)
+  );
+
+  const entityBreadth = Math.min(
+    8,
+    Math.max(0, entities.size - 1) * 3
+  );
+
+  const strategicEventCount = events.filter((event) =>
+    isStrategicEntity(event?.primaryEntity)
+  ).length;
+
+  const strategicImportance = Math.min(
+    10,
+    strategicEventCount * 3
+  );
+
+  const oilSupplyRiskCount = events.filter(
+    (event) =>
+      event?.oilSupplyRisk === true ||
+      event?.eventType === "GEOPOLITICAL_OIL_SUPPLY_RISK" ||
+      event?.eventType === "ENERGY_SUPPLY_EVENT"
+  ).length;
+
+  const treasuryLiquidityRiskCount = events.filter(
+    (event) =>
+      event?.treasuryLiquidityRisk === true ||
+      event?.eventType === "TREASURY_RATES_RISK" ||
+      event?.eventType === "FINANCIAL_STRESS_EVENT"
+  ).length;
+
+  const transmissionRisk = Math.min(
+    12,
+    oilSupplyRiskCount * 4 + treasuryLiquidityRiskCount * 3
+  );
+
+  const observedTimes = events
+    .map((event) => Date.parse(event?.observedAt || ""))
+    .filter(Number.isFinite)
+    .sort((a, b) => a - b);
+
+  const persistenceHours =
+    observedTimes.length >= 2
+      ? (observedTimes[observedTimes.length - 1] - observedTimes[0]) /
+        (60 * 60 * 1000)
+      : 0;
+
+  const persistence =
+    events.length >= 3 && persistenceHours >= 2
+      ? Math.min(10, 4 + Math.floor(persistenceHours / 2))
+      : events.length >= 2 && persistenceHours >= 1
+        ? 3
+        : 0;
+
+  const rawScore =
+    severityBase +
+    additionalEvents +
+    familyBreadth +
+    entityBreadth +
+    strategicImportance +
+    transmissionRisk +
+    persistence;
+
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+  const state = eventPressureLabel(score);
+
+  const highestEventSeverity = events
+    .map((event) => String(event?.severity || "").toUpperCase())
+    .sort((a, b) => severityRank(b) - severityRank(a))[0] || null;
+
+  const reasonCodes = [];
+
+  if (events.length >= 2) reasonCodes.push("MULTIPLE_ACTIVE_MATERIAL_EVENTS");
+  if (families.size >= 2) reasonCodes.push("MULTI_FAMILY_EVENT_PRESSURE");
+  if (entities.size >= 2) reasonCodes.push("MULTI_ENTITY_EVENT_PRESSURE");
+  if (strategicEventCount > 0) reasonCodes.push("STRATEGIC_EVENT_ACTIVE");
+  if (oilSupplyRiskCount > 0) reasonCodes.push("OIL_SUPPLY_EVENT_PRESSURE");
+  if (treasuryLiquidityRiskCount > 0) {
+    reasonCodes.push("TREASURY_FINANCIAL_EVENT_PRESSURE");
+  }
+  if (persistence > 0) reasonCodes.push("EVENT_PRESSURE_PERSISTENT");
+
+  return {
+    score,
+    state,
+    macroSeverity: eventPressureMacroSeverity(state, false),
+    activeEventCount: events.length,
+    highestEventSeverity,
+    distinctFamilyCount: families.size,
+    distinctEntityCount: entities.size,
+    strategicEventCount,
+    oilSupplyRiskCount,
+    treasuryLiquidityRiskCount,
+    persistenceHours: round(persistenceHours, 2) ?? 0,
+    marketConfirmed: false,
+    components: {
+      severityBase,
+      additionalEvents,
+      familyBreadth,
+      entityBreadth,
+      strategicImportance,
+      transmissionRisk,
+      persistence,
+    },
+    reasonCodes,
+  };
+}
+
 export function buildIntradayMacro({
   generatedAtUtc = new Date().toISOString(),
   slowContext = {},
@@ -391,8 +639,15 @@ export function buildIntradayMacro({
   const tltRead = classifyTlt(tlt);
   const oilRead = classifyOil({ wti, brent });
 
-  const events = normalizeTemporaryEvents(temporaryEvents, Date.parse(generatedAtUtc) || Date.now());
+  const events = normalizeTemporaryEvents(
+    temporaryEvents,
+    Date.parse(generatedAtUtc) || Date.now()
+  );
   const activeEvents = events.filter((e) => e.usable);
+
+  // Event Pressure measures the intensity of the ACTIVE MATERIAL event stack.
+  // It does not create direction, permission, or MACRO_SHOCK by itself.
+  const eventPressureBase = buildEventPressure(activeEvents);
 
   // Canonical Finlight/Engine 25 event families.
   // News identifies the event; market data confirms transmission.
@@ -430,6 +685,20 @@ export function buildIntradayMacro({
   const tltConfirmed = tltRead.state === "NEGATIVE";
   const oilConfirmed = oilRead.marketConfirmed === true;
   const crossMarketConfluence = ratesConfirmed && oilConfirmed;
+  const eventMarketConfirmed =
+    geopoliticsMarketConfirmed ||
+    treasuryMarketConfirmed ||
+    crossMarketConfluence;
+
+  const eventPressure = {
+    ...eventPressureBase,
+    marketConfirmed: eventMarketConfirmed,
+    macroSeverity: eventPressureMacroSeverity(
+      eventPressureBase.state,
+      eventMarketConfirmed
+    ),
+  };
+
   const marketEvidenceCount = [ratesRead.state, tltRead.state, oilRead.state]
     .filter((x) => x && x !== "UNAVAILABLE").length;
 
@@ -448,28 +717,96 @@ export function buildIntradayMacro({
   } else if (macroShock) {
     state = "MACRO_SHOCK";
     equityImpact = "EQUITY_NEGATIVE";
-    severity = maxSeverity("HIGH", ratesRead.severity, tltRead.severity, oilRead.severity);
+    severity = maxSeverity(
+      "HIGH",
+      ratesRead.severity,
+      tltRead.severity,
+      oilRead.severity,
+      eventPressure.macroSeverity
+    );
     reasonCodes.push("CROSS_MARKET_MACRO_SHOCK_CONFIRMED");
   } else {
-    const negativeCount = [ratesRead.state, tltRead.state, oilRead.state].filter((x) => x === "NEGATIVE").length;
-    const supportiveCount = [ratesRead.state, tltRead.state, oilRead.state].filter((x) => x === "SUPPORTIVE").length;
+    const negativeCount = [ratesRead.state, tltRead.state, oilRead.state]
+      .filter((x) => x === "NEGATIVE").length;
 
-    if (negativeCount >= 2 || geopoliticsMarketConfirmed || treasuryMarketConfirmed) {
+    const supportiveCount = [ratesRead.state, tltRead.state, oilRead.state]
+      .filter((x) => x === "SUPPORTIVE").length;
+
+    const meaningfulEventPressure =
+      eventPressure.state !== "LOW" &&
+      eventPressure.activeEventCount > 0;
+
+    const highEventPressure =
+      ["HIGH", "VERY_HIGH", "EXTREME"].includes(eventPressure.state);
+
+    if (
+      negativeCount >= 2 ||
+      geopoliticsMarketConfirmed ||
+      treasuryMarketConfirmed ||
+      highEventPressure
+    ) {
       state = "MACRO_HEADWIND";
-      equityImpact = "EQUITY_NEGATIVE";
-      severity = maxSeverity("MODERATE", ratesRead.severity, tltRead.severity, oilRead.severity);
-      reasonCodes.push("MULTI_COMPONENT_MACRO_HEADWIND");
-    } else if (supportiveCount >= 2 && negativeCount === 0 && !geopoliticsActive && !treasuryActive) {
+
+      // News intensity can raise the headwind severity, but without market
+      // confirmation it does not manufacture an equity-negative shock.
+      equityImpact =
+        negativeCount >= 1 || eventMarketConfirmed
+          ? "EQUITY_NEGATIVE"
+          : "MIXED";
+
+      severity = maxSeverity(
+        "MODERATE",
+        ratesRead.severity,
+        tltRead.severity,
+        oilRead.severity,
+        eventPressure.macroSeverity
+      );
+
+      reasonCodes.push(
+        highEventPressure
+          ? "HIGH_EVENT_PRESSURE_MACRO_HEADWIND"
+          : "MULTI_COMPONENT_MACRO_HEADWIND"
+      );
+    } else if (
+      supportiveCount >= 2 &&
+      negativeCount === 0 &&
+      !geopoliticsActive &&
+      !treasuryActive &&
+      !meaningfulEventPressure
+    ) {
       state = "MACRO_SUPPORTIVE";
       equityImpact = "EQUITY_SUPPORTIVE";
       severity = "LOW";
       reasonCodes.push("MULTI_COMPONENT_MACRO_SUPPORTIVE");
-    } else if (negativeCount === 1 || geopoliticsActive || treasuryActive) {
+    } else if (
+      negativeCount === 1 ||
+      geopoliticsActive ||
+      treasuryActive ||
+      meaningfulEventPressure
+    ) {
       state = "MACRO_HEADWIND";
       equityImpact = negativeCount === 1 ? "EQUITY_NEGATIVE" : "MIXED";
-      severity = maxSeverity("LOW", ratesRead.severity, tltRead.severity, oilRead.severity);
+
+      severity = maxSeverity(
+        "LOW",
+        ratesRead.severity,
+        tltRead.severity,
+        oilRead.severity,
+        eventPressure.macroSeverity
+      );
+
       reasonCodes.push("SINGLE_COMPONENT_OR_EVENT_HEADWIND");
     }
+  }
+
+  reasonCodes.push(...eventPressure.reasonCodes);
+
+  if (eventPressure.state === "VERY_HIGH") {
+    reasonCodes.push("EVENT_PRESSURE_VERY_HIGH");
+  }
+
+  if (eventPressure.state === "EXTREME") {
+    reasonCodes.push("EVENT_PRESSURE_EXTREME");
   }
 
   const outputWarnings = [...warnings];
@@ -523,6 +860,12 @@ export function buildIntradayMacro({
         shockState: oilRead.shockState,
         reasonCodes: oilRead.reasonCodes,
       },
+      eventPressure: {
+        ...eventPressure,
+        note:
+          "News intensity only. Market confirmation remains separate and is still required for MACRO_SHOCK.",
+      },
+
       treasuryLiquidity: {
         state: treasuryMarketConfirmed ? "NEGATIVE" : treasuryActive ? "WATCH" : "NEUTRAL",
         severity: treasuryMarketConfirmed ? "MODERATE" : treasuryActive ? "LOW" : "LOW",
@@ -562,6 +905,8 @@ export function buildIntradayMacro({
 
     // Root-level diagnostic mirrors for Engine 25 consumers.
     // Canonical detailed objects remain under components.*.
+    eventPressure,
+
     geopolitics: {
       state: geopoliticsMarketConfirmed
         ? "ELEVATED"
@@ -615,5 +960,6 @@ export default {
   classifyOil,
   normalizeTemporaryEvents,
   evaluateEventLifecycle,
+  buildEventPressure,
   buildIntradayMacro,
 };
