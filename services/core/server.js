@@ -268,6 +268,89 @@ function runStartupSnapshotBuild() {
   });
 }
 
+// --- Engine 25 startup news recovery ---
+// WebSocket delivery begins only after the connection is admitted.
+// Restore recent Reuters history first so a restart does not erase the
+// active event stack used by Engine 25 Event Pressure.
+let ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+function startEngine25FinlightStreamSafe() {
+  try {
+    startEngine25FinlightStream();
+  } catch (error) {
+    console.error(
+      "[engine25-finlight-stream] startup error:",
+      error?.stack || error?.message || String(error)
+    );
+  }
+}
+
+function runEngine25NewsStartupRecovery() {
+  if (ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING) {
+    console.log("[engine25-news-startup] skipped: recovery already running");
+    return;
+  }
+
+  ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = true;
+
+  console.log(
+    `[engine25-news-startup] REST RECOVERY START @ ${new Date().toISOString()}`
+  );
+
+  const child = spawn("node", ["./jobs/updateEngine25NewsEvents.js"], {
+    cwd: __dirname,
+    env: process.env,
+
+    // updateEngine25NewsEvents.js prints the full canonical JSON when run
+    // directly. Suppress stdout here so Render startup logs stay readable.
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  let stderr = "";
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+    if (code === 0) {
+      console.log(
+        `[engine25-news-startup] REST RECOVERY SUCCESS @ ${new Date().toISOString()}`
+      );
+    } else {
+      console.error(
+        `[engine25-news-startup] REST RECOVERY FAIL @ ${new Date().toISOString()} | code=${code}`
+      );
+
+      if (stderr.trim()) {
+        console.error(stderr.trim());
+      }
+    }
+
+    // The WebSocket becomes PRIMARY for all newly arriving articles.
+    // Start it even if REST recovery failed so live delivery is never lost.
+    console.log("[engine25-news-startup] starting Finlight WebSocket");
+    startEngine25FinlightStreamSafe();
+  });
+
+  child.on("error", (err) => {
+    ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+    console.error(
+      `[engine25-news-startup] REST RECOVERY SPAWN ERROR @ ${new Date().toISOString()} |`,
+      err?.stack || err?.message || String(err)
+    );
+
+    // If recovery cannot launch, fail open to the live WebSocket.
+    console.log(
+      "[engine25-news-startup] starting Finlight WebSocket after recovery spawn error"
+    );
+    startEngine25FinlightStreamSafe();
+  });
+}
+
 // --- Start ---
 const PORT = Number(process.env.PORT) || 8080;
 const HOST = "0.0.0.0";
@@ -290,22 +373,16 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/engine21-alignment  ✅ Engine 21");
   console.log("- /live  (GitHub JSON proxies)");
 
-  // Build snapshot after server is already listening
+  // Build snapshot after server is already listening.
   setTimeout(() => {
     runStartupSnapshotBuild();
   }, 1500);
 
-  // Start Engine 25 Finlight Reuters WebSocket after the API is listening.
-  // This is the PRIMARY live-news lane. The REST job remains fallback/recovery.
+  // Engine 25 news startup contract:
+  // REST recovery/backfill first -> persistent WebSocket second.
+  // This prevents empty active-event / Event Pressure state after restart.
   setTimeout(() => {
-    try {
-      startEngine25FinlightStream();
-    } catch (error) {
-      console.error(
-        "[engine25-finlight-stream] startup error:",
-        error?.stack || error?.message || String(error)
-      );
-    }
+    runEngine25NewsStartupRecovery();
   }, 2500);
 });
 
