@@ -359,6 +359,7 @@ function resolveBroaderReaction10m({
 
 function resolveCanonicalDirection({
   observation1m = null,
+  validation5m = null,
   previousCanonicalDirection = null,
   tenMinuteCompletedClose = null,
   tenMinuteEma10 = null,
@@ -374,21 +375,20 @@ function resolveCanonicalDirection({
    * Forming 1m, semantic level-action labels, 5m, 10m, Engine 26 bias,
    * and EMA10 do not create canonical direction here.
    */
-  const completedState = safeUpper(
-    observation1m?.completedPriceActionState,
-    "NO_CLEAR_DIRECTION"
-  );
+const completedState = safeUpper(
+  validation5m?.completedPriceActionState,
+  "NO_CLEAR_DIRECTION"
+);
 
-  const completedDirection = safeUpper(
-    observation1m?.completedPriceActionDirection,
-    "NEUTRAL"
-  );
+const completedDirection = safeUpper(
+  validation5m?.completedPriceActionDirection,
+  "NEUTRAL"
+);
 
-  const completedQuality = safeUpper(
-    observation1m?.completedPriceActionQuality,
-    "WEAK"
-  );
-
+const completedQuality = safeUpper(
+  validation5m?.completedPriceActionQuality,
+  "WEAK"
+);
   const previousDirection = safeUpper(
     previousCanonicalDirection,
     "NEUTRAL"
@@ -1452,24 +1452,24 @@ const matureReaction5m = {
 
   state:
     safeUpper(
-      validation5m?.currentPriceActionState,
+      validation5m?.completedPriceActionState,
       "NO_CLEAR_DIRECTION"
     ),
 
   direction:
     safeUpper(
-      validation5m?.currentPriceActionDirection,
+      validation5m?.completedPriceActionDirection,
       "NEUTRAL"
     ),
 
   quality:
     safeUpper(
-      validation5m?.currentPriceActionQuality,
+      validation5m?.completedPriceActionQuality,
       "WEAK"
     ),
 
   role:
-    "CURRENT_5M_PRICE_ACTION",
+    "COMPLETED_5M_PRICE_ACTION",
 
   referenceType:
     validation5m?.referenceType ||
