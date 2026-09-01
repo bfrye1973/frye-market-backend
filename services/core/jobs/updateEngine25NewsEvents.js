@@ -1,5 +1,5 @@
 // services/core/jobs/updateEngine25NewsEvents.js
-// Engine 25 Finlight News REST Fallback v0.4
+// Engine 25 Finlight News REST Recovery v0.5 — active-event enrichment / coverage diagnostics
 //
 // ROLE:
 // - WebSocket listener is PRIMARY live Reuters ingestion.
@@ -19,6 +19,7 @@ import {
   ENGINE25_NEWS_SOURCE,
   normalizeFinlightNews,
   dedupeEngine25NewsEvents,
+  buildEngine25NewsThreads,
 } from "../logic/engine25NewsFilter.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +40,10 @@ const FINLIGHT_API_KEY =
 const DEFAULT_LIVE_LOOKBACK_HOURS = 24;
 const DEFAULT_PAGE_SIZE = 100;
 const RETENTION_HOURS = 48;
+const ENRICHMENT_LOOKBACK_HOURS = 8;
+const ENRICHMENT_PAGE_SIZE = 50;
+const MAX_ENRICHMENT_QUERIES = 6;
+const COVERAGE_STALE_MINUTES = 45;
 
 function clampNumber(value, min, max, fallback) {
   const n = Number(value);
@@ -168,6 +173,311 @@ function buildLiveWindow(now = new Date()) {
       safeNowMs - lookbackHours * 60 * 60 * 1000
     ).toISOString(),
     to: new Date(safeNowMs + 2 * 60 * 1000).toISOString(),
+  };
+}
+
+
+function isActiveMaterialHighEvent(event, nowMs) {
+  const expiresMs = Date.parse(event?.expiresAt || "");
+  return (
+    event?.material === true &&
+    ["HIGH", "EXTREME"].includes(String(event?.severity || "").toUpperCase()) &&
+    Number.isFinite(expiresMs) &&
+    nowMs < expiresMs
+  );
+}
+
+function enrichmentQueriesForEvent(event) {
+  const type = String(event?.eventType || "");
+  const entity = String(event?.primaryEntity || "");
+  const headline = String(event?.headlineSummary || "").toLowerCase();
+  const queries = [];
+
+  if (
+    type === "GEOPOLITICAL_OIL_SUPPLY_RISK" ||
+    type === "ENERGY_SUPPLY_EVENT"
+  ) {
+    if (entity === "Strait of Hormuz" || /hormuz|persian gulf|gulf of oman/.test(headline)) {
+      queries.push(
+        "Iran Hormuz oil",
+        "Iran Gulf oil exports",
+        "Hormuz shipping oil supply",
+        "US Iran strikes Hormuz"
+      );
+    } else if (entity === "Iran") {
+      queries.push(
+        "Iran oil exports",
+        "Iran oil supply shipping",
+        "US Iran oil"
+      );
+    } else {
+      queries.push(`${entity || "energy"} oil supply`);
+    }
+  }
+
+  if (type === "GEOPOLITICAL_ESCALATION") {
+    if (entity === "Iran" || /iran/.test(headline)) {
+      queries.push(
+        "US Iran strikes",
+        "Iran retaliation",
+        "Iran Hormuz"
+      );
+    } else if (entity) {
+      queries.push(`${entity} escalation`);
+    }
+  }
+
+  if (type === "TREASURY_RATES_RISK") {
+    queries.push(
+      "US Treasury yields selloff",
+      "Treasury auction yields",
+      "bond market liquidity"
+    );
+  }
+
+  if (type === "FED_POLICY_EVENT") {
+    queries.push("Federal Reserve rates policy");
+  }
+
+  if (type === "FINANCIAL_STRESS_EVENT") {
+    queries.push("US funding stress liquidity banks");
+  }
+
+  return queries;
+}
+
+function buildActiveEventEnrichmentQueries(events, nowMs) {
+  const queries = [];
+
+  for (const event of events || []) {
+    if (!isActiveMaterialHighEvent(event, nowMs)) continue;
+
+    for (const query of enrichmentQueriesForEvent(event)) {
+      if (!query || queries.includes(query)) continue;
+      queries.push(query);
+      if (queries.length >= MAX_ENRICHMENT_QUERIES) return queries;
+    }
+  }
+
+  return queries;
+}
+
+function articleIdentity(article) {
+  return [
+    String(article?.link || "").trim(),
+    String(article?.source || "").trim(),
+    String(article?.publishDate || "").trim(),
+    String(article?.title || "").trim(),
+  ].join("|");
+}
+
+function uniqueArticles(articles = []) {
+  const seen = new Set();
+  const out = [];
+
+  for (const article of articles) {
+    const id = articleIdentity(article);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(article);
+  }
+
+  return out;
+}
+
+async function fetchFinlightQuery({
+  query,
+  now = new Date(),
+  from = null,
+  to = null,
+} = {}) {
+  if (!FINLIGHT_API_KEY) {
+    const error = new Error("Missing FINLIGHT_API_KEY");
+    error.httpStatus = null;
+    throw error;
+  }
+
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+
+  const requestBody = {
+    sources: FINLIGHT_SOURCE_FILTER,
+    query,
+    from:
+      from ||
+      new Date(
+        safeNowMs - ENRICHMENT_LOOKBACK_HOURS * 60 * 60 * 1000
+      ).toISOString(),
+    to: to || new Date(safeNowMs + 2 * 60 * 1000).toISOString(),
+    language: "en",
+    orderBy: "createdAt",
+    order: "DESC",
+    pageSize: ENRICHMENT_PAGE_SIZE,
+  };
+
+  const requestedAtUtc = new Date().toISOString();
+  const response = await fetch(`${FINLIGHT_BASE}${SOURCE_ENDPOINT}`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-API-KEY": FINLIGHT_API_KEY,
+    },
+    body: JSON.stringify(requestBody),
+  });
+
+  const receivedAtUtc = new Date().toISOString();
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    const error = new Error(
+      `Finlight enrichment query HTTP ${response.status} query="${query}" ${text.slice(0, 300)}`
+    );
+    error.httpStatus = response.status;
+    throw error;
+  }
+
+  const json = await readJsonResponse(
+    response,
+    `Finlight enrichment query "${query}"`
+  );
+
+  return {
+    query,
+    requestedAtUtc,
+    receivedAtUtc,
+    results: Array.isArray(json?.articles) ? json.articles : [],
+  };
+}
+
+async function fetchActiveEventEnrichment({
+  events = [],
+  now = new Date(),
+} = {}) {
+  const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
+  const safeNowMs = Number.isFinite(nowMs) ? nowMs : Date.now();
+  const queries = buildActiveEventEnrichmentQueries(events, safeNowMs);
+
+  if (!queries.length) {
+    return {
+      queries: [],
+      results: [],
+      diagnostics: [],
+      errorCount: 0,
+    };
+  }
+
+  const diagnostics = [];
+  const results = [];
+  let errorCount = 0;
+
+  // Sequential by design: bounded request load and easier provider diagnostics.
+  for (const query of queries) {
+    try {
+      const response = await fetchFinlightQuery({ query, now });
+      diagnostics.push({
+        query,
+        ok: true,
+        requestedAtUtc: response.requestedAtUtc,
+        receivedAtUtc: response.receivedAtUtc,
+        articleCount: response.results.length,
+      });
+      results.push(...response.results);
+    } catch (error) {
+      errorCount += 1;
+      diagnostics.push({
+        query,
+        ok: false,
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  return {
+    queries,
+    results: uniqueArticles(results),
+    diagnostics,
+    errorCount,
+  };
+}
+
+function eventIdentitySet(events = []) {
+  return new Set(
+    events
+      .map((event) =>
+        String(
+          event?.sourceUrl ||
+          event?.providerArticleId ||
+          event?.eventId ||
+          ""
+        ).trim()
+      )
+      .filter(Boolean)
+  );
+}
+
+function buildNewsCoverageDiagnostic({
+  existingEvents = [],
+  mergedEvents = [],
+  enrichmentQueries = [],
+  enrichmentNewEventCount = 0,
+  nowMs,
+} = {}) {
+  const activeHigh = mergedEvents.filter((event) =>
+    isActiveMaterialHighEvent(event, nowMs)
+  );
+
+  if (!activeHigh.length) {
+    return {
+      state: "NORMAL",
+      coverageGap: false,
+      activeHighEventCount: 0,
+      targetedEnrichmentRequired: false,
+      targetedQueryCount: enrichmentQueries.length,
+      newTargetedEventCount: enrichmentNewEventCount,
+      reasonCodes: [],
+    };
+  }
+
+  const latestMs = Math.max(
+    ...activeHigh
+      .flatMap((event) => [
+        Date.parse(event?.latestDevelopmentAt || ""),
+        Date.parse(event?.observedAt || ""),
+      ])
+      .filter(Number.isFinite)
+  );
+
+  const latestRelatedNewsAgeMinutes = Number.isFinite(latestMs)
+    ? Math.max(0, Math.round((nowMs - latestMs) / 60000))
+    : null;
+
+  const stale =
+    Number.isFinite(latestRelatedNewsAgeMinutes) &&
+    latestRelatedNewsAgeMinutes >= COVERAGE_STALE_MINUTES;
+
+  const gap =
+    stale &&
+    enrichmentQueries.length > 0 &&
+    enrichmentNewEventCount === 0;
+
+  return {
+    state: gap ? "NEWS_COVERAGE_GAP" : stale ? "TARGETED_ENRICHMENT_ACTIVE" : "NORMAL",
+    coverageGap: gap,
+    activeHighEventCount: activeHigh.length,
+    latestRelatedNewsAgeMinutes,
+    staleAfterMinutes: COVERAGE_STALE_MINUTES,
+    targetedEnrichmentRequired: stale,
+    targetedQueryCount: enrichmentQueries.length,
+    newTargetedEventCount: enrichmentNewEventCount,
+    reasonCodes: gap
+      ? ["ACTIVE_HIGH_EVENT_STALE", "TARGETED_ENRICHMENT_FOUND_NO_NEW_EVENT"]
+      : stale
+        ? ["ACTIVE_HIGH_EVENT_STALE"]
+        : [],
+    note:
+      "Coverage diagnostics identify a possible discovery gap only. They do not invent news, direction, permission, or MACRO_SHOCK.",
   };
 }
 
@@ -308,10 +618,37 @@ export async function buildAndWriteEngine25NewsEvents({
   const liveWindow = buildLiveWindow(now);
 
   try {
-    const fetched = await fetcher({ now });
+    // Snapshot current events only to decide whether targeted enrichment is needed.
+    // We still re-read after network work before persistence to protect WebSocket writes.
+    const enrichmentPlanningSnapshot = readExistingFile();
+
+    const [fetched, enrichment] = await Promise.all([
+      fetcher({ now }),
+      fetchActiveEventEnrichment({
+        events: enrichmentPlanningSnapshot.events,
+        now,
+      }),
+    ]);
+
+    const allFetchedArticles = uniqueArticles([
+      ...(fetched.results || []),
+      ...(enrichment.results || []),
+    ]);
 
     const normalized = normalizeFinlightNews(
-      fetched.results,
+      allFetchedArticles,
+      now,
+      fetched.providerFetchedAtUtc
+    );
+
+    const broadNormalized = normalizeFinlightNews(
+      fetched.results || [],
+      now,
+      fetched.providerFetchedAtUtc
+    );
+
+    const enrichmentNormalized = normalizeFinlightNews(
+      enrichment.results || [],
       now,
       fetched.providerFetchedAtUtc
     );
@@ -373,6 +710,27 @@ export async function buildAndWriteEngine25NewsEvents({
       mergedEvents.map((event) => event?.publishedToEngineFetchLatencyMs)
     );
 
+    const existingIdentities = eventIdentitySet(existing.events);
+    const enrichmentNewEvents = enrichmentNormalized.events.filter((event) => {
+      const id = String(
+        event?.sourceUrl ||
+        event?.providerArticleId ||
+        event?.eventId ||
+        ""
+      ).trim();
+      return id && !existingIdentities.has(id);
+    });
+
+    const newsCoverage = buildNewsCoverageDiagnostic({
+      existingEvents: existing.events,
+      mergedEvents,
+      enrichmentQueries: enrichment.queries,
+      enrichmentNewEventCount: enrichmentNewEvents.length,
+      nowMs: now.getTime(),
+    });
+
+    const eventThreads = buildEngine25NewsThreads(mergedEvents);
+
     const output = {
       ...existing,
       ok: true,
@@ -385,11 +743,13 @@ export async function buildAndWriteEngine25NewsEvents({
       ),
       sourceEndpoint: SOURCE_ENDPOINT,
       sourceFilters: FINLIGHT_SOURCE_FILTER,
-      discoveryMode: "FINLIGHT_REST_FALLBACK_MERGE",
-      semanticQueryApplied: false,
+      discoveryMode: "FINLIGHT_REST_RECOVERY_PLUS_ACTIVE_EVENT_ENRICHMENT",
+      semanticQueryApplied: enrichment.queries.length > 0,
       liveWindow: fetched.liveWindow || liveWindow,
       httpStatus: fetched.httpStatus ?? 200,
       itemsFetched: mergedEvents.length,
+      broadItemsFetched: Array.isArray(fetched.results) ? fetched.results.length : 0,
+      enrichmentItemsFetched: enrichment.results.length,
       itemsRelevant: mergedEvents.length,
       itemsMaterial: mergedEvents.filter(
         (event) => event?.material === true
@@ -403,7 +763,24 @@ export async function buildAndWriteEngine25NewsEvents({
       providerDiagnostics: {
         ...(existing.providerDiagnostics || {}),
         restFallback: fetched.providerDiagnostics || null,
+        activeEventEnrichment: {
+          enabled: true,
+          queryCount: enrichment.queries.length,
+          queries: enrichment.queries,
+          articleCount: enrichment.results.length,
+          normalizedEventCount: enrichmentNormalized.events.length,
+          newEventCount: enrichmentNewEvents.length,
+          errorCount: enrichment.errorCount,
+          requests: enrichment.diagnostics,
+          secondaryProvider: {
+            configured: false,
+            status: "NOT_CONFIGURED",
+            note: "No second professional provider is configured in this file. Coverage gaps remain explicit rather than fabricated.",
+          },
+        },
       },
+      newsCoverage,
+      eventThreads,
       events: mergedEvents,
       warnings: Array.isArray(existing.warnings)
         ? existing.warnings.filter(
