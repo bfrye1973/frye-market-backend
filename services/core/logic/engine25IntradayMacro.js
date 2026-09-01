@@ -1,8 +1,8 @@
 // services/core/logic/engine25IntradayMacro.js
-// Engine 25 Intraday Macro v0.4 — event intensity + broad market confirmation
+// Engine 25 Intraday Macro v0.5 — strict full cross-market Macro Shock confirmation
 // Pure classification/normalization logic. No provider calls, no trade permission.
 
-export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.4";
+export const INTRADAY_MACRO_ENGINE = "engine25.intradayMacro.v0.5";
 
 export const MACRO_STATES = Object.freeze([
   "MACRO_SUPPORTIVE",
@@ -771,10 +771,35 @@ export function buildIntradayMacro({
   const marketEvidenceCount = [ratesRead.state, tltRead.state, oilRead.state]
     .filter((x) => x && x !== "UNAVAILABLE").length;
 
-  // Critical manager rule: a manual event alone never creates MACRO_SHOCK.
-  const macroShock =
-    (geopoliticsMarketConfirmed && oilRead.shockState === "CONFIRMED") ||
-    (crossMarketConfluence && oilRead.severity === "EXTREME");
+  // MACRO SHOCK CONTRACT
+  // --------------------
+  // News/event intensity alone never creates MACRO_SHOCK.
+  // One confirming market family is not enough.
+  // Two-family broad confirmation is enough to allow EXTREME MACRO_HEADWIND,
+  // but MACRO_SHOCK is intentionally stricter.
+  //
+  // MACRO_SHOCK requires ALL of the following:
+  // 1) Event Pressure itself is EXTREME.
+  // 2) Oil is in a confirmed SHOCK state.
+  // 3) Rates are fully confirmed negative:
+  //      - ZN/ZB Treasury pressure is NEGATIVE
+  //      - TLT duration pressure is NEGATIVE
+  // 4) Therefore full cross-market confluence is present:
+  //      oil + rates + duration.
+  //
+  // This prevents geopolitics + oil alone from manufacturing a system-wide
+  // macro shock while rates/duration are not confirming.
+  const shockLevelOilConfirmed =
+    oilRead.marketConfirmed === true &&
+    oilRead.shockState === "CONFIRMED";
+
+  const fullCrossMarketShockConfirmed =
+    eventPressureBase.state === "EXTREME" &&
+    shockLevelOilConfirmed &&
+    ratesConfirmed &&
+    crossMarketConfluence;
+
+  const macroShock = fullCrossMarketShockConfirmed;
 
   let state = marketEvidenceCount > 0 ? "MACRO_NEUTRAL" : null;
   let equityImpact = marketEvidenceCount > 0 ? "NEUTRAL" : null;
@@ -793,7 +818,9 @@ export function buildIntradayMacro({
       oilRead.severity,
       eventPressure.macroSeverity
     );
-    reasonCodes.push("CROSS_MARKET_MACRO_SHOCK_CONFIRMED");
+    reasonCodes.push(
+      "EXTREME_EVENT_PRESSURE_FULL_CROSS_MARKET_SHOCK_CONFIRMED"
+    );
   } else {
     const negativeCount = [ratesRead.state, tltRead.state, oilRead.state]
       .filter((x) => x === "NEGATIVE").length;
@@ -893,7 +920,19 @@ export function buildIntradayMacro({
     !broadMarketConfirmed &&
     !macroShock
   ) {
-    reasonCodes.push("EXTREME_EVENT_PRESSURE_CAPPED_AT_HIGH_MACRO_HEADWIND");
+    reasonCodes.push(
+      "EXTREME_EVENT_PRESSURE_CAPPED_AT_HIGH_MACRO_HEADWIND"
+    );
+  }
+
+  if (
+    eventPressure.state === "EXTREME" &&
+    broadMarketConfirmed &&
+    !macroShock
+  ) {
+    reasonCodes.push(
+      "EXTREME_EVENT_PRESSURE_BROAD_CONFIRMATION_NO_FULL_MACRO_SHOCK"
+    );
   }
 
   if (eventPressure.state === "VERY_HIGH") {
@@ -958,7 +997,7 @@ export function buildIntradayMacro({
       eventPressure: {
         ...eventPressure,
         note:
-          "News intensity only. EXTREME Macro Headwind requires broad market confirmation; MACRO_SHOCK still requires the existing dedicated shock conditions.",
+          "News intensity only. EXTREME Macro Headwind requires broad market confirmation. MACRO_SHOCK is stricter and requires EXTREME Event Pressure plus confirmed oil shock plus full rates/duration confirmation.",
       },
 
       treasuryLiquidity: {
@@ -998,6 +1037,10 @@ export function buildIntradayMacro({
       crossMarketConfluence,
       marketConfirmationCount,
       broadMarketConfirmed,
+
+      // Strict Macro Shock diagnostics.
+      shockLevelOilConfirmed,
+      fullCrossMarketShockConfirmed,
     },
 
     // Root-level diagnostic mirrors for Engine 25 consumers.
