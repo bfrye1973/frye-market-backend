@@ -1,5 +1,5 @@
 // services/core/logic/engine25NewsFilter.js
-// Engine 25 Finlight News v0.4 — strike morphology / Hormuz escalation fix
+// Engine 25 Finlight News v0.5 — continuation threads / evidence-preserving dedupe
 // Pure relevance, classification, expiry, and dedupe logic.
 // No provider calls. No trade direction. No market confirmation thresholds.
 //
@@ -11,7 +11,7 @@
 
 import { createHash } from "crypto";
 
-export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.4";
+export const ENGINE25_NEWS_ENGINE = "engine25.finlightNews.v0.5";
 export const ENGINE25_NEWS_SOURCE = "FINLIGHT_REUTERS_FEED";
 export const ENGINE25_NEWS_SOURCE_TIER = "PROFESSIONAL_NEWS";
 export const ENGINE25_NEWS_PROVIDER = "FINLIGHT";
@@ -144,6 +144,135 @@ function addHours(iso, hours) {
   const ms = Date.parse(iso || "");
   if (!Number.isFinite(ms)) return null;
   return new Date(ms + hours * 60 * 60 * 1000).toISOString();
+}
+
+const SEVERITY_RANK = Object.freeze({
+  LOW: 1,
+  MODERATE: 2,
+  HIGH: 3,
+  EXTREME: 4,
+});
+
+function maxSeverity(a, b) {
+  const aa = String(a || "LOW").toUpperCase();
+  const bb = String(b || "LOW").toUpperCase();
+  return (SEVERITY_RANK[bb] || 0) > (SEVERITY_RANK[aa] || 0) ? bb : aa;
+}
+
+function eventFamily(eventType) {
+  if (["GEOPOLITICAL_OIL_SUPPLY_RISK", "ENERGY_SUPPLY_EVENT"].includes(eventType)) {
+    return "ENERGY_GEOPOLITICS";
+  }
+  if (eventType === "GEOPOLITICAL_ESCALATION") return "GEOPOLITICS";
+  if (["TREASURY_RATES_RISK", "FED_POLICY_EVENT", "FINANCIAL_STRESS_EVENT"].includes(eventType)) {
+    return "RATES_FINANCIAL";
+  }
+  if (eventType === "TRADE_POLICY_RISK") return "TRADE";
+  if (eventType === "MACRO_DATA_RELEASE") return "US_MACRO";
+  return eventType || "UNKNOWN";
+}
+
+function strategicThreadAnchor(eventType, primaryEntityValue, text) {
+  if (hasAny(text, ["strait of hormuz", "hormuz", "persian gulf", "gulf of oman"])) {
+    return "HORMUZ_GULF";
+  }
+  if (hasAny(text, ["red sea", "suez canal", "suez"])) {
+    return "RED_SEA_SUEZ";
+  }
+  if (hasAny(text, ["iran", "iranian"])) return "IRAN";
+  if (hasAny(text, ["israel", "israeli"])) return "ISRAEL";
+  if (hasAny(text, ["russia", "russian", "ukraine", "ukrainian"])) return "RUSSIA_UKRAINE";
+  if (hasAny(text, ["china", "chinese", "taiwan", "taiwanese"])) return "CHINA_TAIWAN";
+  if (hasAny(text, ["north korea", "north korean", "pyongyang"])) return "NORTH_KOREA";
+  if (primaryEntityValue) {
+    return String(primaryEntityValue).toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  }
+  return String(eventType || "UNKNOWN").toUpperCase();
+}
+
+function eventThreadKeyFor(eventType, primaryEntityValue, text) {
+  const family = eventFamily(eventType);
+  const anchor = strategicThreadAnchor(eventType, primaryEntityValue, text);
+  return `${family}:${anchor}`;
+}
+
+function developmentIdentity(event) {
+  return (
+    String(event?.sourceUrl || "").trim() ||
+    String(event?.providerArticleId || "").trim() ||
+    String(event?.eventId || "").trim() ||
+    `${event?.observedAt || ""}|${event?.headlineSummary || ""}`
+  );
+}
+
+function developmentFromEvent(event) {
+  return {
+    eventId: event?.eventId || null,
+    providerArticleId: event?.providerArticleId || null,
+    sourceUrl: event?.sourceUrl || null,
+    source: event?.source || null,
+    observedAt: event?.observedAt || null,
+    providerFirstSeenAt: event?.providerFirstSeenAt || null,
+    eventType: event?.eventType || null,
+    headlineSummary: event?.headlineSummary || null,
+    material: event?.material === true,
+    severity: event?.severity || null,
+    primaryTheme: event?.primaryTheme || null,
+    primaryEntity: event?.primaryEntity || null,
+    oilSupplyRisk: event?.oilSupplyRisk === true,
+    treasuryLiquidityRisk: event?.treasuryLiquidityRisk === true,
+  };
+}
+
+function mergeDevelopmentEvidence(canonical, incoming) {
+  const existingDevelopments = Array.isArray(canonical?.developments)
+    ? canonical.developments
+    : [];
+
+  const candidates = [
+    ...existingDevelopments,
+    developmentFromEvent(incoming),
+    ...(Array.isArray(incoming?.developments) ? incoming.developments : []),
+  ].filter(Boolean);
+
+  const seen = new Set();
+  const developments = [];
+
+  for (const development of candidates) {
+    const id = developmentIdentity(development);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+
+    if (id === developmentIdentity(canonical)) continue;
+    developments.push(development);
+  }
+
+  developments.sort(
+    (a, b) => Date.parse(a?.observedAt || "") - Date.parse(b?.observedAt || "")
+  );
+
+  const canonicalExpiryMs = Date.parse(canonical?.expiresAt || "");
+  const incomingExpiryMs = Date.parse(incoming?.expiresAt || "");
+  const expiresAt =
+    Number.isFinite(incomingExpiryMs) &&
+    (!Number.isFinite(canonicalExpiryMs) || incomingExpiryMs > canonicalExpiryMs)
+      ? incoming.expiresAt
+      : canonical.expiresAt;
+
+  return {
+    ...canonical,
+    expiresAt,
+    material: canonical?.material === true || incoming?.material === true,
+    severity: maxSeverity(canonical?.severity, incoming?.severity),
+    oilSupplyRisk: canonical?.oilSupplyRisk === true || incoming?.oilSupplyRisk === true,
+    treasuryLiquidityRisk:
+      canonical?.treasuryLiquidityRisk === true ||
+      incoming?.treasuryLiquidityRisk === true,
+    latestDevelopmentAt: [canonical?.latestDevelopmentAt, incoming?.observedAt]
+      .filter(Boolean)
+      .sort((a, b) => Date.parse(b) - Date.parse(a))[0] || canonical?.observedAt || null,
+    developments,
+  };
 }
 
 function primaryEntity(text) {
@@ -813,6 +942,11 @@ export function normalizeFinlightArticle(
   const expiresAt = addHours(observedAt, EXPIRY_HOURS[eventType]);
   const oilSupplyRisk = oilSupplyRiskFor(eventType, text);
   const treasuryLiquidityRisk = treasuryLiquidityRiskFor(eventType, text);
+  const eventThreadKey = eventThreadKeyFor(
+    eventType,
+    primaryEntity(text),
+    text
+  );
 
   const nowMs = now instanceof Date ? now.getTime() : Date.parse(now);
   const expiresMs = Date.parse(expiresAt || "");
@@ -869,6 +1003,9 @@ export function normalizeFinlightArticle(
     status: expired ? "EVENT_EXPIRED" : "EVENT_DETECTED",
     primaryTheme: themeFor(eventType, text),
     primaryEntity: primaryEntity(text),
+    eventThreadKey,
+    latestDevelopmentAt: observedAt,
+    developments: [],
     oilSupplyRisk,
     treasuryLiquidityRisk,
     severity: severityFor(eventType, text, material),
@@ -937,44 +1074,62 @@ export function dedupeEngine25NewsEvents(events = []) {
     .filter(Boolean)
     .sort(
       (a, b) =>
-        Date.parse(b.observedAt || "") -
-        Date.parse(a.observedAt || "")
+        Date.parse(a.observedAt || "") -
+        Date.parse(b.observedAt || "")
     );
 
   const kept = [];
-  const seenArticles = new Set();
+  const seenArticles = new Map();
 
-  for (const event of sorted) {
-    const articleIdentity =
-      String(event?.sourceUrl || "").trim() ||
-      String(event?.providerArticleId || "").trim() ||
-      String(event?.eventId || "").trim();
+  for (const rawEvent of sorted) {
+    const event = {
+      ...rawEvent,
+      developments: Array.isArray(rawEvent?.developments)
+        ? rawEvent.developments
+        : [],
+      latestDevelopmentAt:
+        rawEvent?.latestDevelopmentAt || rawEvent?.observedAt || null,
+    };
 
-    if (!articleIdentity || seenArticles.has(articleIdentity)) {
+    const articleIdentity = developmentIdentity(event);
+
+    if (!articleIdentity) continue;
+
+    if (seenArticles.has(articleIdentity)) {
+      const index = seenArticles.get(articleIdentity);
+      kept[index] = mergeDevelopmentEvidence(kept[index], event);
       continue;
     }
 
-    seenArticles.add(articleIdentity);
-
     const observedMs = Date.parse(event.observedAt || "");
+    let duplicateIndex = -1;
 
-    const duplicate = kept.some((prior) => {
-      if (!sameSecondaryIdentity(event, prior)) {
-        return false;
-      }
+    for (let i = 0; i < kept.length; i += 1) {
+      const prior = kept[i];
+      if (!sameSecondaryIdentity(event, prior)) continue;
 
       const priorMs = Date.parse(prior.observedAt || "");
-
-      return (
+      if (
         Number.isFinite(observedMs) &&
         Number.isFinite(priorMs) &&
         Math.abs(priorMs - observedMs) <= 30 * 60 * 1000
-      );
-    });
-
-    if (!duplicate) {
-      kept.push(event);
+      ) {
+        duplicateIndex = i;
+        break;
+      }
     }
+
+    if (duplicateIndex >= 0) {
+      kept[duplicateIndex] = mergeDevelopmentEvidence(
+        kept[duplicateIndex],
+        event
+      );
+      seenArticles.set(articleIdentity, duplicateIndex);
+      continue;
+    }
+
+    kept.push(event);
+    seenArticles.set(articleIdentity, kept.length - 1);
   }
 
   return kept.sort(
@@ -982,6 +1137,93 @@ export function dedupeEngine25NewsEvents(events = []) {
       Date.parse(a.observedAt || "") -
       Date.parse(b.observedAt || "")
   );
+}
+
+export function buildEngine25NewsThreads(events = []) {
+  const threads = new Map();
+
+  for (const event of [...events].filter(Boolean)) {
+    const key =
+      String(event?.eventThreadKey || "").trim() ||
+      `${eventFamily(event?.eventType)}:${String(event?.primaryEntity || "UNRESOLVED")
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, "_")}`;
+
+    if (!threads.has(key)) {
+      threads.set(key, {
+        threadId: key,
+        family: eventFamily(event?.eventType),
+        primaryEntity: event?.primaryEntity || null,
+        primaryTheme: event?.primaryTheme || null,
+        firstObservedAt: event?.observedAt || null,
+        latestObservedAt: event?.latestDevelopmentAt || event?.observedAt || null,
+        eventCount: 0,
+        developmentCount: 0,
+        materialEventCount: 0,
+        highestSeverity: "LOW",
+        oilSupplyRisk: false,
+        treasuryLiquidityRisk: false,
+        eventIds: [],
+        developments: [],
+      });
+    }
+
+    const thread = threads.get(key);
+    thread.eventCount += 1;
+    thread.materialEventCount += event?.material === true ? 1 : 0;
+    thread.highestSeverity = maxSeverity(thread.highestSeverity, event?.severity);
+    thread.oilSupplyRisk = thread.oilSupplyRisk || event?.oilSupplyRisk === true;
+    thread.treasuryLiquidityRisk =
+      thread.treasuryLiquidityRisk || event?.treasuryLiquidityRisk === true;
+
+    if (event?.eventId) thread.eventIds.push(event.eventId);
+
+    const allDevelopments = [
+      developmentFromEvent(event),
+      ...(Array.isArray(event?.developments) ? event.developments : []),
+    ].filter(Boolean);
+
+    for (const development of allDevelopments) {
+      const id = developmentIdentity(development);
+      if (
+        id &&
+        !thread.developments.some(
+          (existing) => developmentIdentity(existing) === id
+        )
+      ) {
+        thread.developments.push(development);
+      }
+    }
+
+    thread.developmentCount = thread.developments.length;
+
+    const candidateTimes = [
+      thread.firstObservedAt,
+      event?.observedAt,
+      ...thread.developments.map((item) => item?.observedAt),
+    ]
+      .map((value) => Date.parse(value || ""))
+      .filter(Number.isFinite);
+
+    if (candidateTimes.length) {
+      thread.firstObservedAt = new Date(Math.min(...candidateTimes)).toISOString();
+      thread.latestObservedAt = new Date(Math.max(...candidateTimes)).toISOString();
+    }
+  }
+
+  return [...threads.values()]
+    .map((thread) => ({
+      ...thread,
+      eventIds: [...new Set(thread.eventIds)],
+      developments: thread.developments.sort(
+        (a, b) => Date.parse(a?.observedAt || "") - Date.parse(b?.observedAt || "")
+      ),
+    }))
+    .sort(
+      (a, b) =>
+        Date.parse(b.latestObservedAt || "") -
+        Date.parse(a.latestObservedAt || "")
+    );
 }
 
 export function normalizeFinlightNews(
