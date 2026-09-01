@@ -693,26 +693,61 @@ function resolveFinalCanonicalDirection({
    * for the current negotiated-zone cycle.
    */
   else if (insideNegotiatedZone === true) {
-    if (previousConfirmedDirectional) {
-      direction = previousDirection;
+if (
+  previousConfirmedDirectional &&
+  reactionConfirmed &&
+  candidateDirectional &&
+  candidateDirection !== previousDirection
+) {
+  /*
+   * A new qualified COMPLETED 5m reaction is authoritative
+   * inside the negotiated zone and may reverse the prior
+   * canonical Engine 3 reaction.
+   *
+   * 1m remains diagnostic-only and cannot cause this reversal.
+   */
+  direction = candidateDirection;
 
-      sourceTimeframe =
-        "ESTABLISHED_NEGOTIATED_ZONE_REACTION";
+  sourceTimeframe = "5m";
+  reactionTimeframe = "5m";
 
-      reactionTimeframe = "5m";
+  insideZoneDirectionLocked = false;
 
-      insideZoneDirectionLocked = true;
+  directionEstablishedByFresh1m = false;
+  directionEstablishedByCompleted5m = true;
 
-      directionEstablishedByFresh1m = false;
-      directionEstablishedByCompleted5m = false;
+  resolutionStatus =
+    `NEGOTIATED_ZONE_REACTION_${previousDirection}_TO_${candidateDirection}_CONFIRMED`;
 
-      resolutionStatus =
-        `NEGOTIATED_ZONE_REACTION_${previousDirection}_PERSISTED`;
+  resolutionReason =
+    "QUALIFIED_COMPLETED_5M_REACTION_REVERSED_PRIOR_NEGOTIATED_ZONE_DIRECTION";
+}
 
-      resolutionReason =
-        "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_CANNOT_BE_REVERSED_BY_DIAGNOSTIC_TIMEFRAMES";
-    }
+else if (previousConfirmedDirectional) {
+  /*
+   * No qualified opposite completed 5m reaction.
+   * Keep the existing canonical direction.
+   *
+   * 1m and forming/current timeframe diagnostics cannot flip it.
+   */
+  direction = previousDirection;
 
+  sourceTimeframe =
+    "ESTABLISHED_NEGOTIATED_ZONE_REACTION";
+
+  reactionTimeframe = "5m";
+
+  insideZoneDirectionLocked = true;
+
+  directionEstablishedByFresh1m = false;
+  directionEstablishedByCompleted5m = false;
+
+  resolutionStatus =
+    `NEGOTIATED_ZONE_REACTION_${previousDirection}_PERSISTED`;
+
+  resolutionReason =
+    "PREVIOUS_CONFIRMED_NEGOTIATED_ZONE_REACTION_PERSISTED_WITHOUT_OPPOSITE_COMPLETED_5M_CONFIRMATION";
+}
     else if (
       reactionConfirmed &&
       candidateDirectional
