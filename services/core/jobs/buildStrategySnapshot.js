@@ -46,6 +46,7 @@ import { buildReactionObservation1m } from "../logic/engine3/buildReactionObserv
 import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidation5m.js";
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
+import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
@@ -8176,6 +8177,23 @@ const previousEngine3CanonicalDirection =
       "NEUTRAL"
     : null;
 
+const previousEngine3V5Canonical =
+  isEsIntradayScalp
+    ? previousSnapshot
+        ?.strategies
+        ?.[s.strategyId]
+        ?.confluence
+        ?.context
+        ?.reaction
+        ?.engine3V5
+        ?.canonical
+        ?.canonical ||
+      {
+        direction: "NEUTRAL",
+        candidateId: null,
+      }
+    : null;
+
 const previousEngine3ReactionConfirmed =
   isEsIntradayScalp
     ? previousSnapshot
@@ -8753,6 +8771,43 @@ if (isEsIntradayScalp) {
     engine3ReactionValidation5m,
     engine3ReactionConfirmation10m,
   };
+
+const engine3V5 =
+  buildEngine3V5Shadow({
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
+
+    bars1m:
+      engine3DiagnosticBars
+        ?.oneMinute
+        ?.bars || [],
+
+    bars5m:
+      engine3DiagnosticBars
+        ?.fiveMinute
+        ?.bars || [],
+
+    bars10m:
+      marketMeter
+        ?.layers
+        ?.emaPosture
+        ?.tenMinute
+        ?.bars || [],
+
+    evaluationTimeMs,
+
+    tenMinuteEma10:
+      strategy1TenMinuteEma10,
+
+    previousCanonical:
+      previousEngine3V5Canonical,
+
+    shadowMode:
+      true,
+  });
+
+patchedConfluence.context.reaction.engine3V5 =
+  engine3V5;
   
 attachPaperScalpReactionToConfluence({
   patchedConfluence,
