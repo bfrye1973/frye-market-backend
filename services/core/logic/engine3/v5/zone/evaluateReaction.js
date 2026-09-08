@@ -208,6 +208,34 @@ function classifyReaction({
       ""
     ).toUpperCase();
 
+  const contactObserved =
+    contact?.contactObserved === true;
+
+  const noRecentZoneContact =
+    contactObserved !== true ||
+    contactState === "NO_RECENT_ZONE_CONTACT";
+
+  if (noRecentZoneContact) {
+    return {
+      reactionState: "NO_ACTIVE_ZONE_REACTION",
+      reactionBias: "NONE",
+      facts: {
+        failedBreakoutAbove: false,
+        failedBreakdownBelow: false,
+        failedReclaimFromBelow: false,
+        failedAcceptanceAbove: false,
+        failedAcceptanceBelow: false,
+        rejectionHigh: false,
+        rejectionLow: false,
+        reclaimedAboveZone: false,
+        lostBelowZone: false,
+        acceptingAbove: false,
+        acceptingBelow: false,
+        choppingInside: false,
+      },
+    };
+  }
+
   const sequencePhase =
     String(
       sequenceMomentum
