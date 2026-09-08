@@ -10155,13 +10155,32 @@ const [
     error: "SPY_VOLUME_BEHAVIOR_FETCH_FAILED",
     detail: String(err?.message || err),
   })),
-  fetchEngine3DiagnosticBarStack({
-    symbol,
-    limit: 120,
-    coreBase: CORE_BASE,
-    fetchJson,
-  }),
-]);
+String(symbol || "").toUpperCase() === "ES"
+  ? fetchEngine3DiagnosticBarStack({
+      symbol,
+      limit: 120,
+      coreBase: CORE_BASE,
+      fetchJson,
+    })
+  : Promise.resolve({
+      oneMinute: {
+        ok: false,
+        timeframe: "1m",
+        bars: [],
+        diagnosticOnly: true,
+        reasonCode: "ENGINE3_DIAGNOSTIC_NOT_ENABLED_FOR_NON_ES",
+        detail: null,
+      },
+
+      fiveMinute: {
+        ok: false,
+        timeframe: "5m",
+        bars: [],
+        diagnosticOnly: true,
+        reasonCode: "ENGINE3_DIAGNOSTIC_NOT_ENABLED_FOR_NON_ES",
+        detail: null,
+      },
+    }),
    
 
 console.log("Live Market Meter fetched");
