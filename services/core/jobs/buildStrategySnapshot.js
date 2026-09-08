@@ -10181,6 +10181,7 @@ String(symbol || "").toUpperCase() === "ES"
         detail: null,
       },
     }),
+]);
    
 
 console.log("Live Market Meter fetched");
