@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-09-04 12:10",
+  "updatedAt": "2026-09-10 06:25",
   "schema": "active-wave-state-es@v7-minute-w4-expanded-flat-internal-c",
   "activeDegreeKeys": [
     "primary",
@@ -162,10 +162,10 @@
       "parentDegree": "intermediate",
       "parentWave": "W3",
       "activeWave": "W4",
-      "stage": "MINOR_W4_COMPLEX_CORRECTION_ACTIVE_MINOR_C_STARTING",
-      "currentRead": "MINOR_W4_COMPLEX_CORRECTION_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
-      "headline": "Minor W4 complex correction active \u2014 Minor C-down starting, Minute A-down active",
-      "action": "WATCH_MINUTE_A_DOWN_TO_7700_REACTION_THEN_EXPECT_MINUTE_B_BOUNCE",
+      "stage": "MINOR_W4_COMPLEX_CORRECTION_ACTIVE_MINOR_C_ACTIVE",
+      "currentRead": "MINOR_W4_COMPLEX_CORRECTION_MINOR_C_ACTIVE_MINUTE_C_DOWN_ACTIVE",
+      "headline": "Minor W4 complex correction active \u2014 Minor C-down active, Minute C-down active after B-up completed",
+      "action": "WATCH_MINUTE_C_DOWN_FROM_CONFIRMED_B_HIGH_7760",
       "marks": {
         "W1": {
           "low": {
@@ -287,27 +287,27 @@
         "direction": "DOWN",
         "parentCompletedWave": "W3",
         "parentNextWave": "W5",
-        "stage": "MINOR_C_DOWN_STARTING",
+        "stage": "MINOR_C_DOWN_ACTIVE",
         "currentLeg": "Minor C-down",
-        "currentRead": "MINOR_W4_COMPLEX_CORRECTION_ACTIVE_MINOR_C_DOWN_STARTING",
+        "currentRead": "MINOR_W4_COMPLEX_CORRECTION_MINOR_C_ACTIVE_MINUTE_C_DOWN_ACTIVE",
         "waveA": {
           "price": 7618.0,
           "time": "2026-09-02 15:00",
-          "status": "COMPLETED_CANDIDATE"
+          "status": "COMPLETED"
         },
         "waveB": {
-          "price": 7764.0,
+          "price": 7760.0,
           "time": "2026-09-04 15:00",
           "status": "COMPLETED_CANDIDATE"
         },
         "waveC": {
           "price": null,
           "time": null,
-          "status": "STARTING"
+          "status": "ACTIVE"
         },
         "invalidationLevel": 7840.0,
         "invalidationRule": "LARGER_MINOR_W4_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840",
-        "completionRule": "Do not call Minor W4 complete until Minute A down completes, Minute B bounce forms, and final Minute C down completes/reclaims.",
+        "completionRule": "Do not call Minor W4 complete until Minute C-down finishes/exhausts and price reclaims its invalidation structure.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
@@ -343,92 +343,86 @@
       "watchOnly": true,
       "reasonCodes": [
         "MINOR_W4_COMPLEX_CORRECTION_ACTIVE",
-        "MINOR_C_DOWN_STARTING",
-        "MINUTE_A_DOWN_ACTIVE_INSIDE_MINOR_C",
-        "WATCH_7701_75_KEY_0618_REACTION_ZONE",
-        "MINUTE_B_BOUNCE_EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-        "DO_NOT_PROJECT_FINAL_MINUTE_C_UNTIL_B_HIGH_CONFIRMED",
+        "MINOR_C_DOWN_ACTIVE",
+        "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+        "MINUTE_B_UP_COMPLETED_AT_7760_00",
+        "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ],
       "targetModel": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_09_04_MINOR_W4_COMPLEX_MINOR_C_STARTING",
+        "source": "BRIAN_MANUAL_2026_09_10_MINOR_W4_COMPLEX_MINUTE_B_COMPLETE_C_ACTIVE",
         "generated": false,
-        "modelType": "MINOR_W4_COMPLEX_CORRECTION_MINOR_C_STARTING",
-        "summary": "Minor W4 remains active. Minor C-down is starting now, but only Minute A-down is active. Watch 7701.75/7700 for first reaction, then expect Minute B-up before final Minute C-down projection.",
-        "minorCDownStarting": true,
-        "currentInternalWave": "Minute-A",
-        "nextExpectedInternalWave": "Minute-B",
-        "aDownStart": 7764.0,
-        "aDownStartTime": "2026-09-04 15:00",
-        "aDownWatchLevels": {
-          "firstSupport": 7724.25,
-          "key0618Reaction": 7701.75,
-          "midSupport": 7685.75,
-          "deepSupport": 7669.75,
-          "lowerShelf": 7655.0,
-          "priorLow": 7618.0,
-          "flushZone": 7604.0
+        "modelType": "MINOR_W4_COMPLEX_CORRECTION_MINOR_C_ACTIVE",
+        "summary": "Minor W4 remains active. Minor C-down is active. Minute A-down completed at 7618.00, Minute B-up completed candidate at 7760.00, and Minute C-down is active from 7760.00.",
+        "minorCDownActive": true,
+        "currentInternalWave": "Minute-C",
+        "previousInternalWave": "Minute-B",
+        "nextExpectedInternalWave": null,
+        "aLow": 7618.0,
+        "aTime": "2026-09-02 15:00",
+        "bHigh": 7760.0,
+        "bTime": "2026-09-04 15:00",
+        "aLegLength": 142.0,
+        "cProjectionBase": 7760.0,
+        "cDownTargets": {
+          "cc100": 7618.0,
+          "cc1272": 7579.5,
+          "cc1618": 7530.25,
+          "cc200": 7476.0,
+          "cc2618": 7388.25
         },
         "displayLevels": [
           {
-            "label": "First support / .786",
-            "key": "firstSupport",
-            "price": 7724.25,
-            "status": "WATCH"
-          },
-          {
-            "label": "Key .618 reaction",
-            "key": "key0618Reaction",
-            "price": 7701.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Mid support / .500",
-            "key": "midSupport",
-            "price": 7685.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Deep support / .382",
-            "key": "deepSupport",
-            "price": 7669.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Lower shelf",
-            "key": "lowerShelf",
-            "price": 7655.0,
-            "status": "WATCH"
-          },
-          {
-            "label": "Prior A low",
-            "key": "priorLow",
+            "label": "C 1.000",
+            "key": "cc100",
             "price": 7618.0,
             "status": "WATCH"
           },
           {
-            "label": "Flush zone",
-            "key": "flushZone",
-            "price": 7604.0,
+            "label": "C 1.272",
+            "key": "cc1272",
+            "price": 7579.5,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 1.618",
+            "key": "cc1618",
+            "price": 7530.25,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 2.000",
+            "key": "cc200",
+            "price": 7476.0,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 2.618",
+            "key": "cc2618",
+            "price": 7388.25,
             "status": "WATCH"
           }
         ],
         "completionMap": {
           "firstReaction": 7618.0,
-          "primaryCompletion": 7527.75,
-          "deepCompletion": 7472.0,
-          "extremeExhaustion": 7381.75
+          "secondaryReaction": 7579.5,
+          "primaryCompletion": 7530.25,
+          "deepCompletion": 7476.0,
+          "extremeExhaustion": 7388.25
         },
         "invalidationLevel": 7840.0,
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "MINOR_C_DOWN_STARTING",
-          "MINUTE_A_DOWN_ACTIVE",
-          "FINAL_MINUTE_C_PROJECTION_PENDING_B_HIGH"
+          "MINOR_C_DOWN_ACTIVE",
+          "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+          "MINUTE_B_UP_COMPLETED_AT_7760_00",
+          "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
         ]
       }
     },
@@ -438,11 +432,11 @@
       "active": true,
       "parentDegree": "minor",
       "parentWave": "W4",
-      "activeWave": "A",
-      "stage": "MINUTE_A_DOWN_ACTIVE_INSIDE_MINOR_C",
-      "currentRead": "MINUTE_A_DOWN_ACTIVE_INSIDE_MINOR_C_DOWN",
-      "headline": "Minute A-down active inside starting Minor C-down",
-      "action": "WATCH_7701_75_KEY_0618_REACTION_FOR_A_DOWN_EXHAUSTION_THEN_MINUTE_B_BOUNCE",
+      "activeWave": "C",
+      "stage": "MINUTE_C_DOWN_ACTIVE_AFTER_B_UP_COMPLETE",
+      "currentRead": "MINUTE_C_DOWN_ACTIVE_FROM_B_HIGH_7760",
+      "headline": "Minute C-down active after B-up completed at 7760.00",
+      "action": "WATCH_MINUTE_C_DOWN_TARGETS_FROM_7760",
       "marks": {
         "W1": {
           "low": {
@@ -537,81 +531,67 @@
       },
       "targetModel": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
-        "modelType": "MINUTE_A_DOWN_WATCH_MAP_INSIDE_MINOR_C_DOWN",
+        "source": "BRIAN_MANUAL_2026_09_10_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+        "modelType": "MINUTE_C_DOWN_PROJECTION_FROM_CONFIRMED_B_HIGH",
         "parentCompletedWave": "MINOR_W3",
-        "activeWave": "Minute-A",
+        "activeWave": "Minute-C",
         "correctionType": "COMPLEX_MINOR_W4",
-        "currentLeg": "Minute-A",
-        "minuteAStart": 7764.0,
-        "minuteAStartTime": "2026-09-04 15:00",
-        "aDownWatchLevels": {
-          "firstSupport": 7724.25,
-          "key0618Reaction": 7701.75,
-          "midSupport": 7685.75,
-          "deepSupport": 7669.75,
-          "lowerShelf": 7655.0,
-          "priorLow": 7618.0,
-          "flushZone": 7604.0
+        "currentLeg": "Minute-C",
+        "minuteALow": 7618.0,
+        "minuteATime": "2026-09-02 15:00",
+        "minuteBHigh": 7760.0,
+        "minuteBTime": "2026-09-04 15:00",
+        "aLegLength": 142.0,
+        "cProjectionBase": 7760.0,
+        "levels": {
+          "cc100": 7618.0,
+          "cc1272": 7579.5,
+          "cc1618": 7530.25,
+          "cc200": 7476.0,
+          "cc2618": 7388.25
         },
         "displayLevels": [
           {
-            "label": "First support / .786",
-            "key": "firstSupport",
-            "price": 7724.25,
-            "status": "WATCH"
-          },
-          {
-            "label": "Key .618 reaction",
-            "key": "key0618Reaction",
-            "price": 7701.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Mid support / .500",
-            "key": "midSupport",
-            "price": 7685.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Deep support / .382",
-            "key": "deepSupport",
-            "price": 7669.75,
-            "status": "WATCH"
-          },
-          {
-            "label": "Lower shelf",
-            "key": "lowerShelf",
-            "price": 7655.0,
-            "status": "WATCH"
-          },
-          {
-            "label": "Prior A low",
-            "key": "priorLow",
+            "label": "C 1.000",
+            "key": "cc100",
             "price": 7618.0,
             "status": "WATCH"
           },
           {
-            "label": "Flush zone",
-            "key": "flushZone",
-            "price": 7604.0,
+            "label": "C 1.272",
+            "key": "cc1272",
+            "price": 7579.5,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 1.618",
+            "key": "cc1618",
+            "price": 7530.25,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 2.000",
+            "key": "cc200",
+            "price": 7476.0,
+            "status": "WATCH"
+          },
+          {
+            "label": "C 2.618",
+            "key": "cc2618",
+            "price": 7388.25,
             "status": "WATCH"
           }
         ],
-        "nextTarget": 7701.75,
-        "nextTargetKey": "key0618Reaction",
-        "keyReactionZone": {
-          "lo": 7700.0,
-          "hi": 7701.75,
-          "label": "KEY_0618_REACTION_ZONE_FOR_MINUTE_A_DOWN"
-        },
-        "reclaimInvalidationLevel": 7764.0,
-        "summary": "Minor C-down is starting. Current tactical wave is Minute A-down from 7764.00. Watch 7701.75/7700 for first A-down reaction where traders may get bulled up into Minute B. Final Minute C-down projection waits until B high is confirmed.",
+        "nextTarget": 7618.0,
+        "nextTargetKey": "cc100",
+        "primaryTarget": 7530.25,
+        "deepTarget": 7476.0,
+        "reclaimInvalidationLevel": 7760.0,
+        "summary": "Minute A-down completed at 7618.00. Minute B-up completed candidate at 7760.00. Minute C-down is active from 7760.00. Current Minute C-down invalidation is above 7760.00 reclaim/hold.",
         "reasonCodes": [
-          "MINUTE_A_DOWN_ACTIVE",
-          "WATCH_7701_75_KEY_0618_REACTION",
-          "MINUTE_B_BOUNCE_EXPECTED_AFTER_A_DOWN",
-          "FINAL_MINUTE_C_PROJECTION_PENDING_B_HIGH",
+          "MINUTE_B_UP_COMPLETE",
+          "MINUTE_C_DOWN_ACTIVE",
+          "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
@@ -620,200 +600,194 @@
         "watchOnly": true,
         "internalCStructure": {
           "active": true,
-          "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+          "source": "BRIAN_MANUAL_2026_09_10_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
           "parentCorrection": "MINOR_W4_COMPLEX_CORRECTION",
           "correctionType": "COMPLEX_W4",
           "parentCompletedWave": "MINOR_W3",
           "currentWave": "MINOR_C_DOWN",
           "previousInternalWave": "Minute-B",
-          "currentInternalWave": "Minute-A",
-          "nextExpectedInternalWave": "Minute-B",
-          "cWaveState": "MINUTE_A_DOWN_ACTIVE",
+          "currentInternalWave": "Minute-C",
+          "nextExpectedInternalWave": null,
+          "cWaveState": "MINUTE_C_DOWN_ACTIVE",
           "direction": "DOWN",
           "parentStructure": {
             "degree": "minor",
             "wave": "W4",
             "type": "COMPLEX_CORRECTION",
-            "activeLeg": "Minor C-down starting",
+            "activeLeg": "Minor C-down active",
             "invalidationLevel": 7840.0,
             "invalidationRule": "LARGER_MINOR_W4_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840"
           },
           "minuteA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "low": 7618.0,
+            "time": "2026-09-02 15:00",
+            "status": "COMPLETED",
+            "completedCandidate": true
+          },
+          "minuteB": {
+            "state": "COMPLETED_CANDIDATE",
+            "direction": "UP",
+            "high": 7760.0,
+            "time": "2026-09-04 15:00",
+            "status": "COMPLETED_CANDIDATE",
+            "completedCandidate": true,
+            "invalidationLevel": 7760.0,
+            "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760"
+          },
+          "minuteC": {
             "state": "ACTIVE",
             "direction": "DOWN",
-            "start": 7764.0,
+            "start": 7760.0,
             "startTime": "2026-09-04 15:00",
             "projectionPending": false,
             "targetModel": {
               "active": true,
-              "source": "ENGINE22_CURRENT_MINUTE_A_DOWN_FROM_INTERNAL_B_HIGH",
-              "anchorHigh": 7764.0,
+              "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+              "anchorHigh": 7760.0,
+              "anchorLow": 7618.0,
+              "aLegLength": 142.0,
               "levels": {
-                "firstSupport": 7724.25,
-                "key0618Reaction": 7701.75,
-                "midSupport": 7685.75,
-                "deepSupport": 7669.75,
-                "lowerShelf": 7655.0,
-                "priorLow": 7618.0,
-                "flushZone": 7604.0
+                "cc100": 7618.0,
+                "cc1272": 7579.5,
+                "cc1618": 7530.25,
+                "cc200": 7476.0,
+                "cc2618": 7388.25
               },
               "displayLevels": [
                 {
-                  "label": "First support / .786",
-                  "key": "firstSupport",
-                  "price": 7724.25,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Key .618 reaction",
-                  "key": "key0618Reaction",
-                  "price": 7701.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Mid support / .500",
-                  "key": "midSupport",
-                  "price": 7685.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Deep support / .382",
-                  "key": "deepSupport",
-                  "price": 7669.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Lower shelf",
-                  "key": "lowerShelf",
-                  "price": 7655.0,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Prior A low",
-                  "key": "priorLow",
+                  "label": "C 1.000",
+                  "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "Flush zone",
-                  "key": "flushZone",
-                  "price": 7604.0,
+                  "label": "C 1.272",
+                  "key": "cc1272",
+                  "price": 7579.5,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 1.618",
+                  "key": "cc1618",
+                  "price": 7530.25,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.000",
+                  "key": "cc200",
+                  "price": 7476.0,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.618",
+                  "key": "cc2618",
+                  "price": 7388.25,
                   "status": "WATCH"
                 }
               ],
-              "firstReaction": 7724.25,
-              "keyReaction": 7701.75,
-              "deepSupport": 7669.75,
-              "priorLow": 7618.0,
-              "flushZone": 7604.0,
-              "invalidationLevel": 7764.0
+              "primaryTarget": 7530.25,
+              "deepTarget": 7476.0,
+              "invalidationLevel": 7760.0
             }
-          },
-          "minuteB": {
-            "state": "EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-            "direction": "UP",
-            "projectionPending": true,
-            "note": "Minute B-up expected after Minute A-down reaction/exhaustion. Do not set B high until confirmed."
-          },
-          "minuteC": {
-            "state": "PENDING_MINUTE_B_HIGH",
-            "direction": "DOWN",
-            "projectionPending": true,
-            "note": "Final Minute C-down projection waits until Minute B high is confirmed."
           },
           "cA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "low": 7618.0,
+            "time": "2026-09-02 15:00",
+            "completedCandidate": true,
+            "completionTouchPrice": 7618.0,
+            "completionTouchTime": "2026-09-02 15:00"
+          },
+          "cB": {
+            "state": "COMPLETED_CANDIDATE",
+            "active": false,
+            "direction": "UP",
+            "high": 7760.0,
+            "time": "2026-09-04 15:00",
+            "completedCandidate": true,
+            "completedBy": "MANUAL_MINUTE_B_HIGH_MARKED_BY_BRIAN_7760"
+          },
+          "cC": {
             "state": "ACTIVE",
             "direction": "DOWN",
-            "start": 7764.0,
+            "start": 7760.0,
             "startTime": "2026-09-04 15:00",
+            "projectionPending": false,
             "targetModel": {
               "active": true,
+              "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+              "anchorHigh": 7760.0,
+              "anchorLow": 7618.0,
+              "aLegLength": 142.0,
               "levels": {
-                "firstSupport": 7724.25,
-                "key0618Reaction": 7701.75,
-                "midSupport": 7685.75,
-                "deepSupport": 7669.75,
-                "lowerShelf": 7655.0,
-                "priorLow": 7618.0,
-                "flushZone": 7604.0
+                "cc100": 7618.0,
+                "cc1272": 7579.5,
+                "cc1618": 7530.25,
+                "cc200": 7476.0,
+                "cc2618": 7388.25
               },
               "displayLevels": [
                 {
-                  "label": "First support / .786",
-                  "key": "firstSupport",
-                  "price": 7724.25,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Key .618 reaction",
-                  "key": "key0618Reaction",
-                  "price": 7701.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Mid support / .500",
-                  "key": "midSupport",
-                  "price": 7685.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Deep support / .382",
-                  "key": "deepSupport",
-                  "price": 7669.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Lower shelf",
-                  "key": "lowerShelf",
-                  "price": 7655.0,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Prior A low",
-                  "key": "priorLow",
+                  "label": "C 1.000",
+                  "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "Flush zone",
-                  "key": "flushZone",
-                  "price": 7604.0,
+                  "label": "C 1.272",
+                  "key": "cc1272",
+                  "price": 7579.5,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 1.618",
+                  "key": "cc1618",
+                  "price": 7530.25,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.000",
+                  "key": "cc200",
+                  "price": 7476.0,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.618",
+                  "key": "cc2618",
+                  "price": 7388.25,
                   "status": "WATCH"
                 }
               ],
-              "invalidationLevel": 7764.0
+              "primaryTarget": 7530.25,
+              "deepTarget": 7476.0,
+              "invalidationLevel": 7760.0
             }
-          },
-          "cB": {
-            "state": "EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-            "active": false,
-            "projectionPending": true
-          },
-          "cC": {
-            "state": "PENDING_MINUTE_B_HIGH",
-            "projectionPending": true
           },
           "finalMinuteABC": {
-            "active": false,
-            "state": "PENDING_MINUTE_B_HIGH",
+            "active": true,
             "parentLeg": "Minor C-down",
             "waveA": {
-              "state": "ACTIVE",
-              "direction": "DOWN",
-              "start": 7764.0,
-              "startTime": "2026-09-04 15:00"
+              "price": 7618.0,
+              "time": "2026-09-02 15:00",
+              "status": "COMPLETED"
             },
             "waveB": {
-              "state": "PENDING",
-              "status": "WAITING_FOR_A_DOWN_EXHAUSTION"
+              "price": 7760.0,
+              "time": "2026-09-04 15:00",
+              "status": "COMPLETED_CANDIDATE"
             },
             "waveC": {
-              "state": "PENDING",
-              "status": "WAITING_FOR_B_HIGH"
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7760.0,
+              "startTime": "2026-09-04 15:00"
             }
           },
-          "invalidationLevel": 7764.0,
-          "invalidationRule": "CURRENT_MINUTE_A_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7764",
+          "invalidationLevel": 7760.0,
+          "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760",
           "largerInvalidationLevel": 7840.0,
           "largerInvalidationRule": "LARGER_MINOR_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840",
           "downstreamTravelDirection": "SHORT",
@@ -824,10 +798,11 @@
           "noPermissionCreated": true,
           "watchOnly": true,
           "reasonCodes": [
-            "ENGINE22_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
-            "WATCH_7701_75_KEY_0618_REACTION",
-            "MINUTE_B_EXPECTED_AFTER_A_DOWN",
-            "FINAL_MINUTE_C_PENDING_B_HIGH",
+            "ENGINE22_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+            "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+            "MINUTE_B_UP_COMPLETED_AT_7760_00",
+            "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
+            "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
             "NO_EXECUTION",
             "NO_PERMISSION_CREATED"
           ]
@@ -860,94 +835,82 @@
       },
       "internalStructure": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+        "source": "BRIAN_MANUAL_2026_09_10_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
         "parentDegree": "minor",
         "parentWave": "W4",
         "previousInternalWave": "Minute-B",
-        "currentInternalWave": "Minute-A",
-        "nextExpectedInternalWave": "Minute-B",
+        "currentInternalWave": "Minute-C",
+        "nextExpectedInternalWave": null,
         "internalLegDirection": "DOWN",
         "parentWaveDirection": "DOWN",
-        "classification": "MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+        "classification": "MINOR_C_ACTIVE_MINUTE_C_DOWN_ACTIVE",
         "parentWaveStillValid": true,
         "parentWaveComplete": false,
         "parentTransitionPossible": false,
         "transitionRisk": "MODERATE",
-        "invalidationLevel": 7764.0,
+        "invalidationLevel": 7760.0,
         "invalidationBreached": false,
-        "supportLevel": 7701.75,
+        "supportLevel": 7618.0,
         "retracementZone": {
           "active": true,
-          "source": "MINUTE_A_DOWN_WATCH_MAP",
+          "source": "MINUTE_C_DOWN_PROJECTION_FROM_B_HIGH_7760",
           "levels": {
-            "firstSupport": 7724.25,
-            "key0618Reaction": 7701.75,
-            "midSupport": 7685.75,
-            "deepSupport": 7669.75,
-            "lowerShelf": 7655.0,
-            "priorLow": 7618.0,
-            "flushZone": 7604.0
+            "cc100": 7618.0,
+            "cc1272": 7579.5,
+            "cc1618": 7530.25,
+            "cc200": 7476.0,
+            "cc2618": 7388.25
           },
           "displayLevels": [
             {
-              "label": "First support / .786",
-              "key": "firstSupport",
-              "price": 7724.25,
-              "status": "WATCH"
-            },
-            {
-              "label": "Key .618 reaction",
-              "key": "key0618Reaction",
-              "price": 7701.75,
-              "status": "WATCH"
-            },
-            {
-              "label": "Mid support / .500",
-              "key": "midSupport",
-              "price": 7685.75,
-              "status": "WATCH"
-            },
-            {
-              "label": "Deep support / .382",
-              "key": "deepSupport",
-              "price": 7669.75,
-              "status": "WATCH"
-            },
-            {
-              "label": "Lower shelf",
-              "key": "lowerShelf",
-              "price": 7655.0,
-              "status": "WATCH"
-            },
-            {
-              "label": "Prior A low",
-              "key": "priorLow",
+              "label": "C 1.000",
+              "key": "cc100",
               "price": 7618.0,
               "status": "WATCH"
             },
             {
-              "label": "Flush zone",
-              "key": "flushZone",
-              "price": 7604.0,
+              "label": "C 1.272",
+              "key": "cc1272",
+              "price": 7579.5,
+              "status": "WATCH"
+            },
+            {
+              "label": "C 1.618",
+              "key": "cc1618",
+              "price": 7530.25,
+              "status": "WATCH"
+            },
+            {
+              "label": "C 2.000",
+              "key": "cc200",
+              "price": 7476.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "C 2.618",
+              "key": "cc2618",
+              "price": 7388.25,
               "status": "WATCH"
             }
           ],
-          "zoneState": "WATCHING_7701_75_KEY_REACTION"
+          "zoneState": "MINUTE_C_DOWN_ACTIVE"
         },
         "evidence": {
-          "minorW4ComplexCorrectionActive": true,
-          "minorCDownStarting": true,
-          "minuteADownActive": true,
-          "minuteAStart": 7764.0,
-          "minuteAStartTime": "2026-09-04 15:00",
-          "keyReactionLevel": 7701.75,
-          "minuteBExpectedAfterADown": true,
-          "finalMinuteCProjectionPendingBHigh": true
+          "minuteADownCompleted": true,
+          "minuteALow": 7618.0,
+          "minuteALowTime": "2026-09-02 15:00",
+          "minuteBUpCompletedCandidate": true,
+          "minuteBHigh": 7760.0,
+          "minuteBHighTime": "2026-09-04 15:00",
+          "minuteCDownActive": true,
+          "finalMinuteCProjectionPublished": true
         },
         "reasonCodes": [
-          "ENGINE22_MINOR_C_STARTING",
-          "ENGINE22_MINUTE_A_DOWN_ACTIVE",
-          "ENGINE22_FINAL_MINUTE_C_PROJECTION_PENDING_B_HIGH",
+          "ENGINE22_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+          "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+          "MINUTE_B_UP_COMPLETED_AT_7760_00",
+          "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
+          "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
@@ -956,200 +919,194 @@
         "watchOnly": true,
         "internalCStructure": {
           "active": true,
-          "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+          "source": "BRIAN_MANUAL_2026_09_10_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
           "parentCorrection": "MINOR_W4_COMPLEX_CORRECTION",
           "correctionType": "COMPLEX_W4",
           "parentCompletedWave": "MINOR_W3",
           "currentWave": "MINOR_C_DOWN",
           "previousInternalWave": "Minute-B",
-          "currentInternalWave": "Minute-A",
-          "nextExpectedInternalWave": "Minute-B",
-          "cWaveState": "MINUTE_A_DOWN_ACTIVE",
+          "currentInternalWave": "Minute-C",
+          "nextExpectedInternalWave": null,
+          "cWaveState": "MINUTE_C_DOWN_ACTIVE",
           "direction": "DOWN",
           "parentStructure": {
             "degree": "minor",
             "wave": "W4",
             "type": "COMPLEX_CORRECTION",
-            "activeLeg": "Minor C-down starting",
+            "activeLeg": "Minor C-down active",
             "invalidationLevel": 7840.0,
             "invalidationRule": "LARGER_MINOR_W4_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840"
           },
           "minuteA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "low": 7618.0,
+            "time": "2026-09-02 15:00",
+            "status": "COMPLETED",
+            "completedCandidate": true
+          },
+          "minuteB": {
+            "state": "COMPLETED_CANDIDATE",
+            "direction": "UP",
+            "high": 7760.0,
+            "time": "2026-09-04 15:00",
+            "status": "COMPLETED_CANDIDATE",
+            "completedCandidate": true,
+            "invalidationLevel": 7760.0,
+            "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760"
+          },
+          "minuteC": {
             "state": "ACTIVE",
             "direction": "DOWN",
-            "start": 7764.0,
+            "start": 7760.0,
             "startTime": "2026-09-04 15:00",
             "projectionPending": false,
             "targetModel": {
               "active": true,
-              "source": "ENGINE22_CURRENT_MINUTE_A_DOWN_FROM_INTERNAL_B_HIGH",
-              "anchorHigh": 7764.0,
+              "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+              "anchorHigh": 7760.0,
+              "anchorLow": 7618.0,
+              "aLegLength": 142.0,
               "levels": {
-                "firstSupport": 7724.25,
-                "key0618Reaction": 7701.75,
-                "midSupport": 7685.75,
-                "deepSupport": 7669.75,
-                "lowerShelf": 7655.0,
-                "priorLow": 7618.0,
-                "flushZone": 7604.0
+                "cc100": 7618.0,
+                "cc1272": 7579.5,
+                "cc1618": 7530.25,
+                "cc200": 7476.0,
+                "cc2618": 7388.25
               },
               "displayLevels": [
                 {
-                  "label": "First support / .786",
-                  "key": "firstSupport",
-                  "price": 7724.25,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Key .618 reaction",
-                  "key": "key0618Reaction",
-                  "price": 7701.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Mid support / .500",
-                  "key": "midSupport",
-                  "price": 7685.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Deep support / .382",
-                  "key": "deepSupport",
-                  "price": 7669.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Lower shelf",
-                  "key": "lowerShelf",
-                  "price": 7655.0,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Prior A low",
-                  "key": "priorLow",
+                  "label": "C 1.000",
+                  "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "Flush zone",
-                  "key": "flushZone",
-                  "price": 7604.0,
+                  "label": "C 1.272",
+                  "key": "cc1272",
+                  "price": 7579.5,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 1.618",
+                  "key": "cc1618",
+                  "price": 7530.25,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.000",
+                  "key": "cc200",
+                  "price": 7476.0,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.618",
+                  "key": "cc2618",
+                  "price": 7388.25,
                   "status": "WATCH"
                 }
               ],
-              "firstReaction": 7724.25,
-              "keyReaction": 7701.75,
-              "deepSupport": 7669.75,
-              "priorLow": 7618.0,
-              "flushZone": 7604.0,
-              "invalidationLevel": 7764.0
+              "primaryTarget": 7530.25,
+              "deepTarget": 7476.0,
+              "invalidationLevel": 7760.0
             }
-          },
-          "minuteB": {
-            "state": "EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-            "direction": "UP",
-            "projectionPending": true,
-            "note": "Minute B-up expected after Minute A-down reaction/exhaustion. Do not set B high until confirmed."
-          },
-          "minuteC": {
-            "state": "PENDING_MINUTE_B_HIGH",
-            "direction": "DOWN",
-            "projectionPending": true,
-            "note": "Final Minute C-down projection waits until Minute B high is confirmed."
           },
           "cA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "low": 7618.0,
+            "time": "2026-09-02 15:00",
+            "completedCandidate": true,
+            "completionTouchPrice": 7618.0,
+            "completionTouchTime": "2026-09-02 15:00"
+          },
+          "cB": {
+            "state": "COMPLETED_CANDIDATE",
+            "active": false,
+            "direction": "UP",
+            "high": 7760.0,
+            "time": "2026-09-04 15:00",
+            "completedCandidate": true,
+            "completedBy": "MANUAL_MINUTE_B_HIGH_MARKED_BY_BRIAN_7760"
+          },
+          "cC": {
             "state": "ACTIVE",
             "direction": "DOWN",
-            "start": 7764.0,
+            "start": 7760.0,
             "startTime": "2026-09-04 15:00",
+            "projectionPending": false,
             "targetModel": {
               "active": true,
+              "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+              "anchorHigh": 7760.0,
+              "anchorLow": 7618.0,
+              "aLegLength": 142.0,
               "levels": {
-                "firstSupport": 7724.25,
-                "key0618Reaction": 7701.75,
-                "midSupport": 7685.75,
-                "deepSupport": 7669.75,
-                "lowerShelf": 7655.0,
-                "priorLow": 7618.0,
-                "flushZone": 7604.0
+                "cc100": 7618.0,
+                "cc1272": 7579.5,
+                "cc1618": 7530.25,
+                "cc200": 7476.0,
+                "cc2618": 7388.25
               },
               "displayLevels": [
                 {
-                  "label": "First support / .786",
-                  "key": "firstSupport",
-                  "price": 7724.25,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Key .618 reaction",
-                  "key": "key0618Reaction",
-                  "price": 7701.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Mid support / .500",
-                  "key": "midSupport",
-                  "price": 7685.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Deep support / .382",
-                  "key": "deepSupport",
-                  "price": 7669.75,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Lower shelf",
-                  "key": "lowerShelf",
-                  "price": 7655.0,
-                  "status": "WATCH"
-                },
-                {
-                  "label": "Prior A low",
-                  "key": "priorLow",
+                  "label": "C 1.000",
+                  "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "Flush zone",
-                  "key": "flushZone",
-                  "price": 7604.0,
+                  "label": "C 1.272",
+                  "key": "cc1272",
+                  "price": 7579.5,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 1.618",
+                  "key": "cc1618",
+                  "price": 7530.25,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.000",
+                  "key": "cc200",
+                  "price": 7476.0,
+                  "status": "WATCH"
+                },
+                {
+                  "label": "C 2.618",
+                  "key": "cc2618",
+                  "price": 7388.25,
                   "status": "WATCH"
                 }
               ],
-              "invalidationLevel": 7764.0
+              "primaryTarget": 7530.25,
+              "deepTarget": 7476.0,
+              "invalidationLevel": 7760.0
             }
-          },
-          "cB": {
-            "state": "EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-            "active": false,
-            "projectionPending": true
-          },
-          "cC": {
-            "state": "PENDING_MINUTE_B_HIGH",
-            "projectionPending": true
           },
           "finalMinuteABC": {
-            "active": false,
-            "state": "PENDING_MINUTE_B_HIGH",
+            "active": true,
             "parentLeg": "Minor C-down",
             "waveA": {
-              "state": "ACTIVE",
-              "direction": "DOWN",
-              "start": 7764.0,
-              "startTime": "2026-09-04 15:00"
+              "price": 7618.0,
+              "time": "2026-09-02 15:00",
+              "status": "COMPLETED"
             },
             "waveB": {
-              "state": "PENDING",
-              "status": "WAITING_FOR_A_DOWN_EXHAUSTION"
+              "price": 7760.0,
+              "time": "2026-09-04 15:00",
+              "status": "COMPLETED_CANDIDATE"
             },
             "waveC": {
-              "state": "PENDING",
-              "status": "WAITING_FOR_B_HIGH"
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7760.0,
+              "startTime": "2026-09-04 15:00"
             }
           },
-          "invalidationLevel": 7764.0,
-          "invalidationRule": "CURRENT_MINUTE_A_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7764",
+          "invalidationLevel": 7760.0,
+          "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760",
           "largerInvalidationLevel": 7840.0,
           "largerInvalidationRule": "LARGER_MINOR_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840",
           "downstreamTravelDirection": "SHORT",
@@ -1160,10 +1117,11 @@
           "noPermissionCreated": true,
           "watchOnly": true,
           "reasonCodes": [
-            "ENGINE22_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
-            "WATCH_7701_75_KEY_0618_REACTION",
-            "MINUTE_B_EXPECTED_AFTER_A_DOWN",
-            "FINAL_MINUTE_C_PENDING_B_HIGH",
+            "ENGINE22_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+            "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+            "MINUTE_B_UP_COMPLETED_AT_7760_00",
+            "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
+            "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
             "NO_EXECUTION",
             "NO_PERMISSION_CREATED"
           ]
@@ -1173,11 +1131,9 @@
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "MINUTE_A_DOWN_ACTIVE_INSIDE_MINOR_C",
-        "MINOR_C_DOWN_STARTING",
-        "WATCH_7701_75_KEY_0618_REACTION",
-        "MINUTE_B_BOUNCE_EXPECTED_AFTER_A_DOWN_EXHAUSTION",
-        "FINAL_MINUTE_C_PROJECTION_PENDING_B_HIGH",
+        "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+        "MINUTE_B_UP_COMPLETED_CANDIDATE_AT_7760_00",
+        "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ],
@@ -1221,9 +1177,9 @@
       },
       "internalCStructure": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_08_28_MINOR_C_DOWN_MINUTE_C_DOWN_ACTIVE",
-        "parentCorrection": "MINOR_W4_EXPANDED_FLAT",
-        "correctionType": "EXPANDED_FLAT",
+        "source": "BRIAN_MANUAL_2026_09_10_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+        "parentCorrection": "MINOR_W4_COMPLEX_CORRECTION",
+        "correctionType": "COMPLEX_W4",
         "parentCompletedWave": "MINOR_W3",
         "currentWave": "MINOR_C_DOWN",
         "previousInternalWave": "Minute-B",
@@ -1234,185 +1190,183 @@
         "parentStructure": {
           "degree": "minor",
           "wave": "W4",
-          "type": "EXPANDED_FLAT",
-          "activeLeg": "Minor C-down",
+          "type": "COMPLEX_CORRECTION",
+          "activeLeg": "Minor C-down active",
           "invalidationLevel": 7840.0,
-          "invalidationRule": "LARGER_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_EXPANDED_FLAT_B_HIGH_7840"
+          "invalidationRule": "LARGER_MINOR_W4_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840"
         },
         "minuteA": {
           "state": "COMPLETED",
-          "low": 7654.5,
-          "time": "2026-08-24 06:30",
+          "direction": "DOWN",
+          "low": 7618.0,
+          "time": "2026-09-02 15:00",
           "status": "COMPLETED",
           "completedCandidate": true
         },
         "minuteB": {
           "state": "COMPLETED_CANDIDATE",
-          "high": 7782.0,
-          "time": "2026-08-28 08:00",
+          "direction": "UP",
+          "high": 7760.0,
+          "time": "2026-09-04 15:00",
           "status": "COMPLETED_CANDIDATE",
           "completedCandidate": true,
-          "invalidationLevel": 7782.0,
-          "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7782"
+          "invalidationLevel": 7760.0,
+          "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760"
         },
         "minuteC": {
           "state": "ACTIVE",
           "direction": "DOWN",
-          "start": 7782.0,
-          "startTime": "2026-08-28 08:00",
+          "start": 7760.0,
+          "startTime": "2026-09-04 15:00",
           "projectionPending": false,
           "targetModel": {
             "active": true,
-            "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_INTERNAL_B_HIGH",
-            "anchorHigh": 7782.0,
-            "anchorLow": 7654.5,
-            "aLegLength": 127.5,
+            "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+            "anchorHigh": 7760.0,
+            "anchorLow": 7618.0,
+            "aLegLength": 142.0,
             "levels": {
-              "cc100": 7654.5,
-              "cc1272": 7619.75,
-              "cc1618": 7575.75,
-              "cc200": 7527.0,
-              "cc2618": 7448.25
-            },
-            "displayLevels": [
-              {
-                "label": "Minute C 1.000",
-                "price": 7654.5,
-                "status": "WATCH"
-              },
-              {
-                "label": "Minute C 1.272",
-                "price": 7619.75,
-                "status": "WATCH"
-              },
-              {
-                "label": "Minute C 1.618",
-                "price": 7575.75,
-                "status": "WATCH"
-              },
-              {
-                "label": "Minute C 2.000",
-                "price": 7527.0,
-                "status": "WATCH"
-              },
-              {
-                "label": "Minute C 2.618",
-                "price": 7448.25,
-                "status": "WATCH"
-              }
-            ],
-            "primaryTarget": 7575.75,
-            "deepTarget": 7448.25,
-            "invalidationLevel": 7782.0
-          }
-        },
-        "cA": {
-          "state": "COMPLETED",
-          "low": 7654.5,
-          "time": "2026-08-24 06:30",
-          "completedCandidate": true,
-          "completionZoneTouched": true,
-          "completionTouchPrice": 7654.5,
-          "completionTouchTime": "2026-08-24 06:30"
-        },
-        "cB": {
-          "state": "COMPLETED_CANDIDATE",
-          "active": false,
-          "high": 7782.0,
-          "time": "2026-08-28 08:00",
-          "completedCandidate": true,
-          "completedBy": "MANUAL_MINUTE_B_HIGH_MARKED_BY_BRIAN"
-        },
-        "cC": {
-          "state": "ACTIVE",
-          "direction": "DOWN",
-          "start": 7782.0,
-          "startTime": "2026-08-28 08:00",
-          "projectionPending": false,
-          "targetModel": {
-            "active": true,
-            "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_INTERNAL_B_HIGH",
-            "anchorHigh": 7782.0,
-            "anchorLow": 7654.5,
-            "aLegLength": 127.5,
-            "levels": {
-              "cc100": 7654.5,
-              "cc1272": 7619.75,
-              "cc1618": 7575.75,
-              "cc200": 7527.0,
-              "cc2618": 7448.25
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
             },
             "displayLevels": [
               {
                 "label": "C 1.000",
-                "price": 7654.5,
+                "key": "cc100",
+                "price": 7618.0,
                 "status": "WATCH"
               },
               {
                 "label": "C 1.272",
-                "price": 7619.75,
+                "key": "cc1272",
+                "price": 7579.5,
                 "status": "WATCH"
               },
               {
                 "label": "C 1.618",
-                "price": 7575.75,
+                "key": "cc1618",
+                "price": 7530.25,
                 "status": "WATCH"
               },
               {
                 "label": "C 2.000",
-                "price": 7527.0,
+                "key": "cc200",
+                "price": 7476.0,
                 "status": "WATCH"
               },
               {
                 "label": "C 2.618",
-                "price": 7448.25,
+                "key": "cc2618",
+                "price": 7388.25,
                 "status": "WATCH"
               }
             ],
-            "primaryTarget": 7575.75,
-            "deepTarget": 7448.25,
-            "invalidationLevel": 7782.0
-          },
-          "largerCPrimaryTarget": 7650.25,
-          "largerCTargets": {
-            "c100": 7722.75,
-            "c1272": 7690.75,
-            "c1618": 7650.25,
-            "c200": 7605.5,
-            "c2618": 7533.0
+            "primaryTarget": 7530.25,
+            "deepTarget": 7476.0,
+            "invalidationLevel": 7760.0
+          }
+        },
+        "cA": {
+          "state": "COMPLETED",
+          "direction": "DOWN",
+          "low": 7618.0,
+          "time": "2026-09-02 15:00",
+          "completedCandidate": true,
+          "completionTouchPrice": 7618.0,
+          "completionTouchTime": "2026-09-02 15:00"
+        },
+        "cB": {
+          "state": "COMPLETED_CANDIDATE",
+          "active": false,
+          "direction": "UP",
+          "high": 7760.0,
+          "time": "2026-09-04 15:00",
+          "completedCandidate": true,
+          "completedBy": "MANUAL_MINUTE_B_HIGH_MARKED_BY_BRIAN_7760"
+        },
+        "cC": {
+          "state": "ACTIVE",
+          "direction": "DOWN",
+          "start": 7760.0,
+          "startTime": "2026-09-04 15:00",
+          "projectionPending": false,
+          "targetModel": {
+            "active": true,
+            "source": "ENGINE22_CURRENT_MINUTE_C_DOWN_FROM_B_HIGH_7760",
+            "anchorHigh": 7760.0,
+            "anchorLow": 7618.0,
+            "aLegLength": 142.0,
+            "levels": {
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
+            },
+            "displayLevels": [
+              {
+                "label": "C 1.000",
+                "key": "cc100",
+                "price": 7618.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "C 1.272",
+                "key": "cc1272",
+                "price": 7579.5,
+                "status": "WATCH"
+              },
+              {
+                "label": "C 1.618",
+                "key": "cc1618",
+                "price": 7530.25,
+                "status": "WATCH"
+              },
+              {
+                "label": "C 2.000",
+                "key": "cc200",
+                "price": 7476.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "C 2.618",
+                "key": "cc2618",
+                "price": 7388.25,
+                "status": "WATCH"
+              }
+            ],
+            "primaryTarget": 7530.25,
+            "deepTarget": 7476.0,
+            "invalidationLevel": 7760.0
           }
         },
         "finalMinuteABC": {
           "active": true,
           "parentLeg": "Minor C-down",
           "waveA": {
-            "price": 7654.5,
-            "time": "2026-08-24 06:30",
+            "price": 7618.0,
+            "time": "2026-09-02 15:00",
             "status": "COMPLETED"
           },
           "waveB": {
-            "price": 7782.0,
-            "time": "2026-08-28 08:00",
+            "price": 7760.0,
+            "time": "2026-09-04 15:00",
             "status": "COMPLETED_CANDIDATE"
           },
           "waveC": {
             "state": "ACTIVE",
             "direction": "DOWN",
-            "start": 7782.0,
-            "startTime": "2026-08-28 08:00"
+            "start": 7760.0,
+            "startTime": "2026-09-04 15:00"
           }
         },
-        "largerCDownTargets": {
-          "c100": 7722.75,
-          "c1272": 7690.75,
-          "c1618": 7650.25,
-          "c200": 7605.5,
-          "c2618": 7533.0
-        },
-        "invalidationLevel": 7782.0,
-        "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7782",
+        "invalidationLevel": 7760.0,
+        "invalidationRule": "CURRENT_MINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_INTERNAL_B_HIGH_7760",
         "largerInvalidationLevel": 7840.0,
-        "largerInvalidationRule": "LARGER_MINOR_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_EXPANDED_FLAT_B_HIGH_7840",
+        "largerInvalidationRule": "LARGER_MINOR_C_DOWN_THESIS_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_7840",
         "downstreamTravelDirection": "SHORT",
         "directionalContextValidForEngine26": true,
         "engine26TravelContextRole": "STRUCTURAL_TRAVEL_CONTEXT",
@@ -1421,13 +1375,11 @@
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "ENGINE22_INTERNAL_C_STRUCTURE_UPDATED",
-          "MINOR_W4_EXPANDED_FLAT_MINOR_C_DOWN_ACTIVE",
-          "MINUTE_A_DOWN_COMPLETED_AT_7654_50",
-          "MINUTE_B_UP_COMPLETED_CANDIDATE_AT_7782_00",
-          "MINUTE_C_DOWN_ACTIVE",
-          "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7782",
-          "LARGER_C_DOWN_INVALIDATION_ABOVE_7840",
+          "ENGINE22_MINUTE_B_COMPLETE_C_DOWN_ACTIVE",
+          "MINUTE_A_DOWN_COMPLETED_AT_7618_00",
+          "MINUTE_B_UP_COMPLETED_AT_7760_00",
+          "MINUTE_C_DOWN_ACTIVE_FROM_7760_00",
+          "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -1438,12 +1390,12 @@
       "direction": "DOWN",
       "active": true,
       "parentDegree": "minute",
-      "parentWave": "A",
+      "parentWave": "C",
       "activeWave": null,
-      "stage": "MINUTE_A_DOWN_ACTIVE_SUBMINUTE_CONTEXT",
-      "currentRead": "SUBMINUTE_CONTEXT_INSIDE_ACTIVE_MINUTE_A_DOWN",
-      "headline": "Subminute context inside active Minute A-down",
-      "action": "USE_MINUTE_A_DOWN_MAP_FOR_CONTEXT_DO_NOT_FORCE_SUBMINUTE_COUNT",
+      "stage": "MINUTE_C_DOWN_ACTIVE_SUBMINUTE_CONTEXT",
+      "currentRead": "SUBMINUTE_CONTEXT_INSIDE_ACTIVE_MINUTE_C_DOWN",
+      "headline": "Subminute context inside active Minute C-down",
+      "action": "USE_MINUTE_C_DOWN_MAP_FOR_CONTEXT_DO_NOT_FORCE_SUBMINUTE_COUNT",
       "marks": {
         "W1": null,
         "W2": null,
@@ -1475,41 +1427,41 @@
         "active": true,
         "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
         "parentDegree": "minute",
-        "parentWave": "A",
+        "parentWave": "C",
         "previousInternalWave": null,
-        "currentInternalWave": "A-down",
-        "nextExpectedInternalWave": "B-up",
+        "currentInternalWave": "C-down",
+        "nextExpectedInternalWave": null,
         "internalLegDirection": "DOWN",
         "parentWaveDirection": "DOWN",
-        "classification": "SUBMINUTE_CONTEXT_INSIDE_MINUTE_A_DOWN",
+        "classification": "SUBMINUTE_CONTEXT_INSIDE_MINUTE_C_DOWN",
         "parentWaveStillValid": true,
         "parentWaveComplete": false,
         "parentTransitionPossible": false,
         "transitionRisk": "MODERATE",
-        "invalidationLevel": 7764.0,
+        "invalidationLevel": 7760.0,
         "invalidationBreached": false,
-        "supportLevel": 7701.75,
+        "supportLevel": 7618.0,
         "internalReference": {
-          "chartRead": "MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+          "chartRead": "MINOR_C_ACTIVE_MINUTE_C_DOWN_ACTIVE",
           "minorW4ComplexCorrectionActive": true,
-          "minorCDownStarting": true,
-          "minuteADownActive": true,
-          "minuteAStart": 7764.0,
-          "minuteAStartTime": "2026-09-04 15:00",
-          "firstSupport": 7724.25,
-          "key0618Reaction": 7701.75,
-          "midSupport": 7685.75,
-          "deepSupport": 7669.75,
-          "lowerShelf": 7655.0,
-          "priorLow": 7618.0,
-          "flushZone": 7604.0
+          "minorCDownActive": true,
+          "minuteCDownActive": true,
+          "minuteALow": 7618.0,
+          "minuteALowTime": "2026-09-02 15:00",
+          "minuteBHigh": 7760.0,
+          "minuteBHighTime": "2026-09-04 15:00",
+          "cc100": 7618.0,
+          "cc1272": 7579.5,
+          "cc1618": 7530.25,
+          "cc200": 7476.0,
+          "cc2618": 7388.25
         },
         "evidence": {
           "cleanSubminuteCountUnavailable": true,
           "minuteADownActive": true
         },
         "reasonCodes": [
-          "ENGINE22_SUBMINUTE_CONTEXT_INSIDE_MINUTE_A_DOWN",
+          "ENGINE22_SUBMINUTE_CONTEXT_INSIDE_MINUTE_C_DOWN",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
