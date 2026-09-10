@@ -81,6 +81,207 @@ function normalizeSymbol(value) {
   return String(value || "").trim().toUpperCase();
 }
 
+const REAL_FUTURES_MONTHS = {
+  F: "JAN",
+  G: "FEB",
+  H: "MAR",
+  J: "APR",
+  K: "MAY",
+  M: "JUN",
+  N: "JUL",
+  Q: "AUG",
+  U: "SEP",
+  V: "OCT",
+  X: "NOV",
+  Z: "DEC",
+};
+
+function normalizeRealBrokerSymbol(value) {
+  return normalizeId(value)
+    ? normalizeSymbol(value)
+    : null;
+}
+
+function parseRealFuturesContractIdentity({
+  brokerSymbol = null,
+  instrumentRoot = null,
+  futuresContractCode = null,
+  contractMonthCode = null,
+  contractMonth = null,
+  contractYear = null,
+} = {}) {
+  const normalizedBrokerSymbol =
+    normalizeRealBrokerSymbol(brokerSymbol);
+
+  const explicitCode =
+    normalizeId(futuresContractCode)
+      ? normalizeSymbol(futuresContractCode)
+          .replace(/^\//, "")
+          .replace(/:.*$/, "")
+      : null;
+
+  const strippedBrokerSymbol =
+    normalizedBrokerSymbol
+      ? normalizedBrokerSymbol
+          .replace(/^\//, "")
+          .replace(/:.*$/, "")
+      : null;
+
+  const code =
+    explicitCode ||
+    strippedBrokerSymbol ||
+    null;
+
+  const match =
+    code?.match(
+      /^([A-Z0-9]+?)([FGHJKMNQUVXZ])(\d{1,2})$/
+    ) || null;
+
+  const parsedRoot =
+    match?.[1] || null;
+
+  const parsedMonthCode =
+    match?.[2] || null;
+
+  const parsedYearText =
+    match?.[3] || null;
+
+  const normalizedRoot =
+    normalizeRealInstrumentRoot(
+      normalizedBrokerSymbol,
+      firstDefined(
+        instrumentRoot,
+        parsedRoot
+      )
+    );
+
+  const normalizedMonthCode =
+    toUpper(
+      firstDefined(
+        contractMonthCode,
+        parsedMonthCode
+      )
+    ) || null;
+
+  const normalizedMonth =
+    toUpper(
+      firstDefined(
+        contractMonth,
+        REAL_FUTURES_MONTHS[
+          normalizedMonthCode
+        ]
+      )
+    ) || null;
+
+  let normalizedYear =
+    toNumberOrNull(
+      contractYear
+    );
+
+  if (
+    normalizedYear === null &&
+    parsedYearText
+  ) {
+    if (parsedYearText.length === 2) {
+      normalizedYear =
+        2000 +
+        Number(parsedYearText);
+    } else {
+      normalizedYear =
+        Number(parsedYearText);
+    }
+  }
+
+  const normalizedCode =
+    match
+      ? `${match[1]}${match[2]}${match[3]}`
+      : explicitCode;
+
+  return {
+    brokerSymbol:
+      normalizedBrokerSymbol,
+
+    instrumentRoot:
+      normalizedRoot,
+
+    futuresContractCode:
+      normalizedCode,
+
+    contractMonthCode:
+      normalizedMonthCode,
+
+    contractMonth:
+      normalizedMonth,
+
+    contractYear:
+      normalizedYear,
+  };
+}
+
+function getRealTradeFuturesContractCode(trade) {
+  const explicit =
+    normalizeId(
+      firstDefined(
+        trade?.futuresContractCode,
+        trade?.realBroker?.futuresContractCode,
+        trade?.brokerImport?.futuresContractCode
+      )
+    );
+
+  if (explicit) {
+    return normalizeSymbol(explicit);
+  }
+
+  return parseRealFuturesContractIdentity({
+    brokerSymbol:
+      firstDefined(
+        trade?.brokerSymbol,
+        trade?.realBroker?.brokerSymbol,
+        trade?.brokerImport?.brokerSymbol
+      ),
+
+    instrumentRoot:
+      firstDefined(
+        trade?.normalizedInstrumentRoot,
+        trade?.instrumentRoot,
+        trade?.symbol
+      ),
+  }).futuresContractCode;
+}
+
+function getRealLotFuturesContractCode(
+  lot,
+  fallbackContractCode = null
+) {
+  const explicit =
+    normalizeId(
+      lot?.futuresContractCode
+    );
+
+  if (explicit) {
+    return normalizeSymbol(explicit);
+  }
+
+  const parsed =
+    parseRealFuturesContractIdentity({
+      brokerSymbol:
+        lot?.brokerSymbol,
+    }).futuresContractCode;
+
+  if (parsed) {
+    return normalizeSymbol(parsed);
+  }
+
+  const fallback =
+    normalizeId(
+      fallbackContractCode
+    );
+
+  return fallback
+    ? normalizeSymbol(fallback)
+    : null;
+}
+
 function toNumberOrNull(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -1575,14 +1776,48 @@ function normalizeRealBrokerFill(fill = {}) {
     )
   );
 
-  const symbol = normalizeId(fill?.symbol);
-  const instrumentRoot = normalizeRealInstrumentRoot(
-    symbol,
-    firstDefined(
-      fill?.instrumentRoot,
-      fill?.rootSymbol
-    )
-  );
+  const brokerSymbol =
+    normalizeRealBrokerSymbol(
+      firstDefined(
+        fill?.brokerSymbol,
+        fill?.symbol
+      )
+    );
+
+  const symbol =
+    normalizeId(
+      firstDefined(
+        fill?.symbol,
+        fill?.brokerSymbol
+      )
+    );
+
+  const contractIdentity =
+    parseRealFuturesContractIdentity({
+      brokerSymbol,
+
+      instrumentRoot:
+        firstDefined(
+          fill?.instrumentRoot,
+          fill?.rootSymbol,
+          fill?.normalizedInstrumentRoot
+        ),
+
+      futuresContractCode:
+        fill?.futuresContractCode,
+
+      contractMonthCode:
+        fill?.contractMonthCode,
+
+      contractMonth:
+        fill?.contractMonth,
+
+      contractYear:
+        fill?.contractYear,
+    });
+
+  const instrumentRoot =
+    contractIdentity.instrumentRoot;
 
   const positionEffect = toUpper(fill?.positionEffect);
   const side = toUpper(fill?.side);
@@ -1640,7 +1875,26 @@ function normalizeRealBrokerFill(fill = {}) {
     eventType,
 
     symbol,
+    brokerSymbol:
+      contractIdentity.brokerSymbol,
+
     instrumentRoot,
+
+    normalizedInstrumentRoot:
+      instrumentRoot,
+
+    futuresContractCode:
+      contractIdentity.futuresContractCode,
+
+    contractMonthCode:
+      contractIdentity.contractMonthCode,
+
+    contractMonth:
+      contractIdentity.contractMonth,
+
+    contractYear:
+      contractIdentity.contractYear,
+
     assetType,
 
     positionEffect,
@@ -1702,8 +1956,18 @@ function validateRealBrokerFill(fill) {
     errors.push("UNSUPPORTED_REAL_ASSET_TYPE");
   }
 
-  if (!fill.symbol || !fill.instrumentRoot) {
+  if (
+    !fill.symbol ||
+    !fill.brokerSymbol ||
+    !fill.instrumentRoot
+  ) {
     errors.push("MISSING_REAL_INSTRUMENT");
+  }
+
+  if (!fill.futuresContractCode) {
+    errors.push(
+      "MISSING_REAL_FUTURES_CONTRACT_CODE"
+    );
   }
 
   if (
@@ -1771,6 +2035,11 @@ function validateRealBrokerFill(fill) {
 }
 
 function realCampaignMatches(trade, fill) {
+  const tradeContractCode =
+    getRealTradeFuturesContractCode(
+      trade
+    );
+
   return (
     toUpper(trade?.accountMode) === "REAL" &&
     toUpper(trade?.source) === "SCHWAB_BROKER_FILL" &&
@@ -1783,6 +2052,8 @@ function realCampaignMatches(trade, fill) {
       trade?.instrumentRoot ||
       trade?.symbol
     ) === fill.instrumentRoot &&
+    tradeContractCode ===
+      fill.futuresContractCode &&
     toUpper(trade?.direction) === fill.direction
   );
 }
@@ -1925,6 +2196,8 @@ function consumeRealFifoLots({
   closingBrokerTransactionId = null,
   closingBrokerOrderId = null,
   closingFillTime = null,
+  futuresContractCode = null,
+  fallbackFuturesContractCode = null,
 }) {
   const working = clone(lots || []);
   const closedContracts = [];
@@ -1948,6 +2221,53 @@ function consumeRealFifoLots({
       toNumberOrNull(
         lot?.price
       );
+
+    const lotFuturesContractCode =
+      getRealLotFuturesContractCode(
+        lot,
+        fallbackFuturesContractCode
+      );
+
+    if (
+      !lotFuturesContractCode
+    ) {
+      return {
+        ok: false,
+        error:
+          "REAL_FIFO_FUTURES_CONTRACT_CODE_MISSING",
+        contractId:
+          normalizeId(
+            lot?.contractId
+          ),
+        openingBrokerTransactionId:
+          normalizeId(
+            lot?.brokerTransactionId
+          ),
+      };
+    }
+
+    if (
+      futuresContractCode &&
+      lotFuturesContractCode !==
+        futuresContractCode
+    ) {
+      return {
+        ok: false,
+        error:
+          "REAL_FIFO_FUTURES_CONTRACT_MISMATCH",
+        expectedFuturesContractCode:
+          futuresContractCode,
+        lotFuturesContractCode,
+        contractId:
+          normalizeId(
+            lot?.contractId
+          ),
+        openingBrokerTransactionId:
+          normalizeId(
+            lot?.brokerTransactionId
+          ),
+      };
+    }
 
     if (
       lotQty <= 0 ||
@@ -2049,6 +2369,29 @@ function consumeRealFifoLots({
           1,
 
         direction,
+
+        brokerSymbol:
+          normalizeRealBrokerSymbol(
+            lot?.brokerSymbol
+          ),
+
+        futuresContractCode:
+          lotFuturesContractCode,
+
+        contractMonthCode:
+          normalizeId(
+            lot?.contractMonthCode
+          ),
+
+        contractMonth:
+          normalizeId(
+            lot?.contractMonth
+          ),
+
+        contractYear:
+          toNumberOrNull(
+            lot?.contractYear
+          ),
 
         status:
           "CLOSED",
@@ -2323,9 +2666,29 @@ function buildRealBrokerEvent({
     brokerStatus:
       fill.brokerStatus,
 
-    symbol: fill.symbol,
+    symbol:
+      fill.symbol,
+
+    brokerSymbol:
+      fill.brokerSymbol,
+
     instrumentRoot:
       fill.instrumentRoot,
+
+    normalizedInstrumentRoot:
+      fill.instrumentRoot,
+
+    futuresContractCode:
+      fill.futuresContractCode,
+
+    contractMonthCode:
+      fill.contractMonthCode,
+
+    contractMonth:
+      fill.contractMonth,
+
+    contractYear:
+      fill.contractYear,
 
     positionEffect:
       fill.positionEffect,
@@ -2483,7 +2846,19 @@ function buildRealOpeningContracts({
         fill.instrumentRoot,
 
       brokerSymbol:
-        fill.symbol,
+        fill.brokerSymbol,
+
+      futuresContractCode:
+        fill.futuresContractCode,
+
+      contractMonthCode:
+        fill.contractMonthCode,
+
+      contractMonth:
+        fill.contractMonth,
+
+      contractYear:
+        fill.contractYear,
 
       direction:
         fill.direction,
@@ -2634,6 +3009,34 @@ function closeRealContractRegistry({
       };
     }
 
+    const contractFuturesContractCode =
+      normalizeId(
+        contract?.futuresContractCode
+      )
+        ? normalizeSymbol(
+            contract.futuresContractCode
+          )
+        : parseRealFuturesContractIdentity({
+            brokerSymbol:
+              contract?.brokerSymbol,
+          }).futuresContractCode;
+
+    if (
+      fill.futuresContractCode &&
+      contractFuturesContractCode !==
+        fill.futuresContractCode
+    ) {
+      return {
+        ok: false,
+        error:
+          "REAL_CONTRACT_FUTURES_CONTRACT_MISMATCH",
+        contractId,
+        expectedFuturesContractCode:
+          fill.futuresContractCode,
+        contractFuturesContractCode,
+      };
+    }
+
     contract.status =
       "CLOSED";
 
@@ -2648,6 +3051,26 @@ function closeRealContractRegistry({
 
     contract.exitPrice =
       fill.fillPrice;
+
+    contract.brokerSymbol =
+      contract.brokerSymbol ||
+      fill.brokerSymbol;
+
+    contract.futuresContractCode =
+      contractFuturesContractCode ||
+      fill.futuresContractCode;
+
+    contract.contractMonthCode =
+      contract.contractMonthCode ||
+      fill.contractMonthCode;
+
+    contract.contractMonth =
+      contract.contractMonth ||
+      fill.contractMonth;
+
+    contract.contractYear =
+      contract.contractYear ??
+      fill.contractYear;
 
     contract.realizedPoints =
       closed.realizedPoints;
@@ -2690,6 +3113,21 @@ function createRealCampaign({
 
         brokerTransactionId:
           fill.brokerTransactionId,
+
+        brokerSymbol:
+          fill.brokerSymbol,
+
+        futuresContractCode:
+          fill.futuresContractCode,
+
+        contractMonthCode:
+          fill.contractMonthCode,
+
+        contractMonth:
+          fill.contractMonth,
+
+        contractYear:
+          fill.contractYear,
 
         qty:
           1,
@@ -2742,10 +3180,22 @@ function createRealCampaign({
       fill.instrumentRoot,
 
     brokerSymbol:
-      fill.symbol,
+      fill.brokerSymbol,
 
     normalizedInstrumentRoot:
       fill.instrumentRoot,
+
+    futuresContractCode:
+      fill.futuresContractCode,
+
+    contractMonthCode:
+      fill.contractMonthCode,
+
+    contractMonth:
+      fill.contractMonth,
+
+    contractYear:
+      fill.contractYear,
 
     strategyId:
       "schwab_real@broker",
@@ -2808,10 +3258,22 @@ function createRealCampaign({
         fill.brokerAccountLabel,
 
       brokerSymbol:
-        fill.symbol,
+        fill.brokerSymbol,
 
       normalizedInstrumentRoot:
         fill.instrumentRoot,
+
+      futuresContractCode:
+        fill.futuresContractCode,
+
+      contractMonthCode:
+        fill.contractMonthCode,
+
+      contractMonth:
+        fill.contractMonth,
+
+      contractYear:
+        fill.contractYear,
 
       dollarsPerPoint:
         fill.dollarsPerPoint,
@@ -2832,7 +3294,19 @@ function createRealCampaign({
         fill.journalAccount,
 
       brokerSymbol:
-        fill.symbol,
+        fill.brokerSymbol,
+
+      futuresContractCode:
+        fill.futuresContractCode,
+
+      contractMonthCode:
+        fill.contractMonthCode,
+
+      contractMonth:
+        fill.contractMonth,
+
+      contractYear:
+        fill.contractYear,
 
       dollarsPerPoint:
         fill.dollarsPerPoint,
@@ -3000,6 +3474,21 @@ function applyRealScaleIn({
       brokerTransactionId:
         fill.brokerTransactionId,
 
+      brokerSymbol:
+        fill.brokerSymbol,
+
+      futuresContractCode:
+        fill.futuresContractCode,
+
+      contractMonthCode:
+        fill.contractMonthCode,
+
+      contractMonth:
+        fill.contractMonth,
+
+      contractYear:
+        fill.contractYear,
+
       qty:
         1,
 
@@ -3139,6 +3628,14 @@ function applyRealClosingFill({
         fill.brokerOrderId,
       closingFillTime:
         fill.fillTime,
+
+      futuresContractCode:
+        fill.futuresContractCode,
+
+      fallbackFuturesContractCode:
+        getRealTradeFuturesContractCode(
+          trade
+        ),
     });
 
   if (!fifo.ok) {
@@ -3442,6 +3939,8 @@ export async function ingestRealBrokerFill(
         fill.journalAccount,
       instrumentRoot:
         fill.instrumentRoot,
+      futuresContractCode:
+        fill.futuresContractCode,
       direction:
         fill.direction,
       matchingTradeIds:
@@ -3590,6 +4089,8 @@ export async function ingestRealBrokerFill(
         fill.journalAccount,
       instrumentRoot:
         fill.instrumentRoot,
+      futuresContractCode:
+        fill.futuresContractCode,
       direction:
         fill.direction,
     };
