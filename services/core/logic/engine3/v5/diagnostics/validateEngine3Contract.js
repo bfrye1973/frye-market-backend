@@ -38,6 +38,7 @@ function hasCanonicalDirectionValue(value) {
 export function validateEngine3Contract({
   normalizedZoneInput = null,
   oneMinuteEvidence = null,
+  priceActionControl = null,
   fiveMinuteReaction = null,
   tenMinuteContext = null,
   departureState = null,
@@ -92,6 +93,25 @@ export function validateEngine3Contract({
     );
   }
 
+  checks.priceActionControlAuthorityPresent =
+    priceActionControl?.canonicalControlAuthority === true &&
+    priceActionControl?.canonicalDirectionPublisher !== true;
+
+  if (!checks.priceActionControlAuthorityPresent) {
+    violations.push(
+      "ENGINE3_V5_CONTRACT_PRICE_ACTION_CONTROL_AUTHORITY_MISSING"
+    );
+  }
+
+  checks.priceActionSourceResolutionHasNoAuthority =
+    priceActionControl?.sourceResolutionAuthority !== true;
+
+  if (!checks.priceActionSourceResolutionHasNoAuthority) {
+    violations.push(
+      "ENGINE3_V5_CONTRACT_TIMEFRAME_SOURCE_AUTHORITY_VIOLATION"
+    );
+  }
+
   checks.formingFiveMinuteCanonicalAuthorityDisabled =
     fiveMinuteReaction
       ?.forming5mAuthorizedForStateMachine !== true;
@@ -102,13 +122,13 @@ export function validateEngine3Contract({
     );
   }
 
-  checks.completedFiveMinuteAuthorityPresent =
+  checks.completedFiveMinuteCanonicalAuthorityDisabled =
     fiveMinuteReaction
-      ?.completed5mAuthorizedForStateMachine === true;
+      ?.completed5mAuthorizedForStateMachine !== true;
 
-  if (!checks.completedFiveMinuteAuthorityPresent) {
+  if (!checks.completedFiveMinuteCanonicalAuthorityDisabled) {
     violations.push(
-      "ENGINE3_V5_CONTRACT_COMPLETED_5M_AUTHORITY_MISSING"
+      "ENGINE3_V5_CONTRACT_COMPLETED_5M_AUTHORITY_VIOLATION"
     );
   }
 
