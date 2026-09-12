@@ -41,6 +41,10 @@ import {
 } from "./timeframe/build5mReaction.js";
 
 import {
+  buildPriceActionControl,
+} from "./priceAction/buildPriceActionControl.js";
+
+import {
   build10mContext,
 } from "./timeframe/build10mContext.js";
 
@@ -135,6 +139,24 @@ export function buildEngine3V5Shadow({
       evaluationTimeMs,
     });
 
+  /*
+   * Canonical price-action control is timeframe-agnostic.
+   *
+   * We currently use the densest available price path (the evidence
+   * already built from bars1m) as transport resolution only.
+   * The 1m label has ZERO canonical authority.
+   */
+  const priceActionControl =
+    buildPriceActionControl({
+      normalizedZoneInput,
+
+      priceActionEvidence:
+        oneMinuteEvidence?.current || null,
+
+      sourceResolution:
+        "DENSEST_AVAILABLE_PRICE_PATH",
+    });
+
   const tenMinuteContext =
     build10mContext({
       bars:
@@ -185,9 +207,8 @@ export function buildEngine3V5Shadow({
     runDirectionStateMachine({
       normalizedZoneInput,
 
-      completed5mHandoff:
-        fiveMinuteReaction
-          ?.stateMachineHandoff ||
+      priceActionHandoff:
+        priceActionControl ||
         null,
 
       previousCanonical:
@@ -208,6 +229,8 @@ export function buildEngine3V5Shadow({
 
       oneMinuteEvidence,
 
+      priceActionControl,
+
       fiveMinuteReaction,
 
       tenMinuteContext,
@@ -227,6 +250,8 @@ export function buildEngine3V5Shadow({
 
       oneMinuteEvidence,
 
+      priceActionControl,
+
       fiveMinuteReaction,
 
       tenMinuteContext,
@@ -245,6 +270,8 @@ export function buildEngine3V5Shadow({
       normalizedZoneInput,
 
       oneMinuteEvidence,
+
+      priceActionControl,
 
       fiveMinuteReaction,
 
@@ -292,6 +319,9 @@ export function buildEngine3V5Shadow({
     evidence: {
       oneMinute:
         oneMinuteEvidence,
+
+      priceAction:
+        priceActionControl,
 
       fiveMinute:
         fiveMinuteReaction,
