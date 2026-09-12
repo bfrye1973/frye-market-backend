@@ -7,30 +7,28 @@
 //   SHORT
 //   NEUTRAL
 //
-// Frozen contract:
-// - 1m cannot create or flip canonical direction.
-// - Forming 5m cannot create or flip canonical direction.
-// - COMPLETED 5m control is the primary mature authority while
-//   price is working the negotiated zone.
-// - Completed 5m may establish LONG/SHORT from NEUTRAL.
-// - Completed 5m may reverse LONG <-> SHORT when genuine opposite
-//   buyer/seller control is resolved.
-// - CONTESTED / ABSORPTION / NO_CONTROL do not manufacture a flip.
-// - 10m price action cannot create initial direction.
+// Locked price-action contract:
+// - Engine 26 owns WHERE: exact negotiated zone + candidate/lifecycle authorization.
+// - Engine 3 owns WHAT PRICE IS DOING THERE.
+// - Initial canonical direction comes from resolved PRICE-ACTION CONTROL,
+//   not from a 1m/5m/10m timeframe label.
+// - BUYERS_CONTROL may establish/reinforce/reverse to LONG.
+// - SELLERS_CONTROL may establish/reinforce/reverse to SHORT.
+// - CONTESTED / ABSORPTION / NO_CONTROL do not manufacture a direction.
+// - 1m/5m/10m remain evidence/diagnostic views only for initial direction.
 // - Post-zone departure/travel cannot create direction from NEUTRAL.
-// - Departure state and EMA10 travel state manage an ALREADY-ESTABLISHED
-//   direction only.
+// - Departure + EMA10 travel manage an ALREADY-ESTABLISHED direction only.
 // - EMA10 travel may HOLD or RESET an established direction.
 // - Engine 26 directional opinion is never canonical authority.
 // - No permission.
 // - No execution.
 //
 // Expected upstream modules:
-// timeframe/build5mReaction.js
+// priceAction/buildPriceActionControl.js
 // state/departureState.js
 // state/ema10TravelState.js
 
-const ENGINE = "engine3.v5.state.directionStateMachine.v1";
+const ENGINE = "engine3.v5.state.directionStateMachine.v2";
 const SOURCE = "engine3.v5.state.directionStateMachine";
 
 const CANONICAL_DIRECTIONS = new Set([
@@ -133,20 +131,12 @@ function buildBaseResult({
 
     mode: "ZONE_REACTION",
 
-    stateTransition:
-      "NO_CHANGE",
+    stateTransition: "NO_CHANGE",
 
-    establishedNow:
-      false,
-
-    reversedNow:
-      false,
-
-    resetNow:
-      false,
-
-    heldNow:
-      false,
+    establishedNow: false,
+    reversedNow: false,
+    resetNow: false,
+    heldNow: false,
 
     canonicalSource:
       "PREVIOUS_CANONICAL_STATE",
@@ -154,6 +144,8 @@ function buildBaseResult({
     reasonCodes: [
       "ENGINE3_V5_DIRECTION_STATE_MACHINE_RAN",
       ...reasonCodes,
+      "ENGINE3_V5_PRICE_ACTION_CONTROL_OWNS_INITIAL_DIRECTION_EVIDENCE",
+      "ENGINE3_V5_TIMEFRAME_LABELS_HAVE_NO_INITIAL_DIRECTION_AUTHORITY",
       "ENGINE3_V5_SOLE_CANONICAL_DIRECTION_PUBLISHER",
       "ENGINE3_V5_NO_PERMISSION_CREATED",
       "ENGINE3_V5_NO_EXECUTION",
@@ -164,7 +156,7 @@ function buildBaseResult({
 export function runDirectionStateMachine({
   normalizedZoneInput = null,
 
-  completed5mHandoff = null,
+  priceActionHandoff = null,
 
   previousCanonical = null,
 
@@ -194,13 +186,13 @@ export function runDirectionStateMachine({
 
   const controlState =
     normalizeControl(
-      completed5mHandoff
+      priceActionHandoff
         ?.controlState
     );
 
   const quality =
     normalizeQuality(
-      completed5mHandoff
+      priceActionHandoff
         ?.quality
     );
 
@@ -212,13 +204,13 @@ export function runDirectionStateMachine({
   const zoneEligible =
     normalizedZoneInput?.eligible === true;
 
-  const completed5mEligible =
-    completed5mHandoff?.eligible === true &&
-    completed5mHandoff?.completedOnly === true;
+  const priceActionEligible =
+    priceActionHandoff?.eligible === true &&
+    priceActionHandoff?.canonicalControlAuthority === true;
 
-  const matureControlResolved =
-    completed5mHandoff
-      ?.matureControlResolved === true &&
+  const directionalControlResolved =
+    priceActionEligible === true &&
+    priceActionHandoff?.controlResolved === true &&
     isDirectional(candidateDirection);
 
   const candidateIdentityChanged =
@@ -267,9 +259,13 @@ export function runDirectionStateMachine({
           ? "ENGINE3_V5_ZONE_INPUT_ELIGIBLE"
           : "ENGINE3_V5_ZONE_INPUT_NOT_ELIGIBLE",
 
-        completed5mEligible
-          ? "ENGINE3_V5_COMPLETED_5M_HANDOFF_ELIGIBLE"
-          : "ENGINE3_V5_COMPLETED_5M_HANDOFF_NOT_ELIGIBLE",
+        priceActionEligible
+          ? "ENGINE3_V5_PRICE_ACTION_HANDOFF_ELIGIBLE"
+          : "ENGINE3_V5_PRICE_ACTION_HANDOFF_NOT_ELIGIBLE",
+
+        directionalControlResolved
+          ? "ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_RESOLVED"
+          : "ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_NOT_RESOLVED",
 
         candidateIdentityChanged
           ? "ENGINE3_V5_CANDIDATE_IDENTITY_CHANGED"
@@ -284,20 +280,15 @@ export function runDirectionStateMachine({
     return {
       ...base,
 
-      direction:
-        "NEUTRAL",
-
-      mode:
-        "RESET",
+      direction: "NEUTRAL",
+      mode: "RESET",
 
       stateTransition:
         isDirectional(previousDirection)
           ? `${previousDirection}_TO_NEUTRAL`
           : "NEUTRAL_HELD",
 
-      resetNow:
-        true,
-
+      resetNow: true,
       heldNow:
         previousDirection === "NEUTRAL",
 
@@ -317,8 +308,7 @@ export function runDirectionStateMachine({
 
   // ------------------------------------------------------------
   // 2. Invalid / unauthorized current zone cannot create direction.
-  //    Preserve prior established state unless downstream lifecycle
-  //    explicitly tells us to reset.
+  //    Preserve prior established state unless lifecycle resets it.
   // ------------------------------------------------------------
   if (zoneEligible !== true) {
     return {
@@ -355,7 +345,7 @@ export function runDirectionStateMachine({
   // 3. Post-zone travel lifecycle.
   //
   // Travel is allowed ONLY for an already-established direction.
-  // It can HOLD or RESET. It cannot create a direction from NEUTRAL.
+  // It can HOLD or RESET. It cannot create direction from NEUTRAL.
   // ------------------------------------------------------------
   if (
     isDirectional(previousDirection) &&
@@ -369,17 +359,13 @@ export function runDirectionStateMachine({
       return {
         ...base,
 
-        direction:
-          "NEUTRAL",
-
-        mode:
-          "TRAVEL",
+        direction: "NEUTRAL",
+        mode: "TRAVEL",
 
         stateTransition:
           `${previousDirection}_TO_NEUTRAL`,
 
-        resetNow:
-          true,
+        resetNow: true,
 
         canonicalSource:
           "EMA10_TRAVEL_RESET",
@@ -411,8 +397,7 @@ export function runDirectionStateMachine({
         stateTransition:
           "NO_CHANGE",
 
-        heldNow:
-          true,
+        heldNow: true,
 
         canonicalSource:
           "EMA10_TRAVEL_HOLD",
@@ -427,11 +412,6 @@ export function runDirectionStateMachine({
       };
     }
 
-    /*
-     * Departure is confirmed but EMA travel state has not yet resolved.
-     * Preserve established direction. Do not let diagnostic 5m/10m
-     * create a new travel decision.
-     */
     return {
       ...base,
 
@@ -444,8 +424,7 @@ export function runDirectionStateMachine({
       stateTransition:
         "NO_CHANGE",
 
-      heldNow:
-        true,
+      heldNow: true,
 
       canonicalSource:
         "ESTABLISHED_DIRECTION_PENDING_EMA10",
@@ -469,17 +448,13 @@ export function runDirectionStateMachine({
     return {
       ...base,
 
-      direction:
-        "NEUTRAL",
-
-      mode:
-        "ZONE_REACTION",
+      direction: "NEUTRAL",
+      mode: "ZONE_REACTION",
 
       stateTransition:
         "NEUTRAL_HELD",
 
-      heldNow:
-        true,
+      heldNow: true,
 
       canonicalSource:
         "NO_ESTABLISHED_DIRECTION_FOR_TRAVEL",
@@ -493,14 +468,15 @@ export function runDirectionStateMachine({
   }
 
   // ------------------------------------------------------------
-  // 5. Inside-zone / zone-reaction authority:
-  //    COMPLETED 5m control only.
+  // 5. Core price-action authority.
+  //
+  // No timeframe label is consulted here. The state machine consumes
+  // only resolved buyer/seller CONTROL from the price-action pipeline.
   // ------------------------------------------------------------
   if (
-    completed5mEligible === true &&
-    matureControlResolved === true
+    priceActionEligible === true &&
+    directionalControlResolved === true
   ) {
-    // Fresh establishment from NEUTRAL.
     if (previousDirection === "NEUTRAL") {
       return {
         ...base,
@@ -509,27 +485,25 @@ export function runDirectionStateMachine({
           candidateDirection,
 
         mode:
-          "ZONE_REACTION",
+          "PRICE_ACTION_CONTROL",
 
         stateTransition:
           `NEUTRAL_TO_${candidateDirection}`,
 
-        establishedNow:
-          true,
+        establishedNow: true,
 
         canonicalSource:
-          "COMPLETED_5M_CONTROL",
+          "PRICE_ACTION_CONTROL",
 
         reasonCodes: [
           ...base.reasonCodes,
-          "ENGINE3_V5_COMPLETED_5M_ESTABLISHED_CANONICAL_DIRECTION",
+          "ENGINE3_V5_PRICE_ACTION_CONTROL_ESTABLISHED_CANONICAL_DIRECTION",
           `ENGINE3_V5_CONTROL_${controlState}`,
           `ENGINE3_V5_CANONICAL_DIRECTION_${candidateDirection}`,
         ],
       };
     }
 
-    // Opposite completed-5m control may reverse established direction.
     if (
       isDirectional(previousDirection) &&
       candidateDirection ===
@@ -542,27 +516,25 @@ export function runDirectionStateMachine({
           candidateDirection,
 
         mode:
-          "ZONE_REACTION",
+          "PRICE_ACTION_CONTROL",
 
         stateTransition:
           `${previousDirection}_TO_${candidateDirection}`,
 
-        reversedNow:
-          true,
+        reversedNow: true,
 
         canonicalSource:
-          "COMPLETED_5M_OPPOSITE_CONTROL",
+          "OPPOSITE_PRICE_ACTION_CONTROL",
 
         reasonCodes: [
           ...base.reasonCodes,
-          "ENGINE3_V5_COMPLETED_5M_REVERSED_CANONICAL_DIRECTION",
+          "ENGINE3_V5_PRICE_ACTION_CONTROL_REVERSED_CANONICAL_DIRECTION",
           `ENGINE3_V5_CONTROL_${controlState}`,
           `ENGINE3_V5_CANONICAL_DIRECTION_${candidateDirection}`,
         ],
       };
     }
 
-    // Same-side mature control reinforces existing direction.
     if (
       isDirectional(previousDirection) &&
       candidateDirection === previousDirection
@@ -574,20 +546,19 @@ export function runDirectionStateMachine({
           previousDirection,
 
         mode:
-          "ZONE_REACTION",
+          "PRICE_ACTION_CONTROL",
 
         stateTransition:
           "NO_CHANGE",
 
-        heldNow:
-          true,
+        heldNow: true,
 
         canonicalSource:
-          "COMPLETED_5M_SAME_SIDE_CONTROL",
+          "SAME_SIDE_PRICE_ACTION_CONTROL",
 
         reasonCodes: [
           ...base.reasonCodes,
-          "ENGINE3_V5_COMPLETED_5M_REINFORCED_CANONICAL_DIRECTION",
+          "ENGINE3_V5_PRICE_ACTION_CONTROL_REINFORCED_CANONICAL_DIRECTION",
           `ENGINE3_V5_CONTROL_${controlState}`,
           `ENGINE3_V5_CANONICAL_DIRECTION_${previousDirection}`,
         ],
@@ -596,14 +567,14 @@ export function runDirectionStateMachine({
   }
 
   // ------------------------------------------------------------
-  // 6. Mixed / unresolved completed-5m control does not manufacture
+  // 6. Mixed / unresolved price-action control does not manufacture
   //    a new direction and does not flip an existing one.
   // ------------------------------------------------------------
   if (
     controlState === "CONTESTED" ||
     controlState === "ABSORPTION" ||
     controlState === "NO_CONTROL" ||
-    matureControlResolved !== true
+    directionalControlResolved !== true
   ) {
     return {
       ...base,
@@ -612,33 +583,31 @@ export function runDirectionStateMachine({
         previousDirection,
 
       mode:
-        "ZONE_REACTION",
+        "PRICE_ACTION_CONTROL",
 
       stateTransition:
         previousDirection === "NEUTRAL"
           ? "NEUTRAL_HELD"
           : "NO_CHANGE",
 
-      heldNow:
-        true,
+      heldNow: true,
 
       canonicalSource:
         isDirectional(previousDirection)
-          ? "PREVIOUS_DIRECTION_NO_OPPOSITE_COMPLETED_5M_CONTROL"
-          : "WAITING_FOR_COMPLETED_5M_CONTROL",
+          ? "PREVIOUS_DIRECTION_NO_OPPOSITE_PRICE_ACTION_CONTROL"
+          : "WAITING_FOR_PRICE_ACTION_CONTROL",
 
       reasonCodes: [
         ...base.reasonCodes,
         `ENGINE3_V5_CONTROL_${controlState}`,
         isDirectional(previousDirection)
-          ? "ENGINE3_V5_PREVIOUS_DIRECTION_PRESERVED_WITHOUT_OPPOSITE_COMPLETED_5M_CONTROL"
-          : "ENGINE3_V5_WAITING_FOR_MATURE_COMPLETED_5M_CONTROL",
+          ? "ENGINE3_V5_PREVIOUS_DIRECTION_PRESERVED_WITHOUT_OPPOSITE_PRICE_ACTION_CONTROL"
+          : "ENGINE3_V5_WAITING_FOR_RESOLVED_PRICE_ACTION_CONTROL",
         `ENGINE3_V5_CANONICAL_DIRECTION_${previousDirection}`,
       ],
     };
   }
 
-  // Defensive fallback.
   return {
     ...base,
 
@@ -646,13 +615,12 @@ export function runDirectionStateMachine({
       previousDirection,
 
     mode:
-      "ZONE_REACTION",
+      "PRICE_ACTION_CONTROL",
 
     stateTransition:
       "NO_CHANGE",
 
-    heldNow:
-      true,
+    heldNow: true,
 
     canonicalSource:
       "DEFENSIVE_STATE_PRESERVATION",
