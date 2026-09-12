@@ -230,6 +230,20 @@ export function buildCanonicalEngine3({
       heldNow:
         stateMachine
           ?.heldNow === true,
+
+      travelModeActive:
+        stateMachine?.mode === "TRAVEL" &&
+        stateMachine?.resetNow !== true &&
+        (
+          direction === "LONG" ||
+          direction === "SHORT"
+        ),
+
+      travelDirection:
+        stateMachine?.mode === "TRAVEL" &&
+        stateMachine?.resetNow !== true
+          ? direction
+          : "NEUTRAL",
     },
 
     control: {
