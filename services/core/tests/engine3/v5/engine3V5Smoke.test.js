@@ -366,6 +366,173 @@ function pass(n, label) {
   pass(8, "SHORT travel resets above EMA10");
 }
 
+// 9. Once SHORT departure is confirmed, later bounce does not unlatch travel.
+{
+  const departureBars = bars(600, [
+    [105, 106, 101, 103],
+    [103, 104, 98, 99],
+    [99, 100, 95, 97],
+    [97, 98, 93, 95],
+  ], 1788600000);
+
+  const departureContext = build10mContext({
+    bars: departureBars,
+    normalizedZoneInput: zoneInput,
+    evaluationTimeMs: evalAfterAll(departureBars, 600),
+  });
+
+  const firstDeparture = resolveDepartureState({
+    establishedDirection: "SHORT",
+    zone: zoneInput.zone,
+    tenMinuteContext: departureContext,
+  });
+
+  assert.equal(firstDeparture.departureConfirmed, true);
+  assert.equal(firstDeparture.freshlyConfirmed, true);
+
+  const bounceBars = bars(600, [
+    [98, 99, 94, 95],
+    [95, 97, 93, 94],
+    [94, 97, 93, 96],
+  ], 1788610000);
+
+  const bounceContext = build10mContext({
+    bars: bounceBars,
+    normalizedZoneInput: zoneInput,
+    evaluationTimeMs: evalAfterAll(bounceBars, 600),
+  });
+
+  const latchedDeparture = resolveDepartureState({
+    establishedDirection: "SHORT",
+    zone: zoneInput.zone,
+    tenMinuteContext: bounceContext,
+    previousTravelModeActive: true,
+    previousTravelDirection: "SHORT",
+  });
+
+  assert.equal(
+    latchedDeparture.progression.shortProgressionValid,
+    false
+  );
+  assert.equal(latchedDeparture.departureConfirmed, true);
+  assert.equal(latchedDeparture.departureLatched, true);
+  assert.equal(latchedDeparture.priorTravelLatchMatches, true);
+
+  const travel = resolveEma10TravelState({
+    establishedDirection: "SHORT",
+    departureState: latchedDeparture,
+    tenMinuteContext: bounceContext,
+    ema10: 102,
+  });
+
+  assert.equal(travel.travelActive, true);
+  assert.equal(travel.holdEstablishedDirection, true);
+
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: {
+      eligible: true,
+      canonicalControlAuthority: true,
+      sourceResolutionAuthority: false,
+      controlResolved: true,
+      controlState: "BUYERS_CONTROL",
+      controlConfidence: "STRONG",
+      quality: "STRONG",
+    },
+    previousCanonical: {
+      direction: "SHORT",
+      candidateId: "TEST_CANDIDATE_1",
+      travelModeActive: true,
+      travelDirection: "SHORT",
+    },
+    departureState: latchedDeparture,
+    ema10TravelState: travel,
+  });
+
+  assert.equal(state.direction, "SHORT");
+  assert.equal(state.mode, "TRAVEL");
+  assert.equal(state.canonicalSource, "EMA10_TRAVEL_HOLD");
+
+  pass(9, "latched SHORT travel survives bounce and opposite price action below EMA10");
+}
+
+// 10. Latched SHORT still resets only on completed 10m close above EMA10.
+{
+  const resetBars = bars(600, [
+    [97, 99, 94, 95],
+    [95, 99, 94, 98],
+  ], 1788620000);
+
+  const resetContext = build10mContext({
+    bars: resetBars,
+    normalizedZoneInput: zoneInput,
+    evaluationTimeMs: evalAfterAll(resetBars, 600),
+  });
+
+  const latchedDeparture = resolveDepartureState({
+    establishedDirection: "SHORT",
+    zone: zoneInput.zone,
+    tenMinuteContext: resetContext,
+    previousTravelModeActive: true,
+    previousTravelDirection: "SHORT",
+  });
+
+  const travel = resolveEma10TravelState({
+    establishedDirection: "SHORT",
+    departureState: latchedDeparture,
+    tenMinuteContext: resetContext,
+    ema10: 97,
+  });
+
+  assert.equal(travel.resetEstablishedDirection, true);
+
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: mixedPriceActionHandoff(),
+    previousCanonical: {
+      direction: "SHORT",
+      candidateId: "TEST_CANDIDATE_1",
+      travelModeActive: true,
+      travelDirection: "SHORT",
+    },
+    departureState: latchedDeparture,
+    ema10TravelState: travel,
+  });
+
+  assert.equal(state.direction, "NEUTRAL");
+  assert.equal(state.resetNow, true);
+
+  pass(10, "latched SHORT resets only when completed 10m close crosses above EMA10");
+}
+
+// 11. Travel latch cannot transfer to a different direction.
+{
+  const b = bars(600, [
+    [103, 104, 98, 99],
+    [99, 100, 95, 97],
+    [97, 98, 93, 95],
+  ], 1788630000);
+
+  const c = build10mContext({
+    bars: b,
+    normalizedZoneInput: zoneInput,
+    evaluationTimeMs: evalAfterAll(b, 600),
+  });
+
+  const d = resolveDepartureState({
+    establishedDirection: "LONG",
+    zone: zoneInput.zone,
+    tenMinuteContext: c,
+    previousTravelModeActive: true,
+    previousTravelDirection: "SHORT",
+  });
+
+  assert.equal(d.priorTravelLatchMatches, false);
+  assert.equal(d.departureConfirmed, false);
+
+  pass(11, "travel latch is direction-specific and cannot transfer SHORT -> LONG");
+}
+
 console.log("");
-console.log("ENGINE 3 V5 PRICE-ACTION SMOKE TEST: 8/8 PASSED");
+console.log("ENGINE 3 V5 PRICE-ACTION + TRAVEL SMOKE TEST: 11/11 PASSED");
 console.log("No permission created. No execution.");
