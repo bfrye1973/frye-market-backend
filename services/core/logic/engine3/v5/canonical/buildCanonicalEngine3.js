@@ -60,6 +60,8 @@ export function buildCanonicalEngine3({
 
   oneMinuteEvidence = null,
 
+  priceActionControl = null,
+
   fiveMinuteReaction = null,
 
   tenMinuteContext = null,
@@ -80,33 +82,23 @@ export function buildCanonicalEngine3({
   const quality =
     normalizeQuality(
       stateMachine?.quality ??
-      fiveMinuteReaction
-        ?.stateMachineHandoff
-        ?.quality
+      priceActionControl?.quality
     );
 
   const controlState =
-    fiveMinuteReaction
-      ?.stateMachineHandoff
-      ?.controlState ||
+    priceActionControl?.controlState ||
     "NO_CONTROL";
 
   const controlConfidence =
-    fiveMinuteReaction
-      ?.stateMachineHandoff
-      ?.controlConfidence ||
+    priceActionControl?.controlConfidence ||
     "WEAK";
 
   const reactionState =
-    fiveMinuteReaction
-      ?.stateMachineHandoff
-      ?.reactionState ||
+    priceActionControl?.reactionState ||
     null;
 
   const followThroughState =
-    fiveMinuteReaction
-      ?.stateMachineHandoff
-      ?.followThroughState ||
+    priceActionControl?.followThroughState ||
     null;
 
   const canonicalReady =
@@ -252,23 +244,40 @@ export function buildCanonicalEngine3({
       reactionState,
 
       reactionBias:
-        fiveMinuteReaction
-          ?.stateMachineHandoff
-          ?.reactionBias ||
+        priceActionControl?.reactionBias ||
         null,
 
       followThroughState,
 
       followThroughBias:
-        fiveMinuteReaction
-          ?.stateMachineHandoff
-          ?.followThroughBias ||
+        priceActionControl?.followThroughBias ||
         null,
 
       sequencePhase:
-        fiveMinuteReaction
-          ?.stateMachineHandoff
-          ?.sequencePhase ||
+        priceActionControl?.sequencePhase ||
+        null,
+
+      sourceResolution:
+        priceActionControl?.sourceResolution ||
+        null,
+    },
+
+    priceActionAuthority: {
+      role:
+        priceActionControl?.role ||
+        "PRICE_ACTION_CONTROL",
+
+      canonicalControlAuthority:
+        priceActionControl?.canonicalControlAuthority === true,
+
+      canonicalDirectionPublisher:
+        false,
+
+      timeframeLabelAuthority:
+        false,
+
+      sourceResolution:
+        priceActionControl?.sourceResolution ||
         null,
     },
 
@@ -291,14 +300,13 @@ export function buildCanonicalEngine3({
       fiveMinute: {
         role:
           fiveMinuteReaction?.role ||
-          "PRIMARY_MATURE_ZONE_REACTION_AUTHORITY",
+          "SUPPORTING_PRICE_ACTION_EVIDENCE",
 
         formingCanonicalAuthority:
           false,
 
         completedCanonicalEvidenceAuthority:
-          fiveMinuteReaction
-            ?.completed5mAuthorizedForStateMachine === true,
+          false,
 
         canonicalDirectionPublisher:
           false,
