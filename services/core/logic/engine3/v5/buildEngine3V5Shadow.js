@@ -91,6 +91,19 @@ function normalizePreviousCanonical(
       previousCanonical
         ?.currentCandidateId ||
       null,
+
+    travelModeActive:
+      previousCanonical?.travelModeActive === true ||
+      previousCanonical
+        ?.canonical
+        ?.travelModeActive === true,
+
+    travelDirection:
+      previousCanonical?.travelDirection ||
+      previousCanonical
+        ?.canonical
+        ?.travelDirection ||
+      "NEUTRAL",
   };
 }
 
@@ -188,6 +201,12 @@ export function buildEngine3V5Shadow({
         normalizedZoneInput?.zone,
 
       tenMinuteContext,
+
+      previousTravelModeActive:
+        prior.travelModeActive === true,
+
+      previousTravelDirection:
+        prior.travelDirection,
     });
 
   const ema10TravelState =
