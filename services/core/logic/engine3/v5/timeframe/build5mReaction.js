@@ -1,24 +1,20 @@
 // services/core/logic/engine3/v5/timeframe/build5mReaction.js
 //
-// Engine 3 v5 — 5m mature negotiated-zone reaction.
+// Engine 3 v5 — 5m supporting price-action evidence.
 //
 // Contract:
 // - Consumes raw 5m bars plus normalized Engine 26 negotiated-zone input.
-// - Separates FORMING 5m diagnostics from COMPLETED 5m authority.
-// - Completed 5m is the primary mature reaction/control authority
-//   while price is working the Engine 26 negotiated zone.
-// - Forming 5m is diagnostic only.
-// - Completed 5m may establish or reverse canonical Engine 3 direction,
-//   but ONLY downstream through state/directionStateMachine.js.
-// - This module itself never publishes canonical LONG / SHORT / NEUTRAL.
+// - Separates FORMING and COMPLETED 5m diagnostics.
+// - 5m is a compressed/supporting view of the same price-action story.
+// - 5m does NOT own initial canonical direction or canonical control.
+// - This module never publishes canonical LONG / SHORT / NEUTRAL.
 // - Does not create permission.
 // - Does not create execution.
 //
-// Frozen timeframe authority:
-// 1m = diagnostic only.
-// Forming 5m = diagnostic only.
-// Completed 5m = mature zone-reaction/control evidence.
-// 10m = broader context until travel lifecycle takes over.
+// Locked authority:
+// Timeframe labels do not own initial Engine 3 direction.
+// 5m remains useful supporting evidence only.
+// Canonical price-action control is resolved separately.
 //
 // Canonical direction authority remains exclusively in
 // state/directionStateMachine.js.
@@ -401,7 +397,7 @@ export function build5mReaction({
       "5m",
 
     role:
-      "PRIMARY_MATURE_ZONE_REACTION_AUTHORITY",
+      "SUPPORTING_PRICE_ACTION_EVIDENCE",
 
     canonicalDirectionPublisher:
       false,
@@ -413,7 +409,7 @@ export function build5mReaction({
      * but this builder itself is NOT allowed to publish LONG/SHORT/NEUTRAL.
      */
     completed5mAuthorizedForStateMachine:
-      true,
+      false,
 
     forming5mAuthorizedForStateMachine:
       false,
@@ -510,7 +506,7 @@ export function build5mReaction({
         "MATURE_ZONE_REACTION_CONTROL",
 
       canonicalEvidenceAuthority:
-        true,
+        false,
 
       normalized:
         completedStack.normalized,
@@ -556,10 +552,10 @@ export function build5mReaction({
      */
     stateMachineHandoff: {
       eligible:
-        normalizedZoneInput?.eligible === true,
+        false,
 
       source:
-        "COMPLETED_5M_ZONE_REACTION_CONTROL",
+        "COMPLETED_5M_SUPPORTING_PRICE_ACTION_EVIDENCE",
 
       timeframe:
         "5m",
@@ -610,6 +606,9 @@ export function build5mReaction({
         null,
 
       matureControlResolved,
+
+      supportingEvidenceOnly:
+        true,
 
       mixedControlResolved,
 
@@ -674,8 +673,8 @@ export function build5mReaction({
     reasonCodes: [
       "ENGINE3_V5_5M_REACTION_BUILT",
       "ENGINE3_V5_FORMING_5M_DIAGNOSTIC_ONLY",
-      "ENGINE3_V5_COMPLETED_5M_PRIMARY_MATURE_REACTION_AUTHORITY",
-      "ENGINE3_V5_COMPLETED_5M_CONTROL_AUTHORIZED_FOR_STATE_MACHINE",
+      "ENGINE3_V5_COMPLETED_5M_SUPPORTING_PRICE_ACTION_EVIDENCE",
+      "ENGINE3_V5_5M_HAS_NO_INITIAL_DIRECTION_AUTHORITY",
       "ENGINE3_V5_5M_BUILDER_CANNOT_PUBLISH_CANONICAL_DIRECTION",
       matureControlResolved
         ? "ENGINE3_V5_COMPLETED_5M_DIRECTIONAL_CONTROL_RESOLVED"
