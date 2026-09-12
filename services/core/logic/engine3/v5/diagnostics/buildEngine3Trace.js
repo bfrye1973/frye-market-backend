@@ -41,6 +41,7 @@ function uniqueReasonCodes(values = []) {
 export function buildEngine3Trace({
   normalizedZoneInput = null,
   oneMinuteEvidence = null,
+  priceActionControl = null,
   fiveMinuteReaction = null,
   tenMinuteContext = null,
   departureState = null,
@@ -96,6 +97,41 @@ export function buildEngine3Trace({
     },
 
     evidence: {
+      priceAction: {
+        role:
+          priceActionControl?.role || null,
+
+        canonicalControlAuthority:
+          priceActionControl?.canonicalControlAuthority === true,
+
+        canonicalDirectionPublisher:
+          false,
+
+        sourceResolution:
+          priceActionControl?.sourceResolution || null,
+
+        sourceResolutionAuthority:
+          false,
+
+        controlState:
+          priceActionControl?.controlState || null,
+
+        controlConfidence:
+          priceActionControl?.controlConfidence || null,
+
+        quality:
+          priceActionControl?.quality || null,
+
+        reactionState:
+          priceActionControl?.reactionState || null,
+
+        followThroughState:
+          priceActionControl?.followThroughState || null,
+
+        sequencePhase:
+          priceActionControl?.sequencePhase || null,
+      },
+
       oneMinute: {
         role:
           oneMinuteEvidence?.role || null,
@@ -214,26 +250,23 @@ export function buildEngine3Trace({
     },
 
     control: {
-      completed5m:
+      priceAction:
+        priceActionControl || null,
+
+      completed5mSupporting:
         completed5m?.control || null,
 
       forming5mDiagnosticOnly:
         forming5m?.control || null,
 
       quality:
-        completed5m?.quality || null,
+        priceActionControl?.qualityEvidence || null,
 
       canonicalControlState:
-        fiveMinuteReaction
-          ?.stateMachineHandoff
-          ?.controlState ||
-        null,
+        priceActionControl?.controlState || null,
 
       canonicalControlConfidence:
-        fiveMinuteReaction
-          ?.stateMachineHandoff
-          ?.controlConfidence ||
-        null,
+        priceActionControl?.controlConfidence || null,
     },
 
     travel: {
@@ -266,9 +299,14 @@ export function buildEngine3Trace({
       formingFiveMinuteCanCreateCanonicalDirection:
         false,
 
+      priceActionControlAuthority:
+        priceActionControl?.canonicalControlAuthority === true,
+
+      sourceResolutionHasDirectionAuthority:
+        false,
+
       completedFiveMinuteEvidenceAuthority:
-        fiveMinuteReaction
-          ?.completed5mAuthorizedForStateMachine === true,
+        false,
 
       tenMinuteCanCreateInitialCanonicalDirection:
         false,
