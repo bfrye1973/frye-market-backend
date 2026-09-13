@@ -76,6 +76,7 @@ function engine22Context() {
 function buildAtPrice({
   currentPrice,
   previousLocationCandidate = null,
+  openPaperTrades = [],
   bars10m = [],
   ema10Posture = null,
   snapshotTime =
@@ -93,6 +94,7 @@ function buildAtPrice({
     snapshotTime,
     engine22WaveStrategy,
     previousLocationCandidate,
+    openPaperTrades,
     bars10m,
     ema10Posture,
     ...(manualZonesFilePath
@@ -106,6 +108,23 @@ function buildAtPrice({
     activationRangePoints: 4,
     monitoringRangePoints: 25,
   });
+}
+
+function openPaperTradeFor(candidate) {
+  return {
+    symbol: "ES",
+    strategyId: "intraday_scalp@10m",
+    status: "OPEN",
+    accountMode: "PAPER",
+    direction: candidate?.directionBias ?? candidate?.direction,
+    candidateId: candidate?.candidateId,
+    zoneId: candidate?.zoneId,
+    identity: {
+      strategyId: "intraday_scalp@10m",
+      candidateId: candidate?.candidateId,
+      zoneId: candidate?.zoneId,
+    },
+  };
 }
 
 function longLowerFactsBars() {
@@ -170,6 +189,7 @@ test(
     const partial = buildAtPrice({
       currentPrice: lower.targetZone.low,
       previousLocationCandidate: lower,
+      openPaperTrades: [openPaperTradeFor(lower)],
       snapshotTime:
         "2026-07-28T15:10:00.000Z",
     }).engine26LocationCandidate;
@@ -219,6 +239,7 @@ test(
     const partial = buildAtPrice({
       currentPrice: upper.targetZone.high,
       previousLocationCandidate: upper,
+      openPaperTrades: [openPaperTradeFor(upper)],
       snapshotTime:
         "2026-07-28T18:10:00.000Z",
     }).engine26LocationCandidate;
@@ -2486,6 +2507,166 @@ test(
       );
       assert.equal(rebuilt.contactState, null);
       assert.equal(rebuilt.priorRotationFullyComplete, false);
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "unexecuted directional child yields when price enters a different approved negotiated zone",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-unexecuted-zone-supersession-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-07-31T16:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(activeLong.directionBias, "LONG");
+      assert.equal(activeLong.entryZone.low, 7433.75);
+
+      const superseded = buildAtPrice({
+        currentPrice: 7505,
+        previousLocationCandidate: activeLong,
+        snapshotTime:
+          "2026-07-31T16:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+        openPaperTrades: [],
+      }).engine26LocationCandidate;
+
+      assert.notEqual(
+        superseded.candidateId,
+        activeLong.candidateId
+      );
+      assert.notEqual(
+        superseded.zoneId,
+        activeLong.zoneId
+      );
+      assert.equal(superseded.location.lo, 7504);
+      assert.equal(superseded.location.hi, 7518.25);
+      assert.equal(superseded.location.relation, "INSIDE_ZONE");
+    } finally {
+      fs.rmSync(
+        tempDir,
+        {
+          recursive: true,
+          force: true,
+        }
+      );
+    }
+  }
+);
+
+test(
+  "matching OPEN PAPER trade preserves directional child through a different negotiated-zone contact",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine26-open-trade-preservation-"
+      )
+    );
+
+    const memoryFilePath = path.join(
+      tempDir,
+      "negotiated-zone-memory.json"
+    );
+
+    const manualZonesFilePath = path.join(
+      tempDir,
+      "es-smz-manual-zones.txt"
+    );
+
+    try {
+      fs.writeFileSync(
+        manualZonesFilePath,
+        [
+          "7419.75-7473.50 | NEG 7433.75-7457.50",
+          "7490.00-7525.00 | NEG 7504.00-7518.25",
+          "",
+        ].join("\n"),
+        "utf8"
+      );
+
+      const activeLong = buildAtPrice({
+        currentPrice: 7445.75,
+        snapshotTime:
+          "2026-07-31T17:00:00.000Z",
+        bars10m: longLowerFactsBars(),
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      const preserved = buildAtPrice({
+        currentPrice: 7505,
+        previousLocationCandidate: activeLong,
+        openPaperTrades: [openPaperTradeFor(activeLong)],
+        snapshotTime:
+          "2026-07-31T17:10:00.000Z",
+        bars10m: [],
+        ema10Posture: "BULLISH",
+        manualZonesFilePath,
+        memoryFilePath,
+        persistMemory: false,
+      }).engine26LocationCandidate;
+
+      assert.equal(
+        preserved.candidateId,
+        activeLong.candidateId
+      );
+      assert.equal(preserved.zoneId, activeLong.zoneId);
+      assert.equal(preserved.directionBias, "LONG");
+      assert.equal(preserved.entryZone.low, 7433.75);
+      assert.equal(
+        preserved.targetApproachCompletionWatch,
+        true
+      );
+      assert.equal(preserved.targetZoneEntryTouched, true);
     } finally {
       fs.rmSync(
         tempDir,
