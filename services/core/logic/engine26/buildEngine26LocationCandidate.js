@@ -108,6 +108,89 @@ function normalizeDirection(value) {
   return "NEUTRAL";
 }
 
+function normalizeId(value) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function findMatchingOpenStrategy1Trade({
+  openPaperTrades,
+  symbol,
+  strategyId,
+  candidateId,
+  zoneId,
+}) {
+  const trades = Array.isArray(openPaperTrades)
+    ? openPaperTrades
+    : [];
+
+  const expectedSymbol = String(symbol || "")
+    .trim()
+    .toUpperCase();
+
+  const expectedStrategyId = normalizeId(strategyId);
+  const expectedCandidateId = normalizeId(candidateId);
+  const expectedZoneId = normalizeId(zoneId);
+
+  return (
+    trades.find((trade) => {
+      const tradeSymbol = String(trade?.symbol || "")
+        .trim()
+        .toUpperCase();
+
+      const tradeStrategyId = normalizeId(
+        trade?.strategyId ?? trade?.identity?.strategyId
+      );
+
+      const tradeStatus = String(trade?.status || "")
+        .trim()
+        .toUpperCase();
+
+      const tradeAccountMode = String(
+        trade?.accountMode || ""
+      )
+        .trim()
+        .toUpperCase();
+
+      if (
+        tradeSymbol !== expectedSymbol ||
+        tradeStrategyId !== expectedStrategyId ||
+        tradeStatus !== "OPEN" ||
+        tradeAccountMode !== "PAPER"
+      ) {
+        return false;
+      }
+
+      const tradeCandidateId = normalizeId(
+        trade?.candidateId ??
+          trade?.identity?.candidateId ??
+          trade?.setup?.candidateId ??
+          trade?.setup?.engine26?.candidateId ??
+          trade?.signalEvent?.candidateId
+      );
+
+      const tradeZoneId = normalizeId(
+        trade?.zoneId ??
+          trade?.identity?.zoneId ??
+          trade?.setup?.zoneId ??
+          trade?.setup?.engine26?.zoneId ??
+          trade?.signalEvent?.zoneId
+      );
+
+      if (
+        expectedCandidateId &&
+        tradeCandidateId === expectedCandidateId
+      ) {
+        return true;
+      }
+
+      return Boolean(
+        expectedZoneId && tradeZoneId === expectedZoneId
+      );
+    }) || null
+  );
+}
+
 function engine22ExplicitTravelOpposesDirection({
   engine22TravelContext,
   direction,
@@ -1331,6 +1414,8 @@ function findRecoverableDirectionalMemoryChild({
   snapshotTime,
   tickSize,
   engine22TravelContext = null,
+  openPaperTrades = [],
+  currentContactZoneId = null,
 }) {
   const records = Object.values(
     memoryStore?.records || {}
@@ -1387,6 +1472,22 @@ function findRecoverableDirectionalMemoryChild({
        !record?.releaseReason &&
        !record?.targetTouchedAt;
 
+      const matchingOpenTrade =
+        findMatchingOpenStrategy1Trade({
+          openPaperTrades,
+          symbol,
+          strategyId,
+          candidateId:
+            record?.currentCandidateId,
+          zoneId: record?.zoneId,
+        });
+
+      const supersededByCurrentZoneContact =
+        Boolean(currentContactZoneId) &&
+        Boolean(record?.zoneId) &&
+        currentContactZoneId !== record.zoneId &&
+        !matchingOpenTrade;
+
       /*
        * A general favorable 10-point objective is bookkeeping only.
        * It is not a Strategy 1 lifecycle release and must not prevent
@@ -1396,7 +1497,8 @@ function findRecoverableDirectionalMemoryChild({
       if (
         !identityValid ||
         !lifecyclePreservable ||
-        opposedByEngine22Travel
+        opposedByEngine22Travel ||
+        supersededByCurrentZoneContact
       ) {
         return null;
       }
@@ -2949,6 +3051,7 @@ export function buildEngine26LocationCandidate({
   engine25Context = null,
   engine1Context = null,
   previousLocationCandidate = null,
+  openPaperTrades = [],
   bars10m = [],
   ema10Posture = null,
   manualZonesFilePath = undefined,
@@ -3152,6 +3255,21 @@ const strategy1EligibleZones =
         safeMonitoringRange
   );
 
+const currentNegotiatedZoneContact =
+  selectionPurpose === "STRATEGY1_CHILD"
+    ? strategy1EligibleZones.find((zone) => {
+        const low = toFiniteNumber(zone?.lo);
+        const high = toFiniteNumber(zone?.hi);
+
+        return (
+          low !== null &&
+          high !== null &&
+          normalizedPrice >= low &&
+          normalizedPrice <= high
+        );
+      }) || null
+    : null;
+
 const resolvedEma10Posture =
   resolveEma10Posture({
     ema10Posture,
@@ -3253,6 +3371,33 @@ const immediatePreviousOpposedByEngine22Travel =
     direction:
       immediatePreviousDirection,
   });
+
+const immediatePreviousOpenTrade =
+  findMatchingOpenStrategy1Trade({
+    openPaperTrades,
+    symbol: normalizedSymbol,
+    strategyId: normalizedStrategyId,
+    candidateId:
+      previousLocationCandidate?.candidateId,
+    zoneId:
+      previousLocationCandidate?.zoneId,
+  });
+
+const currentContactZoneId =
+  currentNegotiatedZoneContact
+    ? buildCanonicalZoneId(
+        normalizedSymbol,
+        currentNegotiatedZoneContact
+      )
+    : null;
+
+const immediatePreviousZoneSupersededByCurrentContact =
+  Boolean(currentContactZoneId) &&
+  Boolean(previousLocationCandidate?.zoneId) &&
+  currentContactZoneId !==
+    previousLocationCandidate?.zoneId &&
+  !immediatePreviousOpenTrade;
+
 const immediatePreviousChildPreservable =
   selectionPurpose === "STRATEGY1_CHILD" &&
   Boolean(immediatePreviousZone) &&
@@ -3265,7 +3410,8 @@ const immediatePreviousChildPreservable =
     )
   ) &&
   immediatePreviousReleaseState.released !== true &&
-  immediatePreviousOpposedByEngine22Travel !== true;
+  immediatePreviousOpposedByEngine22Travel !== true &&
+  immediatePreviousZoneSupersededByCurrentContact !== true;
 
 const recoveredPromotedContactChild =
   selectionPurpose === "STRATEGY1_CHILD" &&
@@ -3297,6 +3443,8 @@ const recoveredMemoryChild =
         tickSize,
         engine22TravelContext:
           engine22MinuteTravelContext,
+        openPaperTrades,
+        currentContactZoneId,
       })
     : null;
 
