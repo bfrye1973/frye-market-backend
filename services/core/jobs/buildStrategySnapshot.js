@@ -8493,6 +8493,26 @@ attachEngine4AuthorizedReactionParticipation({
         }).catch(() => null)
       : null;
 
+let engine26OpenPaperTrades = [];
+
+if (isEsIntradayScalp) {
+  try {
+    const openPaperResp = await listTrades({
+      symbol,
+      strategyId: s.strategyId,
+      status: "OPEN",
+      accountMode: "PAPER",
+    });
+
+    engine26OpenPaperTrades = Array.isArray(openPaperResp?.trades)
+      ? openPaperResp.trades
+      : [];
+  } catch (err) {
+    console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
+    engine26OpenPaperTrades = [];
+  }
+}
+
   /*
    * Engine 26A — reaction-independent location discovery.
    *
@@ -8550,6 +8570,9 @@ attachEngine4AuthorizedReactionParticipation({
             ?.[s.strategyId]
             ?.engine26LocationCandidate ||
           null,
+
+        openPaperTrades:
+          engine26OpenPaperTrades,
 
         bars10m:
           marketMeter
@@ -9180,25 +9203,7 @@ let engine7PositionSizing = null;
 
 if (isEsIntradayScalp) {
   try {
-    let openPaperTrades = [];
-
-    try {
-      const openPaperResp = await listTrades({
-        symbol,
-        strategyId: s.strategyId,
-        status: "OPEN",
-        accountMode: "PAPER",
-      });
-
-      openPaperTrades = Array.isArray(openPaperResp?.trades)
-        ? openPaperResp.trades
-        : [];
-    } catch (err) {
-      console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
-
-      openPaperTrades = [];
-    }
-
+    const openPaperTrades = engine26OpenPaperTrades;
 const engine26 = buildEngine26PaperTradePlan({
   symbol,
   strategyId: s.strategyId,
