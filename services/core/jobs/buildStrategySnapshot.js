@@ -8838,14 +8838,31 @@ patchedConfluence.context.reaction.engine3V5 =
 
 if (isEsIntradayScalp) {
   saveEngine3V5CanonicalState({
-    canonical:
-      engine3V5?.canonical?.canonical || null,
+    canonical: {
+      ...(engine3V5?.canonical?.canonical || {}),
 
-    symbol,
-    strategyId: s.strategyId,
-    laneId: "minute",
-  });
-}
+      candidateId:
+        engine3V5?.canonical?.candidateId ??
+        engine26LocationCandidate?.candidateId ??
+        null,
+
+      zoneId:
+        engine3V5?.canonical?.zoneId ??
+        engine26LocationCandidate?.zoneId ??
+        null,
+
+     symbol:
+       engine3V5?.canonical?.symbol ??
+       symbol,
+
+     strategyId:
+       engine3V5?.canonical?.strategyId ??
+       s.strategyId,
+
+     laneId:
+       engine3V5?.canonical?.laneId ??
+       "minute",
+   },
   
 const engine3Strategy1Handoff =
   buildEngine3Strategy1Handoff({
