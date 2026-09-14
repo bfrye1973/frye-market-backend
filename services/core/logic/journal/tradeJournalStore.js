@@ -3856,6 +3856,688 @@ function applyRealClosingFill({
   };
 }
 
+
+function getRealCampaignOldestOpenLotTime(trade) {
+  const lots =
+    cloneRemainingLots(
+      trade
+    );
+
+  const times =
+    lots
+      .map(
+        (lot) =>
+          Date.parse(
+            lot?.fillTime ||
+            ""
+          )
+      )
+      .filter(
+        Number.isFinite
+      );
+
+  if (times.length) {
+    return Math.min(
+      ...times
+    );
+  }
+
+  return (
+    Date.parse(
+      trade?.entry?.time ||
+      trade?.createdAt ||
+      ""
+    ) || 0
+  );
+}
+
+function planRealMultiCampaignClose({
+  openCampaigns,
+  fill,
+}) {
+  const candidates = [];
+
+  for (
+    const trade
+    of openCampaigns
+  ) {
+    const lots =
+      cloneRemainingLots(
+        trade
+      );
+
+    for (
+      let lotIndex = 0;
+      lotIndex <
+      lots.length;
+      lotIndex += 1
+    ) {
+      const lot =
+        lots[
+          lotIndex
+        ];
+
+      const lotQty =
+        toNumberOrNull(
+          lot?.qty
+        ) ?? 0;
+
+      if (
+        lotQty <= 0
+      ) {
+        continue;
+      }
+
+      const lotFuturesContractCode =
+        getRealLotFuturesContractCode(
+          lot,
+          getRealTradeFuturesContractCode(
+            trade
+          )
+        );
+
+      if (
+        !lotFuturesContractCode
+      ) {
+        return {
+          ok: false,
+          error:
+            "REAL_MULTI_CAMPAIGN_FIFO_FUTURES_CONTRACT_CODE_MISSING",
+          tradeId:
+            trade.tradeId,
+          contractId:
+            normalizeId(
+              lot?.contractId
+            ),
+        };
+      }
+
+      if (
+        lotFuturesContractCode !==
+        fill.futuresContractCode
+      ) {
+        return {
+          ok: false,
+          error:
+            "REAL_MULTI_CAMPAIGN_FIFO_FUTURES_CONTRACT_MISMATCH",
+          tradeId:
+            trade.tradeId,
+          contractId:
+            normalizeId(
+              lot?.contractId
+            ),
+          expectedFuturesContractCode:
+            fill.futuresContractCode,
+          lotFuturesContractCode,
+        };
+      }
+
+      candidates.push({
+        trade,
+        tradeId:
+          trade.tradeId,
+        lot,
+        lotIndex,
+        qty:
+          lotQty,
+        fillTimeMs:
+          Date.parse(
+            lot?.fillTime ||
+            ""
+          ) || 0,
+        brokerTransactionId:
+          normalizeId(
+            lot?.brokerTransactionId
+          ) || "",
+        contractId:
+          normalizeId(
+            lot?.contractId
+          ) || "",
+      });
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      a.fillTimeMs -
+        b.fillTimeMs ||
+      a.brokerTransactionId.localeCompare(
+        b.brokerTransactionId
+      ) ||
+      a.contractId.localeCompare(
+        b.contractId
+      ) ||
+      a.lotIndex -
+        b.lotIndex
+  );
+
+  let remainingToAllocate =
+    fill.quantity;
+
+  const quantityByTradeId =
+    new Map();
+
+  const selectedContractIds =
+    [];
+
+  for (
+    const candidate
+    of candidates
+  ) {
+    if (
+      remainingToAllocate <= 0
+    ) {
+      break;
+    }
+
+    const matchedQty =
+      Math.min(
+        remainingToAllocate,
+        candidate.qty
+      );
+
+    quantityByTradeId.set(
+      candidate.tradeId,
+      (
+        quantityByTradeId.get(
+          candidate.tradeId
+        ) || 0
+      ) +
+        matchedQty
+    );
+
+    /*
+     * New REAL lots are qty:1. This loop also remains compatible
+     * with legacy qty>1 lots by recording the same durable contractId
+     * only once for audit display.
+     */
+    if (
+      candidate.contractId
+    ) {
+      selectedContractIds.push(
+        candidate.contractId
+      );
+    }
+
+    remainingToAllocate -=
+      matchedQty;
+  }
+
+  if (
+    remainingToAllocate > 0
+  ) {
+    return {
+      ok: false,
+      error:
+        "REAL_EXIT_QUANTITY_EXCEEDS_AGGREGATE_REMAINING_QUANTITY",
+      aggregateRemainingQuantity:
+        fill.quantity -
+        remainingToAllocate,
+      fillQuantity:
+        fill.quantity,
+      remainingToAllocate,
+    };
+  }
+
+  const allocations =
+    openCampaigns
+      .filter(
+        (trade) =>
+          quantityByTradeId.has(
+            trade.tradeId
+          )
+      )
+      .map(
+        (trade) => ({
+          trade,
+          quantity:
+            quantityByTradeId.get(
+              trade.tradeId
+            ),
+          oldestOpenLotTime:
+            getRealCampaignOldestOpenLotTime(
+              trade
+            ),
+        })
+      )
+      .sort(
+        (a, b) =>
+          a.oldestOpenLotTime -
+            b.oldestOpenLotTime ||
+          String(
+            a.trade?.tradeId ||
+            ""
+          ).localeCompare(
+            String(
+              b.trade?.tradeId ||
+              ""
+            )
+          )
+      );
+
+  return {
+    ok: true,
+    allocations,
+    selectedContractIds,
+  };
+}
+
+function splitRealClosingFillForAllocation({
+  fill,
+  quantity,
+  allocatedQuantityBefore,
+}) {
+  const totalQuantity =
+    fill.quantity;
+
+  const isLastAllocation =
+    allocatedQuantityBefore +
+      quantity ===
+    totalQuantity;
+
+  const proportional =
+    (
+      value,
+      alreadyAllocatedValue
+    ) => {
+      const total =
+        normalizeRealFee(
+          value
+        );
+
+      if (
+        total === 0
+      ) {
+        return 0;
+      }
+
+      if (
+        isLastAllocation
+      ) {
+        return round2(
+          total -
+          alreadyAllocatedValue
+        );
+      }
+
+      return round2(
+        total *
+        (
+          quantity /
+          totalQuantity
+        )
+      );
+    };
+
+  return {
+    ...fill,
+
+    quantity,
+
+    originalBrokerFillQuantity:
+      totalQuantity,
+  };
+}
+
+function applyRealClosingFillAcrossCampaigns({
+  openCampaigns,
+  fill,
+}) {
+  const plan =
+    planRealMultiCampaignClose({
+      openCampaigns,
+      fill,
+    });
+
+  if (!plan.ok) {
+    return plan;
+  }
+
+  for (
+    const allocation
+    of plan.allocations
+  ) {
+    if (
+      realEventTimeIsOutOfOrder(
+        allocation.trade,
+        fill.fillTime
+      )
+    ) {
+      return {
+        ok: false,
+        error:
+          "REAL_FILL_OUT_OF_ORDER",
+        brokerTransactionId:
+          fill.brokerTransactionId,
+        tradeId:
+          allocation.trade.tradeId,
+        fillTime:
+          fill.fillTime,
+      };
+    }
+  }
+
+  let allocatedQuantityBefore =
+    0;
+
+  let allocatedCommission =
+    0;
+
+  let allocatedExchangeFee =
+    0;
+
+  let allocatedOtherFees =
+    0;
+
+  let allocatedTotalFees =
+    0;
+
+  const affectedTrades =
+    [];
+
+  const aggregateClosedContracts =
+    [];
+
+  let aggregateRealizedPoints =
+    0;
+
+  let aggregateGrossRealizedPnL =
+    0;
+
+  let hasRealizedPoints =
+    false;
+
+  let hasGrossRealizedPnL =
+    false;
+
+  for (
+    let i = 0;
+    i <
+    plan.allocations.length;
+    i += 1
+  ) {
+    const allocation =
+      plan.allocations[
+        i
+      ];
+
+    const isLast =
+      i ===
+      plan.allocations.length -
+        1;
+
+    const allocateFee =
+      (
+        total,
+        alreadyAllocated
+      ) => {
+        const normalized =
+          normalizeRealFee(
+            total
+          );
+
+        if (isLast) {
+          return round2(
+            normalized -
+            alreadyAllocated
+          );
+        }
+
+        return round2(
+          normalized *
+          (
+            allocation.quantity /
+            fill.quantity
+          )
+        );
+      };
+
+    const allocatedFill = {
+      ...fill,
+
+      quantity:
+        allocation.quantity,
+
+      originalBrokerFillQuantity:
+        fill.quantity,
+
+      commission:
+        allocateFee(
+          fill.commission,
+          allocatedCommission
+        ),
+
+      futuresExchangeFee:
+        allocateFee(
+          fill.futuresExchangeFee,
+          allocatedExchangeFee
+        ),
+
+      otherFees:
+        allocateFee(
+          fill.otherFees,
+          allocatedOtherFees
+        ),
+
+      totalFees:
+        allocateFee(
+          fill.totalFees,
+          allocatedTotalFees
+        ),
+    };
+
+    allocatedCommission =
+      round2(
+        allocatedCommission +
+        allocatedFill.commission
+      );
+
+    allocatedExchangeFee =
+      round2(
+        allocatedExchangeFee +
+        allocatedFill.futuresExchangeFee
+      );
+
+    allocatedOtherFees =
+      round2(
+        allocatedOtherFees +
+        allocatedFill.otherFees
+      );
+
+    allocatedTotalFees =
+      round2(
+        allocatedTotalFees +
+        allocatedFill.totalFees
+      );
+
+    const applied =
+      applyRealClosingFill({
+        trade:
+          allocation.trade,
+        fill:
+          allocatedFill,
+      });
+
+    if (!applied.ok) {
+      return {
+        ...applied,
+        affectedTradeIds:
+          affectedTrades.map(
+            (row) =>
+              row.tradeId
+          ),
+      };
+    }
+
+    const event =
+      allocation.trade
+        ?.events
+        ?.findLast?.(
+          (row) =>
+            sameNonEmpty(
+              row?.brokerTransactionId,
+              fill.brokerTransactionId
+            ) &&
+            Array.isArray(
+              row?.closedContracts
+            ) &&
+            row.closedContracts.length > 0
+        ) ||
+      [...(
+        allocation.trade
+          ?.events ||
+        []
+      )]
+        .reverse()
+        .find(
+          (row) =>
+            sameNonEmpty(
+              row?.brokerTransactionId,
+              fill.brokerTransactionId
+            ) &&
+            Array.isArray(
+              row?.closedContracts
+            ) &&
+            row.closedContracts.length > 0
+        ) ||
+      null;
+
+    const closedContracts =
+      Array.isArray(
+        event?.closedContracts
+      )
+        ? event.closedContracts
+        : [];
+
+    aggregateClosedContracts.push(
+      ...clone(
+        closedContracts
+      )
+    );
+
+    const eventRealizedPoints =
+      toNumberOrNull(
+        event
+          ?.eventRealizedPoints
+      );
+
+    if (
+      eventRealizedPoints !== null
+    ) {
+      aggregateRealizedPoints +=
+        eventRealizedPoints;
+
+      hasRealizedPoints =
+        true;
+    }
+
+    const eventGrossRealizedPnL =
+      toNumberOrNull(
+        event
+          ?.grossEventRealizedPnL
+      );
+
+    if (
+      eventGrossRealizedPnL !== null
+    ) {
+      aggregateGrossRealizedPnL +=
+        eventGrossRealizedPnL;
+
+      hasGrossRealizedPnL =
+        true;
+    }
+
+    affectedTrades.push({
+      tradeId:
+        allocation.trade
+          .tradeId,
+
+      quantity:
+        allocation.quantity,
+
+      status:
+        allocation.trade
+          .status,
+
+      remainingQty:
+        applied
+          .remainingQty,
+
+      eventType:
+        applied
+          .eventType,
+    });
+
+    allocatedQuantityBefore +=
+      allocation.quantity;
+  }
+
+  const aggregateRemainingQty =
+    openCampaigns.reduce(
+      (
+        sum,
+        trade
+      ) =>
+        sum +
+        (
+          toNumberOrNull(
+            trade
+              ?.qty
+              ?.remainingQty
+          ) || 0
+        ),
+      0
+    );
+
+  return {
+    ok: true,
+
+    affectedTrades,
+
+    affectedTradeIds:
+      affectedTrades.map(
+        (row) =>
+          row.tradeId
+      ),
+
+    closedContracts:
+      aggregateClosedContracts,
+
+    remainingQty:
+      aggregateRemainingQty,
+
+    eventType:
+      affectedTrades.length > 1
+        ? "REAL_MULTI_CAMPAIGN_EXIT"
+        : affectedTrades[0]
+            ?.eventType ||
+          "REAL_EXIT",
+
+    eventRealizedPoints:
+      hasRealizedPoints
+        ? round2(
+            aggregateRealizedPoints
+          )
+        : null,
+
+    grossEventRealizedPnL:
+      hasGrossRealizedPnL
+        ? round2(
+            aggregateGrossRealizedPnL
+          )
+        : null,
+
+    allocatedCommission,
+    allocatedExchangeFee,
+    allocatedOtherFees,
+    allocatedTotalFees,
+
+    selectedContractIds:
+      plan.selectedContractIds,
+  };
+}
+
+
 export async function ingestRealBrokerFill(
   normalizedFill = {}
 ) {
@@ -3924,7 +4606,20 @@ export async function ingestRealBrokerFill(
       fill
     );
 
-  if (openCampaigns.length > 1) {
+  /*
+   * OPENING remains intentionally single-campaign.
+   * Multiple matching OPEN campaigns are still ambiguous for scale-in.
+   *
+   * CLOSING is different: Schwab can legitimately send one closing fill
+   * whose quantity spans more than one Engine 10 campaign. In that case
+   * Engine 10 owns global FIFO across all matching campaigns.
+   */
+  if (
+    fill.positionEffect ===
+      "OPENING" &&
+    openCampaigns.length >
+      1
+  ) {
     return {
       ok: false,
       created: false,
@@ -3952,9 +4647,12 @@ export async function ingestRealBrokerFill(
   }
 
   const openTrade =
-    openCampaigns[0] || null;
+    openCampaigns[0] ||
+    null;
 
   if (
+    fill.positionEffect ===
+      "OPENING" &&
     openTrade &&
     realEventTimeIsOutOfOrder(
       openTrade,
@@ -3978,7 +4676,10 @@ export async function ingestRealBrokerFill(
     };
   }
 
-  if (fill.positionEffect === "OPENING") {
+  if (
+    fill.positionEffect ===
+      "OPENING"
+  ) {
     if (!openTrade) {
       const latestCampaign =
         findMostRecentRealCampaign(
@@ -3988,14 +4689,20 @@ export async function ingestRealBrokerFill(
 
       const latestCloseTime =
         normalizeId(
-          latestCampaign?.summary?.closeTime
+          latestCampaign
+            ?.summary
+            ?.closeTime
         );
 
       if (
         latestCampaign &&
         latestCloseTime &&
-        Date.parse(fill.fillTime) <=
-          Date.parse(latestCloseTime)
+        Date.parse(
+          fill.fillTime
+        ) <=
+          Date.parse(
+            latestCloseTime
+          )
       ) {
         return {
           ok: false,
@@ -4022,7 +4729,9 @@ export async function ingestRealBrokerFill(
           fill,
         });
 
-      writeJournalTrades(trades);
+      writeJournalTrades(
+        trades
+      );
 
       return {
         ok: true,
@@ -4036,8 +4745,10 @@ export async function ingestRealBrokerFill(
         status:
           "OPEN",
         remainingQty:
-          trade.qty.remainingQty,
-        journalCompleted: true,
+          trade.qty
+            .remainingQty,
+        journalCompleted:
+          true,
         eventType:
           "REAL_ENTRY_FILL",
         trade,
@@ -4051,7 +4762,9 @@ export async function ingestRealBrokerFill(
         fill,
       });
 
-    writeJournalTrades(trades);
+    writeJournalTrades(
+      trades
+    );
 
     return {
       ok: true,
@@ -4066,7 +4779,8 @@ export async function ingestRealBrokerFill(
         openTrade.status,
       remainingQty:
         applied.remainingQty,
-      journalCompleted: true,
+      journalCompleted:
+        true,
       eventType:
         applied.eventType,
       trade:
@@ -4074,7 +4788,9 @@ export async function ingestRealBrokerFill(
     };
   }
 
-  if (!openTrade) {
+  if (
+    !openCampaigns.length
+  ) {
     return {
       ok: false,
       created: false,
@@ -4096,10 +4812,119 @@ export async function ingestRealBrokerFill(
     };
   }
 
-  const applied =
-    applyRealClosingFill({
+  /*
+   * One matching campaign keeps the historical single-campaign path
+   * exactly as before.
+   */
+  if (
+    openCampaigns.length ===
+    1
+  ) {
+    const singleTrade =
+      openCampaigns[0];
+
+    if (
+      realEventTimeIsOutOfOrder(
+        singleTrade,
+        fill.fillTime
+      )
+    ) {
+      return {
+        ok: false,
+        created: false,
+        updated: false,
+        duplicate: false,
+        journalCompleted: false,
+        error:
+          "REAL_FILL_OUT_OF_ORDER",
+        brokerTransactionId:
+          fill.brokerTransactionId,
+        tradeId:
+          singleTrade.tradeId,
+        fillTime:
+          fill.fillTime,
+      };
+    }
+
+    const applied =
+      applyRealClosingFill({
+        trade:
+          singleTrade,
+        fill,
+      });
+
+    if (!applied.ok) {
+      return {
+        ok: false,
+        created: false,
+        updated: false,
+        duplicate: false,
+        journalCompleted: false,
+        brokerTransactionId:
+          fill.brokerTransactionId,
+        tradeId:
+          singleTrade.tradeId,
+        ...applied,
+      };
+    }
+
+    writeJournalTrades(
+      trades
+    );
+
+    return {
+      ok: true,
+      brokerTransactionId:
+        fill.brokerTransactionId,
+      tradeId:
+        singleTrade.tradeId,
+      tradeIds: [
+        singleTrade.tradeId,
+      ],
+      created: false,
+      updated: true,
+      duplicate: false,
+      status:
+        singleTrade.status,
+      remainingQty:
+        applied.remainingQty,
+      journalCompleted:
+        true,
+      eventType:
+        applied.eventType,
+      closedContracts:
+        clone(
+          singleTrade
+            ?.events
+            ?.findLast?.(
+              (event) =>
+                sameNonEmpty(
+                  event
+                    ?.brokerTransactionId,
+                  fill
+                    .brokerTransactionId
+                )
+            )
+            ?.closedContracts ||
+          []
+        ),
       trade:
-        openTrade,
+        singleTrade,
+      trades: [
+        singleTrade,
+      ],
+    };
+  }
+
+  /*
+   * Multi-campaign close:
+   * one immutable Schwab closing fill may span multiple matching
+   * Engine 10 campaigns. Engine 10 allocates it by global FIFO while
+   * preserving account/root/expiration/direction boundaries.
+   */
+  const applied =
+    applyRealClosingFillAcrossCampaigns({
+      openCampaigns,
       fill,
     });
 
@@ -4112,35 +4937,131 @@ export async function ingestRealBrokerFill(
       journalCompleted: false,
       brokerTransactionId:
         fill.brokerTransactionId,
-      tradeId:
-        openTrade.tradeId,
+      journalAccount:
+        fill.journalAccount,
+      instrumentRoot:
+        fill.instrumentRoot,
+      futuresContractCode:
+        fill.futuresContractCode,
+      direction:
+        fill.direction,
+      matchingTradeIds:
+        openCampaigns.map(
+          (trade) =>
+            trade.tradeId
+        ),
       ...applied,
     };
   }
 
-  writeJournalTrades(trades);
+  writeJournalTrades(
+    trades
+  );
+
+  const affectedTradeObjects =
+    applied
+      .affectedTradeIds
+      .map(
+        (tradeId) =>
+          trades.find(
+            (trade) =>
+              trade.tradeId ===
+              tradeId
+          )
+      )
+      .filter(Boolean);
+
+  const allAffectedClosed =
+    affectedTradeObjects.every(
+      (trade) =>
+        toUpper(
+          trade?.status
+        ) ===
+        "CLOSED"
+    );
 
   return {
     ok: true,
     brokerTransactionId:
       fill.brokerTransactionId,
+
     tradeId:
-      openTrade.tradeId,
+      applied
+        .affectedTradeIds[
+        0
+      ] || null,
+
+    tradeIds:
+      applied
+        .affectedTradeIds,
+
     created: false,
     updated: true,
     duplicate: false,
+
     status:
-      openTrade.status,
+      allAffectedClosed
+        ? "CLOSED"
+        : "OPEN",
+
     remainingQty:
-      applied.remainingQty,
-    journalCompleted: true,
+      applied
+        .remainingQty,
+
+    journalCompleted:
+      true,
+
     eventType:
-      applied.eventType,
+      applied
+        .eventType,
+
+    closedContracts:
+      applied
+        .closedContracts,
+
+    affectedTrades:
+      applied
+        .affectedTrades,
+
+    selectedContractIds:
+      applied
+        .selectedContractIds,
+
+    eventRealizedPoints:
+      applied
+        .eventRealizedPoints,
+
+    grossEventRealizedPnL:
+      applied
+        .grossEventRealizedPnL,
+
+    allocatedFees: {
+      commission:
+        applied
+          .allocatedCommission,
+
+      futuresExchangeFee:
+        applied
+          .allocatedExchangeFee,
+
+      otherFees:
+        applied
+          .allocatedOtherFees,
+
+      totalFees:
+        applied
+          .allocatedTotalFees,
+    },
+
     trade:
-      openTrade,
+      affectedTradeObjects[
+        0
+      ] || null,
+
+    trades:
+      affectedTradeObjects,
   };
 }
-
 
 export async function listTrades(
   filters = {}
