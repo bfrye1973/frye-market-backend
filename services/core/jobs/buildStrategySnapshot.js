@@ -8863,7 +8863,11 @@ if (isEsIntradayScalp) {
        engine3V5?.canonical?.laneId ??
        "minute",
    },
-  
+   symbol,
+   strategyId: s.strategyId,
+   laneId: "minute",
+ });
+}
 const engine3Strategy1Handoff =
   buildEngine3Strategy1Handoff({
     engine3V5,
