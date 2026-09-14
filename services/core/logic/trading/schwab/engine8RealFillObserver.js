@@ -7,7 +7,10 @@
 // - REAL fills never pass through the Engine 8 PAPER executor.
 //
 // Journal boundary:
-// - one Schwab activityId -> one normalized Engine 10 delivery
+// - legacy single-FUTURE transactions preserve the historical one-activityId
+//   -> one normalized Engine 10 delivery + legacy dedupe key
+// - multi-FUTURE transactions expand into deterministic broker fill legs
+// - every leg preserves the same real Schwab brokerTransactionId/activityId
 // - Engine 10 owns tradeId, contractId, FIFO, and contract lifecycle
 // - delivery is marked complete only after Engine 10 acknowledgement
 //
@@ -23,6 +26,7 @@ import {
 import { getSchwabConfig } from "./schwabConfig.js";
 import {
   normalizeSchwabRealFutureTransaction,
+  normalizeSchwabRealFutureTransactionLegs,
   resolveSchwabJournalAccount,
 } from "./engine8RealFillNormalizer.js";
 import {
@@ -127,14 +131,31 @@ async function deliverToEngine10({
 }
 
 function isEngine10Acknowledgement(fill, delivery) {
-  return Boolean(
-    delivery?.httpOk === true &&
-      delivery?.body?.ok === true &&
-      delivery?.body?.journalCompleted === true &&
-      text(delivery?.body?.brokerTransactionId) ===
-        text(fill?.brokerTransactionId) &&
-      text(delivery?.body?.tradeId)
-  );
+  if (
+    delivery?.httpOk !== true ||
+    delivery?.body?.ok !== true ||
+    delivery?.body?.journalCompleted !== true ||
+    text(delivery?.body?.brokerTransactionId) !==
+      text(fill?.brokerTransactionId) ||
+    !text(delivery?.body?.tradeId)
+  ) {
+    return false;
+  }
+
+  // Leg-aware fills require Engine 10 to acknowledge the same leg when
+  // Engine 10 includes leg identity in its response. If the response does not
+  // echo the field, the existing parent transaction acknowledgement remains
+  // sufficient for backward-compatible rollout.
+  if (
+    text(fill?.brokerFillLegId) &&
+    text(delivery?.body?.brokerFillLegId) &&
+    text(delivery?.body?.brokerFillLegId) !==
+      text(fill?.brokerFillLegId)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function summarizeFill(fill) {
@@ -142,8 +163,12 @@ function summarizeFill(fill) {
     brokerAccountLabel: fill.brokerAccountLabel,
     journalAccount: fill.journalAccount,
     brokerTransactionId: fill.brokerTransactionId,
+    brokerFillLegId: fill.brokerFillLegId || null,
+    brokerFillIdentity: fill.brokerFillIdentity || null,
     brokerOrderId: fill.brokerOrderId,
     symbol: fill.symbol,
+    brokerSymbol: fill.brokerSymbol || fill.symbol || null,
+    futuresContractCode: fill.futuresContractCode || null,
     positionEffect: fill.positionEffect,
     side: fill.side,
     direction: fill.direction,
@@ -154,6 +179,90 @@ function summarizeFill(fill) {
     futuresExchangeFee: fill.futuresExchangeFee,
     otherFees: fill.otherFees,
     totalFees: fill.totalFees,
+  };
+}
+
+function positionEffectRank(fill) {
+  return text(fill?.positionEffect).toUpperCase() === "CLOSING"
+    ? 0
+    : 1;
+}
+
+function compareCandidates(left, right) {
+  const leftTime = Date.parse(left.fill.fillTime);
+  const rightTime = Date.parse(right.fill.fillTime);
+
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+
+  const transactionCompare =
+    text(left.fill.brokerTransactionId).localeCompare(
+      text(right.fill.brokerTransactionId),
+      undefined,
+      { numeric: true }
+    );
+
+  if (transactionCompare !== 0) {
+    return transactionCompare;
+  }
+
+  const effectCompare =
+    positionEffectRank(left.fill) -
+    positionEffectRank(right.fill);
+
+  if (effectCompare !== 0) {
+    return effectCompare;
+  }
+
+  return text(left.fill.brokerFillLegId).localeCompare(
+    text(right.fill.brokerFillLegId)
+  );
+}
+
+function normalizeTransactionCandidates({
+  transaction,
+  maskedAccountNumber,
+  observedAt,
+}) {
+  // Preserve the legacy path exactly for the overwhelming majority of
+  // historical/single-FUTURE transactions. This prevents a rollout from
+  // changing old dedupe keys and accidentally replaying history.
+  const legacy = normalizeSchwabRealFutureTransaction({
+    transaction,
+    maskedAccountNumber,
+    observedAt,
+  });
+
+  if (legacy.ok) {
+    return {
+      ok: true,
+      brokerTransactionId: legacy.fill.brokerTransactionId,
+      candidates: [legacy],
+      normalizationMode: "LEGACY_SINGLE_FUTURE",
+    };
+  }
+
+  if (
+    legacy.reason !==
+    "MULTIPLE_FUTURE_TRANSFER_ITEMS_UNSUPPORTED"
+  ) {
+    return legacy;
+  }
+
+  const legAware = normalizeSchwabRealFutureTransactionLegs({
+    transaction,
+    maskedAccountNumber,
+    observedAt,
+  });
+
+  if (!legAware.ok) {
+    return legAware;
+  }
+
+  return {
+    ...legAware,
+    normalizationMode: "LEG_AWARE_MULTI_FUTURE",
   };
 }
 
@@ -187,7 +296,9 @@ export function computeEngine8RealFillQueryStart({
   }
 
   if (!recoveryMode) {
-    return new Date(Math.max(bootstrapMs, rollingStartMs)).toISOString();
+    return new Date(
+      Math.max(bootstrapMs, rollingStartMs)
+    ).toISOString();
   }
 
   const lastFillMs = validDateMs(lastBrokerFillTimeSeen);
@@ -213,10 +324,23 @@ function latestFillForAccount(candidates) {
     const leftTime = Date.parse(left.fill.fillTime);
     const rightTime = Date.parse(right.fill.fillTime);
 
-    if (leftTime !== rightTime) return rightTime - leftTime;
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
 
-    return text(right.fill.brokerTransactionId).localeCompare(
-      text(left.fill.brokerTransactionId)
+    const transactionCompare =
+      text(right.fill.brokerTransactionId).localeCompare(
+        text(left.fill.brokerTransactionId),
+        undefined,
+        { numeric: true }
+      );
+
+    if (transactionCompare !== 0) {
+      return transactionCompare;
+    }
+
+    return text(right.fill.brokerFillLegId).localeCompare(
+      text(left.fill.brokerFillLegId)
     );
   })[0];
 }
@@ -231,7 +355,8 @@ export async function observeSchwabRealFills({
 } = {}) {
   const config = getSchwabConfig();
   const resolvedLookbackMinutes = positiveInt(
-    lookbackMinutes ?? process.env.ENGINE8_REAL_FILL_LOOKBACK_MINUTES,
+    lookbackMinutes ??
+      process.env.ENGINE8_REAL_FILL_LOOKBACK_MINUTES,
     15
   );
   const resolvedRecoveryOverlapMinutes = positiveInt(
@@ -241,7 +366,10 @@ export async function observeSchwabRealFills({
   );
   const deliveryEnabled =
     deliver === null
-      ? boolEnv("ENGINE8_REAL_FILL_DELIVERY_ENABLED", false)
+      ? boolEnv(
+          "ENGINE8_REAL_FILL_DELIVERY_ENABLED",
+          false
+        )
       : deliver === true;
 
   const endDate = now.toISOString();
@@ -250,8 +378,8 @@ export async function observeSchwabRealFills({
 
   const result = {
     active: true,
-    engine: "engine8.schwabRealFillObserver.v2",
-    contractVersion: "engine8.schwabRealFillObserver.v2",
+    engine: "engine8.schwabRealFillObserver.v3",
+    contractVersion: "engine8.schwabRealFillObserver.v3",
     mode: deliveryEnabled
       ? recoveryMode
         ? "READ_ONLY_BROKER_RECOVERY_WITH_ENGINE10_DELIVERY"
@@ -266,12 +394,14 @@ export async function observeSchwabRealFills({
     deliveryEnabled,
     recoveryMode: recoveryMode === true,
     lookbackMinutes: resolvedLookbackMinutes,
-    recoveryOverlapMinutes: resolvedRecoveryOverlapMinutes,
+    recoveryOverlapMinutes:
+      resolvedRecoveryOverlapMinutes,
     bootstrapStartedAt,
     endDate,
     accountsRead: 0,
     transactionsRead: 0,
     futuresFillsNormalized: 0,
+    multiFutureTransactionsNormalized: 0,
     alreadyDelivered: 0,
     delivered: 0,
     pending: 0,
@@ -293,19 +423,26 @@ export async function observeSchwabRealFills({
       return {
         ...result,
         ok: false,
-        status: "BLOCKED_ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED",
-        errors: ["ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED"],
+        status:
+          "BLOCKED_ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED",
+        errors: [
+          "ENGINE8_REAL_FILL_BOOTSTRAP_NOT_INITIALIZED",
+        ],
       };
     }
 
-    baseUrl = journalBaseUrl(engine10BaseUrl);
+    baseUrl =
+      journalBaseUrl(engine10BaseUrl);
 
     if (!baseUrl) {
       return {
         ...result,
         ok: false,
-        status: "BLOCKED_ENGINE10_BASE_URL_MISSING",
-        errors: ["ENGINE8_REAL_JOURNAL_BASE_URL_OR_CORE_BASE_REQUIRED"],
+        status:
+          "BLOCKED_ENGINE10_BASE_URL_MISSING",
+        errors: [
+          "ENGINE8_REAL_JOURNAL_BASE_URL_OR_CORE_BASE_REQUIRED",
+        ],
       };
     }
 
@@ -313,7 +450,8 @@ export async function observeSchwabRealFills({
       return {
         ...result,
         ok: false,
-        status: "BLOCKED_ENGINE8_ADMIN_SECRET_MISSING",
+        status:
+          "BLOCKED_ENGINE8_ADMIN_SECRET_MISSING",
         errors: [
           "ENGINE8_ADMIN_SECRET_REQUIRED_FOR_ENGINE10_REAL_FILL_ROUTE",
         ],
@@ -324,69 +462,94 @@ export async function observeSchwabRealFills({
   let accountsResult;
 
   try {
-    accountsResult = await getSchwabAccountNumbers();
+    accountsResult =
+      await getSchwabAccountNumbers();
   } catch (error) {
     return {
       ...result,
       ok: false,
-      status: "SCHWAB_ACCOUNT_DISCOVERY_FAILED",
-      errors: [String(error?.message || error)],
+      status:
+        "SCHWAB_ACCOUNT_DISCOVERY_FAILED",
+      errors: [
+        String(error?.message || error),
+      ],
     };
   }
 
   const candidates = [];
   const accountRuns = new Map();
 
-  for (const account of accountsResult.accounts || []) {
-    if (!account?.accountHash || !account?.maskedAccountNumber) {
+  for (
+    const account of
+    accountsResult.accounts || []
+  ) {
+    if (
+      !account?.accountHash ||
+      !account?.maskedAccountNumber
+    ) {
       result.skipped += 1;
       continue;
     }
 
-    const accountIdentity = resolveSchwabJournalAccount(
-      account.maskedAccountNumber
-    );
+    const accountIdentity =
+      resolveSchwabJournalAccount(
+        account.maskedAccountNumber
+      );
 
     if (!accountIdentity.ok) {
       result.accountErrors += 1;
       result.errors.push({
-        account: account.maskedAccountNumber,
-        error: accountIdentity.reason,
+        account:
+          account.maskedAccountNumber,
+        error:
+          accountIdentity.reason,
       });
       continue;
     }
 
     const brokerAccountLabel =
       accountIdentity.brokerAccountLabel;
+
     const existingWatermark =
-      getEngine8RealFillAccountWatermark(brokerAccountLabel);
+      getEngine8RealFillAccountWatermark(
+        brokerAccountLabel
+      );
 
     let startDate;
 
     try {
-      startDate = computeEngine8RealFillQueryStart({
-        deliveryEnabled,
-        recoveryMode,
-        bootstrapStartedAt,
-        lastBrokerFillTimeSeen:
-          existingWatermark?.lastBrokerFillTimeSeen || null,
-        now,
-        lookbackMinutes: resolvedLookbackMinutes,
-        recoveryOverlapMinutes:
-          resolvedRecoveryOverlapMinutes,
-      });
+      startDate =
+        computeEngine8RealFillQueryStart({
+          deliveryEnabled,
+          recoveryMode,
+          bootstrapStartedAt,
+          lastBrokerFillTimeSeen:
+            existingWatermark
+              ?.lastBrokerFillTimeSeen ||
+            null,
+          now,
+          lookbackMinutes:
+            resolvedLookbackMinutes,
+          recoveryOverlapMinutes:
+            resolvedRecoveryOverlapMinutes,
+        });
     } catch (error) {
       result.accountErrors += 1;
       result.errors.push({
-        account: account.maskedAccountNumber,
-        error: String(error?.message || error),
+        account:
+          account.maskedAccountNumber,
+        error:
+          String(
+            error?.message || error
+          ),
       });
       continue;
     }
 
     const accountRun = {
       brokerAccountLabel,
-      journalAccount: accountIdentity.journalAccount,
+      journalAccount:
+        accountIdentity.journalAccount,
       startDate,
       endDate,
       existingWatermark,
@@ -394,41 +557,58 @@ export async function observeSchwabRealFills({
       failed: false,
     };
 
-    accountRuns.set(brokerAccountLabel, accountRun);
+    accountRuns.set(
+      brokerAccountLabel,
+      accountRun
+    );
+
     result.accountWindows.push({
       brokerAccountLabel,
-      journalAccount: accountIdentity.journalAccount,
+      journalAccount:
+        accountIdentity.journalAccount,
       startDate,
       endDate,
-      recoveryMode: recoveryMode === true,
+      recoveryMode:
+        recoveryMode === true,
     });
 
     let transactions;
 
     try {
-      transactions = await fetchTradeTransactions({
-        accountHash: account.accountHash,
-        startDate,
-        endDate,
-      });
+      transactions =
+        await fetchTradeTransactions({
+          accountHash:
+            account.accountHash,
+          startDate,
+          endDate,
+        });
+
       result.accountsRead += 1;
-      result.transactionsRead += transactions.length;
+      result.transactionsRead +=
+        transactions.length;
     } catch (error) {
       accountRun.failed = true;
       result.accountErrors += 1;
       result.errors.push({
-        account: account.maskedAccountNumber,
-        error: String(error?.message || error),
+        account:
+          account.maskedAccountNumber,
+        error:
+          String(
+            error?.message || error
+          ),
       });
       continue;
     }
 
     for (const transaction of transactions) {
-      const normalized = normalizeSchwabRealFutureTransaction({
-        transaction,
-        maskedAccountNumber: account.maskedAccountNumber,
-        observedAt: nowIso(),
-      });
+      const normalized =
+        normalizeTransactionCandidates({
+          transaction,
+          maskedAccountNumber:
+            account.maskedAccountNumber,
+          observedAt:
+            nowIso(),
+        });
 
       if (!normalized.ok) {
         if (normalized.skipped) {
@@ -437,155 +617,301 @@ export async function observeSchwabRealFills({
           accountRun.failed = true;
           result.normalizationErrors += 1;
           result.errors.push({
-            account: account.maskedAccountNumber,
+            account:
+              account.maskedAccountNumber,
             brokerTransactionId:
-              normalized.brokerTransactionId || null,
-            error: normalized.reason,
+              normalized
+                .brokerTransactionId ||
+              null,
+            error:
+              normalized.reason,
           });
         }
         continue;
       }
 
-      accountRun.candidates.push(normalized);
-      candidates.push(normalized);
+      if (
+        normalized.normalizationMode ===
+        "LEG_AWARE_MULTI_FUTURE"
+      ) {
+        result.multiFutureTransactionsNormalized += 1;
+      }
+
+      for (
+        const candidate of
+        normalized.candidates || []
+      ) {
+        accountRun.candidates.push(
+          candidate
+        );
+        candidates.push(candidate);
+      }
     }
   }
 
-  candidates.sort((left, right) => {
-    const leftTime = Date.parse(left.fill.fillTime);
-    const rightTime = Date.parse(right.fill.fillTime);
-
-    if (leftTime !== rightTime) return leftTime - rightTime;
-
-    return text(left.fill.brokerTransactionId).localeCompare(
-      text(right.fill.brokerTransactionId)
-    );
-  });
+  candidates.sort(compareCandidates);
 
   for (const candidate of candidates) {
-    const { fill, dedupeKey } = candidate;
-    const accountRun = accountRuns.get(fill.brokerAccountLabel);
+    const { fill, dedupeKey } =
+      candidate;
+
+    const accountRun =
+      accountRuns.get(
+        fill.brokerAccountLabel
+      );
+
     result.futuresFillsNormalized += 1;
 
-    const existing = getEngine8RealFillRecord(dedupeKey);
+    const existing =
+      getEngine8RealFillRecord(
+        dedupeKey
+      );
 
-    if (existing?.delivered === true) {
+    if (
+      existing?.delivered === true
+    ) {
       result.alreadyDelivered += 1;
+
       result.fills.push({
         ...summarizeFill(fill),
-        deliveryStatus: "ALREADY_DELIVERED",
-        tradeId: existing.engine10TradeId || null,
+        deliveryStatus:
+          "ALREADY_DELIVERED",
+        tradeId:
+          existing.engine10TradeId ||
+          null,
       });
+
       continue;
     }
 
-    upsertEngine8RealFillRecord(dedupeKey, {
-      broker: "SCHWAB",
-      journalAccount: fill.journalAccount,
-      brokerAccountLabel: fill.brokerAccountLabel,
-      brokerTransactionId: fill.brokerTransactionId,
-      brokerOrderId: fill.brokerOrderId,
-      fillTime: fill.fillTime,
-      normalizedFill: fill,
-      delivered: false,
-      deliveryStatus: deliveryEnabled
-        ? "PENDING_ENGINE10"
-        : "DRY_RUN_ONLY",
-    });
+    upsertEngine8RealFillRecord(
+      dedupeKey,
+      {
+        broker: "SCHWAB",
+        journalAccount:
+          fill.journalAccount,
+        brokerAccountLabel:
+          fill.brokerAccountLabel,
+        brokerTransactionId:
+          fill.brokerTransactionId,
+        brokerFillLegId:
+          fill.brokerFillLegId ||
+          null,
+        brokerFillIdentity:
+          fill.brokerFillIdentity ||
+          null,
+        brokerOrderId:
+          fill.brokerOrderId,
+        fillTime:
+          fill.fillTime,
+        normalizedFill:
+          fill,
+        delivered:
+          false,
+        deliveryStatus:
+          deliveryEnabled
+            ? "PENDING_ENGINE10"
+            : "DRY_RUN_ONLY",
+      }
+    );
 
     if (!deliveryEnabled) {
       result.pending += 1;
+
       result.fills.push({
         ...summarizeFill(fill),
-        deliveryStatus: "DRY_RUN_ONLY",
+        deliveryStatus:
+          "DRY_RUN_ONLY",
       });
+
       continue;
     }
 
     let delivery;
 
     try {
-      delivery = await deliverToEngine10({
-        fill,
-        baseUrl,
-        adminSecret: config.adminSecret,
-      });
+      delivery =
+        await deliverToEngine10({
+          fill,
+          baseUrl,
+          adminSecret:
+            config.adminSecret,
+        });
     } catch (error) {
-      if (accountRun) accountRun.failed = true;
+      if (accountRun) {
+        accountRun.failed = true;
+      }
+
       result.pending += 1;
-      upsertEngine8RealFillRecord(dedupeKey, {
-        delivered: false,
-        deliveryStatus: "ENGINE10_DELIVERY_FAILED",
-        attemptCount: Number(existing?.attemptCount || 0) + 1,
-        lastAttemptAt: nowIso(),
-        lastError: String(error?.message || error),
-      });
+
+      upsertEngine8RealFillRecord(
+        dedupeKey,
+        {
+          delivered: false,
+          deliveryStatus:
+            "ENGINE10_DELIVERY_FAILED",
+          attemptCount:
+            Number(
+              existing
+                ?.attemptCount || 0
+            ) + 1,
+          lastAttemptAt:
+            nowIso(),
+          lastError:
+            String(
+              error?.message || error
+            ),
+        }
+      );
+
       result.fills.push({
         ...summarizeFill(fill),
-        deliveryStatus: "ENGINE10_DELIVERY_FAILED",
-        error: String(error?.message || error),
+        deliveryStatus:
+          "ENGINE10_DELIVERY_FAILED",
+        error:
+          String(
+            error?.message || error
+          ),
       });
+
       continue;
     }
 
-    if (isEngine10Acknowledgement(fill, delivery)) {
+    if (
+      isEngine10Acknowledgement(
+        fill,
+        delivery
+      )
+    ) {
       result.delivered += 1;
-      upsertEngine8RealFillRecord(dedupeKey, {
-        delivered: true,
-        deliveryStatus: "ENGINE10_ACKNOWLEDGED",
-        attemptCount: Number(existing?.attemptCount || 0) + 1,
-        lastAttemptAt: nowIso(),
-        deliveredAt: nowIso(),
-        engine10TradeId: text(delivery.body.tradeId),
-        engine10Status: text(delivery.body.status) || null,
-        engine10RemainingQty:
-          Number.isFinite(Number(delivery.body.remainingQty))
-            ? Number(delivery.body.remainingQty)
-            : null,
-        engine10Duplicate: delivery.body.duplicate === true,
-        engine10EventType:
-          text(delivery.body.eventType) || null,
-        lastError: null,
-      });
+
+      upsertEngine8RealFillRecord(
+        dedupeKey,
+        {
+          delivered: true,
+          deliveryStatus:
+            "ENGINE10_ACKNOWLEDGED",
+          attemptCount:
+            Number(
+              existing
+                ?.attemptCount || 0
+            ) + 1,
+          lastAttemptAt:
+            nowIso(),
+          deliveredAt:
+            nowIso(),
+          engine10TradeId:
+            text(
+              delivery.body.tradeId
+            ),
+          engine10Status:
+            text(
+              delivery.body.status
+            ) || null,
+          engine10RemainingQty:
+            Number.isFinite(
+              Number(
+                delivery.body
+                  .remainingQty
+              )
+            )
+              ? Number(
+                  delivery.body
+                    .remainingQty
+                )
+              : null,
+          engine10Duplicate:
+            delivery.body
+              .duplicate === true,
+          engine10EventType:
+            text(
+              delivery.body
+                .eventType
+            ) || null,
+          engine10BrokerFillLegId:
+            text(
+              delivery.body
+                .brokerFillLegId
+            ) || null,
+          lastError: null,
+        }
+      );
+
       result.fills.push({
         ...summarizeFill(fill),
-        deliveryStatus: "ENGINE10_ACKNOWLEDGED",
-        tradeId: delivery.body.tradeId,
-        engine10Status: delivery.body.status || null,
-        remainingQty: delivery.body.remainingQty ?? null,
-        duplicate: delivery.body.duplicate === true,
+        deliveryStatus:
+          "ENGINE10_ACKNOWLEDGED",
+        tradeId:
+          delivery.body.tradeId,
+        engine10Status:
+          delivery.body.status ||
+          null,
+        remainingQty:
+          delivery.body
+            .remainingQty ?? null,
+        duplicate:
+          delivery.body
+            .duplicate === true,
       });
     } else {
-      if (accountRun) accountRun.failed = true;
+      if (accountRun) {
+        accountRun.failed = true;
+      }
+
       result.pending += 1;
-      upsertEngine8RealFillRecord(dedupeKey, {
-        delivered: false,
-        deliveryStatus: "ENGINE10_NOT_ACKNOWLEDGED",
-        attemptCount: Number(existing?.attemptCount || 0) + 1,
-        lastAttemptAt: nowIso(),
-        engine10HttpStatus: delivery.httpStatus,
-        lastError:
-          text(delivery?.body?.error || delivery?.body?.reason) ||
-          `ENGINE10_HTTP_${delivery.httpStatus}`,
-      });
+
+      upsertEngine8RealFillRecord(
+        dedupeKey,
+        {
+          delivered: false,
+          deliveryStatus:
+            "ENGINE10_NOT_ACKNOWLEDGED",
+          attemptCount:
+            Number(
+              existing
+                ?.attemptCount || 0
+            ) + 1,
+          lastAttemptAt:
+            nowIso(),
+          engine10HttpStatus:
+            delivery.httpStatus,
+          lastError:
+            text(
+              delivery?.body?.error ||
+                delivery?.body?.reason
+            ) ||
+            `ENGINE10_HTTP_${delivery.httpStatus}`,
+        }
+      );
+
       result.fills.push({
         ...summarizeFill(fill),
-        deliveryStatus: "ENGINE10_NOT_ACKNOWLEDGED",
-        httpStatus: delivery.httpStatus,
+        deliveryStatus:
+          "ENGINE10_NOT_ACKNOWLEDGED",
+        httpStatus:
+          delivery.httpStatus,
         engine10Error:
-          delivery?.body?.error || delivery?.body?.reason || null,
+          delivery?.body?.error ||
+          delivery?.body?.reason ||
+          null,
       });
     }
   }
 
   if (deliveryEnabled) {
-    for (const accountRun of accountRuns.values()) {
+    for (
+      const accountRun of
+      accountRuns.values()
+    ) {
       if (accountRun.failed) {
         result.watermarkHeld += 1;
         continue;
       }
 
-      const latest = latestFillForAccount(accountRun.candidates);
+      const latest =
+        latestFillForAccount(
+          accountRun.candidates
+        );
 
       updateEngine8RealFillAccountWatermark(
         accountRun.brokerAccountLabel,
@@ -594,13 +920,15 @@ export async function observeSchwabRealFills({
             accountRun.brokerAccountLabel,
           journalAccount:
             accountRun.journalAccount,
-          lastSuccessfulPollAt: endDate,
+          lastSuccessfulPollAt:
+            endDate,
           ...(latest
             ? {
                 lastBrokerFillTimeSeen:
                   latest.fill.fillTime,
                 lastBrokerTransactionIdSeen:
-                  latest.fill.brokerTransactionId,
+                  latest.fill
+                    .brokerTransactionId,
               }
             : {}),
         }
@@ -625,7 +953,8 @@ export async function observeSchwabRealFills({
               ? "REAL_FILL_RECOVERY_COMPLETE"
               : "REAL_FILL_OBSERVER_DELIVERY_COMPLETE"
             : "REAL_FILL_OBSERVER_DRY_RUN_COMPLETE",
-    evaluatedAt: nowIso(),
+    evaluatedAt:
+      nowIso(),
   };
 }
 
