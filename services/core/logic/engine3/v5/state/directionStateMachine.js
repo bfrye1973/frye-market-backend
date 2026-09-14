@@ -12,8 +12,12 @@
 // - Engine 3 owns WHAT PRICE IS DOING THERE.
 // - Initial canonical direction comes from resolved PRICE-ACTION CONTROL,
 //   not from a 1m/5m/10m timeframe label.
-// - BUYERS_CONTROL may establish/reinforce/reverse to LONG.
-// - SELLERS_CONTROL may establish/reinforce/reverse to SHORT.
+// - BUYERS_CONTROL may establish/reinforce LONG.
+// - SELLERS_CONTROL may establish/reinforce SHORT.
+// - Opposite local control does NOT automatically reverse canonical direction.
+// - Canonical reversal requires opposite resolved control PLUS structural displacement
+//   through the opposite negotiated-zone boundary, proving the prior control story
+//   was actually erased rather than merely counter-reacted.
 // - CONTESTED / ABSORPTION / NO_CONTROL do not manufacture a direction.
 // - 1m/5m/10m remain evidence/diagnostic views only for initial direction.
 // - Post-zone departure/travel cannot create direction from NEUTRAL.
@@ -98,6 +102,69 @@ function oppositeDirection(direction) {
   if (direction === "LONG") return "SHORT";
   if (direction === "SHORT") return "LONG";
   return "NEUTRAL";
+}
+
+function resolveCanonicalReversalEvidence({
+  previousDirection,
+  candidateDirection,
+  priceActionHandoff,
+  normalizedZoneInput,
+} = {}) {
+  const latestClose =
+    Number(priceActionHandoff?.latestClose);
+
+  const zoneLow =
+    Number(normalizedZoneInput?.zone?.low);
+
+  const zoneHigh =
+    Number(normalizedZoneInput?.zone?.high);
+
+  const dataAvailable =
+    Number.isFinite(latestClose) &&
+    Number.isFinite(zoneLow) &&
+    Number.isFinite(zoneHigh);
+
+  const oppositeControl =
+    isDirectional(previousDirection) &&
+    candidateDirection === oppositeDirection(previousDirection);
+
+  const displacedAboveZone =
+    dataAvailable &&
+    latestClose > zoneHigh;
+
+  const displacedBelowZone =
+    dataAvailable &&
+    latestClose < zoneLow;
+
+  const structuralDisplacementConfirmed =
+    candidateDirection === "LONG"
+      ? displacedAboveZone
+      : candidateDirection === "SHORT"
+      ? displacedBelowZone
+      : false;
+
+  return {
+    oppositeControl,
+    dataAvailable,
+    latestClose:
+      Number.isFinite(latestClose)
+        ? latestClose
+        : null,
+    zoneLow:
+      Number.isFinite(zoneLow)
+        ? zoneLow
+        : null,
+    zoneHigh:
+      Number.isFinite(zoneHigh)
+        ? zoneHigh
+        : null,
+    displacedAboveZone,
+    displacedBelowZone,
+    structuralDisplacementConfirmed,
+    qualified:
+      oppositeControl &&
+      structuralDisplacementConfirmed,
+  };
 }
 
 function buildBaseResult({
@@ -212,6 +279,14 @@ export function runDirectionStateMachine({
     priceActionEligible === true &&
     priceActionHandoff?.controlResolved === true &&
     isDirectional(candidateDirection);
+
+  const reversalEvidence =
+    resolveCanonicalReversalEvidence({
+      previousDirection,
+      candidateDirection,
+      priceActionHandoff,
+      normalizedZoneInput,
+    });
 
   const candidateIdentityChanged =
     previousCandidateId != null &&
@@ -509,28 +584,65 @@ export function runDirectionStateMachine({
       candidateDirection ===
         oppositeDirection(previousDirection)
     ) {
+      if (reversalEvidence.qualified === true) {
+        return {
+          ...base,
+
+          direction:
+            candidateDirection,
+
+          mode:
+            "PRICE_ACTION_CONTROL",
+
+          stateTransition:
+            `${previousDirection}_TO_${candidateDirection}`,
+
+          reversedNow: true,
+
+          canonicalSource:
+            "OPPOSITE_PRICE_ACTION_CONTROL_WITH_STRUCTURAL_DISPLACEMENT",
+
+          reversalEvidence,
+
+          reasonCodes: [
+            ...base.reasonCodes,
+            "ENGINE3_V5_OPPOSITE_CONTROL_REVERSAL_QUALIFIED",
+            "ENGINE3_V5_PRIOR_CONTROL_STORY_ERASED_BY_ZONE_DISPLACEMENT",
+            `ENGINE3_V5_CONTROL_${controlState}`,
+            `ENGINE3_V5_CANONICAL_DIRECTION_${candidateDirection}`,
+          ],
+        };
+      }
+
+      /*
+       * Opposite local control is a real response, but not yet a canonical
+       * reversal. Preserve the established direction until the opposite side
+       * actually displaces through the far negotiated-zone boundary.
+       */
       return {
         ...base,
 
         direction:
-          candidateDirection,
+          previousDirection,
 
         mode:
           "PRICE_ACTION_CONTROL",
 
         stateTransition:
-          `${previousDirection}_TO_${candidateDirection}`,
+          "NO_CHANGE",
 
-        reversedNow: true,
+        heldNow: true,
 
         canonicalSource:
-          "OPPOSITE_PRICE_ACTION_CONTROL",
+          "OPPOSITE_LOCAL_CONTROL_REVERSAL_NOT_QUALIFIED",
+
+        reversalEvidence,
 
         reasonCodes: [
           ...base.reasonCodes,
-          "ENGINE3_V5_PRICE_ACTION_CONTROL_REVERSED_CANONICAL_DIRECTION",
-          `ENGINE3_V5_CONTROL_${controlState}`,
-          `ENGINE3_V5_CANONICAL_DIRECTION_${candidateDirection}`,
+          "ENGINE3_V5_OPPOSITE_LOCAL_CONTROL_DETECTED",
+          "ENGINE3_V5_CANONICAL_REVERSAL_REQUIRES_STRUCTURAL_ZONE_DISPLACEMENT",
+          `ENGINE3_V5_CANONICAL_DIRECTION_${previousDirection}_PRESERVED`,
         ],
       };
     }
