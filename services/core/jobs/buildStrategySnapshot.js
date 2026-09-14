@@ -36,7 +36,6 @@ import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22W
 import { interpretWaveEnvironment } from "../logic/engine23/interpretation/interpretWaveEnvironment.js";
 import { buildTenMinuteLayer } from "../logic/marketLayers/buildTenMinuteLayer.js";
 import { buildEngine22LifecycleReaction } from "../logic/engine3/engine22LifecycleReaction.js";
-import { attachPaperScalpReactionToConfluence } from "../logic/engine3/paperScalpReaction.js";
 import { attachFastImbalanceReactionToConfluence } from "../logic/engine3/fastImbalanceReaction.js";
 import { attachCurrentLevelActionToConfluence } from "../logic/priceAction/currentLevelAction.js";
 import { deriveCandleCompletionTruth } from "../logic/engine3/candleCompletionTruth.js";
@@ -8827,48 +8826,41 @@ const engine3V5 =
       previousEngine3V5Canonical,
 
     shadowMode:
-      true,
+      false,
   });
 
 patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
   
-attachPaperScalpReactionToConfluence({
-  patchedConfluence,
-  engine22WaveStrategy,
-  engine26ReactionHandoff,
-  engine26StructuralContext,
-  paperShortResearchEnabled: isEsIntradayScalp,
+const engine3Strategy1Handoff =
+  buildEngine3Strategy1Handoff({
+    engine3V5,
 
-  previousCanonicalDirection:
-    previousEngine3CanonicalDirection,
+    engine26LocationCandidate,
+    engine26ReactionHandoff,
 
-  previousReactionConfirmed:
-    previousEngine3ReactionConfirmed,
+    observation1m:
+      engine3ReactionObservation1m,
 
-  previousEstablishedTripDirection:
-    previousEngine3EstablishedTripDirection,
+    validation5m:
+      engine3ReactionValidation5m,
 
-  previousEstablishedTripCandidateId:
-    previousEngine3EstablishedTripCandidateId,
+    confirmation10m:
+      engine3ReactionConfirmation10m,
+  });
 
-  tenMinutePriorCompletedClose:
-    strategy1TenMinutePriorCompletedClose,
+patchedConfluence.context.reaction.engine3Strategy1Handoff =
+  engine3Strategy1Handoff;
 
-  tenMinuteCompletedClose:
-    strategy1TenMinuteCompletedClose, 
-  
-  tenMinuteEma10:
-    strategy1TenMinuteEma10,
-});
-
+patchedConfluence.context.reaction.paperScalpReaction =
+  engine3Strategy1Handoff;
   const engine3Strategy1Readiness = buildStrategy1Readiness({
     engine26LocationCandidate,
     engine26ReactionHandoff,
     observation1m: engine3ReactionObservation1m,
     validation5m: engine3ReactionValidation5m,
     paperScalpReaction:
-      patchedConfluence?.context?.reaction?.paperScalpReaction || null,
+      engine3Strategy1Handoff,
   });
   patchedConfluence.context.reaction.engine3Strategy1Readiness =
     engine3Strategy1Readiness;
