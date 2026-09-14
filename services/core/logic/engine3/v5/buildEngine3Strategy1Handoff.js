@@ -540,9 +540,43 @@ export function buildEngine3Strategy1Handoff({
       confirmation10m,
 
     /*
-     * Existing Engine 4 consumes some of these candle fields.
+     * Existing Engine 4 candle-source compatibility contract.
+     *
+     * Source truth comes from the already-built 1m observation and 5m
+     * validation objects. These fields are transport only; they do not
+     * change Engine 3 canonical direction or held-signal behavior.
      */
+    sourceTimeframe:
+      observation1m?.sourceTimeframe ??
+      null,
+
+    reactionTimeframe:
+      observation1m?.sourceTimeframe ??
+      null,
+
+    candleSourceFresh:
+      observation1m?.stale === false &&
+      (
+        validation5m == null ||
+        validation5m?.stale === false
+      ),
+
+    sourceAgeMs:
+      observation1m?.sourceAgeMs ??
+      null,
+
+    stale:
+      observation1m?.stale === true,
+
+    staleReason:
+      observation1m?.staleReason ??
+      null,
+
     currentCandle:
+      observation1m?.currentCandle ??
+      null,
+
+    lastCandle:
       observation1m?.currentCandle ??
       null,
 
@@ -558,12 +592,27 @@ export function buildEngine3Strategy1Handoff({
       observation1m?.priorCandleStatus ??
       null,
 
+    candleClosed:
+      observation1m?.currentCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.currentCandleStatus === "FORMING"
+        ? false
+        : null,
+
+    priorCandleCompleted:
+      observation1m?.priorCandleStatus === "COMPLETED"
+        ? true
+        : observation1m?.priorCandleStatus === "FORMING"
+        ? false
+        : null,
+
     supportingBarTime:
       observation1m?.supportingBarTime ??
       null,
 
     evaluationTimeMs:
       observation1m?.evaluationTimeMs ??
+      observation1m?.observedAt ??
       null,
 
     currentPrice:
