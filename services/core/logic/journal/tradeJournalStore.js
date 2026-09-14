@@ -1851,12 +1851,30 @@ function normalizeRealBrokerFill(fill = {}) {
     toNumberOrNull(fill?.dollarsPerPoint) ??
     realFuturesDollarsPerPoint(instrumentRoot);
 
-  const brokerDedupeKey =
+  const brokerFillLegId =
+    normalizeId(
+      fill?.brokerFillLegId
+    );
+
+  const brokerFillIdentity =
     broker &&
     journalAccount &&
     brokerTransactionId
-      ? `${broker}|${journalAccount}|${brokerTransactionId}`
+      ? (
+          brokerFillLegId
+            ? `${broker}|${journalAccount}|${brokerTransactionId}|${brokerFillLegId}`
+            : `${broker}|${journalAccount}|${brokerTransactionId}`
+        )
       : null;
+
+  /*
+   * brokerDedupeKey is retained for backward compatibility with the
+   * existing Journal schema/readers. For leg-aware fills it becomes the
+   * leg-aware identity; for legacy fills it remains byte-for-byte the
+   * historical parent-transaction identity.
+   */
+  const brokerDedupeKey =
+    brokerFillIdentity;
 
   return {
     source,
@@ -1869,6 +1887,10 @@ function normalizeRealBrokerFill(fill = {}) {
 
     brokerTransactionId,
     brokerOrderId,
+
+    brokerFillLegId,
+    brokerFillIdentity,
+
     brokerDedupeKey,
 
     brokerStatus,
@@ -1942,6 +1964,10 @@ function validateRealBrokerFill(fill) {
 
   if (!fill.brokerDedupeKey) {
     errors.push("MISSING_BROKER_DEDUPE_KEY");
+  }
+
+  if (!fill.brokerFillIdentity) {
+    errors.push("MISSING_BROKER_FILL_IDENTITY");
   }
 
   if (fill.eventType !== "TRADE") {
@@ -2091,32 +2117,81 @@ function findMostRecentRealCampaign(trades, fill) {
 }
 
 function findRealFillDuplicate(trades, fill) {
-  for (const trade of trades) {
-    const events = Array.isArray(trade?.events)
-      ? trade.events
-      : [];
-
-    const event = events.find(
-      (row) =>
-        sameNonEmpty(
-          row?.brokerDedupeKey,
-          fill.brokerDedupeKey
-        ) ||
-        (
-          toUpper(row?.broker) === fill.broker &&
-          toUpper(row?.journalAccount) ===
-            fill.journalAccount &&
-          sameNonEmpty(
-            row?.brokerTransactionId,
-            fill.brokerTransactionId
-          )
-        )
+  const incomingLegId =
+    normalizeId(
+      fill?.brokerFillLegId
     );
 
-    if (event) {
+  for (const trade of trades) {
+    const events =
+      Array.isArray(
+        trade?.events
+      )
+        ? trade.events
+        : [];
+
+    for (const row of events) {
+      const sameParent =
+        toUpper(
+          row?.broker
+        ) === fill.broker &&
+        toUpper(
+          row?.journalAccount
+        ) ===
+          fill.journalAccount &&
+        sameNonEmpty(
+          row?.brokerTransactionId,
+          fill.brokerTransactionId
+        );
+
+      if (!sameParent) {
+        continue;
+      }
+
+      const existingLegId =
+        normalizeId(
+          row?.brokerFillLegId
+        );
+
+      /*
+       * LEG-AWARE incoming fill:
+       * - exact same leg => duplicate
+       * - historical parent-only event => treat parent as already consumed,
+       *   preserving backward compatibility and preventing double ingestion
+       *   of a historical fill that predates leg IDs
+       * - a different explicit leg under the same parent is NOT a duplicate
+       */
+      if (incomingLegId) {
+        if (
+          existingLegId &&
+          existingLegId ===
+            incomingLegId
+        ) {
+          return {
+            trade,
+            event: row,
+          };
+        }
+
+        if (!existingLegId) {
+          return {
+            trade,
+            event: row,
+          };
+        }
+
+        continue;
+      }
+
+      /*
+       * LEGACY incoming fill:
+       * parent transaction identity remains authoritative exactly as before.
+       * Any existing event under that parent makes the legacy replay a
+       * duplicate.
+       */
       return {
         trade,
-        event,
+        event: row,
       };
     }
   }
@@ -2194,6 +2269,7 @@ function consumeRealFifoLots({
   direction,
   dollarsPerPoint,
   closingBrokerTransactionId = null,
+  closingBrokerFillLegId = null,
   closingBrokerOrderId = null,
   closingFillTime = null,
   futuresContractCode = null,
@@ -2339,6 +2415,14 @@ function consumeRealFifoLots({
             lot?.brokerTransactionId
           ),
 
+        openingBrokerFillLegId:
+          normalizeId(
+            firstDefined(
+              lot?.brokerFillLegId,
+              lot?.openingBrokerFillLegId
+            )
+          ),
+
         openingFillTime:
           normalizeId(
             lot?.fillTime
@@ -2347,6 +2431,11 @@ function consumeRealFifoLots({
         closingBrokerTransactionId:
           normalizeId(
             closingBrokerTransactionId
+          ),
+
+        closingBrokerFillLegId:
+          normalizeId(
+            closingBrokerFillLegId
           ),
 
         closingBrokerOrderId:
@@ -2660,6 +2749,12 @@ function buildRealBrokerEvent({
     brokerOrderId:
       fill.brokerOrderId,
 
+    brokerFillLegId:
+      fill.brokerFillLegId,
+
+    brokerFillIdentity:
+      fill.brokerFillIdentity,
+
     brokerDedupeKey:
       fill.brokerDedupeKey,
 
@@ -2785,6 +2880,7 @@ function makeRealTradeId(fill) {
 function makeRealContractId({
   tradeId,
   openingBrokerTransactionId,
+  openingBrokerFillLegId = null,
   ordinal,
 }) {
   const safeTradeId =
@@ -2797,13 +2893,24 @@ function makeRealContractId({
     ) ||
     "UNKNOWN_OPENING";
 
+  const safeLegId =
+    normalizeId(
+      openingBrokerFillLegId
+    );
+
   const safeOrdinal =
     Number.isInteger(ordinal) &&
     ordinal > 0
       ? ordinal
       : 1;
 
-  return `${safeTradeId}|CTR|${safeOpeningId}|${safeOrdinal}`;
+  /*
+   * Legacy contractId format is preserved exactly when no leg ID exists.
+   * New leg-aware openings add the leg identity only for new contracts.
+   */
+  return safeLegId
+    ? `${safeTradeId}|CTR|${safeOpeningId}|LEG|${safeLegId}|${safeOrdinal}`
+    : `${safeTradeId}|CTR|${safeOpeningId}|${safeOrdinal}`;
 }
 
 function buildRealOpeningContracts({
@@ -2828,6 +2935,10 @@ function buildRealOpeningContracts({
           tradeId,
           openingBrokerTransactionId:
             fill.brokerTransactionId,
+
+          openingBrokerFillLegId:
+            fill.brokerFillLegId,
+
           ordinal,
         }),
 
@@ -2869,6 +2980,9 @@ function buildRealOpeningContracts({
       openingBrokerTransactionId:
         fill.brokerTransactionId,
 
+      openingBrokerFillLegId:
+        fill.brokerFillLegId,
+
       openingBrokerOrderId:
         fill.brokerOrderId,
 
@@ -2879,6 +2993,9 @@ function buildRealOpeningContracts({
         fill.fillPrice,
 
       closingBrokerTransactionId:
+        null,
+
+      closingBrokerFillLegId:
         null,
 
       closingBrokerOrderId:
@@ -3043,6 +3160,9 @@ function closeRealContractRegistry({
     contract.closingBrokerTransactionId =
       fill.brokerTransactionId;
 
+    contract.closingBrokerFillLegId =
+      fill.brokerFillLegId;
+
     contract.closingBrokerOrderId =
       fill.brokerOrderId;
 
@@ -3114,6 +3234,12 @@ function createRealCampaign({
         brokerTransactionId:
           fill.brokerTransactionId,
 
+        brokerFillLegId:
+          fill.brokerFillLegId,
+
+        brokerFillIdentity:
+          fill.brokerFillIdentity,
+
         brokerSymbol:
           fill.brokerSymbol,
 
@@ -3147,8 +3273,16 @@ function createRealCampaign({
       tradeId,
       brokerTransactionId:
         fill.brokerTransactionId,
+
+      brokerFillLegId:
+        fill.brokerFillLegId,
+
+      brokerFillIdentity:
+        fill.brokerFillIdentity,
+
       brokerOrderId:
         fill.brokerOrderId,
+
       brokerDedupeKey:
         fill.brokerDedupeKey,
       strategyId:
@@ -3242,6 +3376,12 @@ function createRealCampaign({
 
       brokerTransactionId:
         fill.brokerTransactionId,
+
+      brokerFillLegId:
+        fill.brokerFillLegId,
+
+      brokerFillIdentity:
+        fill.brokerFillIdentity,
 
       brokerOrderId:
         fill.brokerOrderId,
@@ -3624,6 +3764,10 @@ function applyRealClosingFill({
         fill.dollarsPerPoint,
       closingBrokerTransactionId:
         fill.brokerTransactionId,
+
+      closingBrokerFillLegId:
+        fill.brokerFillLegId,
+
       closingBrokerOrderId:
         fill.brokerOrderId,
       closingFillTime:
@@ -3765,6 +3909,12 @@ function applyRealClosingFill({
 
         brokerTransactionId:
           fill.brokerTransactionId,
+
+        brokerFillLegId:
+          fill.brokerFillLegId,
+
+        brokerFillIdentity:
+          fill.brokerFillIdentity,
 
         brokerOrderId:
           fill.brokerOrderId,
@@ -4579,6 +4729,13 @@ export async function ingestRealBrokerFill(
       ok: true,
       brokerTransactionId:
         fill.brokerTransactionId,
+
+      brokerFillLegId:
+        fill.brokerFillLegId,
+
+      brokerFillIdentity:
+        fill.brokerFillIdentity,
+
       tradeId:
         duplicate.trade.tradeId,
       created: false,
