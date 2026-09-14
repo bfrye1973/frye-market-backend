@@ -833,6 +833,9 @@ export function normalizeSchwabRealFutureTransaction({
         otherFees
     );
 
+  const contractIdentity =
+    parseFuturesContractIdentity(symbol);
+
   const normalized = {
     contractVersion:
       "engine8.schwabRealFill.v1",
@@ -858,6 +861,24 @@ export function normalizeSchwabRealFutureTransaction({
       "TRADE",
 
     symbol,
+
+    // Additive expiration metadata for legacy single-leg fills.
+    // IMPORTANT: the legacy brokerTransactionId and dedupeKey below
+    // remain unchanged, so historical single-leg dedupe behavior is
+    // preserved exactly.
+    brokerSymbol:
+      contractIdentity.brokerSymbol,
+    normalizedInstrumentRoot:
+      contractIdentity.normalizedInstrumentRoot,
+    futuresContractCode:
+      contractIdentity.futuresContractCode,
+    contractMonthCode:
+      contractIdentity.contractMonthCode,
+    contractMonth:
+      contractIdentity.contractMonth,
+    contractYear:
+      contractIdentity.contractYear,
+
     assetType:
       "FUTURE",
 
