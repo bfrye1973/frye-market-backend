@@ -147,6 +147,14 @@ export function buildPriceActionControl({
     controlState === "BUYERS_CONTROL" ||
     controlState === "SELLERS_CONTROL";
 
+  const latestBar =
+    evidence?.normalized?.bars?.at(-1) ||
+    null;
+
+  const latestZoneRelation =
+    evidence?.zoneRelation?.latestRelation ||
+    null;
+
   return {
     ok: true,
     engine: ENGINE,
@@ -224,6 +232,15 @@ export function buildPriceActionControl({
 
     sequenceBias:
       evidence?.sequenceMomentum?.evidenceBias ?? null,
+
+    latestClose:
+      latestBar?.close ?? null,
+
+    latestZoneCloseRelation:
+      latestZoneRelation?.priceRelation?.close ?? null,
+
+    latestZonePrimaryRelation:
+      latestZoneRelation?.primaryRelation ?? null,
 
     canonicalDirection: null,
     canonicalDirectionPublisher: false,
