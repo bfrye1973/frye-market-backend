@@ -32,7 +32,7 @@ import path from "node:path";
 
 const DEFAULT_DIR =
   process.env.ENGINE3_V5_STATE_DIR ||
-  "/var/data/engine3";
+  "/opt/render/project/src/services/core/data/engine3";
 
 const DEFAULT_FILE =
   process.env.ENGINE3_V5_STATE_FILE ||
