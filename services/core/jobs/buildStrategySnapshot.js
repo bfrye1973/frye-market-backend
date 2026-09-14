@@ -101,6 +101,10 @@ import {
   getEngine8DuplicateState,
 } from "../logic/trading/engine8DuplicateState.js";
 import { buildStrategyTimeline } from "../logic/engine27/timeline/buildStrategyTimeline.js";
+import {
+  loadEngine3V5CanonicalState,
+  saveEngine3V5CanonicalState,
+} from "../logic/engine3/v5/state/engine3CanonicalStateStore.js";
 
 
 /* -----------------------------
@@ -8177,18 +8181,18 @@ const previousEngine3CanonicalDirection =
       "NEUTRAL"
     : null;
 
+const engine3PersistentState =
+  isEsIntradayScalp
+    ? loadEngine3V5CanonicalState({
+        symbol,
+        strategyId: s.strategyId,
+        laneId: "minute",
+      })
+    : null;
+
 const previousEngine3V5Canonical =
   isEsIntradayScalp
-    ? previousSnapshot
-        ?.strategies
-        ?.[s.strategyId]
-        ?.confluence
-        ?.context
-        ?.reaction
-        ?.engine3V5
-        ?.canonical
-        ?.canonical ||
-      {
+    ? engine3PersistentState?.canonical || {
         direction: "NEUTRAL",
         candidateId: null,
       }
@@ -8831,6 +8835,17 @@ const engine3V5 =
 
 patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
+
+if (isEsIntradayScalp) {
+  saveEngine3V5CanonicalState({
+    canonical:
+      engine3V5?.canonical?.canonical || null,
+
+    symbol,
+    strategyId: s.strategyId,
+    laneId: "minute",
+  });
+}
   
 const engine3Strategy1Handoff =
   buildEngine3Strategy1Handoff({
