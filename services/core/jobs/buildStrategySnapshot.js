@@ -47,6 +47,7 @@ import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidat
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
+import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
