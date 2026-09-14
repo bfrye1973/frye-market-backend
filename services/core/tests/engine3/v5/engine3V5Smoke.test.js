@@ -533,6 +533,117 @@ function pass(n, label) {
   pass(11, "travel latch is direction-specific and cannot transfer SHORT -> LONG");
 }
 
+
+// 12. Opposite BUYERS_CONTROL inside the zone is a response, not a canonical reversal.
+{
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: {
+      eligible: true,
+      canonicalControlAuthority: true,
+      sourceResolutionAuthority: false,
+      controlResolved: true,
+      controlState: "BUYERS_CONTROL",
+      controlConfidence: "GOOD",
+      quality: "GOOD",
+      latestClose: 105,
+      latestZoneCloseRelation: "INSIDE_ZONE",
+    },
+    previousCanonical: {
+      direction: "SHORT",
+      candidateId: "TEST_CANDIDATE_1",
+    },
+  });
+
+  assert.equal(state.direction, "SHORT");
+  assert.equal(state.reversedNow, false);
+  assert.equal(
+    state.canonicalSource,
+    "OPPOSITE_LOCAL_CONTROL_REVERSAL_NOT_QUALIFIED"
+  );
+  pass(12, "opposite buyer response inside zone does not flip established SHORT");
+}
+
+// 13. BUYERS_CONTROL that displaces above the far zone boundary may reverse SHORT -> LONG.
+{
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: {
+      eligible: true,
+      canonicalControlAuthority: true,
+      sourceResolutionAuthority: false,
+      controlResolved: true,
+      controlState: "BUYERS_CONTROL",
+      controlConfidence: "STRONG",
+      quality: "STRONG",
+      latestClose: 111,
+      latestZoneCloseRelation: "ABOVE_ZONE",
+    },
+    previousCanonical: {
+      direction: "SHORT",
+      candidateId: "TEST_CANDIDATE_1",
+    },
+  });
+
+  assert.equal(state.direction, "LONG");
+  assert.equal(state.reversedNow, true);
+  assert.equal(state.reversalEvidence.structuralDisplacementConfirmed, true);
+  pass(13, "buyer control + displacement above zone reverses SHORT -> LONG");
+}
+
+// 14. SELLERS_CONTROL inside the zone is not enough to reverse established LONG.
+{
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: {
+      eligible: true,
+      canonicalControlAuthority: true,
+      sourceResolutionAuthority: false,
+      controlResolved: true,
+      controlState: "SELLERS_CONTROL",
+      controlConfidence: "GOOD",
+      quality: "GOOD",
+      latestClose: 104,
+      latestZoneCloseRelation: "INSIDE_ZONE",
+    },
+    previousCanonical: {
+      direction: "LONG",
+      candidateId: "TEST_CANDIDATE_1",
+    },
+  });
+
+  assert.equal(state.direction, "LONG");
+  assert.equal(state.reversedNow, false);
+  pass(14, "opposite seller response inside zone does not flip established LONG");
+}
+
+// 15. SELLERS_CONTROL that displaces below the far zone boundary may reverse LONG -> SHORT.
+{
+  const state = runDirectionStateMachine({
+    normalizedZoneInput: zoneInput,
+    priceActionHandoff: {
+      eligible: true,
+      canonicalControlAuthority: true,
+      sourceResolutionAuthority: false,
+      controlResolved: true,
+      controlState: "SELLERS_CONTROL",
+      controlConfidence: "GOOD",
+      quality: "GOOD",
+      latestClose: 99,
+      latestZoneCloseRelation: "BELOW_ZONE",
+    },
+    previousCanonical: {
+      direction: "LONG",
+      candidateId: "TEST_CANDIDATE_1",
+    },
+  });
+
+  assert.equal(state.direction, "SHORT");
+  assert.equal(state.reversedNow, true);
+  assert.equal(state.reversalEvidence.structuralDisplacementConfirmed, true);
+  pass(15, "seller control + displacement below zone reverses LONG -> SHORT");
+}
+
 console.log("");
-console.log("ENGINE 3 V5 PRICE-ACTION + TRAVEL SMOKE TEST: 11/11 PASSED");
+console.log("ENGINE 3 V5 PRICE-ACTION + TRAVEL + REVERSAL SMOKE TEST: 15/15 PASSED");
 console.log("No permission created. No execution.");
