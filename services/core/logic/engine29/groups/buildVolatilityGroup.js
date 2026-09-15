@@ -4,6 +4,7 @@ import { ENGINE29_GROUP_IDS, ENGINE29_GROUP_STATES } from "../constants.js";
 import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
 import {
   groupBase,
+  timeframeLabel,
   isBreakingOrWorse,
   isConfirmedBreak,
   isRecovering,
@@ -47,7 +48,7 @@ function buildOne(symbols, timeframeKey) {
 
   return groupBase({
     group: ENGINE29_GROUP_IDS.VOLATILITY,
-    timeframe: timeframeKey === "tactical" ? "1H" : "1W",
+    timeframe: timeframeLabel(timeframeKey),
     state,
     members,
     reasonCodes,
@@ -63,5 +64,6 @@ export function buildVolatilityGroup(symbols = {}) {
   return {
     structural: buildOne(symbols, "structural"),
     tactical: buildOne(symbols, "tactical"),
+    fastTactical: buildOne(symbols, "fastTactical"),
   };
 }
