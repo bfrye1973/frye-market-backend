@@ -5,7 +5,8 @@ export const ENGINE29_VERSION = "engine29.crossMarketStress.v1";
 export const ENGINE29_TIMEFRAMES = Object.freeze({
   STRUCTURAL: "1W",
   TACTICAL: "1H",
-  FUTURE_FAST_TACTICAL: "30m",
+  FAST_TACTICAL: "30m",
+  FUTURE_FAST_TACTICAL: "30m", // legacy alias
 });
 
 export const ENGINE29_OVERALL_STATES = Object.freeze({
@@ -92,6 +93,7 @@ export const ENGINE29_GROUP_ORDER = Object.freeze([
 export const ENGINE29_ARCHITECTURE_RULES = Object.freeze({
   structuralTimeframe: ENGINE29_TIMEFRAMES.STRUCTURAL,
   tacticalTimeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+  fastTacticalTimeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
   futureFastTacticalTimeframe: ENGINE29_TIMEFRAMES.FUTURE_FAST_TACTICAL,
   tacticalCannotOverwriteStructural: true,
   fastTacticalCannotOverwriteTactical: true,
