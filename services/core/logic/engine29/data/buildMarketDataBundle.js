@@ -214,7 +214,7 @@ export async function buildEngine29MarketDataBundle({
   polygonApiKey = process.env.POLYGON_API_KEY,
   fredApiKey = process.env.FRED_API_KEY,
   now = Date.now(),
-  structuralLookbackDays = 1400,
+  structuralLookbackDays = 2200,
   tacticalLookbackDays = 45,
   includeOptionalSymbols = true,
   includeTactical = true,
