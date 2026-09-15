@@ -1,6 +1,6 @@
 {
   "symbol": "ES",
-  "updatedAt": "2026-09-10 06:25",
+  "updatedAt": "2026-09-14 16:45",
   "schema": "active-wave-state-es@v7-minute-w4-expanded-flat-internal-c",
   "activeDegreeKeys": [
     "primary",
@@ -435,8 +435,8 @@
       "activeWave": "C",
       "stage": "MINUTE_C_DOWN_ACTIVE_AFTER_B_UP_COMPLETE",
       "currentRead": "MINUTE_C_DOWN_ACTIVE_FROM_B_HIGH_7760",
-      "headline": "Minute C-down active after B-up completed at 7760.00",
-      "action": "WATCH_MINUTE_C_DOWN_TARGETS_FROM_7760",
+      "headline": "Minute C-down active after B-up completed at 7760.00 \u2014 subminute ABC timing active inside C",
+      "action": "WATCH_PARENT_MINUTE_C_DOWN_TARGETS_AND_SUBMINUTE_C_DOWN_TIMING_BELOW_7680",
       "marks": {
         "W1": {
           "low": {
@@ -657,31 +657,31 @@
               },
               "displayLevels": [
                 {
-                  "label": "C 1.000",
+                  "label": "Minute C 1.000",
                   "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.272",
+                  "label": "Minute C 1.272",
                   "key": "cc1272",
                   "price": 7579.5,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.618",
+                  "label": "Minute C 1.618",
                   "key": "cc1618",
                   "price": 7530.25,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.000",
+                  "label": "Minute C 2.000",
                   "key": "cc200",
                   "price": 7476.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.618",
+                  "label": "Minute C 2.618",
                   "key": "cc2618",
                   "price": 7388.25,
                   "status": "WATCH"
@@ -731,31 +731,31 @@
               },
               "displayLevels": [
                 {
-                  "label": "C 1.000",
+                  "label": "Minute C 1.000",
                   "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.272",
+                  "label": "Minute C 1.272",
                   "key": "cc1272",
                   "price": 7579.5,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.618",
+                  "label": "Minute C 1.618",
                   "key": "cc1618",
                   "price": 7530.25,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.000",
+                  "label": "Minute C 2.000",
                   "key": "cc200",
                   "price": 7476.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.618",
+                  "label": "Minute C 2.618",
                   "key": "cc2618",
                   "price": 7388.25,
                   "status": "WATCH"
@@ -805,7 +805,205 @@
             "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
             "NO_EXECUTION",
             "NO_PERMISSION_CREATED"
-          ]
+          ],
+          "subminuteABC": {
+            "active": true,
+            "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "parentDegree": "minute",
+            "parentWave": "C",
+            "parentLeg": "Minute C-down",
+            "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+            "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+            "direction": "DOWN",
+            "currentInternalWave": "Subminute-C",
+            "previousInternalWave": "Subminute-B",
+            "nextExpectedInternalWave": null,
+            "invalidationLevel": 7680.0,
+            "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+            "subminuteA": {
+              "state": "COMPLETED",
+              "direction": "DOWN",
+              "high": 7762.0,
+              "highTime": "2026-09-04 05:00",
+              "low": 7586.0,
+              "lowTime": "2026-09-10 07:00",
+              "status": "COMPLETED"
+            },
+            "subminuteB": {
+              "state": "COMPLETED_CANDIDATE",
+              "direction": "UP",
+              "low": 7592.0,
+              "lowTime": "2026-09-10 11:00",
+              "high": 7680.0,
+              "highTime": "2026-09-11 10:00",
+              "status": "COMPLETED_CANDIDATE"
+            },
+            "subminuteC": {
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7680.0,
+              "startTime": "2026-09-11 10:00",
+              "projectionPending": false,
+              "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+              "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+            },
+            "parentMinuteCTargets": {
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
+            },
+            "parentMinuteCDisplayLevels": [
+              {
+                "label": "Minute C 1.000",
+                "key": "cc100",
+                "price": 7618.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.272",
+                "key": "cc1272",
+                "price": 7579.5,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.618",
+                "key": "cc1618",
+                "price": 7530.25,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.000",
+                "key": "cc200",
+                "price": 7476.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.618",
+                "key": "cc2618",
+                "price": 7388.25,
+                "status": "WATCH"
+              }
+            ],
+            "notes": [
+              "Subminute ABC is timing/path only inside active parent Minute C-down.",
+              "Do not publish the oversized independent subminute C extension ladder.",
+              "Minute C-down owns the actual target ladder."
+            ],
+            "noExecution": true,
+            "noPermissionCreated": true,
+            "watchOnly": true,
+            "reasonCodes": [
+              "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+              "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+              "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+              "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+              "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+              "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+              "NO_EXECUTION",
+              "NO_PERMISSION_CREATED"
+            ]
+          },
+          "subminuteStructure": {
+            "active": true,
+            "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "parentDegree": "minute",
+            "parentWave": "C",
+            "parentLeg": "Minute C-down",
+            "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+            "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+            "direction": "DOWN",
+            "currentInternalWave": "Subminute-C",
+            "previousInternalWave": "Subminute-B",
+            "nextExpectedInternalWave": null,
+            "invalidationLevel": 7680.0,
+            "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+            "subminuteA": {
+              "state": "COMPLETED",
+              "direction": "DOWN",
+              "high": 7762.0,
+              "highTime": "2026-09-04 05:00",
+              "low": 7586.0,
+              "lowTime": "2026-09-10 07:00",
+              "status": "COMPLETED"
+            },
+            "subminuteB": {
+              "state": "COMPLETED_CANDIDATE",
+              "direction": "UP",
+              "low": 7592.0,
+              "lowTime": "2026-09-10 11:00",
+              "high": 7680.0,
+              "highTime": "2026-09-11 10:00",
+              "status": "COMPLETED_CANDIDATE"
+            },
+            "subminuteC": {
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7680.0,
+              "startTime": "2026-09-11 10:00",
+              "projectionPending": false,
+              "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+              "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+            },
+            "parentMinuteCTargets": {
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
+            },
+            "parentMinuteCDisplayLevels": [
+              {
+                "label": "Minute C 1.000",
+                "key": "cc100",
+                "price": 7618.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.272",
+                "key": "cc1272",
+                "price": 7579.5,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.618",
+                "key": "cc1618",
+                "price": 7530.25,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.000",
+                "key": "cc200",
+                "price": 7476.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.618",
+                "key": "cc2618",
+                "price": 7388.25,
+                "status": "WATCH"
+              }
+            ],
+            "notes": [
+              "Subminute ABC is timing/path only inside active parent Minute C-down.",
+              "Do not publish the oversized independent subminute C extension ladder.",
+              "Minute C-down owns the actual target ladder."
+            ],
+            "noExecution": true,
+            "noPermissionCreated": true,
+            "watchOnly": true,
+            "reasonCodes": [
+              "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+              "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+              "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+              "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+              "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+              "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+              "NO_EXECUTION",
+              "NO_PERMISSION_CREATED"
+            ]
+          }
         }
       },
       "decisionWatch": {
@@ -976,31 +1174,31 @@
               },
               "displayLevels": [
                 {
-                  "label": "C 1.000",
+                  "label": "Minute C 1.000",
                   "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.272",
+                  "label": "Minute C 1.272",
                   "key": "cc1272",
                   "price": 7579.5,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.618",
+                  "label": "Minute C 1.618",
                   "key": "cc1618",
                   "price": 7530.25,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.000",
+                  "label": "Minute C 2.000",
                   "key": "cc200",
                   "price": 7476.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.618",
+                  "label": "Minute C 2.618",
                   "key": "cc2618",
                   "price": 7388.25,
                   "status": "WATCH"
@@ -1050,31 +1248,31 @@
               },
               "displayLevels": [
                 {
-                  "label": "C 1.000",
+                  "label": "Minute C 1.000",
                   "key": "cc100",
                   "price": 7618.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.272",
+                  "label": "Minute C 1.272",
                   "key": "cc1272",
                   "price": 7579.5,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 1.618",
+                  "label": "Minute C 1.618",
                   "key": "cc1618",
                   "price": 7530.25,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.000",
+                  "label": "Minute C 2.000",
                   "key": "cc200",
                   "price": 7476.0,
                   "status": "WATCH"
                 },
                 {
-                  "label": "C 2.618",
+                  "label": "Minute C 2.618",
                   "key": "cc2618",
                   "price": 7388.25,
                   "status": "WATCH"
@@ -1124,7 +1322,205 @@
             "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
             "NO_EXECUTION",
             "NO_PERMISSION_CREATED"
-          ]
+          ],
+          "subminuteABC": {
+            "active": true,
+            "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "parentDegree": "minute",
+            "parentWave": "C",
+            "parentLeg": "Minute C-down",
+            "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+            "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+            "direction": "DOWN",
+            "currentInternalWave": "Subminute-C",
+            "previousInternalWave": "Subminute-B",
+            "nextExpectedInternalWave": null,
+            "invalidationLevel": 7680.0,
+            "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+            "subminuteA": {
+              "state": "COMPLETED",
+              "direction": "DOWN",
+              "high": 7762.0,
+              "highTime": "2026-09-04 05:00",
+              "low": 7586.0,
+              "lowTime": "2026-09-10 07:00",
+              "status": "COMPLETED"
+            },
+            "subminuteB": {
+              "state": "COMPLETED_CANDIDATE",
+              "direction": "UP",
+              "low": 7592.0,
+              "lowTime": "2026-09-10 11:00",
+              "high": 7680.0,
+              "highTime": "2026-09-11 10:00",
+              "status": "COMPLETED_CANDIDATE"
+            },
+            "subminuteC": {
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7680.0,
+              "startTime": "2026-09-11 10:00",
+              "projectionPending": false,
+              "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+              "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+            },
+            "parentMinuteCTargets": {
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
+            },
+            "parentMinuteCDisplayLevels": [
+              {
+                "label": "Minute C 1.000",
+                "key": "cc100",
+                "price": 7618.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.272",
+                "key": "cc1272",
+                "price": 7579.5,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.618",
+                "key": "cc1618",
+                "price": 7530.25,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.000",
+                "key": "cc200",
+                "price": 7476.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.618",
+                "key": "cc2618",
+                "price": 7388.25,
+                "status": "WATCH"
+              }
+            ],
+            "notes": [
+              "Subminute ABC is timing/path only inside active parent Minute C-down.",
+              "Do not publish the oversized independent subminute C extension ladder.",
+              "Minute C-down owns the actual target ladder."
+            ],
+            "noExecution": true,
+            "noPermissionCreated": true,
+            "watchOnly": true,
+            "reasonCodes": [
+              "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+              "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+              "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+              "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+              "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+              "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+              "NO_EXECUTION",
+              "NO_PERMISSION_CREATED"
+            ]
+          },
+          "subminuteStructure": {
+            "active": true,
+            "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "parentDegree": "minute",
+            "parentWave": "C",
+            "parentLeg": "Minute C-down",
+            "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+            "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+            "direction": "DOWN",
+            "currentInternalWave": "Subminute-C",
+            "previousInternalWave": "Subminute-B",
+            "nextExpectedInternalWave": null,
+            "invalidationLevel": 7680.0,
+            "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+            "subminuteA": {
+              "state": "COMPLETED",
+              "direction": "DOWN",
+              "high": 7762.0,
+              "highTime": "2026-09-04 05:00",
+              "low": 7586.0,
+              "lowTime": "2026-09-10 07:00",
+              "status": "COMPLETED"
+            },
+            "subminuteB": {
+              "state": "COMPLETED_CANDIDATE",
+              "direction": "UP",
+              "low": 7592.0,
+              "lowTime": "2026-09-10 11:00",
+              "high": 7680.0,
+              "highTime": "2026-09-11 10:00",
+              "status": "COMPLETED_CANDIDATE"
+            },
+            "subminuteC": {
+              "state": "ACTIVE",
+              "direction": "DOWN",
+              "start": 7680.0,
+              "startTime": "2026-09-11 10:00",
+              "projectionPending": false,
+              "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+              "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+            },
+            "parentMinuteCTargets": {
+              "cc100": 7618.0,
+              "cc1272": 7579.5,
+              "cc1618": 7530.25,
+              "cc200": 7476.0,
+              "cc2618": 7388.25
+            },
+            "parentMinuteCDisplayLevels": [
+              {
+                "label": "Minute C 1.000",
+                "key": "cc100",
+                "price": 7618.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.272",
+                "key": "cc1272",
+                "price": 7579.5,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 1.618",
+                "key": "cc1618",
+                "price": 7530.25,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.000",
+                "key": "cc200",
+                "price": 7476.0,
+                "status": "WATCH"
+              },
+              {
+                "label": "Minute C 2.618",
+                "key": "cc2618",
+                "price": 7388.25,
+                "status": "WATCH"
+              }
+            ],
+            "notes": [
+              "Subminute ABC is timing/path only inside active parent Minute C-down.",
+              "Do not publish the oversized independent subminute C extension ladder.",
+              "Minute C-down owns the actual target ladder."
+            ],
+            "noExecution": true,
+            "noPermissionCreated": true,
+            "watchOnly": true,
+            "reasonCodes": [
+              "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+              "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+              "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+              "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+              "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+              "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+              "NO_EXECUTION",
+              "NO_PERMISSION_CREATED"
+            ]
+          }
         }
       },
       "noExecution": true,
@@ -1234,31 +1630,31 @@
             },
             "displayLevels": [
               {
-                "label": "C 1.000",
+                "label": "Minute C 1.000",
                 "key": "cc100",
                 "price": 7618.0,
                 "status": "WATCH"
               },
               {
-                "label": "C 1.272",
+                "label": "Minute C 1.272",
                 "key": "cc1272",
                 "price": 7579.5,
                 "status": "WATCH"
               },
               {
-                "label": "C 1.618",
+                "label": "Minute C 1.618",
                 "key": "cc1618",
                 "price": 7530.25,
                 "status": "WATCH"
               },
               {
-                "label": "C 2.000",
+                "label": "Minute C 2.000",
                 "key": "cc200",
                 "price": 7476.0,
                 "status": "WATCH"
               },
               {
-                "label": "C 2.618",
+                "label": "Minute C 2.618",
                 "key": "cc2618",
                 "price": 7388.25,
                 "status": "WATCH"
@@ -1308,31 +1704,31 @@
             },
             "displayLevels": [
               {
-                "label": "C 1.000",
+                "label": "Minute C 1.000",
                 "key": "cc100",
                 "price": 7618.0,
                 "status": "WATCH"
               },
               {
-                "label": "C 1.272",
+                "label": "Minute C 1.272",
                 "key": "cc1272",
                 "price": 7579.5,
                 "status": "WATCH"
               },
               {
-                "label": "C 1.618",
+                "label": "Minute C 1.618",
                 "key": "cc1618",
                 "price": 7530.25,
                 "status": "WATCH"
               },
               {
-                "label": "C 2.000",
+                "label": "Minute C 2.000",
                 "key": "cc200",
                 "price": 7476.0,
                 "status": "WATCH"
               },
               {
-                "label": "C 2.618",
+                "label": "Minute C 2.618",
                 "key": "cc2618",
                 "price": 7388.25,
                 "status": "WATCH"
@@ -1382,7 +1778,205 @@
           "CURRENT_MINUTE_C_INVALIDATION_ABOVE_7760",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
-        ]
+        ],
+        "subminuteABC": {
+          "active": true,
+          "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "parentDegree": "minute",
+          "parentWave": "C",
+          "parentLeg": "Minute C-down",
+          "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+          "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+          "direction": "DOWN",
+          "currentInternalWave": "Subminute-C",
+          "previousInternalWave": "Subminute-B",
+          "nextExpectedInternalWave": null,
+          "invalidationLevel": 7680.0,
+          "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+          "subminuteA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "high": 7762.0,
+            "highTime": "2026-09-04 05:00",
+            "low": 7586.0,
+            "lowTime": "2026-09-10 07:00",
+            "status": "COMPLETED"
+          },
+          "subminuteB": {
+            "state": "COMPLETED_CANDIDATE",
+            "direction": "UP",
+            "low": 7592.0,
+            "lowTime": "2026-09-10 11:00",
+            "high": 7680.0,
+            "highTime": "2026-09-11 10:00",
+            "status": "COMPLETED_CANDIDATE"
+          },
+          "subminuteC": {
+            "state": "ACTIVE",
+            "direction": "DOWN",
+            "start": 7680.0,
+            "startTime": "2026-09-11 10:00",
+            "projectionPending": false,
+            "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+            "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+          },
+          "parentMinuteCTargets": {
+            "cc100": 7618.0,
+            "cc1272": 7579.5,
+            "cc1618": 7530.25,
+            "cc200": 7476.0,
+            "cc2618": 7388.25
+          },
+          "parentMinuteCDisplayLevels": [
+            {
+              "label": "Minute C 1.000",
+              "key": "cc100",
+              "price": 7618.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.272",
+              "key": "cc1272",
+              "price": 7579.5,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.618",
+              "key": "cc1618",
+              "price": 7530.25,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.000",
+              "key": "cc200",
+              "price": 7476.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.618",
+              "key": "cc2618",
+              "price": 7388.25,
+              "status": "WATCH"
+            }
+          ],
+          "notes": [
+            "Subminute ABC is timing/path only inside active parent Minute C-down.",
+            "Do not publish the oversized independent subminute C extension ladder.",
+            "Minute C-down owns the actual target ladder."
+          ],
+          "noExecution": true,
+          "noPermissionCreated": true,
+          "watchOnly": true,
+          "reasonCodes": [
+            "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+            "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+            "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+            "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+            "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED"
+          ]
+        },
+        "subminuteStructure": {
+          "active": true,
+          "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "parentDegree": "minute",
+          "parentWave": "C",
+          "parentLeg": "Minute C-down",
+          "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+          "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+          "direction": "DOWN",
+          "currentInternalWave": "Subminute-C",
+          "previousInternalWave": "Subminute-B",
+          "nextExpectedInternalWave": null,
+          "invalidationLevel": 7680.0,
+          "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+          "subminuteA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "high": 7762.0,
+            "highTime": "2026-09-04 05:00",
+            "low": 7586.0,
+            "lowTime": "2026-09-10 07:00",
+            "status": "COMPLETED"
+          },
+          "subminuteB": {
+            "state": "COMPLETED_CANDIDATE",
+            "direction": "UP",
+            "low": 7592.0,
+            "lowTime": "2026-09-10 11:00",
+            "high": 7680.0,
+            "highTime": "2026-09-11 10:00",
+            "status": "COMPLETED_CANDIDATE"
+          },
+          "subminuteC": {
+            "state": "ACTIVE",
+            "direction": "DOWN",
+            "start": 7680.0,
+            "startTime": "2026-09-11 10:00",
+            "projectionPending": false,
+            "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+            "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+          },
+          "parentMinuteCTargets": {
+            "cc100": 7618.0,
+            "cc1272": 7579.5,
+            "cc1618": 7530.25,
+            "cc200": 7476.0,
+            "cc2618": 7388.25
+          },
+          "parentMinuteCDisplayLevels": [
+            {
+              "label": "Minute C 1.000",
+              "key": "cc100",
+              "price": 7618.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.272",
+              "key": "cc1272",
+              "price": 7579.5,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.618",
+              "key": "cc1618",
+              "price": 7530.25,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.000",
+              "key": "cc200",
+              "price": 7476.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.618",
+              "key": "cc2618",
+              "price": 7388.25,
+              "status": "WATCH"
+            }
+          ],
+          "notes": [
+            "Subminute ABC is timing/path only inside active parent Minute C-down.",
+            "Do not publish the oversized independent subminute C extension ladder.",
+            "Minute C-down owns the actual target ladder."
+          ],
+          "noExecution": true,
+          "noPermissionCreated": true,
+          "watchOnly": true,
+          "reasonCodes": [
+            "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+            "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+            "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+            "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+            "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED"
+          ]
+        }
       }
     },
     "subminute": {
@@ -1391,11 +1985,11 @@
       "active": true,
       "parentDegree": "minute",
       "parentWave": "C",
-      "activeWave": null,
-      "stage": "MINUTE_C_DOWN_ACTIVE_SUBMINUTE_CONTEXT",
-      "currentRead": "SUBMINUTE_CONTEXT_INSIDE_ACTIVE_MINUTE_C_DOWN",
-      "headline": "Subminute context inside active Minute C-down",
-      "action": "USE_MINUTE_C_DOWN_MAP_FOR_CONTEXT_DO_NOT_FORCE_SUBMINUTE_COUNT",
+      "activeWave": "C",
+      "stage": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+      "currentRead": "SUBMINUTE_ABC_INSIDE_ACTIVE_MINUTE_C_DOWN",
+      "headline": "Subminute ABC timing inside active Minute C-down",
+      "action": "WATCH_SUBMINUTE_C_DOWN_BELOW_7680_USING_PARENT_MINUTE_C_TARGETS",
       "marks": {
         "W1": null,
         "W2": null,
@@ -1409,47 +2003,196 @@
         "E": null
       },
       "targetModel": {
-        "active": false,
-        "source": "engine22.wave.targets.v1",
+        "active": true,
+        "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_TIMING_ONLY",
         "generated": false,
-        "modelType": "UNRESOLVED_SUBMINUTE_STRUCTURE_USE_MINUTE_W4_C_DOWN_MAP",
-        "reasonCodes": [
-          "SUBMINUTE_STRUCTURE_UNRESOLVED_INSIDE_MINUTE_W4_C_DOWN_WATCH",
-          "USE_MINUTE_W4_C_DOWN_TARGET_MODEL_FOR_CONTEXT",
-          "NO_EXECUTION",
-          "NO_PERMISSION_CREATED"
+        "modelType": "SUBMINUTE_ABC_TIMING_INSIDE_PARENT_MINUTE_C",
+        "summary": "Subminute ABC is active inside the parent Minute C-down. Subminute C starts from 7680.00, but it uses the parent Minute C target ladder instead of an independent deep extension ladder.",
+        "subminuteCStart": 7680.0,
+        "subminuteCStartTime": "2026-09-11 10:00",
+        "invalidationLevel": 7680.0,
+        "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+        "parentMinuteCTargets": {
+          "cc100": 7618.0,
+          "cc1272": 7579.5,
+          "cc1618": 7530.25,
+          "cc200": 7476.0,
+          "cc2618": 7388.25
+        },
+        "displayLevels": [
+          {
+            "label": "Minute C 1.000",
+            "key": "cc100",
+            "price": 7618.0,
+            "status": "WATCH"
+          },
+          {
+            "label": "Minute C 1.272",
+            "key": "cc1272",
+            "price": 7579.5,
+            "status": "WATCH"
+          },
+          {
+            "label": "Minute C 1.618",
+            "key": "cc1618",
+            "price": 7530.25,
+            "status": "WATCH"
+          },
+          {
+            "label": "Minute C 2.000",
+            "key": "cc200",
+            "price": 7476.0,
+            "status": "WATCH"
+          },
+          {
+            "label": "Minute C 2.618",
+            "key": "cc2618",
+            "price": 7388.25,
+            "status": "WATCH"
+          }
         ],
         "noExecution": true,
         "noPermissionCreated": true,
-        "watchOnly": true
+        "watchOnly": true,
+        "reasonCodes": [
+          "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+          "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+          "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+          "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+          "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+          "NO_EXECUTION",
+          "NO_PERMISSION_CREATED"
+        ]
       },
       "internalStructure": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
+        "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
         "parentDegree": "minute",
         "parentWave": "C",
-        "previousInternalWave": null,
-        "currentInternalWave": "C-down",
+        "previousInternalWave": "Subminute-B",
+        "currentInternalWave": "Subminute-C",
         "nextExpectedInternalWave": null,
         "internalLegDirection": "DOWN",
         "parentWaveDirection": "DOWN",
-        "classification": "SUBMINUTE_CONTEXT_INSIDE_MINUTE_C_DOWN",
+        "classification": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
         "parentWaveStillValid": true,
         "parentWaveComplete": false,
         "parentTransitionPossible": false,
         "transitionRisk": "MODERATE",
-        "invalidationLevel": 7760.0,
+        "invalidationLevel": 7680.0,
         "invalidationBreached": false,
         "supportLevel": 7618.0,
+        "subminuteABC": {
+          "active": true,
+          "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "parentDegree": "minute",
+          "parentWave": "C",
+          "parentLeg": "Minute C-down",
+          "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+          "purpose": "TIMING_ONLY_DO_NOT_OVERRIDE_PARENT_MINUTE_C_TARGETS",
+          "direction": "DOWN",
+          "currentInternalWave": "Subminute-C",
+          "previousInternalWave": "Subminute-B",
+          "nextExpectedInternalWave": null,
+          "invalidationLevel": 7680.0,
+          "invalidationRule": "SUBMINUTE_C_DOWN_WEAKENS_IF_PRICE_RECLAIMS_AND_HOLDS_ABOVE_SUBMINUTE_B_HIGH_7680",
+          "subminuteA": {
+            "state": "COMPLETED",
+            "direction": "DOWN",
+            "high": 7762.0,
+            "highTime": "2026-09-04 05:00",
+            "low": 7586.0,
+            "lowTime": "2026-09-10 07:00",
+            "status": "COMPLETED"
+          },
+          "subminuteB": {
+            "state": "COMPLETED_CANDIDATE",
+            "direction": "UP",
+            "low": 7592.0,
+            "lowTime": "2026-09-10 11:00",
+            "high": 7680.0,
+            "highTime": "2026-09-11 10:00",
+            "status": "COMPLETED_CANDIDATE"
+          },
+          "subminuteC": {
+            "state": "ACTIVE",
+            "direction": "DOWN",
+            "start": 7680.0,
+            "startTime": "2026-09-11 10:00",
+            "projectionPending": false,
+            "targetPolicy": "USE_PARENT_MINUTE_C_TARGETS",
+            "doNotPublishIndependentDeepSubminuteExtensionLadder": true
+          },
+          "parentMinuteCTargets": {
+            "cc100": 7618.0,
+            "cc1272": 7579.5,
+            "cc1618": 7530.25,
+            "cc200": 7476.0,
+            "cc2618": 7388.25
+          },
+          "parentMinuteCDisplayLevels": [
+            {
+              "label": "Minute C 1.000",
+              "key": "cc100",
+              "price": 7618.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.272",
+              "key": "cc1272",
+              "price": 7579.5,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 1.618",
+              "key": "cc1618",
+              "price": 7530.25,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.000",
+              "key": "cc200",
+              "price": 7476.0,
+              "status": "WATCH"
+            },
+            {
+              "label": "Minute C 2.618",
+              "key": "cc2618",
+              "price": 7388.25,
+              "status": "WATCH"
+            }
+          ],
+          "notes": [
+            "Subminute ABC is timing/path only inside active parent Minute C-down.",
+            "Do not publish the oversized independent subminute C extension ladder.",
+            "Minute C-down owns the actual target ladder."
+          ],
+          "noExecution": true,
+          "noPermissionCreated": true,
+          "watchOnly": true,
+          "reasonCodes": [
+            "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+            "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+            "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+            "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+            "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+            "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
+            "NO_EXECUTION",
+            "NO_PERMISSION_CREATED"
+          ]
+        },
         "internalReference": {
-          "chartRead": "MINOR_C_ACTIVE_MINUTE_C_DOWN_ACTIVE",
-          "minorW4ComplexCorrectionActive": true,
-          "minorCDownActive": true,
-          "minuteCDownActive": true,
-          "minuteALow": 7618.0,
-          "minuteALowTime": "2026-09-02 15:00",
-          "minuteBHigh": 7760.0,
-          "minuteBHighTime": "2026-09-04 15:00",
+          "chartRead": "SUBMINUTE_ABC_INSIDE_ACTIVE_MINUTE_C_DOWN",
+          "parentMinuteCDownActive": true,
+          "parentMinuteCStart": 7760.0,
+          "parentMinuteCInvalidation": 7760.0,
+          "subminuteAHigh": 7762.0,
+          "subminuteALow": 7586.0,
+          "subminuteBHigh": 7680.0,
+          "subminuteBLow": 7592.0,
+          "subminuteCActive": true,
+          "useParentMinuteCTargets": true,
           "cc100": 7618.0,
           "cc1272": 7579.5,
           "cc1618": 7530.25,
@@ -1457,11 +2200,18 @@
           "cc2618": 7388.25
         },
         "evidence": {
-          "cleanSubminuteCountUnavailable": true,
-          "minuteADownActive": true
+          "subminuteADownCompleted": true,
+          "subminuteBUpCompletedCandidate": true,
+          "subminuteCDownActive": true,
+          "parentMinuteCTargetsRemainAuthoritative": true
         },
         "reasonCodes": [
-          "ENGINE22_SUBMINUTE_CONTEXT_INSIDE_MINUTE_C_DOWN",
+          "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+          "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+          "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+          "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+          "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ],
@@ -1472,16 +2222,20 @@
       },
       "decisionWatch": {
         "active": true,
-        "source": "BRIAN_MANUAL_2026_09_04_MINOR_C_STARTING_MINUTE_A_DOWN_ACTIVE",
-        "state": "SUBMINUTE_CONTEXT_INSIDE_MINUTE_A_DOWN_ACTIVE",
-        "bullPath": "If price reclaims and holds above 7764.00, reassess the Minute A-down read.",
-        "bearPath": "If price remains below 7764.00, Minute A-down can continue toward 7701.75/7700 and lower shelves.",
+        "source": "BRIAN_MANUAL_2026_09_14_SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+        "state": "SUBMINUTE_C_DOWN_ACTIVE_INSIDE_MINUTE_C",
+        "bullPath": "If price reclaims and holds above 7680.00, the subminute C-down timing weakens. Above 7760.00 weakens the parent Minute C-down.",
+        "bearPath": "If price remains below 7680.00, subminute C-down remains active inside parent Minute C-down. Use parent Minute C targets 7618 / 7579.50 / 7530.25 / 7476 / 7388.25.",
         "noExecution": true,
         "noPermissionCreated": true,
         "watchOnly": true,
         "reasonCodes": [
-          "SUBMINUTE_CONTEXT_ONLY",
-          "MINUTE_A_DOWN_ACTIVE",
+          "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+          "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+          "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+          "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+          "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+          "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
           "NO_EXECUTION",
           "NO_PERMISSION_CREATED"
         ]
@@ -1490,9 +2244,12 @@
       "noPermissionCreated": true,
       "watchOnly": true,
       "reasonCodes": [
-        "SUBMINUTE_CONTEXT_ONLY",
-        "MINUTE_A_DOWN_ACTIVE",
-        "STRUCTURAL_CONTEXT_ONLY",
+        "SUBMINUTE_ABC_INSIDE_MINUTE_C_DOWN",
+        "SUBMINUTE_A_DOWN_COMPLETED_7762_TO_7586",
+        "SUBMINUTE_B_UP_COMPLETED_CANDIDATE_7592_TO_7680",
+        "SUBMINUTE_C_DOWN_ACTIVE_FROM_7680",
+        "SUBMINUTE_USES_PARENT_MINUTE_C_TARGETS",
+        "NO_INDEPENDENT_DEEP_SUBMINUTE_EXTENSION_LADDER",
         "NO_EXECUTION",
         "NO_PERMISSION_CREATED"
       ]
