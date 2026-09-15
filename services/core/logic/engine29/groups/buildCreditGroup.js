@@ -4,6 +4,7 @@ import { ENGINE29_GROUP_IDS, ENGINE29_GROUP_STATES } from "../constants.js";
 import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
 import {
   groupBase,
+  timeframeLabel,
   isBreakingOrWorse,
   isDurableBreak,
   isRecovering,
@@ -109,7 +110,7 @@ function buildOne(symbols, timeframeKey) {
 
   return groupBase({
     group: ENGINE29_GROUP_IDS.CREDIT,
-    timeframe: timeframeKey === "tactical" ? "1H" : "1W",
+    timeframe: timeframeLabel(timeframeKey),
     state,
     members,
     subgroups: {
@@ -130,5 +131,6 @@ export function buildCreditGroup(symbols = {}) {
   return {
     structural: buildOne(symbols, "structural"),
     tactical: buildOne(symbols, "tactical"),
+    fastTactical: buildOne(symbols, "fastTactical"),
   };
 }
