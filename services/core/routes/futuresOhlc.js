@@ -290,19 +290,33 @@ async function resolveFuturesContract(productCode) {
   let selectionRule = null;
 
   if (requestedContract) {
+    /*
+     * Schwab/Engine 10 uses a two-digit year code (MESZ26).
+     * Polygon/Massive futures tickers use the final year digit (MESZ6).
+     *
+     * Examples:
+     *   MESU26 -> MESU6
+     *   MESZ26 -> MESZ6
+     *   MESH27 -> MESH7
+     */
+    const polygonRequestedContract =
+      explicitContract?.yearCode?.length === 2
+        ? `${explicitContract.productCode}${explicitContract.monthCode}${explicitContract.yearCode.slice(-1)}`
+        : requestedContract;
+
     selected =
       candidates.find(
         (candidate) =>
           String(candidate?.ticker || "")
             .trim()
-            .toUpperCase() === requestedContract
+            .toUpperCase() === polygonRequestedContract
       ) || null;
 
-    selectionRule = "explicit_contract_exact_ticker";
+    selectionRule = "explicit_contract_exact_ticker_year_normalized";
 
     if (!selected?.ticker) {
       throw new Error(
-        `Could not resolve explicit futures contract ${requestedContract} from product ${cleanCode}`
+        `Could not resolve explicit futures contract ${requestedContract} as Polygon ticker ${polygonRequestedContract} from product ${cleanCode}`
       );
     }
   } else {
