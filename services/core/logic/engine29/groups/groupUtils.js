@@ -56,6 +56,18 @@ export function isRecovering(state) {
   return state === ENGINE29_SYMBOL_STATES.RECOVERING;
 }
 
+// A durable break is intentionally stricter than a generic BREAKING state.
+// TREND_BREAKING and INTRAPERIOD_BREAK are useful warning evidence, but they
+// are not enough by themselves for late-confirmation groups such as Credit.
+export function isDurableBreak(member) {
+  if (!member?.available) return false;
+  if (isConfirmedBreak(member.state)) return true;
+  return (
+    member.state === ENGINE29_SYMBOL_STATES.BREAKING &&
+    member.stage === "COMPLETED_CLOSE_BREAK"
+  );
+}
+
 export function memberSnapshot(symbolEntry, timeframeKey) {
   if (!symbolEntry) return null;
   const view = getTimeframeView(symbolEntry, timeframeKey);
