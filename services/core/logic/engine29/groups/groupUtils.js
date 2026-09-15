@@ -23,7 +23,15 @@ const CONFIDENCE_RANK = Object.freeze({
 
 export function getTimeframeView(symbolEntry, timeframeKey) {
   if (!symbolEntry) return null;
-  return timeframeKey === "tactical" ? symbolEntry.tactical : symbolEntry.structural;
+  if (timeframeKey === "tactical") return symbolEntry.tactical;
+  if (timeframeKey === "fastTactical") return symbolEntry.fastTactical;
+  return symbolEntry.structural;
+}
+
+export function timeframeLabel(timeframeKey) {
+  if (timeframeKey === "tactical") return "1H";
+  if (timeframeKey === "fastTactical") return "30m";
+  return "1W";
 }
 
 export function getSymbolState(symbolEntry, timeframeKey) {
