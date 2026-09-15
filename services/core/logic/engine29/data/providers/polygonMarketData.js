@@ -35,3 +35,28 @@ export async function fetchEngine29PolygonHourly({
     timeframe: "1H",
   };
 }
+
+
+export async function fetchEngine29PolygonThirtyMinute({
+  symbol,
+  apiKey,
+  from,
+  to,
+  adjusted = true,
+}) {
+  const result = await fetchPolygonAggregatesPaginated({
+    symbol,
+    multiplier: 30,
+    timespan: "minute",
+    from,
+    to,
+    apiKey,
+    adjusted,
+    limit: 50000,
+  });
+
+  return {
+    ...result,
+    timeframe: "30m",
+  };
+}
