@@ -28,16 +28,20 @@ export function buildEngine29GroupStateBundle(structureBundle, {
 
   const structuralStates = {};
   const tacticalStates = {};
+  const fastTacticalStates = {};
   const degradedGroups = [];
   const structuralReasonCodes = [];
   const tacticalReasonCodes = [];
+  const fastTacticalReasonCodes = [];
 
   for (const [name, group] of Object.entries(groups)) {
     structuralStates[name] = group.structural?.state ?? null;
     tacticalStates[name] = group.tactical?.state ?? null;
-    if (group.structural?.dataDegraded || group.tactical?.dataDegraded) degradedGroups.push(name);
+    fastTacticalStates[name] = group.fastTactical?.state ?? null;
+    if (group.structural?.dataDegraded || group.tactical?.dataDegraded || group.fastTactical?.dataDegraded) degradedGroups.push(name);
     structuralReasonCodes.push(...(group.structural?.reasonCodes || []));
     tacticalReasonCodes.push(...(group.tactical?.reasonCodes || []));
+    fastTacticalReasonCodes.push(...(group.fastTactical?.reasonCodes || []));
   }
 
   return {
@@ -48,9 +52,11 @@ export function buildEngine29GroupStateBundle(structureBundle, {
     summary: {
       structuralStates,
       tacticalStates,
+      fastTacticalStates,
       degradedGroups: [...new Set(degradedGroups)],
       structuralReasonCodes: [...new Set(structuralReasonCodes)],
       tacticalReasonCodes: [...new Set(tacticalReasonCodes)],
+      fastTacticalReasonCodes: [...new Set(fastTacticalReasonCodes)],
     },
   };
 }
