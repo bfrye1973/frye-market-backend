@@ -5,6 +5,7 @@ import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
 import {
   chooseBestEvidence,
   groupBase,
+  timeframeLabel,
   isBreakingOrWorse,
   isConfirmedBreak,
   isRecovering,
@@ -44,7 +45,7 @@ function buildOne(symbols, timeframeKey) {
 
   return groupBase({
     group: ENGINE29_GROUP_IDS.HEADLINE_INDEX,
-    timeframe: timeframeKey === "tactical" ? "1H" : "1W",
+    timeframe: timeframeLabel(timeframeKey),
     state,
     members,
     subgroups: { SP500_BLOCK: sp500, NASDAQ_BLOCK: nasdaq },
@@ -55,5 +56,9 @@ function buildOne(symbols, timeframeKey) {
 }
 
 export function buildHeadlineIndexGroup(symbols = {}) {
-  return { structural: buildOne(symbols, "structural"), tactical: buildOne(symbols, "tactical") };
+  return {
+    structural: buildOne(symbols, "structural"),
+    tactical: buildOne(symbols, "tactical"),
+    fastTactical: buildOne(symbols, "fastTactical"),
+  };
 }
