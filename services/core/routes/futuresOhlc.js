@@ -1,377 +1,286 @@
-// services/core/routes/futuresOhlc.js
-// Backend-1 — Futures OHLC endpoint
-//
-// GET /api/v1/futures/ohlc?symbol=ES&timeframe=1m&limit=1500
-//
-// Purpose:
-// - Resolve user-facing ES -> active Polygon futures contract like ESM6 / ESU6
-// - Fetch historical futures candles from Polygon futures aggs endpoint
-// - Return same chart bar shape as /api/v1/ohlc:
-//   { time, open, high, low, close, volume }
-//
-// Important:
-// - This route does NOT touch the existing stock /api/v1/ohlc route.
-// - This route uses Polygon/Massive futures endpoint:
-//   /futures/v1/aggs/{ticker}
-// - Polygon futures aggs return window_start in nanoseconds.
-// - We fetch ASC over a controlled lookback window, then return the latest N bars ourselves.
-//
-// Rollover safety:
-// - Supports env override:
-//   ES_CONTRACT_OVERRIDE=ESU6
-//   FUTURES_ES_CONTRACT_OVERRIDE=ESU6
-//   FUTURES_NQ_CONTRACT_OVERRIDE=NQU6
+// services/core/routes/futuresOhlc.js 
+// Backend-1 --- Futures OHLC
+endpoint // // GET
+/api/v1/futures/ohlc?symbol=ES&timeframe=1m&limit=1500 // // Purpose:
+// - Resolve user-facing ES -\> active Polygon futures contract like
+ESM6 / ESU6 // - Fetch historical futures candles from Polygon futures
+aggs endpoint // - Return same chart bar shape as /api/v1/ohlc: // {
+time, open, high, low, close, volume } // // Important: // - This route
+does NOT touch the existing stock /api/v1/ohlc route. // - This route
+uses Polygon/Massive futures endpoint: // /futures/v1/aggs/{ticker} // -
+Polygon futures aggs return window_start in nanoseconds. // - We fetch
+ASC over a controlled lookback window, then return the latest N bars
+ourselves. // // Rollover safety: // - Supports env override: //
+ES_CONTRACT_OVERRIDE=ESU6 // FUTURES_ES_CONTRACT_OVERRIDE=ESU6 //
+FUTURES_NQ_CONTRACT_OVERRIDE=NQU6
 
 import express from "express";
 
-const router = express.Router();
-export default router;
+const router = express.Router(); export default router;
 
-const POLY_KEY =
-  process.env.POLYGON_API ||
-  process.env.POLYGON_API_KEY ||
-  process.env.POLY_API_KEY ||
-  "";
+const POLY_KEY = process.env.POLYGON_API \|\|
+process.env.POLYGON_API_KEY \|\| process.env.POLY_API_KEY \|\| "";
 
-const POLYGON_REST_BASE =
-  process.env.POLYGON_REST_BASE ||
-  process.env.POLYGON_BASE_URL ||
-  "https://api.polygon.io";
+const POLYGON_REST_BASE = process.env.POLYGON_REST_BASE \|\|
+process.env.POLYGON_BASE_URL \|\| "https://api.polygon.io";
 
 const FUTURES_SNAPSHOT_PATH = "/futures/v1/snapshot";
 
-const TF_MAP = {
-  "1m": "1min",
-  "5m": "5min",
-  "10m": "10min",
-  "15m": "15min",
-  "30m": "30min",
-  "1h": "1hour",
-  "4h": "4hour",
-  "1d": "1day",
-};
+const TF_MAP = { "1m": "1min", "5m": "5min", "10m": "10min", "15m":
+"15min", "30m": "30min", "1h": "1hour", "4h": "4hour", "1d": "1day", };
 
-const DAYS_BY_TF = {
-  "1m": 3,
-  "5m": 7,
-  "10m": 14,
-  "15m": 21,
-  "30m": 45,
-  "1h": 90,
-  "4h": 240,
-  "1d": 365 * 3,
-};
+const DAYS_BY_TF = { "1m": 3, "5m": 7, "10m": 14, "15m": 21, "30m": 45,
+"1h": 90, "4h": 240, "1d": 365 \* 3, };
 
-const RESOLVE_CACHE_MS = Number(
-  process.env.FUTURES_RESOLVE_CACHE_MS || 2 * 60 * 1000
-);
+const RESOLVE_CACHE_MS = Number( process.env.FUTURES_RESOLVE_CACHE_MS
+\|\| 2 \* 60 \* 1000 );
 
 const resolveCache = new Map();
 
-function nowIso() {
-  return new Date().toISOString();
-}
+function nowIso() { return new Date().toISOString(); }
 
-function cleanProductCode(v) {
-  const s = String(v || "ES").trim().toUpperCase();
-  return s || "ES";
-}
+function cleanProductCode(v) { const s = String(v \|\|
+"ES").trim().toUpperCase(); return s \|\| "ES"; }
 
-function getContractOverride(productCode) {
-  const cleanCode = cleanProductCode(productCode);
+function parseExplicitFuturesContract(v) { const clean =
+cleanProductCode(v) .replace(/:.\*\$/, "") .replace(/\^//,"");
 
-  if (cleanCode === "ES") {
-    return String(
-      process.env.ES_CONTRACT_OVERRIDE ||
-        process.env.FUTURES_ES_CONTRACT_OVERRIDE ||
-        ""
-    )
-      .trim()
-      .toUpperCase();
-  }
+const match = clean.match(
+/\^(\[A-Z0-9\]+?)(\[FGHJKMNQUVXZ\])(`\d{1,2}`{=tex})\$/ );
 
-  return String(process.env[`FUTURES_${cleanCode}_CONTRACT_OVERRIDE`] || "")
-    .trim()
-    .toUpperCase();
-}
+if (!match) return null;
 
-function clampInt(n, lo, hi, fallback) {
-  const x = Number(n);
-  if (!Number.isFinite(x)) return fallback;
-  return Math.max(lo, Math.min(hi, Math.floor(x)));
-}
+return { requestedContract: clean, productCode: match\[1\], monthCode:
+match\[2\], yearCode: match\[3\], }; }
 
-function toNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+function getContractOverride(productCode) { const cleanCode =
+cleanProductCode(productCode);
 
-function parseDateMs(v) {
-  if (!v) return null;
-  const ms = Date.parse(String(v));
-  return Number.isFinite(ms) ? ms : null;
-}
+if (cleanCode === "ES") { return String(
+process.env.ES_CONTRACT_OVERRIDE \|\|
+process.env.FUTURES_ES_CONTRACT_OVERRIDE \|\| "" ) .trim()
+.toUpperCase(); }
 
-function formatDateUTC(ms) {
-  return new Date(ms).toISOString().slice(0, 10);
-}
+return String(process.env\[`FUTURES_${cleanCode}_CONTRACT_OVERRIDE`\]
+\|\| "") .trim() .toUpperCase(); }
 
-function isSpreadTicker(ticker) {
-  return String(ticker || "").includes("-");
-}
+function clampInt(n, lo, hi, fallback) { const x = Number(n); if
+(!Number.isFinite(x)) return fallback; return Math.max(lo, Math.min(hi,
+Math.floor(x))); }
 
-function isPlainFuturesTicker(ticker, productCode) {
-  const t = String(ticker || "").trim().toUpperCase();
-  const pc = String(productCode || "").trim().toUpperCase();
+function toNum(v) { const n = Number(v); return Number.isFinite(n) ? n :
+null; }
 
-  if (!t || !pc) return false;
-  if (isSpreadTicker(t)) return false;
+function parseDateMs(v) { if (!v) return null; const ms =
+Date.parse(String(v)); return Number.isFinite(ms) ? ms : null; }
 
-  const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`);
-  return re.test(t);
-}
+function formatDateUTC(ms) { return new Date(ms).toISOString().slice(0,
+10); }
 
-function normalizeCandidate(row, productCode) {
-  if (!row || typeof row !== "object") return null;
+function isSpreadTicker(ticker) { return String(ticker \|\|
+"").includes("-"); }
 
-  const details = row.details || {};
-  const session = row.session || {};
+function isPlainFuturesTicker(ticker, productCode) { const t =
+String(ticker \|\| "").trim().toUpperCase(); const pc =
+String(productCode \|\|"").trim().toUpperCase();
 
-  const ticker = String(details.ticker || "").trim().toUpperCase();
-  const rowProductCode = String(details.product_code || productCode || "")
-    .trim()
-    .toUpperCase();
+if (!t \|\| !pc) return false; if (isSpreadTicker(t)) return false;
 
-  if (rowProductCode !== String(productCode).toUpperCase()) return null;
-  if (!isPlainFuturesTicker(ticker, productCode)) return null;
+const re = new RegExp(`^${pc}[FGHJKMNQUVXZ]\\d{1,2}$`); return
+re.test(t); }
 
-  const settlementDate = details.settlement_date || null;
-  const settlementMs = parseDateMs(settlementDate);
-  const volume = toNum(session.volume) ?? 0;
-  const close = toNum(session.close);
+function normalizeCandidate(row, productCode) { if (!row \|\| typeof row
+!== "object") return null;
 
-  const isExpired =
-    settlementMs && Number.isFinite(settlementMs)
-      ? settlementMs < Date.now()
-      : false;
+const details = row.details \|\| {}; const session = row.session \|\|
+{};
 
-  return {
-    ticker,
-    productCode: rowProductCode,
-    settlementDate,
-    settlementMs,
-    isExpired,
-    volume,
-    close,
-  };
-}
+const ticker = String(details.ticker \|\| "").trim().toUpperCase();
+const rowProductCode = String(details.product_code \|\| productCode
+\|\|"") .trim() .toUpperCase();
 
-async function readJsonResponse(response, label) {
-  const text = await response.text();
+if (rowProductCode !== String(productCode).toUpperCase()) return null;
+if (!isPlainFuturesTicker(ticker, productCode)) return null;
 
-  if (!text || !text.trim()) {
-    throw new Error(`${label} returned empty response`);
-  }
+const settlementDate = details.settlement_date \|\| null; const
+settlementMs = parseDateMs(settlementDate); const volume =
+toNum(session.volume) ?? 0; const close = toNum(session.close);
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(
-      `${label} returned non-JSON response. status=${response.status} preview=${text.slice(
-        0,
-        300
-      )}`
-    );
-  }
-}
+const isExpired = settlementMs && Number.isFinite(settlementMs) ?
+settlementMs \< Date.now() : false;
 
-async function resolveFuturesContract(productCode) {
-  const cleanCode = cleanProductCode(productCode);
-  const contractOverride = getContractOverride(cleanCode);
+return { ticker, productCode: rowProductCode, settlementDate,
+settlementMs, isExpired, volume, close, }; }
 
-  if (contractOverride) {
-    const value = {
-      productCode: cleanCode,
-      resolvedSymbol: contractOverride,
-      selected: {
-        ticker: contractOverride,
-        productCode: cleanCode,
-        source: "env_override",
-      },
-      selectionRule: "env_contract_override",
-      candidateCount: 0,
-      checkedAt: nowIso(),
-    };
+async function readJsonResponse(response, label) { const text = await
+response.text();
 
-    resolveCache.set(cleanCode, {
+if (!text \|\| !text.trim()) { throw new
+Error(`${label} returned empty response`); }
+
+try { return JSON.parse(text); } catch { throw new Error(
+`${label} returned non-JSON response. status=${response.status} preview=${text.slice(         0,         300       )}`
+); } }
+
+async function resolveFuturesContract(productCode) { const requestedCode
+= cleanProductCode(productCode); const explicit =
+parseExplicitFuturesContract(requestedCode); const cleanCode =
+explicit?.productCode \|\| requestedCode; const requestedContract =
+explicit?.requestedContract \|\| null;
+
+// Preserve existing root/front-contract override behavior. // Explicit
+contract requests bypass root overrides and resolve themselves. const
+contractOverride = requestedContract ? "" :
+getContractOverride(cleanCode);
+
+const cacheKey = requestedContract ? `EXPLICIT:${requestedContract}` :
+`ROOT:${cleanCode}`;
+
+if (contractOverride) { const value = { productCode: cleanCode,
+requestedContract: null, resolvedSymbol: contractOverride, selected: {
+ticker: contractOverride, productCode: cleanCode, source:
+"env_override", }, selectionRule: "env_contract_override",
+candidateCount: 0, checkedAt: nowIso(), };
+
+    resolveCache.set(cacheKey, {
       cachedAtMs: Date.now(),
       value,
     });
 
     return value;
-  }
 
-  if (!POLY_KEY) {
-    throw new Error("Missing Polygon API key");
-  }
-
-  const cacheKey = cleanCode;
-  const cached = resolveCache.get(cacheKey);
-
-  if (cached && Date.now() - cached.cachedAtMs < RESOLVE_CACHE_MS) {
-    return cached.value;
-  }
-
-  const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
-  const url = new URL(`${base}${FUTURES_SNAPSHOT_PATH}`);
-  url.searchParams.set("product_code", cleanCode);
-  url.searchParams.set("apiKey", POLY_KEY);
-
-  const r = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
-
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`Polygon futures snapshot ${r.status} ${txt}`);
-  }
-
-  const json = await readJsonResponse(r, "Polygon futures snapshot");
-  const results = Array.isArray(json?.results) ? json.results : [];
-
-  const candidates = results
-    .map((row) => normalizeCandidate(row, cleanCode))
-    .filter(Boolean)
-    .filter((c) => !c.isExpired);
-
-  const sorted = [...candidates].sort((a, b) => {
-    const aSettle = Number(a.settlementMs || Number.MAX_SAFE_INTEGER);
-    const bSettle = Number(b.settlementMs || Number.MAX_SAFE_INTEGER);
-
-    if (aSettle !== bSettle) return aSettle - bSettle;
-
-    return Number(b.volume || 0) - Number(a.volume || 0);
-  });
-
-  const selected = sorted[0] || null;
-
-  if (!selected?.ticker) {
-    throw new Error(`Could not resolve futures contract for ${cleanCode}`);
-  }
-
-  const value = {
-    productCode: cleanCode,
-    resolvedSymbol: selected.ticker,
-    selected,
-    selectionRule: "plain_non_spread_contract_nearest_settlement_then_volume",
-    candidateCount: sorted.length,
-    checkedAt: nowIso(),
-  };
-
-  resolveCache.set(cacheKey, {
-    cachedAtMs: Date.now(),
-    value,
-  });
-
-  return value;
 }
 
-function toUnixSecFromNs(v) {
-  const n = Number(v);
-  if (!Number.isFinite(n) || n <= 0) return null;
+if (!POLY_KEY) { throw new Error("Missing Polygon API key"); }
 
-  if (n > 1e17) return Math.floor(n / 1e9);
-  if (n > 1e14) return Math.floor(n / 1e6);
-  if (n > 1e12) return Math.floor(n / 1000);
+const cached = resolveCache.get(cacheKey);
 
-  return Math.floor(n);
-}
+if (cached && Date.now() - cached.cachedAtMs \< RESOLVE_CACHE_MS) {
+return cached.value; }
 
-function normFuturesAgg(b) {
-  const time = toUnixSecFromNs(b?.window_start);
-  const open = Number(b?.open);
-  const high = Number(b?.high);
-  const low = Number(b?.low);
-  const close = Number(b?.close);
-  const volume = Number(b?.volume ?? 0);
+const base = String(POLYGON_REST_BASE \|\| "").replace(//+$/, "");
+  const url = new URL(`${base}\${FUTURES_SNAPSHOT_PATH}\`);
 
-  if (![time, open, high, low, close].every(Number.isFinite)) return null;
+// Polygon snapshot always receives the root product code.
+url.searchParams.set("product_code", cleanCode);
+url.searchParams.set("apiKey", POLY_KEY);
 
-  return {
-    time,
-    open,
-    high,
-    low,
-    close,
-    volume: Number.isFinite(volume) ? volume : 0,
-  };
-}
+const r = await fetch(url.toString(), { cache: "no-store", headers: {
+Accept: "application/json" }, });
 
-async function fetchFuturesAggs({
-  resolvedSymbol,
-  resolution,
-  startDate,
-  endDate,
-  limit,
-}) {
-  if (!POLY_KEY) {
-    throw new Error("Missing Polygon API key");
-  }
+if (!r.ok) { const txt = await r.text().catch(() =\> ""); throw new
+Error(`Polygon futures snapshot ${r.status} ${txt}`); }
 
-  const base = String(POLYGON_REST_BASE || "").replace(/\/+$/, "");
-  const url = new URL(
-    `${base}/futures/v1/aggs/${encodeURIComponent(resolvedSymbol)}`
-  );
+const json = await readJsonResponse(r, "Polygon futures snapshot");
+const results = Array.isArray(json?.results) ? json.results : \[\];
 
-  url.searchParams.set("resolution", resolution);
-  url.searchParams.set("window_start.gte", startDate);
-  url.searchParams.set("window_start.lte", endDate);
-  url.searchParams.set("sort", "asc");
-  url.searchParams.set("limit", "50000");
-  url.searchParams.set("apiKey", POLY_KEY);
+const candidates = results .map((row) =\> normalizeCandidate(row,
+cleanCode)) .filter(Boolean);
 
-  const r = await fetch(url.toString(), {
-    cache: "no-store",
-    headers: { Accept: "application/json" },
-  });
+let selected = null; let selectionRule = null;
 
-  if (!r.ok) {
-    const txt = await r.text().catch(() => "");
-    throw new Error(`Polygon futures aggs ${r.status} ${txt}`);
-  }
+if (requestedContract) { selected = candidates.find( (candidate) =\>
+String(candidate?.ticker \|\| "").trim().toUpperCase() ===
+requestedContract ) \|\| null;
 
-  const data = await readJsonResponse(r, "Polygon futures aggs");
-  const arr = Array.isArray(data?.results) ? data.results : [];
+    selectionRule = "explicit_contract_exact_ticker";
 
-  const bars = arr
-    .map(normFuturesAgg)
-    .filter(Boolean)
-    .sort((a, b) => a.time - b.time);
-
-  const dedup = [];
-  let last = -1;
-
-  for (const b of bars) {
-    if (b.time !== last) {
-      dedup.push(b);
-      last = b.time;
+    if (!selected?.ticker) {
+      throw new Error(
+        `Could not resolve explicit futures contract ${requestedContract} from product ${cleanCode}`
+      );
     }
-  }
 
-  return dedup.length > limit ? dedup.slice(-limit) : dedup;
+} else { const sorted = candidates .filter((c) =\> !c.isExpired)
+.sort((a, b) =\> { const aSettle = Number(a.settlementMs \|\|
+Number.MAX_SAFE_INTEGER); const bSettle = Number(b.settlementMs \|\|
+Number.MAX_SAFE_INTEGER);
+
+        if (aSettle !== bSettle) return aSettle - bSettle;
+
+        return Number(b.volume || 0) - Number(a.volume || 0);
+      });
+
+    selected = sorted[0] || null;
+    selectionRule =
+      "plain_non_spread_contract_nearest_settlement_then_volume";
+
+    if (!selected?.ticker) {
+      throw new Error(`Could not resolve futures contract for ${cleanCode}`);
+    }
+
 }
 
-router.get("/", async (req, res) => {
-  try {
-    const productCode = cleanProductCode(req.query.symbol || "ES");
-    const tfRaw = String(req.query.timeframe || "1m").toLowerCase();
-    const tf = TF_MAP[tfRaw] ? tfRaw : "1m";
-    const resolution = TF_MAP[tf];
+const value = { productCode: cleanCode, requestedContract,
+resolvedSymbol: selected.ticker, selected, selectionRule,
+candidateCount: candidates.length, checkedAt: nowIso(), };
+
+resolveCache.set(cacheKey, { cachedAtMs: Date.now(), value, });
+
+return value; }
+
+function toUnixSecFromNs(v) { const n = Number(v); if
+(!Number.isFinite(n) \|\| n \<= 0) return null;
+
+if (n \> 1e17) return Math.floor(n / 1e9); if (n \> 1e14) return
+Math.floor(n / 1e6); if (n \> 1e12) return Math.floor(n / 1000);
+
+return Math.floor(n); }
+
+function normFuturesAgg(b) { const time =
+toUnixSecFromNs(b?.window_start); const open = Number(b?.open); const
+high = Number(b?.high); const low = Number(b?.low); const close =
+Number(b?.close); const volume = Number(b?.volume ?? 0);
+
+if (\![time, open, high, low, close\].every(Number.isFinite)) return
+null;
+
+return { time, open, high, low, close, volume: Number.isFinite(volume) ?
+volume : 0, }; }
+
+async function fetchFuturesAggs({ resolvedSymbol, resolution, startDate,
+endDate, limit, }) { if (!POLY_KEY) { throw new Error("Missing Polygon
+API key"); }
+
+const base = String(POLYGON_REST_BASE \|\| "").replace(//+$/, "");
+  const url = new URL(
+    `${base}/futures/v1/aggs/\${encodeURIComponent(resolvedSymbol)}\` );
+
+url.searchParams.set("resolution", resolution);
+url.searchParams.set("window_start.gte", startDate);
+url.searchParams.set("window_start.lte", endDate);
+url.searchParams.set("sort", "asc"); url.searchParams.set("limit",
+"50000"); url.searchParams.set("apiKey", POLY_KEY);
+
+const r = await fetch(url.toString(), { cache: "no-store", headers: {
+Accept: "application/json" }, });
+
+if (!r.ok) { const txt = await r.text().catch(() =\> ""); throw new
+Error(`Polygon futures aggs ${r.status} ${txt}`); }
+
+const data = await readJsonResponse(r, "Polygon futures aggs"); const
+arr = Array.isArray(data?.results) ? data.results : \[\];
+
+const bars = arr .map(normFuturesAgg) .filter(Boolean) .sort((a, b) =\>
+a.time - b.time);
+
+const dedup = \[\]; let last = -1;
+
+for (const b of bars) { if (b.time !== last) { dedup.push(b); last =
+b.time; } }
+
+return dedup.length \> limit ? dedup.slice(-limit) : dedup; }
+
+router.get("/", async (req, res) =\> { try { const requestedSymbol =
+cleanProductCode(req.query.symbol \|\| "ES"); const explicitContract =
+parseExplicitFuturesContract(requestedSymbol); const productCode =
+explicitContract?.productCode \|\| requestedSymbol; const tfRaw =
+String(req.query.timeframe \|\| "1m").toLowerCase(); const tf =
+TF_MAP\[tfRaw\] ? tfRaw : "1m"; const resolution = TF_MAP\[tf\];
 
     const limit = clampInt(req.query.limit, 1, 50000, 1500);
 
-    const resolver = await resolveFuturesContract(productCode);
+    const resolver = await resolveFuturesContract(requestedSymbol);
     const resolvedSymbol = resolver.resolvedSymbol;
 
     const targetDays = DAYS_BY_TF[tf] ?? 10;
@@ -392,6 +301,7 @@ router.get("/", async (req, res) => {
     if (String(req.query.debug || "") === "1") {
       return res.json({
         ok: true,
+        requestedSymbol,
         productCode,
         resolvedSymbol,
         timeframe: tf,
@@ -410,13 +320,14 @@ router.get("/", async (req, res) => {
     res.setHeader("Cache-Control", "no-store");
 
     return res.json(bars);
-  } catch (e) {
-    console.error("[/api/v1/futures/ohlc] error:", e?.stack || e);
+
+} catch (e) { console.error("\[/api/v1/futures/ohlc\] error:", e?.stack
+\|\| e);
 
     return res.status(502).json({
       ok: false,
       error: "upstream_error",
       detail: String(e?.message || e),
     });
-  }
-});
+
+} });
