@@ -4,6 +4,7 @@ import { ENGINE29_GROUP_IDS, ENGINE29_GROUP_STATES } from "../constants.js";
 import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
 import {
   groupBase,
+  timeframeLabel,
   isBreakingOrWorse,
   isConfirmedBreak,
   isRecovering,
@@ -66,7 +67,7 @@ function buildOne(symbols, timeframeKey) {
 
   return groupBase({
     group: ENGINE29_GROUP_IDS.RATES_DURATION,
-    timeframe: timeframeKey === "tactical" ? "1H" : "1W",
+    timeframe: timeframeLabel(timeframeKey),
     state,
     members,
     subgroups: {
@@ -75,12 +76,16 @@ function buildOne(symbols, timeframeKey) {
     },
     reasonCodes,
     missingRequiredMembers,
-    notes: timeframeKey === "tactical" && (!y10?.available || !y30?.available)
+    notes: ["tactical", "fastTactical"].includes(timeframeKey) && (!y10?.available || !y30?.available)
       ? ["Tactical rates confirmation is intentionally capped because FRED yields are daily and no verified 1H yield feed is wired yet."]
       : [],
   });
 }
 
 export function buildRatesDurationGroup(symbols = {}) {
-  return { structural: buildOne(symbols, "structural"), tactical: buildOne(symbols, "tactical") };
+  return {
+    structural: buildOne(symbols, "structural"),
+    tactical: buildOne(symbols, "tactical"),
+    fastTactical: buildOne(symbols, "fastTactical"),
+  };
 }
