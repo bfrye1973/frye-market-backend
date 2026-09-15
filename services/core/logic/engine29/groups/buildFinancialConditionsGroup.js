@@ -2,7 +2,7 @@
 
 import { ENGINE29_CONFIDENCE, ENGINE29_GROUP_IDS, ENGINE29_GROUP_STATES } from "../constants.js";
 import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
-import { groupBase, memberSnapshot } from "./groupUtils.js";
+import { groupBase, memberSnapshot, timeframeLabel } from "./groupUtils.js";
 
 function bool(value) {
   return value === true;
@@ -39,7 +39,7 @@ function buildOne(symbols, timeframeKey, context = {}) {
 
   const base = groupBase({
     group: ENGINE29_GROUP_IDS.FINANCIAL_CONDITIONS,
-    timeframe: timeframeKey === "tactical" ? "1H" : "1W",
+    timeframe: timeframeLabel(timeframeKey),
     state,
     members,
     subgroups: { CONTEXT_SIGNALS: signals },
@@ -56,9 +56,13 @@ function buildOne(symbols, timeframeKey, context = {}) {
   return { ...base, assessmentAvailable: true };
 }
 
-export function buildFinancialConditionsGroup(symbols = {}, { structuralContext = {}, tacticalContext = {} } = {}) {
+export function buildFinancialConditionsGroup(
+  symbols = {},
+  { structuralContext = {}, tacticalContext = {}, fastTacticalContext = {} } = {},
+) {
   return {
     structural: buildOne(symbols, "structural", structuralContext),
     tactical: buildOne(symbols, "tactical", tacticalContext),
+    fastTactical: buildOne(symbols, "fastTactical", fastTacticalContext),
   };
 }
