@@ -2,13 +2,27 @@
 
 import { ENGINE29_GROUP_IDS, ENGINE29_GROUP_STATES } from "../constants.js";
 import { ENGINE29_REASON_CODES } from "../canonical/reasonCodes.js";
-import { groupBase, isBreakingOrWorse, isConfirmedBreak, isRecovering, isWarningOrWorse, memberSnapshot } from "./groupUtils.js";
+import {
+  groupBase,
+  isBreakingOrWorse,
+  isConfirmedBreak,
+  isRecovering,
+  isWarningOrWorse,
+  memberSnapshot,
+} from "./groupUtils.js";
 
 function buildOne(symbols, timeframeKey) {
   const vix = memberSnapshot(symbols.VIX, timeframeKey);
   const members = [vix].filter(Boolean);
+
+  // UVXY (or any other proxy) is useful context but is not canonical VIX truth.
+  // Leveraged-volatility products have decay and path-dependence, so they must
+  // never be allowed to declare the Volatility group HEALTHY/CONFIRMED on behalf
+  // of direct VIX structure.
+  const hasDirectVix = Boolean(vix?.available && !vix.isProxy);
+
   let state = null;
-  if (vix?.available) {
+  if (hasDirectVix) {
     if (isConfirmedBreak(vix.state)) state = ENGINE29_GROUP_STATES.SEVERE;
     else if (isBreakingOrWorse(vix.state)) state = ENGINE29_GROUP_STATES.CONFIRMED;
     else if (isWarningOrWorse(vix.state)) state = ENGINE29_GROUP_STATES.FORMING;
@@ -17,9 +31,19 @@ function buildOne(symbols, timeframeKey) {
   }
 
   const reasonCodes = [];
-  if (vix?.available && isWarningOrWorse(vix.state)) reasonCodes.push(ENGINE29_REASON_CODES.VIX_FIRMING);
-  if (vix?.available && isBreakingOrWorse(vix.state)) reasonCodes.push(ENGINE29_REASON_CODES.VIX_BREAKOUT);
-  if (vix?.available && isConfirmedBreak(vix.state)) reasonCodes.push(ENGINE29_REASON_CODES.VIX_STRESS_EXPANSION);
+  if (hasDirectVix && isWarningOrWorse(vix.state)) {
+    reasonCodes.push(ENGINE29_REASON_CODES.VIX_FIRMING);
+  }
+  if (hasDirectVix && isBreakingOrWorse(vix.state)) {
+    reasonCodes.push(ENGINE29_REASON_CODES.VIX_BREAKOUT);
+  }
+  if (hasDirectVix && isConfirmedBreak(vix.state)) {
+    reasonCodes.push(ENGINE29_REASON_CODES.VIX_STRESS_EXPANSION);
+  }
+
+  const missingRequiredMembers = [];
+  if (!vix?.available) missingRequiredMembers.push("VIX");
+  else if (vix.isProxy) missingRequiredMembers.push("VIX_DIRECT");
 
   return groupBase({
     group: ENGINE29_GROUP_IDS.VOLATILITY,
@@ -27,11 +51,17 @@ function buildOne(symbols, timeframeKey) {
     state,
     members,
     reasonCodes,
-    missingRequiredMembers: vix?.available ? [] : ["VIX"],
-    notes: ["Volatility is a confirmation layer, not a prerequisite for recognizing breadth or leadership deterioration."],
+    missingRequiredMembers,
+    notes: [
+      "Volatility is a confirmation layer, not a prerequisite for recognizing breadth or leadership deterioration.",
+      "A proxy such as UVXY may be retained as context, but it cannot determine canonical VIX group state. Direct VIX data is required.",
+    ],
   });
 }
 
 export function buildVolatilityGroup(symbols = {}) {
-  return { structural: buildOne(symbols, "structural"), tactical: buildOne(symbols, "tactical") };
+  return {
+    structural: buildOne(symbols, "structural"),
+    tactical: buildOne(symbols, "tactical"),
+  };
 }
