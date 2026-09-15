@@ -12,12 +12,14 @@ export function buildEngine29StructureBundle(marketDataBundle, { now = Date.now(
 
   const structuralAvailableSymbols = [];
   const tacticalAvailableSymbols = [];
+  const fastTacticalAvailableSymbols = [];
   const missingStructureSymbols = [];
 
   for (const [symbol, entry] of Object.entries(symbols)) {
     if (entry?.structural) structuralAvailableSymbols.push(symbol);
     else missingStructureSymbols.push(symbol);
     if (entry?.tactical) tacticalAvailableSymbols.push(symbol);
+    if (entry?.fastTactical) fastTacticalAvailableSymbols.push(symbol);
   }
 
   return {
@@ -28,9 +30,11 @@ export function buildEngine29StructureBundle(marketDataBundle, { now = Date.now(
     summary: {
       structuralAvailableSymbols,
       tacticalAvailableSymbols,
+      fastTacticalAvailableSymbols,
       missingStructureSymbols,
       structuralAvailableCount: structuralAvailableSymbols.length,
       tacticalAvailableCount: tacticalAvailableSymbols.length,
+      fastTacticalAvailableCount: fastTacticalAvailableSymbols.length,
       missingStructureCount: missingStructureSymbols.length,
     },
   };
