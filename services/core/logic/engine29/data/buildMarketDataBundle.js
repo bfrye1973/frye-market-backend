@@ -13,6 +13,7 @@ import { evaluateFreshness } from "./validateFreshness.js";
 import {
   fetchEngine29PolygonDaily,
   fetchEngine29PolygonHourly,
+  fetchEngine29PolygonThirtyMinute,
 } from "./providers/polygonMarketData.js";
 import { fetchEngine29FredDaily } from "./providers/fredMarketData.js";
 
@@ -49,6 +50,9 @@ function buildUnavailableEntry({ definition, reason }) {
     available: false,
     structural: null,
     tactical: null,
+    fastTactical: null,
+    tacticalAvailable: false,
+    fastTacticalAvailable: false,
     errors: [reason],
   };
 }
@@ -72,8 +76,11 @@ async function loadPolygonSymbol({
   structuralTo,
   tacticalFrom,
   tacticalTo,
+  fastTacticalFrom,
+  fastTacticalTo,
   now,
   includeTactical,
+  includeFastTactical,
 }) {
   const errors = [];
 
@@ -135,9 +142,40 @@ async function loadPolygonSymbol({
     }
   }
 
+  let fastTactical = null;
+  if (includeFastTactical) {
+    try {
+      const thirtyMinute = await fetchEngine29PolygonThirtyMinute({
+        symbol: source.symbol,
+        apiKey: polygonApiKey,
+        from: fastTacticalFrom,
+        to: fastTacticalTo,
+      });
+      const bars = normalizePolygonBars(thirtyMinute.bars);
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        now,
+      });
+
+      fastTactical = {
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        sourceTimeframe: "30m",
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+      };
+    } catch (err) {
+      errors.push(`FAST_TACTICAL: ${err.message}`);
+    }
+  }
+
   const meta = sourceMetadata(source);
   const structuralAvailable = Boolean(structural?.latest);
   const tacticalAvailable = Boolean(tactical?.latest);
+  const fastTacticalAvailable = Boolean(fastTactical?.latest);
 
   return {
     canonicalSymbol: definition.canonicalSymbol,
@@ -151,6 +189,8 @@ async function loadPolygonSymbol({
     structural,
     tactical,
     tacticalAvailable,
+    fastTactical,
+    fastTacticalAvailable,
     errors,
   };
 }
@@ -206,6 +246,9 @@ async function loadFredSymbol({
     tactical: null,
     tacticalAvailable: false,
     tacticalUnavailableReason: "FRED_DAILY_ONLY",
+    fastTactical: null,
+    fastTacticalAvailable: false,
+    fastTacticalUnavailableReason: "FRED_DAILY_ONLY",
     errors,
   };
 }
@@ -216,13 +259,17 @@ export async function buildEngine29MarketDataBundle({
   now = Date.now(),
   structuralLookbackDays = 2200,
   tacticalLookbackDays = 45,
+  fastTacticalLookbackDays = 30,
   includeOptionalSymbols = true,
   includeTactical = true,
+  includeFastTactical = true,
 } = {}) {
   const structuralTo = dateString(now);
   const structuralFrom = dateString(now - structuralLookbackDays * DAY_MS);
   const tacticalTo = structuralTo;
   const tacticalFrom = dateString(now - tacticalLookbackDays * DAY_MS);
+  const fastTacticalTo = structuralTo;
+  const fastTacticalFrom = dateString(now - fastTacticalLookbackDays * DAY_MS);
 
   const definitions = Object.values(ENGINE29_SYMBOL_REGISTRY).filter(
     (definition) => includeOptionalSymbols || definition.required
@@ -250,8 +297,11 @@ export async function buildEngine29MarketDataBundle({
         structuralTo,
         tacticalFrom,
         tacticalTo,
+        fastTacticalFrom,
+        fastTacticalTo,
         now,
         includeTactical,
+        includeFastTactical,
       });
       continue;
     }
@@ -286,6 +336,9 @@ export async function buildEngine29MarketDataBundle({
   const tacticalAvailableSymbols = values
     .filter((item) => item.tacticalAvailable)
     .map((item) => item.canonicalSymbol);
+  const fastTacticalAvailableSymbols = values
+    .filter((item) => item.fastTacticalAvailable)
+    .map((item) => item.canonicalSymbol);
 
   const errors = values.flatMap((item) =>
     (item.errors || []).map((error) => ({
@@ -299,6 +352,7 @@ export async function buildEngine29MarketDataBundle({
     generatedAt: new Date(now).toISOString(),
     structuralTimeframe: ENGINE29_TIMEFRAMES.STRUCTURAL,
     tacticalTimeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+    fastTacticalTimeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
     sourceWindows: {
       structural: {
         sourceTimeframe: "1D",
@@ -309,6 +363,11 @@ export async function buildEngine29MarketDataBundle({
         sourceTimeframe: "1H",
         from: tacticalFrom,
         to: tacticalTo,
+      },
+      fastTactical: {
+        sourceTimeframe: "30m",
+        from: fastTacticalFrom,
+        to: fastTacticalTo,
       },
     },
     dataDegraded:
@@ -321,6 +380,7 @@ export async function buildEngine29MarketDataBundle({
       staleRequiredSymbols,
       proxySymbols,
       tacticalAvailableSymbols,
+      fastTacticalAvailableSymbols,
       errorCount: errors.length,
     },
     symbols,
