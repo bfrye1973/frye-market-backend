@@ -29,12 +29,11 @@ function latestSnapshot(bars = []) {
   };
 }
 
-function prepareHourlyBars(bars = [], now = Date.now()) {
-  const HOUR_MS = 60 * 60 * 1000;
+function prepareIntradayBars(bars = [], now = Date.now(), durationMs = 60 * 60 * 1000) {
   return bars
     .map((bar) => ({
       ...bar,
-      completed: Number.isFinite(Number(bar?.time)) ? Number(bar.time) + HOUR_MS <= now : true,
+      completed: Number.isFinite(Number(bar?.time)) ? Number(bar.time) + durationMs <= now : true,
     }))
     .sort((a, b) => Number(a.time) - Number(b.time));
 }
@@ -52,7 +51,11 @@ function buildOneTimeframe({
 }) {
   const baseBars = timeframe === ENGINE29_TIMEFRAMES.STRUCTURAL
     ? aggregateDailyToWeekly(bars, { now })
-    : prepareHourlyBars(bars, now);
+    : prepareIntradayBars(
+        bars,
+        now,
+        timeframe === ENGINE29_TIMEFRAMES.FAST_TACTICAL ? 30 * 60 * 1000 : 60 * 60 * 1000,
+      );
 
   const enriched = attachEmaSet(baseBars, [10, 20, 50, 200]);
   const swings = detectConfirmedSwings(enriched, { left: swingLeft, right: swingRight });
@@ -134,6 +137,18 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
       })
     : null;
 
+  const fastTactical = symbolEntry.fastTactical?.bars?.length
+    ? buildOneTimeframe({
+        ...common,
+        bars: symbolEntry.fastTactical.bars,
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        swingLeft: 2,
+        swingRight: 2,
+        supportLookbackBars: 160,
+        testingThresholdPct: 0.5,
+      })
+    : null;
+
   return {
     canonicalSymbol: symbolEntry.canonicalSymbol,
     label: symbolEntry.label,
@@ -150,6 +165,8 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
     structural,
     tactical,
     tacticalAvailable: Boolean(tactical),
+    fastTactical,
+    fastTacticalAvailable: Boolean(fastTactical),
     errors: symbolEntry.errors || [],
   };
 }
