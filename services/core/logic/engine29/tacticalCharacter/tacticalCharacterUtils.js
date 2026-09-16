@@ -6,7 +6,7 @@ import {
   ENGINE29_MOVE_DIRECTIONS,
 } from "./moveCharacterConstants.js";
 
-function finite(value) {
+export function finite(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
