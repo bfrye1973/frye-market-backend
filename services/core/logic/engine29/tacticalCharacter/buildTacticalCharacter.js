@@ -3,13 +3,16 @@
 import { ENGINE29_TIMEFRAMES } from "../constants.js";
 import {
   ENGINE29_MOVE_CHARACTERS,
+  ENGINE29_MOVE_DIRECTIONS,
   ENGINE29_MOVE_REASON_CODES,
+  ENGINE29_UNDERLYING_PRESSURE,
 } from "./moveCharacterConstants.js";
 import { buildEngine29EsFuturesAnchor } from "./buildEsFuturesAnchor.js";
 import { detectLiquiditySweep } from "./detectLiquiditySweep.js";
 import { detectFailedMove } from "./detectFailedMove.js";
 import { detectBroadConfirmation } from "./detectBroadConfirmation.js";
 import { detectSqueezeCharacter } from "./detectSqueezeCharacter.js";
+import { detectUnderlyingPressure } from "./detectUnderlyingPressure.js";
 import { resolveMoveCharacter } from "./resolveMoveCharacter.js";
 
 function unique(values = []) {
@@ -23,7 +26,15 @@ function memberLabel(block) {
   return "NOT CONFIRMING";
 }
 
-function plainEnglish(moveCharacter, direction, broadConfirmation, squeeze) {
+function pressureLabel(block) {
+  if (!block || !block.availableCount) return "NO DATA";
+  if (block.direction === ENGINE29_MOVE_DIRECTIONS.UP) return "POSITIVE";
+  if (block.direction === ENGINE29_MOVE_DIRECTIONS.DOWN) return "NEGATIVE";
+  if (block.direction === ENGINE29_MOVE_DIRECTIONS.MIXED) return "MIXED";
+  return "FLAT";
+}
+
+function plainEnglish(moveCharacter, direction, broadConfirmation, squeeze, underlyingPressure) {
   const headlineEtfs = memberLabel(broadConfirmation?.blocks?.headlineEtfs);
   const breadth = memberLabel(broadConfirmation?.blocks?.breadth);
   const leadership = memberLabel(broadConfirmation?.blocks?.leadership);
@@ -58,6 +69,12 @@ function plainEnglish(moveCharacter, direction, broadConfirmation, squeeze) {
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.MIXED) {
     summary = "ES has an active move, but the confirmation picture is mixed.";
     status = "ES MOVE MIXED";
+  } else if (underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.NEGATIVE) {
+    summary = underlyingPressure.headlineHoldingBetter
+      ? "ES is not in an active squeeze, but selling pressure is visible underneath the headline market."
+      : "ES is not in an active squeeze, but cross-market internals are leaning negative.";
+  } else if (underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.POSITIVE) {
+    summary = "ES is not in an active squeeze, but cross-market internals are leaning positive.";
   }
 
   return {
@@ -70,11 +87,20 @@ function plainEnglish(moveCharacter, direction, broadConfirmation, squeeze) {
       impulseMultiple: squeeze?.headline?.averageImpulseMultiple ?? null,
       resolvedSymbol: squeeze?.headline?.resolvedSymbol ?? null,
     },
-    underTheHood: {
+    moveConfirmation: {
       spyQqq: headlineEtfs,
       breadth,
       leadership,
       credit,
+    },
+    underlyingPressure: {
+      state: underlyingPressure?.state ?? null,
+      headlineHoldingBetter: Boolean(underlyingPressure?.headlineHoldingBetter),
+      spyQqq: pressureLabel(underlyingPressure?.blocks?.headlineEtfs),
+      breadth: pressureLabel(underlyingPressure?.blocks?.breadth),
+      leadership: pressureLabel(underlyingPressure?.blocks?.leadership),
+      credit: pressureLabel(underlyingPressure?.blocks?.credit),
+      financials: pressureLabel(underlyingPressure?.blocks?.financials),
     },
   };
 }
@@ -87,14 +113,18 @@ export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
   const symbols = structureBundle?.symbols || {};
   const detectorOptions = { ...options, esAnchor };
 
-  // First pass determines ES direction. Then all internals are evaluated against ES.
-  const initialBroad = detectBroadConfirmation(structureBundle, "UP", detectorOptions);
-  const initialSqueeze = detectSqueezeCharacter(structureBundle, groupBundle, initialBroad, detectorOptions);
-  const direction = initialSqueeze?.headline?.direction;
-  const broadConfirmation = direction === "UP" || direction === "DOWN"
-    ? detectBroadConfirmation(structureBundle, direction, detectorOptions)
-    : initialBroad;
+  // First pass obtains ES direction only. Broad confirmation is then evaluated
+  // strictly in the actual ES direction. Flat ES is NOT treated as an UP move.
+  const directionProbe = detectSqueezeCharacter(
+    structureBundle,
+    groupBundle,
+    detectBroadConfirmation(structureBundle, ENGINE29_MOVE_DIRECTIONS.FLAT, detectorOptions),
+    detectorOptions,
+  );
+  const direction = directionProbe?.headline?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT;
+  const broadConfirmation = detectBroadConfirmation(structureBundle, direction, detectorOptions);
   const squeeze = detectSqueezeCharacter(structureBundle, groupBundle, broadConfirmation, detectorOptions);
+  const underlyingPressure = detectUnderlyingPressure(structureBundle, detectorOptions);
 
   const esEntry = esAnchor?.structure || esAnchor || null;
   const sweepCandidates = esEntry?.fastTactical
@@ -115,6 +145,7 @@ export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
   const reasonCodes = unique([
     ...(broadConfirmation?.reasonCodes || []),
     ...(squeeze?.reasonCodes || []),
+    ...(underlyingPressure?.reasonCodes || []),
     ...sweepCandidates.map((x) => x?.reasonCode),
     ...failedMoveCandidates.map((x) => x?.reasonCode),
   ]);
@@ -124,7 +155,7 @@ export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
   if (!esEntry?.fastTactical) reasonCodes.push(ENGINE29_MOVE_REASON_CODES.ES_ANCHOR_MISSING);
 
   return {
-    version: "engine29.tacticalCharacter.v2.esAnchor",
+    version: "engine29.tacticalCharacter.v2.1.esAnchor",
     timestamp: new Date(now).toISOString(),
     timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
     anchor: "ES",
@@ -133,21 +164,19 @@ export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
     direction: resolved.direction,
     confidence: resolved.confidence,
     esImpulse: squeeze?.headline || null,
-    // Compatibility alias for older consumers.
     headlineImpulse: squeeze?.headline || null,
     broadConfirmation,
+    underlyingPressure,
     oneHourContext: squeeze?.oneHour || null,
     liquiditySweeps: sweepCandidates,
     failedMoves: failedMoveCandidates,
     directVixAvailable,
     dataDegraded: Boolean(structureBundle?.dataDegraded) || !directVixAvailable || !esEntry?.fastTactical,
     reasonCodes: unique(reasonCodes),
-    display: plainEnglish(resolved.moveCharacter, resolved.direction, broadConfirmation, squeeze),
+    display: plainEnglish(resolved.moveCharacter, resolved.direction, broadConfirmation, squeeze, underlyingPressure),
   };
 }
 
-// Convenience path for jobs/routes: fetch the live ES anchor using Frye's existing
-// futures provider, then resolve move character in one call.
 export async function buildEngine29TacticalCharacterWithEs(structureBundle, groupBundle, {
   now = Date.now(),
   esSymbol = "ES",
