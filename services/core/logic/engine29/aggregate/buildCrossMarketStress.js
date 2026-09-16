@@ -76,12 +76,16 @@ function plainGroupLabel(key, state, group) {
   return state;
 }
 
-function buildMissingConfirmations(groupBundle, structural) {
+function buildMissingConfirmations(groupBundle, structural, tacticalCharacter) {
   const missing = [];
   const groups = groupBundle?.groups || {};
 
   if (!structural?.gates?.creditConfirmed) missing.push("CREDIT");
-  if (!structural?.gates?.volatilityConfirmed) missing.push("DIRECT_VIX");
+
+  // Data availability and market confirmation are separate questions.
+  // DIRECT_VIX is only missing when the canonical direct VIX feed is unavailable.
+  // A live direct VIX feed can still be present without confirming volatility stress.
+  if (!tacticalCharacter?.directVixAvailable) missing.push("DIRECT_VIX");
 
   for (const group of Object.values(groups)) {
     for (const member of group?.structural?.missingRequiredMembers || []) missing.push(member);
@@ -124,7 +128,7 @@ export async function buildEngine29CrossMarketStress({
   const structural = resolveEngine29StructuralState(groups);
   const tactical = resolveEngine29TacticalState(groups, move);
   const fastTactical = resolveEngine29FastTacticalShift(move);
-  const missingConfirmations = buildMissingConfirmations(groups, structural);
+  const missingConfirmations = buildMissingConfirmations(groups, structural, move);
 
   const structuralStates = groups?.summary?.structuralStates || {};
   const displayGroups = {};
