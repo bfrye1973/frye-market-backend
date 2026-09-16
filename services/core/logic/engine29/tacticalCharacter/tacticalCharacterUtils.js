@@ -6,7 +6,7 @@ import {
   ENGINE29_MOVE_DIRECTIONS,
 } from "./moveCharacterConstants.js";
 
-export function finite(value) {
+function finite(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -70,6 +70,7 @@ export function deriveDirectionalMove(view, {
     return {
       direction: ENGINE29_MOVE_DIRECTIONS.FLAT,
       returnPct: null,
+      pointMove: null,
       thresholdPct: null,
       impulseMultiple: null,
       available: false,
@@ -79,6 +80,9 @@ export function deriveDirectionalMove(view, {
   const latest = bars.at(-1);
   const anchor = bars.at(-(barsBack + 1));
   const returnPct = pctChange(anchor.close, latest.close);
+  const pointMove = Number.isFinite(Number(latest.close)) && Number.isFinite(Number(anchor.close))
+    ? Number(latest.close) - Number(anchor.close)
+    : null;
   const baseline = medianAbsReturn(view);
   const thresholdPct = Math.max(
     minAbsMovePct,
@@ -95,12 +99,15 @@ export function deriveDirectionalMove(view, {
   return {
     direction,
     returnPct,
+    pointMove,
     thresholdPct,
     impulseMultiple,
     baselineMedianAbsReturnPct: baseline,
     available: true,
     anchorTime: anchor.time ?? null,
     latestTime: latest.time ?? null,
+    anchorClose: Number(anchor.close),
+    latestClose: Number(latest.close),
   };
 }
 
