@@ -14,9 +14,15 @@ import {
 } from "./groupUtils.js";
 
 function buildOne(symbols, timeframeKey) {
-  const members = ["SPX", "SPY", "NDX", "QQQ"].map((s) => memberSnapshot(symbols[s], timeframeKey)).filter(Boolean);
+  const members = ["SPX", "SPY", "NDX", "QQQ", "DJI"]
+    .map((s) => memberSnapshot(symbols[s], timeframeKey))
+    .filter(Boolean);
+
+  // SPX/SPY and NDX/QQQ remain the two independent state-driving blocks.
+  // Direct SPX/NDX are preferred automatically; ETFs remain confirmation/fallback.
   const sp500 = chooseBestEvidence([symbols.SPX, symbols.SPY], timeframeKey);
   const nasdaq = chooseBestEvidence([symbols.NDX, symbols.QQQ], timeframeKey);
+  const dji = memberSnapshot(symbols.DJI, timeframeKey);
   const blocks = [sp500, nasdaq].filter(Boolean);
 
   let state = null;
@@ -43,15 +49,28 @@ function buildOne(symbols, timeframeKey) {
     if (m.canonicalSymbol === "NDX") reasonCodes.push(ENGINE29_REASON_CODES.HEADLINE_NDX_BREAKDOWN);
   }
 
+  // DJI is useful direct context but is not a third independent headline vote.
+  if (dji?.available && isBreakingOrWorse(dji.state)) {
+    reasonCodes.push(ENGINE29_REASON_CODES.HEADLINE_DJI_BREAKDOWN);
+  }
+
   return groupBase({
     group: ENGINE29_GROUP_IDS.HEADLINE_INDEX,
     timeframe: timeframeLabel(timeframeKey),
     state,
     members,
-    subgroups: { SP500_BLOCK: sp500, NASDAQ_BLOCK: nasdaq },
+    subgroups: {
+      SP500_BLOCK: sp500,
+      NASDAQ_BLOCK: nasdaq,
+      DOW_CONTEXT: dji,
+    },
     reasonCodes,
     missingRequiredMembers: blocks.length < 2 ? ["HEADLINE_BLOCK_COVERAGE"] : [],
-    notes: ["SPX/SPY and NDX/QQQ are consolidated into two independent headline blocks to prevent double counting."],
+    notes: [
+      "SPX/SPY and NDX/QQQ are consolidated into two independent headline blocks to prevent double counting.",
+      "Direct SPX and NDX are preferred over ETF proxies when available.",
+      "DJI is retained as direct headline context but does not create a third independent state vote.",
+    ],
   });
 }
 
