@@ -51,6 +51,7 @@ import engine25FullDashboardRouter from "./routes/engine25FullDashboard.js";
 import engine25RefreshRouter from "./routes/engine25Refresh.js";
 import engine25ContextRouter from "./routes/engine25Context.js";
 import engine25IntradayMacroRouter from "./routes/engine25IntradayMacro.js";
+import engine29CrossMarketStressRouter from "./routes/engine29CrossMarketStress.js";
 import executionStateRouter from "./routes/executionState.js";
 import engine26ManualHardSignalRouter from "./routes/engine26ManualHardSignal.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
@@ -185,6 +186,7 @@ app.use("/api/v1", engine25FullDashboardRouter);
 app.use("/api/v1", engine25RefreshRouter);
 app.use("/api/v1", engine25ContextRouter);
 app.use("/api/v1", engine25IntradayMacroRouter);
+app.use("/api/v1", engine29CrossMarketStressRouter);
 app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1", engine26ManualHardSignalRouter);
 app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
@@ -371,6 +373,7 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/v1/run-all-engines   ✅ cron trigger");
   console.log("- /api/v1/trade-permission  ✅ Engine 6");
   console.log("- /api/v1/engine21-alignment  ✅ Engine 21");
+  console.log("- /api/v1/engine29/cross-market-stress  ✅ Engine 29");
   console.log("- /live  (GitHub JSON proxies)");
 
   // Build snapshot after server is already listening.
