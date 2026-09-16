@@ -20,9 +20,18 @@ export const ENGINE29_MOVE_CHARACTERS = Object.freeze({
 });
 
 export const ENGINE29_MOVE_REASON_CODES = Object.freeze({
+  ES_UP_IMPULSE: "ES_UP_IMPULSE",
+  ES_DOWN_IMPULSE: "ES_DOWN_IMPULSE",
+  ES_ANCHOR_MISSING: "ES_ANCHOR_MISSING",
+  ES_ONE_HOUR_OPPOSES_FAST_MOVE: "ES_ONE_HOUR_OPPOSES_FAST_MOVE",
+
+  // Kept for compatibility with earlier Phase 4.75 output.
   HEADLINE_UP_IMPULSE: "HEADLINE_UP_IMPULSE",
   HEADLINE_DOWN_IMPULSE: "HEADLINE_DOWN_IMPULSE",
   HEADLINE_MIXED: "HEADLINE_MIXED",
+
+  SPY_QQQ_CONFIRM_MOVE: "SPY_QQQ_CONFIRM_MOVE",
+  SPY_QQQ_NOT_CONFIRMING: "SPY_QQQ_NOT_CONFIRMING",
 
   BREADTH_CONFIRMS_MOVE: "BREADTH_CONFIRMS_MOVE",
   BREADTH_NOT_CONFIRMING: "BREADTH_NOT_CONFIRMING",
@@ -47,8 +56,12 @@ export const ENGINE29_MOVE_REASON_CODES = Object.freeze({
 export const ENGINE29_MOVE_CHARACTER_DEFAULTS = Object.freeze({
   headlineBarsBack: 2,
   baselineBars: 40,
+
+  // ES is now the primary fast-move trigger. At ~7600, 0.12% is roughly 9 points.
+  // The baseline-multiple requirement prevents normal noise from becoming a squeeze alert.
   minHeadlineAbsMovePct: 0.12,
   minHeadlineImpulseMultiple: 1.5,
+
   minInternalDirectionalPct: 0.03,
   internalBaselineFraction: 0.5,
   minSweepExcursionPct: 0.03,
