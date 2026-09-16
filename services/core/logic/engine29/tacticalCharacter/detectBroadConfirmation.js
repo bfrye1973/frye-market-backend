@@ -16,7 +16,8 @@ function block(symbols, names, direction, options = {}) {
     }));
 
   const available = members.filter((m) => m.move.available);
-  const confirming = available.filter((m) => sameDirection(direction, m.move));
+  const directional = direction === ENGINE29_MOVE_DIRECTIONS.UP || direction === ENGINE29_MOVE_DIRECTIONS.DOWN;
+  const confirming = directional ? available.filter((m) => sameDirection(direction, m.move)) : [];
 
   return {
     availableCount: available.length,
@@ -29,6 +30,7 @@ function block(symbols, names, direction, options = {}) {
 
 export function detectBroadConfirmation(structureBundle, direction, options = {}) {
   const symbols = structureBundle?.symbols || {};
+  const directional = direction === ENGINE29_MOVE_DIRECTIONS.UP || direction === ENGINE29_MOVE_DIRECTIONS.DOWN;
 
   // SPY/QQQ confirm whether the cash/ETF headline market is following ES.
   // They are intentionally NOT counted as an independent macro confirmation block.
@@ -38,47 +40,50 @@ export function detectBroadConfirmation(structureBundle, direction, options = {}
   const credit = block(symbols, ["HYG", "JNK", "LQD"], direction, options);
   const financials = block(symbols, ["XLF", "KRE"], direction, options);
 
-  const headlineEtfsConfirmed = headlineEtfs.availableCount >= 1 && headlineEtfs.confirmingCount >= 1;
-  const breadthConfirmed = breadth.availableCount >= 2 && breadth.confirmingCount >= 2;
-  const leadershipConfirmed = leadership.availableCount >= 1 && leadership.confirmingCount >= 1;
-  const creditConfirmed = credit.availableCount >= 1 && credit.confirmingCount >= 1;
-  const financialsConfirmed = financials.availableCount >= 1 && financials.confirmingCount >= 1;
+  const headlineEtfsConfirmed = directional && headlineEtfs.availableCount >= 1 && headlineEtfs.confirmingCount >= 1;
+  const breadthConfirmed = directional && breadth.availableCount >= 2 && breadth.confirmingCount >= 2;
+  const leadershipConfirmed = directional && leadership.availableCount >= 1 && leadership.confirmingCount >= 1;
+  const creditConfirmed = directional && credit.availableCount >= 1 && credit.confirmingCount >= 1;
+  const financialsConfirmed = directional && financials.availableCount >= 1 && financials.confirmingCount >= 1;
 
-  // ES is the trigger. A real broad move still requires independent internals.
-  // SPY/QQQ are useful confirmation but do not inflate the independent-block count.
-  const broadConfirmed = breadthConfirmed
+  const broadConfirmed = directional
+    && breadthConfirmed
     && leadershipConfirmed
     && (creditConfirmed || financialsConfirmed);
 
   const reasonCodes = [];
-  reasonCodes.push(
-    headlineEtfsConfirmed
-      ? ENGINE29_MOVE_REASON_CODES.SPY_QQQ_CONFIRM_MOVE
-      : ENGINE29_MOVE_REASON_CODES.SPY_QQQ_NOT_CONFIRMING,
-  );
-  reasonCodes.push(
-    breadthConfirmed
-      ? ENGINE29_MOVE_REASON_CODES.BREADTH_CONFIRMS_MOVE
-      : ENGINE29_MOVE_REASON_CODES.BREADTH_NOT_CONFIRMING,
-  );
-  reasonCodes.push(
-    leadershipConfirmed
-      ? ENGINE29_MOVE_REASON_CODES.LEADERSHIP_CONFIRMS_MOVE
-      : ENGINE29_MOVE_REASON_CODES.LEADERSHIP_NOT_CONFIRMING,
-  );
-  reasonCodes.push(
-    creditConfirmed
-      ? ENGINE29_MOVE_REASON_CODES.CREDIT_CONFIRMS_MOVE
-      : ENGINE29_MOVE_REASON_CODES.CREDIT_NOT_CONFIRMING,
-  );
-  reasonCodes.push(
-    broadConfirmed
-      ? ENGINE29_MOVE_REASON_CODES.BROAD_CONFIRMATION_PRESENT
-      : ENGINE29_MOVE_REASON_CODES.BROAD_CONFIRMATION_MISSING,
-  );
+  if (!directional) {
+    reasonCodes.push(ENGINE29_MOVE_REASON_CODES.BROAD_CONFIRMATION_NOT_APPLICABLE);
+  } else {
+    reasonCodes.push(
+      headlineEtfsConfirmed
+        ? ENGINE29_MOVE_REASON_CODES.SPY_QQQ_CONFIRM_MOVE
+        : ENGINE29_MOVE_REASON_CODES.SPY_QQQ_NOT_CONFIRMING,
+    );
+    reasonCodes.push(
+      breadthConfirmed
+        ? ENGINE29_MOVE_REASON_CODES.BREADTH_CONFIRMS_MOVE
+        : ENGINE29_MOVE_REASON_CODES.BREADTH_NOT_CONFIRMING,
+    );
+    reasonCodes.push(
+      leadershipConfirmed
+        ? ENGINE29_MOVE_REASON_CODES.LEADERSHIP_CONFIRMS_MOVE
+        : ENGINE29_MOVE_REASON_CODES.LEADERSHIP_NOT_CONFIRMING,
+    );
+    reasonCodes.push(
+      creditConfirmed
+        ? ENGINE29_MOVE_REASON_CODES.CREDIT_CONFIRMS_MOVE
+        : ENGINE29_MOVE_REASON_CODES.CREDIT_NOT_CONFIRMING,
+    );
+    reasonCodes.push(
+      broadConfirmed
+        ? ENGINE29_MOVE_REASON_CODES.BROAD_CONFIRMATION_PRESENT
+        : ENGINE29_MOVE_REASON_CODES.BROAD_CONFIRMATION_MISSING,
+    );
+  }
 
   return {
-    direction,
+    direction: directional ? direction : ENGINE29_MOVE_DIRECTIONS.FLAT,
     broadConfirmed,
     headlineEtfsConfirmed,
     independentBlocksConfirmed: [breadthConfirmed, leadershipConfirmed, creditConfirmed || financialsConfirmed]
@@ -91,6 +96,6 @@ export function detectBroadConfirmation(structureBundle, direction, options = {}
       financials: { ...financials, confirmed: financialsConfirmed },
     },
     reasonCodes,
-    usable: direction === ENGINE29_MOVE_DIRECTIONS.UP || direction === ENGINE29_MOVE_DIRECTIONS.DOWN,
+    usable: directional,
   };
 }
