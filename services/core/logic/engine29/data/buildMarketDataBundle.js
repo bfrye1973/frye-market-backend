@@ -8,7 +8,11 @@ import {
   ENGINE29_SYMBOL_REGISTRY,
   ENGINE29_REQUIRED_SYMBOLS,
 } from "../symbolRegistry.js";
-import { normalizeFredObservations, normalizePolygonBars, getLatestNormalizedBar } from "./normalizeMarketBars.js";
+import {
+  normalizeFredObservations,
+  normalizePolygonBars,
+  getLatestNormalizedBar,
+} from "./normalizeMarketBars.js";
 import { evaluateFreshness } from "./validateFreshness.js";
 import {
   fetchEngine29PolygonDaily,
@@ -16,21 +20,12 @@ import {
   fetchEngine29PolygonThirtyMinute,
 } from "./providers/polygonMarketData.js";
 import { fetchEngine29FredDaily } from "./providers/fredMarketData.js";
+import { fetchEngine29FuturesProductBars } from "./providers/futuresProductMarketData.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function dateString(ms) {
   return new Date(ms).toISOString().slice(0, 10);
-}
-
-function resolveConfiguredSource(definition) {
-  if (!definition) return null;
-
-  if (definition.primary?.provider !== "PENDING_DIRECT_FEED_VERIFICATION") {
-    return definition.primary || null;
-  }
-
-  return definition.fallback || definition.primary || null;
 }
 
 function buildUnavailableEntry({ definition, reason }) {
@@ -44,6 +39,7 @@ function buildUnavailableEntry({ definition, reason }) {
     provider: null,
     sourceSymbol: null,
     sourceSeriesId: null,
+    sourceProductCode: null,
     isProxy: false,
     proxyFor: null,
     evidenceQuality: ENGINE29_EVIDENCE_QUALITY.MISSING,
@@ -62,9 +58,11 @@ function sourceMetadata(source) {
     provider: source?.provider || null,
     sourceSymbol: source?.symbol || null,
     sourceSeriesId: source?.seriesId || null,
+    sourceProductCode: source?.productCode || null,
     isProxy: Boolean(source?.isProxy),
     proxyFor: source?.proxyFor || null,
-    evidenceQuality: source?.evidenceQuality || ENGINE29_EVIDENCE_QUALITY.MISSING,
+    evidenceQuality:
+      source?.evidenceQuality || ENGINE29_EVIDENCE_QUALITY.MISSING,
   };
 }
 
@@ -173,9 +171,6 @@ async function loadPolygonSymbol({
   }
 
   const meta = sourceMetadata(source);
-  const structuralAvailable = Boolean(structural?.latest);
-  const tacticalAvailable = Boolean(tactical?.latest);
-  const fastTacticalAvailable = Boolean(fastTactical?.latest);
 
   return {
     canonicalSymbol: definition.canonicalSymbol,
@@ -185,12 +180,12 @@ async function loadPolygonSymbol({
     stressDirection: definition.stressDirection,
     required: Boolean(definition.required),
     ...meta,
-    available: structuralAvailable,
+    available: Boolean(structural?.latest),
     structural,
     tactical,
-    tacticalAvailable,
+    tacticalAvailable: Boolean(tactical?.latest),
     fastTactical,
-    fastTacticalAvailable,
+    fastTacticalAvailable: Boolean(fastTactical?.latest),
     errors,
   };
 }
@@ -253,6 +248,221 @@ async function loadFredSymbol({
   };
 }
 
+async function loadFuturesProductSymbol({
+  definition,
+  source,
+  structuralFrom,
+  structuralTo,
+  tacticalFrom,
+  tacticalTo,
+  fastTacticalFrom,
+  fastTacticalTo,
+  now,
+  includeTactical,
+  includeFastTactical,
+}) {
+  const errors = [];
+  let resolvedSymbol = null;
+  let resolver = null;
+
+  let structural = null;
+  try {
+    const daily = await fetchEngine29FuturesProductBars({
+      productCode: source.productCode,
+      timeframe: "1D",
+      from: structuralFrom,
+      to: structuralTo,
+      now,
+    });
+    resolvedSymbol = daily.resolvedSymbol || resolvedSymbol;
+    resolver = daily.resolver || resolver;
+    const bars = daily.bars || [];
+    const latest = getLatestNormalizedBar(bars);
+    const freshness = evaluateFreshness({
+      latestTime: latest?.time,
+      timeframe: "1D",
+      now,
+    });
+
+    structural = {
+      timeframe: ENGINE29_TIMEFRAMES.STRUCTURAL,
+      sourceTimeframe: "1D",
+      count: bars.length,
+      latest,
+      bars,
+      freshness,
+      resolvedSymbol,
+      productCode: source.productCode,
+      contractSpecificHistory: true,
+      continuousHistory: false,
+    };
+  } catch (err) {
+    errors.push(`STRUCTURAL: ${err.message}`);
+  }
+
+  let tactical = null;
+  if (includeTactical) {
+    try {
+      const hourly = await fetchEngine29FuturesProductBars({
+        productCode: source.productCode,
+        timeframe: "1H",
+        from: tacticalFrom,
+        to: tacticalTo,
+        now,
+      });
+      resolvedSymbol = hourly.resolvedSymbol || resolvedSymbol;
+      resolver = hourly.resolver || resolver;
+      const bars = hourly.bars || [];
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+        now,
+      });
+
+      tactical = {
+        timeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+        sourceTimeframe: "1H",
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+        resolvedSymbol,
+        productCode: source.productCode,
+      };
+    } catch (err) {
+      errors.push(`TACTICAL: ${err.message}`);
+    }
+  }
+
+  let fastTactical = null;
+  if (includeFastTactical) {
+    try {
+      const thirtyMinute = await fetchEngine29FuturesProductBars({
+        productCode: source.productCode,
+        timeframe: "30m",
+        from: fastTacticalFrom,
+        to: fastTacticalTo,
+        now,
+      });
+      resolvedSymbol = thirtyMinute.resolvedSymbol || resolvedSymbol;
+      resolver = thirtyMinute.resolver || resolver;
+      const bars = thirtyMinute.bars || [];
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        now,
+      });
+
+      fastTactical = {
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        sourceTimeframe: "30m",
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+        resolvedSymbol,
+        productCode: source.productCode,
+      };
+    } catch (err) {
+      errors.push(`FAST_TACTICAL: ${err.message}`);
+    }
+  }
+
+  return {
+    canonicalSymbol: definition.canonicalSymbol,
+    label: definition.label,
+    group: definition.group,
+    subgroup: definition.subgroup || null,
+    stressDirection: definition.stressDirection,
+    required: Boolean(definition.required),
+    provider: "FRYE_FUTURES_PRODUCT",
+    sourceSymbol: resolvedSymbol,
+    sourceSeriesId: null,
+    sourceProductCode: source.productCode,
+    isProxy: false,
+    proxyFor: null,
+    evidenceQuality: ENGINE29_EVIDENCE_QUALITY.DIRECT,
+    available: Boolean(structural?.latest),
+    structural,
+    tactical,
+    tacticalAvailable: Boolean(tactical?.latest),
+    fastTactical,
+    fastTacticalAvailable: Boolean(fastTactical?.latest),
+    resolver,
+    errors,
+  };
+}
+
+async function loadSource({
+  definition,
+  source,
+  polygonApiKey,
+  fredApiKey,
+  structuralFrom,
+  structuralTo,
+  tacticalFrom,
+  tacticalTo,
+  fastTacticalFrom,
+  fastTacticalTo,
+  now,
+  includeTactical,
+  includeFastTactical,
+}) {
+  if (!source) {
+    return buildUnavailableEntry({ definition, reason: "NO_VERIFIED_DATA_SOURCE" });
+  }
+
+  if (source.provider === "POLYGON") {
+    return loadPolygonSymbol({
+      definition,
+      source,
+      polygonApiKey,
+      structuralFrom,
+      structuralTo,
+      tacticalFrom,
+      tacticalTo,
+      fastTacticalFrom,
+      fastTacticalTo,
+      now,
+      includeTactical,
+      includeFastTactical,
+    });
+  }
+
+  if (source.provider === "FRED") {
+    return loadFredSymbol({
+      definition,
+      source,
+      fredApiKey,
+      structuralFrom,
+      now,
+    });
+  }
+
+  if (source.provider === "FRYE_FUTURES_PRODUCT") {
+    return loadFuturesProductSymbol({
+      definition,
+      source,
+      structuralFrom,
+      structuralTo,
+      tacticalFrom,
+      tacticalTo,
+      fastTacticalFrom,
+      fastTacticalTo,
+      now,
+      includeTactical,
+      includeFastTactical,
+    });
+  }
+
+  return buildUnavailableEntry({
+    definition,
+    reason: `UNSUPPORTED_PROVIDER:${source.provider}`,
+  });
+}
+
 export async function buildEngine29MarketDataBundle({
   polygonApiKey = process.env.POLYGON_API_KEY,
   fredApiKey = process.env.FRED_API_KEY,
@@ -278,21 +488,32 @@ export async function buildEngine29MarketDataBundle({
   const symbols = {};
 
   for (const definition of definitions) {
-    const source = resolveConfiguredSource(definition);
+    const primary = definition.primary || null;
+    const fallback = definition.fallback || null;
 
-    if (!source || source.provider === "PENDING_DIRECT_FEED_VERIFICATION") {
-      symbols[definition.canonicalSymbol] = buildUnavailableEntry({
-        definition,
-        reason: "NO_VERIFIED_DATA_SOURCE",
-      });
-      continue;
-    }
+    let entry = await loadSource({
+      definition,
+      source: primary,
+      polygonApiKey,
+      fredApiKey,
+      structuralFrom,
+      structuralTo,
+      tacticalFrom,
+      tacticalTo,
+      fastTacticalFrom,
+      fastTacticalTo,
+      now,
+      includeTactical,
+      includeFastTactical,
+    });
 
-    if (source.provider === "POLYGON") {
-      symbols[definition.canonicalSymbol] = await loadPolygonSymbol({
+    if (!entry?.available && fallback) {
+      const primaryErrors = [...(entry?.errors || [])];
+      const fallbackEntry = await loadSource({
         definition,
-        source,
+        source: fallback,
         polygonApiKey,
+        fredApiKey,
         structuralFrom,
         structuralTo,
         tacticalFrom,
@@ -303,24 +524,21 @@ export async function buildEngine29MarketDataBundle({
         includeTactical,
         includeFastTactical,
       });
-      continue;
+
+      entry = {
+        ...fallbackEntry,
+        fallbackUsed: true,
+        primaryProvider: primary?.provider || null,
+        primarySourceProductCode: primary?.productCode || null,
+        primarySourceSymbol: primary?.symbol || null,
+        errors: [
+          ...primaryErrors.map((error) => `PRIMARY_FAILED: ${error}`),
+          ...(fallbackEntry?.errors || []),
+        ],
+      };
     }
 
-    if (source.provider === "FRED") {
-      symbols[definition.canonicalSymbol] = await loadFredSymbol({
-        definition,
-        source,
-        fredApiKey,
-        structuralFrom,
-        now,
-      });
-      continue;
-    }
-
-    symbols[definition.canonicalSymbol] = buildUnavailableEntry({
-      definition,
-      reason: `UNSUPPORTED_PROVIDER:${source.provider}`,
-    });
+    symbols[definition.canonicalSymbol] = entry;
   }
 
   const values = Object.values(symbols);
