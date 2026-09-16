@@ -5,6 +5,7 @@ import {
   ENGINE29_MOVE_CHARACTERS,
   ENGINE29_MOVE_REASON_CODES,
 } from "./moveCharacterConstants.js";
+import { buildEngine29EsFuturesAnchor } from "./buildEsFuturesAnchor.js";
 import { detectLiquiditySweep } from "./detectLiquiditySweep.js";
 import { detectFailedMove } from "./detectFailedMove.js";
 import { detectBroadConfirmation } from "./detectBroadConfirmation.js";
@@ -16,52 +17,61 @@ function unique(values = []) {
 }
 
 function memberLabel(block) {
-  if (!block) return "NO DATA";
+  if (!block || !block.availableCount) return "NO DATA";
   if (block.confirmed) return "CONFIRMING";
   if (block.confirmingCount > 0) return "PARTIAL";
   return "NOT CONFIRMING";
 }
 
-function plainEnglish(moveCharacter, direction, broadConfirmation) {
+function plainEnglish(moveCharacter, direction, broadConfirmation, squeeze) {
+  const headlineEtfs = memberLabel(broadConfirmation?.blocks?.headlineEtfs);
   const breadth = memberLabel(broadConfirmation?.blocks?.breadth);
   const leadership = memberLabel(broadConfirmation?.blocks?.leadership);
   const credit = memberLabel(broadConfirmation?.blocks?.credit);
 
-  let summary = "No unusual 30-minute move is active.";
-  let status = "NORMAL / MIXED";
+  let summary = "No unusual ES 30-minute move is active.";
+  let status = "NO ACTIVE SQUEEZE";
 
   if (moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE) {
-    summary = "Headline indexes are moving higher faster than the market underneath them. The move is not yet broadly confirmed.";
-    status = "POSSIBLE UPSIDE SQUEEZE";
+    summary = "ES is moving sharply higher, but the broader market underneath it is not yet confirming the move.";
+    status = "POSSIBLE ES UPSIDE SQUEEZE";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE) {
-    summary = "Headline indexes are dropping faster than the market underneath them. The selloff is not yet broadly confirmed.";
-    status = "POSSIBLE DOWNSIDE SQUEEZE";
+    summary = "ES is moving sharply lower, but the broader market underneath it is not yet confirming the selloff.";
+    status = "POSSIBLE ES DOWNSIDE SQUEEZE";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED) {
     summary = direction === "UP"
-      ? "The 30-minute rally is broadening beyond the headline indexes."
-      : "The 30-minute selloff is broadening beyond the headline indexes.";
-    status = "BROAD MOVE CONFIRMED";
+      ? "The ES rally is broadening across independent market internals."
+      : "The ES selloff is broadening across independent market internals.";
+    status = "ES BROAD MOVE CONFIRMED";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH) {
-    summary = "Price traded above a recent resistance/swing area but failed to hold the level on a completed 30-minute bar.";
-    status = "LIQUIDITY SWEEP HIGH";
+    summary = "ES traded above a recent 30-minute resistance/swing area but failed to hold it on a completed bar.";
+    status = "ES LIQUIDITY SWEEP HIGH";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW) {
-    summary = "Price traded below a recent support/swing area but failed to hold the level on a completed 30-minute bar.";
-    status = "LIQUIDITY SWEEP LOW";
+    summary = "ES traded below a recent 30-minute support/swing area but reclaimed it on a completed bar.";
+    status = "ES LIQUIDITY SWEEP LOW";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.FAILED_BREAKOUT) {
-    summary = "A completed 30-minute breakout was followed by a close back below resistance.";
-    status = "FAILED BREAKOUT";
+    summary = "An ES 30-minute breakout was followed by a close back below resistance.";
+    status = "ES FAILED BREAKOUT";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.FAILED_BREAKDOWN) {
-    summary = "A completed 30-minute breakdown was followed by a close back above support.";
-    status = "FAILED BREAKDOWN";
+    summary = "An ES 30-minute breakdown was followed by a close back above support.";
+    status = "ES FAILED BREAKDOWN";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.MIXED) {
-    summary = "SPY and QQQ are not moving together strongly enough to define one clean headline impulse.";
-    status = "MIXED";
+    summary = "ES has an active move, but the confirmation picture is mixed.";
+    status = "ES MOVE MIXED";
   }
 
   return {
     status,
     summary,
+    es: {
+      direction: squeeze?.headline?.direction ?? null,
+      returnPct: squeeze?.headline?.averageReturnPct ?? null,
+      pointMove: squeeze?.headline?.averagePointMove ?? null,
+      impulseMultiple: squeeze?.headline?.averageImpulseMultiple ?? null,
+      resolvedSymbol: squeeze?.headline?.resolvedSymbol ?? null,
+    },
     underTheHood: {
+      spyQqq: headlineEtfs,
       breadth,
       leadership,
       credit,
@@ -71,27 +81,29 @@ function plainEnglish(moveCharacter, direction, broadConfirmation) {
 
 export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
   now = Date.now(),
+  esAnchor = null,
   ...options
 } = {}) {
   const symbols = structureBundle?.symbols || {};
+  const detectorOptions = { ...options, esAnchor };
 
-  const initialBroad = detectBroadConfirmation(structureBundle, "UP", options);
-  // Squeeze detector resolves the actual headline direction. We run once to get that direction,
-  // then rebuild broad confirmation using the same direction so internals are evaluated correctly.
-  const initialSqueeze = detectSqueezeCharacter(structureBundle, groupBundle, initialBroad, options);
+  // First pass determines ES direction. Then all internals are evaluated against ES.
+  const initialBroad = detectBroadConfirmation(structureBundle, "UP", detectorOptions);
+  const initialSqueeze = detectSqueezeCharacter(structureBundle, groupBundle, initialBroad, detectorOptions);
   const direction = initialSqueeze?.headline?.direction;
   const broadConfirmation = direction === "UP" || direction === "DOWN"
-    ? detectBroadConfirmation(structureBundle, direction, options)
+    ? detectBroadConfirmation(structureBundle, direction, detectorOptions)
     : initialBroad;
-  const squeeze = detectSqueezeCharacter(structureBundle, groupBundle, broadConfirmation, options);
+  const squeeze = detectSqueezeCharacter(structureBundle, groupBundle, broadConfirmation, detectorOptions);
 
-  const sweepCandidates = [symbols.SPY, symbols.QQQ]
-    .filter(Boolean)
-    .map((entry) => detectLiquiditySweep(entry, options));
+  const esEntry = esAnchor?.structure || esAnchor || null;
+  const sweepCandidates = esEntry?.fastTactical
+    ? [detectLiquiditySweep(esEntry, detectorOptions)]
+    : [];
 
-  const failedMoveCandidates = [symbols.SPY, symbols.QQQ]
-    .filter(Boolean)
-    .map((entry) => detectFailedMove(entry));
+  const failedMoveCandidates = esEntry?.fastTactical
+    ? [detectFailedMove(esEntry)]
+    : [];
 
   const resolved = resolveMoveCharacter({
     liquiditySweeps: sweepCandidates,
@@ -109,22 +121,42 @@ export function buildEngine29TacticalCharacter(structureBundle, groupBundle, {
 
   const directVixAvailable = Boolean(symbols.VIX?.fastTactical && !symbols.VIX?.isProxy);
   if (!directVixAvailable) reasonCodes.push(ENGINE29_MOVE_REASON_CODES.DIRECT_VOLATILITY_CONFIRMATION_MISSING);
+  if (!esEntry?.fastTactical) reasonCodes.push(ENGINE29_MOVE_REASON_CODES.ES_ANCHOR_MISSING);
 
   return {
-    version: "engine29.tacticalCharacter.v1",
+    version: "engine29.tacticalCharacter.v2.esAnchor",
     timestamp: new Date(now).toISOString(),
     timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+    anchor: "ES",
+    esResolvedSymbol: esAnchor?.resolvedSymbol || esEntry?.sourceSymbol || null,
     moveCharacter: resolved.moveCharacter,
     direction: resolved.direction,
     confidence: resolved.confidence,
+    esImpulse: squeeze?.headline || null,
+    // Compatibility alias for older consumers.
     headlineImpulse: squeeze?.headline || null,
     broadConfirmation,
     oneHourContext: squeeze?.oneHour || null,
     liquiditySweeps: sweepCandidates,
     failedMoves: failedMoveCandidates,
     directVixAvailable,
-    dataDegraded: Boolean(structureBundle?.dataDegraded) || !directVixAvailable,
+    dataDegraded: Boolean(structureBundle?.dataDegraded) || !directVixAvailable || !esEntry?.fastTactical,
     reasonCodes: unique(reasonCodes),
-    display: plainEnglish(resolved.moveCharacter, resolved.direction, broadConfirmation),
+    display: plainEnglish(resolved.moveCharacter, resolved.direction, broadConfirmation, squeeze),
   };
+}
+
+// Convenience path for jobs/routes: fetch the live ES anchor using Frye's existing
+// futures provider, then resolve move character in one call.
+export async function buildEngine29TacticalCharacterWithEs(structureBundle, groupBundle, {
+  now = Date.now(),
+  esSymbol = "ES",
+  ...options
+} = {}) {
+  const esAnchor = await buildEngine29EsFuturesAnchor({ now, symbol: esSymbol });
+  return buildEngine29TacticalCharacter(structureBundle, groupBundle, {
+    now,
+    esAnchor,
+    ...options,
+  });
 }
