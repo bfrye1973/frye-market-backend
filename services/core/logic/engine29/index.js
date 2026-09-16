@@ -26,6 +26,7 @@ export * from "./groups/buildFinancialConditionsGroup.js";
 export * from "./groups/buildGroupStateBundle.js";
 export * from "./tacticalCharacter/moveCharacterConstants.js";
 export * from "./tacticalCharacter/tacticalCharacterUtils.js";
+export * from "./tacticalCharacter/buildEsFuturesAnchor.js";
 export * from "./tacticalCharacter/detectLiquiditySweep.js";
 export * from "./tacticalCharacter/detectFailedMove.js";
 export * from "./tacticalCharacter/detectBroadConfirmation.js";
