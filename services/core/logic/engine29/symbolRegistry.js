@@ -26,6 +26,16 @@ function fred(seriesId) {
   });
 }
 
+function futuresProduct(productCode) {
+  return Object.freeze({
+    provider: "FRYE_FUTURES_PRODUCT",
+    productCode,
+    evidenceQuality: ENGINE29_EVIDENCE_QUALITY.DIRECT,
+    isProxy: false,
+    proxyFor: null,
+  });
+}
+
 function polygonProxy(symbol, proxyFor) {
   return Object.freeze({
     provider: "POLYGON",
@@ -266,7 +276,7 @@ export const ENGINE29_SYMBOL_REGISTRY = Object.freeze({
     subgroup: "OIL_COMPLEX",
     stressDirection: ENGINE29_STRESS_DIRECTIONS.HIGHER,
     required: true,
-    primary: pendingDirect("WTI"),
+    primary: futuresProduct("CL"),
     fallback: polygonProxy("USO", "WTI"),
   },
   BRENT: {
@@ -276,7 +286,7 @@ export const ENGINE29_SYMBOL_REGISTRY = Object.freeze({
     subgroup: "OIL_COMPLEX",
     stressDirection: ENGINE29_STRESS_DIRECTIONS.HIGHER,
     required: true,
-    primary: pendingDirect("BRENT"),
+    primary: futuresProduct("BZ"),
     fallback: null,
   },
 
