@@ -39,6 +39,11 @@ import {
   updateNegotiatedZoneMemory,
   retirePriorMemoryRecord,
 } from "./strategy1/updateNegotiatedZoneMemory.js";
+import {
+  normalizeEngine26Zone,
+  buildEngine26TradeZoneView,
+  buildEngine26LocationView,
+} from "./engine26ZoneContract.js";
 
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
@@ -291,160 +296,6 @@ function relationToZone(
     ? "NEAR_BELOW_ZONE"
     : "BELOW_ZONE";
 }
-function normalizeZone({
-  zone,
-  source,
-  sourcePath,
-  defaultType = "ZONE",
-  defaultTimeframe = null,
-  priority = 50,
-  tickSize = DEFAULT_TICK_SIZE,
-}) {
-  if (!zone || typeof zone !== "object") {
-    return null;
-  }
-
-  const directPrice = positiveNumber(
-    zone.price ??
-      zone.level ??
-      zone.mid ??
-      zone.value
-  );
-
-  const rawLo = positiveNumber(
-    zone.lo ??
-      zone.low ??
-      zone.lower ??
-      zone.from ??
-      directPrice
-  );
-
-  const rawHi = positiveNumber(
-    zone.hi ??
-      zone.high ??
-      zone.upper ??
-      zone.to ??
-      directPrice
-  );
-
-  if (rawLo === null || rawHi === null) {
-    return null;
-  }
-
-  const lo = roundToTick(
-    Math.min(rawLo, rawHi),
-    tickSize
-  );
-
-  const hi = roundToTick(
-    Math.max(rawLo, rawHi),
-    tickSize
-  );
-
-  const mid = roundToTick(
-    (lo + hi) / 2,
-    tickSize
-  );
-
-  return {
-    upstreamId:
-      zone.id ??
-      zone.zoneId ??
-      null,
-
-    source,
-    sourcePath,
-
-    type: String(
-      zone.zoneType ??
-        zone.type ??
-        zone.label ??
-        defaultType
-    ).toUpperCase(),
-
-    timeframe:
-      zone.timeframe ??
-      zone.tf ??
-      defaultTimeframe,
-
-    side:
-      zone.side ??
-      zone.direction ??
-      zone.bias ??
-      null,
-
-    lo,
-    hi,
-    mid,
-
-    priority,
-
-    strength: toFiniteNumber(
-      zone.strength ??
-        zone.score ??
-        zone.confidence
-    ),
-
-    freshness:
-      zone.freshness ??
-      zone.status ??
-      null,
-
-priceSource:
-  zone.source ?? null,
-
-originalLo:
-  toFiniteNumber(zone.originalLo),
-
-originalHi:
-  toFiniteNumber(zone.originalHi),
-
-originalMid:
-  toFiniteNumber(zone.originalMid),
-
-adjustedLo:
-  toFiniteNumber(zone.adjustedLo),
-
-adjustedHi:
-  toFiniteNumber(zone.adjustedHi),
-
-adjustedMid:
-  toFiniteNumber(zone.adjustedMid),
-
-protectedOriginal:
-  zone.protectedOriginal === true,
-
-readOnly:
-  zone.readOnly === true,
-
-priceBasis:
-  zone.priceBasis ?? null,
-
-sourceFuturesContractCode:
-  zone.sourceFuturesContractCode ?? null,
-
-displayFuturesContractCode:
-  zone.displayFuturesContractCode ?? null,
-
-polygonSourceTicker:
-  zone.polygonSourceTicker ?? null,
-
-polygonDisplayTicker:
-  zone.polygonDisplayTicker ?? null,
-
-rollAdjustmentPoints:
-  toFiniteNumber(zone.rollAdjustmentPoints),
-
-adjustmentMethod:
-  zone.adjustmentMethod ?? null,
-
-adjustmentTimestamp:
-  zone.adjustmentTimestamp ?? null,
-
-    raw: zone,
-  };
-}
-
 function pointZone({
   value,
   source,
@@ -460,7 +311,7 @@ function pointZone({
     return null;
   }
 
-  return normalizeZone({
+  return normalizeEngine26Zone({
     zone: {
       price,
       type,
@@ -508,7 +359,7 @@ function collectEngine26ManualImbalanceZones(
       return;
     }
 
-    const normalized = normalizeZone({
+    const normalized = normalizeEngine26Zone({
       zone,
 
       source:
@@ -547,7 +398,7 @@ function collectEngine26ManualNegotiatedZones(
 
   return zones
     .map((zone, index) =>
-      normalizeZone({
+      normalizeEngine26Zone({
         zone,
         source: "ENGINE26_MANUAL_NEGOTIATED",
         sourcePath:
@@ -2128,7 +1979,7 @@ function collectEngine1Zones(
   const candidates = [];
 
   const add = (zone, options) => {
-    const normalized = normalizeZone({
+    const normalized = normalizeEngine26Zone({
       zone,
       tickSize,
       ...options,
@@ -2226,7 +2077,7 @@ function collectEngine25Zones(
   const candidates = [];
 
   const add = (zone, options) => {
-    const normalized = normalizeZone({
+    const normalized = normalizeEngine26Zone({
       zone,
       tickSize,
       ...options,
