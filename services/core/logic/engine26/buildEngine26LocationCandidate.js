@@ -4168,29 +4168,18 @@ const targetSelectedZone =
 const entryZone =
   provisionalEntryZone;
 
-const targetZone = targetSelectedZone
-  ? {
-      id: buildCanonicalZoneId(
-        normalizedSymbol,
-        targetSelectedZone
-      ),
-      zoneId: buildCanonicalZoneId(
-        normalizedSymbol,
-        targetSelectedZone
-      ),
-      upstreamId:
-        targetSelectedZone.upstreamId,
-      source: targetSelectedZone.source,
-      sourcePath:
-        targetSelectedZone.sourcePath,
-      type: targetSelectedZone.type,
-      timeframe:
-        targetSelectedZone.timeframe,
-      low: targetSelectedZone.lo,
-      high: targetSelectedZone.hi,
-      midline: targetSelectedZone.mid,
-    }
-  : null;
+const targetZone =
+  targetSelectedZone
+    ? buildEngine26TradeZoneView(
+        targetSelectedZone,
+        {
+          zoneId: buildCanonicalZoneId(
+            normalizedSymbol,
+            targetSelectedZone
+          ),
+        }
+      )
+    : null;
 
 const strategyFacts =
   directionBias === "LONG"
