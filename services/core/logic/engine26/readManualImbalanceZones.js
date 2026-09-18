@@ -1,15 +1,14 @@
 // services/core/logic/engine26/readManualImbalanceZones.js
 //
 // Engine 26-owned, reaction-independent manual imbalance inventory.
-// Canonical manual-zone read path.
 //
-// ROLLOVER SAFETY:
-// - NEVER writes to es-smz-manual-zones.txt.
-// - Preserves original source-contract prices.
-// - Publishes rollover-adjusted display/trading prices through lo/hi/mid.
-// - Keeps original + adjusted values and price-basis metadata together.
-// - Uses the tested read-only ES manual-zone rollover adapter as the
-//   single canonical adjustment source for Engine 26 and downstream readers.
+// CONTRACT-BASIS RULE:
+// - The canonical production manual-zone file is September-basis source truth.
+// - Production/default reads are passed through the read-only rollover adapter
+//   so Engine 26 trades/displays the current contract basis.
+// - Explicit custom file paths (tests/replay fixtures/tools) are read exactly
+//   as supplied and are NOT silently roll-adjusted.
+// - A caller may explicitly override this behavior with applyRollover.
 
 import fs from "fs";
 import path from "path";
@@ -18,6 +17,7 @@ import { buildEsManualZoneRolloverPreview } from "../rollover/esManualZoneRollov
 
 const CURRENT_FILE = fileURLToPath(import.meta.url);
 const CURRENT_DIR = path.dirname(CURRENT_FILE);
+
 const DEFAULT_MANUAL_ZONES_FILE = path.resolve(
   CURRENT_DIR,
   "../../data/es-smz-manual-zones.txt"
@@ -38,10 +38,8 @@ function normalizeRange(lo, hi) {
   const a = toFiniteNumber(lo);
   const b = toFiniteNumber(hi);
   if (a === null || b === null) return null;
-
   const lower = Math.min(a, b);
   const upper = Math.max(a, b);
-
   return {
     lo: round2(lower),
     hi: round2(upper),
@@ -85,12 +83,11 @@ function parseManualZoneLine({ line, lineIndex }) {
   const primaryZone = parseRange(primaryPart);
   const negotiatedZone = parseNegotiatedRange(metadataPart);
   const selectedRange = primaryZone || negotiatedZone;
+
   if (!selectedRange) return null;
 
-  const id = `ES_MANUAL_IMBALANCE_${lineIndex + 1}`;
-
   return {
-    id,
+    id: `ES_MANUAL_IMBALANCE_${lineIndex + 1}`,
     symbol: "ES",
     source: "es-smz-manual-zones.txt",
     sourceLine: lineIndex + 1,
@@ -111,15 +108,41 @@ function parseManualZoneLine({ line, lineIndex }) {
   };
 }
 
+function buildRawNegotiatedZone(zone, index) {
+  const range = zone?.negotiatedZone;
+  if (!range) return null;
+
+  return {
+    id: `ES_MANUAL_NEGOTIATED_${zone.sourceLine}`,
+    upstreamId: `ES_MANUAL_NEGOTIATED_${zone.sourceLine}`,
+    parentManualZoneId: zone.id,
+    symbol: "ES",
+    source: "es-smz-manual-zones.txt",
+    sourcePath: `manualImbalanceInventory.negotiatedZones[${index}]`,
+    sourceLine: zone.sourceLine,
+    raw: zone.raw,
+    comment: zone.comment,
+    type: "NEGOTIATED",
+    zoneType: "NEGOTIATED",
+    timeframe: "10m",
+    lo: range.lo,
+    hi: range.hi,
+    mid: range.mid,
+    active: zone.active !== false,
+    invalidated: zone.invalidated === true,
+    expired: zone.expired === true,
+    noPermissionCreated: true,
+    noExecution: true,
+  };
+}
+
 function buildRolloverLookup(preview) {
   const byLine = new Map();
-
   for (const zone of Array.isArray(preview?.zones) ? preview.zones : []) {
     const lineNumber = Number(zone?.lineNumber);
     if (!Number.isFinite(lineNumber)) continue;
     byLine.set(lineNumber, zone);
   }
-
   return byLine;
 }
 
@@ -164,72 +187,53 @@ function applyRolloverToManualZone(zone, rolloverZone, preview) {
 
   return {
     ...zone,
-
-    // Canonical adjusted trading/display values.
     source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
     lo: adjustedLo,
     hi: adjustedHi,
     mid: adjustedMid,
-
-    // Engine 26's negotiated-zone normalizer reads this field, so it must
-    // also use the adjusted contract basis.
     negotiatedZone: adjustedNegotiatedZone,
-
-    // Protected source-contract truth.
     originalLo,
     originalHi,
     originalMid,
     originalNegotiatedZone,
-
-    // Explicit adjusted values.
     adjustedLo,
     adjustedHi,
     adjustedMid,
     adjustedNegotiatedZone,
-
     protectedOriginal: true,
     readOnly: true,
-
     normalizedInstrumentRoot:
       rolloverZone.normalizedInstrumentRoot ??
       preview?.normalizedInstrumentRoot ??
       "ES",
-
     sourceFuturesContractCode:
       rolloverZone.sourceFuturesContractCode ??
       preview?.sourceFuturesContractCode ??
       null,
-
     displayFuturesContractCode:
       rolloverZone.displayFuturesContractCode ??
       preview?.displayFuturesContractCode ??
       null,
-
     polygonSourceTicker:
       rolloverZone.polygonSourceTicker ??
       preview?.polygonSourceTicker ??
       null,
-
     polygonDisplayTicker:
       rolloverZone.polygonDisplayTicker ??
       preview?.polygonDisplayTicker ??
       null,
-
     rollAdjustmentPoints:
       rolloverZone.rollAdjustmentPoints ??
       preview?.rollAdjustmentPoints ??
       0,
-
     adjustmentMethod:
       rolloverZone.adjustmentMethod ??
       preview?.adjustmentMethod ??
       null,
-
     adjustmentTimestamp:
       rolloverZone.adjustmentTimestamp ??
       preview?.adjustmentTimestamp ??
       null,
-
     priceBasis: {
       ...(rolloverZone.priceBasis || {}),
       originalContract:
@@ -251,7 +255,7 @@ function applyRolloverToManualZone(zone, rolloverZone, preview) {
   };
 }
 
-function toNegotiatedZone(zone, index) {
+function buildAdjustedNegotiatedZone(zone, index) {
   const range = zone?.negotiatedZone;
   if (!range) return null;
 
@@ -260,23 +264,17 @@ function toNegotiatedZone(zone, index) {
     upstreamId: `ES_MANUAL_NEGOTIATED_${zone.sourceLine}`,
     parentManualZoneId: zone.id,
     symbol: "ES",
-
-    source: zone.source || "es-smz-manual-zones.txt",
+    source: zone.source || "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
     sourcePath: `manualImbalanceInventory.negotiatedZones[${index}]`,
     sourceLine: zone.sourceLine,
     raw: zone.raw,
     comment: zone.comment,
-
     type: "NEGOTIATED",
     zoneType: "NEGOTIATED",
     timeframe: "10m",
-
-    // Canonical adjusted trading/display values.
     lo: range.lo,
     hi: range.hi,
     mid: range.mid,
-
-    // Protected source-contract values.
     originalLo:
       zone.originalNegotiatedZone?.lo ??
       zone.originalLo ??
@@ -289,8 +287,6 @@ function toNegotiatedZone(zone, index) {
       zone.originalNegotiatedZone?.mid ??
       zone.originalMid ??
       null,
-
-    // Explicit adjusted values.
     adjustedLo:
       zone.adjustedNegotiatedZone?.lo ??
       range.lo,
@@ -300,47 +296,45 @@ function toNegotiatedZone(zone, index) {
     adjustedMid:
       zone.adjustedNegotiatedZone?.mid ??
       range.mid,
-
     protectedOriginal: zone.protectedOriginal === true,
     readOnly: zone.readOnly === true,
-
-    normalizedInstrumentRoot:
-      zone.normalizedInstrumentRoot ?? "ES",
-    sourceFuturesContractCode:
-      zone.sourceFuturesContractCode ?? null,
-    displayFuturesContractCode:
-      zone.displayFuturesContractCode ?? null,
-    polygonSourceTicker:
-      zone.polygonSourceTicker ?? null,
-    polygonDisplayTicker:
-      zone.polygonDisplayTicker ?? null,
-    rollAdjustmentPoints:
-      zone.rollAdjustmentPoints ?? 0,
-    adjustmentMethod:
-      zone.adjustmentMethod ?? null,
-    adjustmentTimestamp:
-      zone.adjustmentTimestamp ?? null,
-    priceBasis:
-      zone.priceBasis ?? null,
-
+    normalizedInstrumentRoot: zone.normalizedInstrumentRoot ?? "ES",
+    sourceFuturesContractCode: zone.sourceFuturesContractCode ?? null,
+    displayFuturesContractCode: zone.displayFuturesContractCode ?? null,
+    polygonSourceTicker: zone.polygonSourceTicker ?? null,
+    polygonDisplayTicker: zone.polygonDisplayTicker ?? null,
+    rollAdjustmentPoints: zone.rollAdjustmentPoints ?? 0,
+    adjustmentMethod: zone.adjustmentMethod ?? null,
+    adjustmentTimestamp: zone.adjustmentTimestamp ?? null,
+    priceBasis: zone.priceBasis ?? null,
     active: zone.active !== false,
     invalidated: zone.invalidated === true,
     expired: zone.expired === true,
-
     noPermissionCreated: true,
     noExecution: true,
   };
 }
 
+function isCanonicalProductionFile(filePath) {
+  return (
+    path.resolve(filePath) ===
+    path.resolve(DEFAULT_MANUAL_ZONES_FILE)
+  );
+}
+
 export function readEngine26ManualImbalanceZones({
   filePath = DEFAULT_MANUAL_ZONES_FILE,
+  applyRollover = isCanonicalProductionFile(filePath),
 } = {}) {
   if (!fs.existsSync(filePath)) {
     return {
       ok: false,
       engine: "engine26.manualImbalanceInventory.v3",
-      source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
+      source: applyRollover
+        ? "ES_MANUAL_ZONE_ROLLOVER_ADAPTER"
+        : "es-smz-manual-zones.txt",
       filePath,
+      rolloverApplied: applyRollover === true,
       zones: [],
       negotiatedZones: [],
       reasonCodes: ["ENGINE26A_MANUAL_IMBALANCE_FILE_MISSING"],
@@ -351,14 +345,18 @@ export function readEngine26ManualImbalanceZones({
   }
 
   let text;
+
   try {
     text = fs.readFileSync(filePath, "utf8");
   } catch (error) {
     return {
       ok: false,
       engine: "engine26.manualImbalanceInventory.v3",
-      source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
+      source: applyRollover
+        ? "ES_MANUAL_ZONE_ROLLOVER_ADAPTER"
+        : "es-smz-manual-zones.txt",
       filePath,
+      rolloverApplied: applyRollover === true,
       zones: [],
       negotiatedZones: [],
       reasonCodes: ["ENGINE26A_MANUAL_IMBALANCE_FILE_READ_FAILED"],
@@ -370,8 +368,47 @@ export function readEngine26ManualImbalanceZones({
 
   const rawZones = text
     .split(/\r?\n/)
-    .map((line, lineIndex) => parseManualZoneLine({ line, lineIndex }))
+    .map((line, lineIndex) =>
+      parseManualZoneLine({
+        line,
+        lineIndex,
+      })
+    )
     .filter(Boolean);
+
+  // Custom/test/replay files are exact caller-owned price truth.
+  if (applyRollover !== true) {
+    const negotiatedZones = rawZones
+      .map((zone, index) =>
+        buildRawNegotiatedZone(zone, index)
+      )
+      .filter(Boolean);
+
+    return {
+      ok: true,
+      engine: "engine26.manualImbalanceInventory.v3",
+      source: "es-smz-manual-zones.txt",
+      filePath,
+      rolloverApplied: false,
+      protectedOriginal: false,
+      zoneCount: rawZones.length,
+      negotiatedZoneCount: negotiatedZones.length,
+      zones: rawZones,
+      negotiatedZones,
+      reasonCodes: rawZones.length
+        ? [
+            "ENGINE26A_MANUAL_IMBALANCE_ZONES_LOADED",
+            "ENGINE26A_MANUAL_NEGOTIATED_ZONES_NORMALIZED",
+            "ENGINE26A_REACTION_INDEPENDENT_INVENTORY",
+            "ENGINE26A_CUSTOM_MANUAL_ZONE_FILE_USED_AS_SUPPLIED",
+            "ENGINE26A_ROLLOVER_NOT_APPLIED_TO_CUSTOM_FILE",
+          ]
+        : ["ENGINE26A_MANUAL_IMBALANCE_ZONES_EMPTY"],
+      warnings: [],
+      noPermissionCreated: true,
+      noExecution: true,
+    };
+  }
 
   let rolloverPreview;
 
@@ -385,6 +422,7 @@ export function readEngine26ManualImbalanceZones({
       engine: "engine26.manualImbalanceInventory.v3",
       source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
       filePath,
+      rolloverApplied: true,
       zones: [],
       negotiatedZones: [],
       reasonCodes: [
@@ -402,6 +440,7 @@ export function readEngine26ManualImbalanceZones({
       engine: "engine26.manualImbalanceInventory.v3",
       source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
       filePath,
+      rolloverApplied: true,
       zones: [],
       negotiatedZones: [],
       reasonCodes: [
@@ -409,7 +448,7 @@ export function readEngine26ManualImbalanceZones({
       ],
       warnings: [
         rolloverPreview?.warning ||
-          "Manual-zone rollover adapter did not return ok=true.",
+        "Manual-zone rollover adapter did not return ok=true.",
       ],
       noPermissionCreated: true,
       noExecution: true,
@@ -426,10 +465,10 @@ export function readEngine26ManualImbalanceZones({
     )
   );
 
-  // Fail closed if any parsed manual zone failed to receive a rollover view.
-  // This prevents a mixed contract-basis inventory from reaching trading logic.
   const unadjustedZones = zones.filter(
-    (zone) => zone?.source !== "ES_MANUAL_ZONE_ROLLOVER_ADAPTER"
+    (zone) =>
+      zone?.source !==
+      "ES_MANUAL_ZONE_ROLLOVER_ADAPTER"
   );
 
   if (unadjustedZones.length) {
@@ -438,6 +477,7 @@ export function readEngine26ManualImbalanceZones({
       engine: "engine26.manualImbalanceInventory.v3",
       source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
       filePath,
+      rolloverApplied: true,
       zones: [],
       negotiatedZones: [],
       reasonCodes: [
@@ -452,7 +492,9 @@ export function readEngine26ManualImbalanceZones({
   }
 
   const negotiatedZones = zones
-    .map((zone, index) => toNegotiatedZone(zone, index))
+    .map((zone, index) =>
+      buildAdjustedNegotiatedZone(zone, index)
+    )
     .filter(Boolean);
 
   return {
@@ -460,34 +502,25 @@ export function readEngine26ManualImbalanceZones({
     engine: "engine26.manualImbalanceInventory.v3",
     source: "ES_MANUAL_ZONE_ROLLOVER_ADAPTER",
     filePath,
-
+    rolloverApplied: true,
     readOnly: true,
     protectedOriginal: true,
-
     normalizedInstrumentRoot:
       rolloverPreview.normalizedInstrumentRoot ?? "ES",
-
     sourceFuturesContractCode:
       rolloverPreview.sourceFuturesContractCode ?? null,
-
     displayFuturesContractCode:
       rolloverPreview.displayFuturesContractCode ?? null,
-
     polygonSourceTicker:
       rolloverPreview.polygonSourceTicker ?? null,
-
     polygonDisplayTicker:
       rolloverPreview.polygonDisplayTicker ?? null,
-
     rollAdjustmentPoints:
       rolloverPreview.rollAdjustmentPoints ?? 0,
-
     adjustmentMethod:
       rolloverPreview.adjustmentMethod ?? null,
-
     adjustmentTimestamp:
       rolloverPreview.adjustmentTimestamp ?? null,
-
     priceBasis: {
       originalContract:
         rolloverPreview.sourceFuturesContractCode ?? null,
@@ -508,14 +541,12 @@ export function readEngine26ManualImbalanceZones({
       adjustmentTimestamp:
         rolloverPreview.adjustmentTimestamp ?? null,
     },
-
     zoneCount: zones.length,
     negotiatedZoneCount: negotiatedZones.length,
-    skippedCount: rolloverPreview.skippedCount ?? 0,
-
+    skippedCount:
+      rolloverPreview.skippedCount ?? 0,
     zones,
     negotiatedZones,
-
     reasonCodes: zones.length
       ? [
           "ENGINE26A_MANUAL_IMBALANCE_ZONES_LOADED",
@@ -526,11 +557,9 @@ export function readEngine26ManualImbalanceZones({
           "ENGINE26A_MANUAL_ZONE_DISPLAY_BASIS_ADJUSTED",
         ]
       : ["ENGINE26A_MANUAL_IMBALANCE_ZONES_EMPTY"],
-
     warnings: rolloverPreview.warning
       ? [rolloverPreview.warning]
       : [],
-
     noPermissionCreated: true,
     noExecution: true,
   };
