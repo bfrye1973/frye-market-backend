@@ -1,6 +1,6 @@
 // - Fast PAPER_ONLY / RESEARCH_ONLY candle + imbalance reaction read.
 // - Designed for Engine 26 FAST_IMBALANCE_WATCH.
-// - Reads manual ES imbalance zones from data/es-smz-manual-zones.txt.
+// - Reads canonical manual ES imbalance zones through Engine 26 rollover-aware inventory.
 // - Reads latest 10m candle behavior around the active imbalance.
 // - Consumes Engine 22 degreeStates wave context.
 // - Consumes Engine 26 structural locationContext.
@@ -11,16 +11,13 @@
 // Output path after attach:
 // confluence.context.reaction.engine3FastImbalanceReaction
 
-import fs from "fs";
+import { readEngine26ManualImbalanceZones } from "../engine26/readManualImbalanceZones.js";
 import { buildEngine22DegreeWaveContext } from "./engine22DegreeWaveContext.js";
 import { buildEngine26LocationReactionContext } from "./engine26LocationReactionContext.js";
 import { deriveCandleCompletionTruth } from "./candleCompletionTruth.js";
 
 const ENGINE = "engine3.fastImbalanceReaction.v1";
 const SOURCE = "ENGINE26_IMBALANCE_WATCH";
-
-const DATA_DIR = "/opt/render/project/src/services/core/data";
-const MANUAL_ZONES_FILE = `${DATA_DIR}/es-smz-manual-zones.txt`;
 
 const FAST_WATCH_BUFFER_PTS = 12;
 
@@ -69,28 +66,6 @@ function normalizeBar(bar) {
   };
 }
 
-function normalizeZone(lo, hi) {
-  const a = toNum(lo);
-  const b = toNum(hi);
-
-  if (a == null || b == null) return null;
-
-  return {
-    lo: Math.min(a, b),
-    hi: Math.max(a, b),
-    mid: round2((Math.min(a, b) + Math.max(a, b)) / 2),
-  };
-}
-
-function parseRange(text) {
-  const match = String(text || "").match(
-    /(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/
-  );
-
-  if (!match) return null;
-
-  return normalizeZone(match[1], match[2]);
-}
 
 function distanceToZone(zone, price) {
   const p = toNum(price);
@@ -107,66 +82,6 @@ function isInsideZone(zone, price) {
   if (!zone || p == null) return false;
 
   return p >= zone.lo && p <= zone.hi;
-}
-
-function readManualImbalanceZones() {
-  if (!fs.existsSync(MANUAL_ZONES_FILE)) {
-    return {
-      ok: false,
-      zones: [],
-      reasonCodes: ["MANUAL_IMBALANCE_FILE_MISSING"],
-    };
-  }
-
-  const text = fs.readFileSync(MANUAL_ZONES_FILE, "utf8");
-
-  const zones = text
-    .split(/\r?\n/)
-    .map((line, idx) => {
-      const raw = String(line || "").trim();
-
-      if (!raw || raw.startsWith("#")) return null;
-
-      const [leftPart, rightPartRaw = ""] = raw.split("|");
-      const mainZone = parseRange(leftPart);
-
-      const negMatch = String(rightPartRaw || "").match(
-        /NEG\s+(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/i
-      );
-
-      const negZone = negMatch
-        ? normalizeZone(negMatch[1], negMatch[2])
-        : null;
-
-      if (!mainZone && !negZone) return null;
-
-      const comment = raw.includes("#")
-        ? raw.slice(raw.indexOf("#") + 1).trim()
-        : null;
-
-      return {
-        id: `ES_MANUAL_IMBALANCE_${idx + 1}`,
-        symbol: "ES",
-        source: "es-smz-manual-zones.txt",
-        raw,
-        comment,
-        side: "GREEN",
-        zoneType: "MANUAL_IMBALANCE",
-        lo: mainZone?.lo ?? negZone?.lo ?? null,
-        hi: mainZone?.hi ?? negZone?.hi ?? null,
-        mid: mainZone?.mid ?? negZone?.mid ?? null,
-        negZone,
-      };
-    })
-    .filter(Boolean);
-
-  return {
-    ok: true,
-    zones,
-    reasonCodes: zones.length
-      ? ["MANUAL_IMBALANCE_ZONES_LOADED"]
-      : ["MANUAL_IMBALANCE_ZONES_EMPTY"],
-  };
 }
 
 function pickActiveImbalance({ zones = [], price }) {
@@ -827,7 +742,7 @@ export function buildFastImbalanceReaction({
     validPrice(engine26FastWatch?.currentPrice) ??
     null;
 
-  const manualZonesRead = readManualImbalanceZones();
+  const manualZonesRead = readEngine26ManualImbalanceZones();
 
   if (!manualZonesRead.ok || !manualZonesRead.zones.length) {
     return makeInactiveResult({
@@ -1060,7 +975,10 @@ export function buildFastImbalanceReaction({
       lo: activeImbalance.lo,
       hi: activeImbalance.hi,
       mid: activeImbalance.mid,
-      negZone: activeImbalance.negZone || null,
+      negZone:
+        activeImbalance.negotiatedZone ??
+        activeImbalance.negZone ??
+        null,
       distancePts: activeImbalance.distancePts,
       inside: activeImbalance.inside,
       near: activeImbalance.near,
