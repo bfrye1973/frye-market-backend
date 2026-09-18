@@ -390,6 +390,57 @@ function normalizeZone({
       zone.status ??
       null,
 
+priceSource:
+  zone.source ?? null,
+
+originalLo:
+  toFiniteNumber(zone.originalLo),
+
+originalHi:
+  toFiniteNumber(zone.originalHi),
+
+originalMid:
+  toFiniteNumber(zone.originalMid),
+
+adjustedLo:
+  toFiniteNumber(zone.adjustedLo),
+
+adjustedHi:
+  toFiniteNumber(zone.adjustedHi),
+
+adjustedMid:
+  toFiniteNumber(zone.adjustedMid),
+
+protectedOriginal:
+  zone.protectedOriginal === true,
+
+readOnly:
+  zone.readOnly === true,
+
+priceBasis:
+  zone.priceBasis ?? null,
+
+sourceFuturesContractCode:
+  zone.sourceFuturesContractCode ?? null,
+
+displayFuturesContractCode:
+  zone.displayFuturesContractCode ?? null,
+
+polygonSourceTicker:
+  zone.polygonSourceTicker ?? null,
+
+polygonDisplayTicker:
+  zone.polygonDisplayTicker ?? null,
+
+rollAdjustmentPoints:
+  toFiniteNumber(zone.rollAdjustmentPoints),
+
+adjustmentMethod:
+  zone.adjustmentMethod ?? null,
+
+adjustmentTimestamp:
+  zone.adjustmentTimestamp ?? null,
+
     raw: zone,
   };
 }
