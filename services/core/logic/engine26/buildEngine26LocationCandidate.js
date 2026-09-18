@@ -3841,70 +3841,12 @@ const completedTargetZone =
 
 const provisionalEntryZone =
   strategy1Eligible
-    ? {
-        id: selectedZoneId,
-        zoneId: selectedZoneId,
-        upstreamId: selectedZone.upstreamId,
-        source: selectedZone.source,
-        sourcePath: selectedZone.sourcePath,
-        type: selectedZone.type,
-        timeframe: selectedZone.timeframe,
-
-        low: selectedZone.lo,
-        high: selectedZone.hi,
-        midline: selectedZone.mid,
-
-        priceSource:
-          selectedZone.priceSource ?? null,
-
-        originalLo:
-          selectedZone.originalLo ?? null,
-
-        originalHi:
-          selectedZone.originalHi ?? null,
-
-        originalMid:
-          selectedZone.originalMid ?? null,
-
-        adjustedLo:
-          selectedZone.adjustedLo ?? null,
-
-        adjustedHi:
-          selectedZone.adjustedHi ?? null,
-
-        adjustedMid:
-          selectedZone.adjustedMid ?? null,
-
-        protectedOriginal:
-          selectedZone.protectedOriginal === true,
-
-        readOnly:
-          selectedZone.readOnly === true,
-
-        priceBasis:
-          selectedZone.priceBasis ?? null,
-
-        sourceFuturesContractCode:
-          selectedZone.sourceFuturesContractCode ?? null,
-
-        displayFuturesContractCode:
-          selectedZone.displayFuturesContractCode ?? null,
-
-        polygonSourceTicker:
-          selectedZone.polygonSourceTicker ?? null,
-
-        polygonDisplayTicker:
-          selectedZone.polygonDisplayTicker ?? null,
-
-        rollAdjustmentPoints:
-          selectedZone.rollAdjustmentPoints ?? null,
-
-        adjustmentMethod:
-          selectedZone.adjustmentMethod ?? null,
-
-        adjustmentTimestamp:
-          selectedZone.adjustmentTimestamp ?? null,
-      }
+    ? buildEngine26TradeZoneView(
+        selectedZone,
+        {
+          zoneId: selectedZoneId,
+        }
+      )
     : null;
 
 const longBoundaries =
