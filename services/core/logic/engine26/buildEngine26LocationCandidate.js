@@ -4892,36 +4892,18 @@ const strategyFacts =
     entryZoneHigh: entryZone?.high ?? null,
     entryZoneMidline: entryZone?.midline ?? null,
 
-    approvedNegotiatedZoneInventory:
-      approvedNegotiatedZones.map((zone) => ({
-        id: buildCanonicalZoneId(normalizedSymbol, zone),
-        zoneId: buildCanonicalZoneId(normalizedSymbol, zone),
-
-        upstreamId:
-          zone.upstreamId ?? null,
-
-        source:
-          zone.source ?? null,
-
-        sourcePath:
-          zone.sourcePath ?? null,
-
-        type:
-          zone.type ?? null,
-
-        timeframe:
-          zone.timeframe ?? null,
-
-        low:
-          zone.lo ?? null,
-
-        high:
-          zone.hi ?? null,
-
-        midline:
-          zone.mid ?? null,
-      })),
-
+approvedNegotiatedZoneInventory:
+  approvedNegotiatedZones.map((zone) =>
+    buildEngine26TradeZoneView(
+      zone,
+      {
+        zoneId: buildCanonicalZoneId(
+          normalizedSymbol,
+          zone
+        ),
+      }
+    )
+  ),
     targetZone,
     targetZoneStatus: targetZone
       ? "TARGET_ZONE_AVAILABLE"
