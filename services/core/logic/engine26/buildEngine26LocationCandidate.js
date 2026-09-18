@@ -4961,49 +4961,10 @@ const strategyFacts =
         ? strategyFacts?.invalidationFacts?.invalidationTime || snapshotTime
         : null,
 
-    location: {
-      source:
-        selectedZone.source,
-
-      sourcePath:
-        selectedZone.sourcePath,
-
-      upstreamId:
-        selectedZone.upstreamId,
-
-      type:
-        selectedZone.type,
-
-      timeframe:
-        selectedZone.timeframe,
-
-      lo:
-        selectedZone.lo,
-
-      hi:
-        selectedZone.hi,
-
-      mid:
-        selectedZone.mid,
-
-      relation:
-        selectedZone.relation,
-
-      distancePoints:
-        selectedZone.distancePoints,
-
-      selectionScore:
-        selectedZone.selectionScore,
-
-      priority:
-        selectedZone.priority,
-
-      strength:
-        selectedZone.strength,
-
-      freshness:
-        selectedZone.freshness,
-    },
+location:
+  buildEngine26LocationView(
+    selectedZone
+  ),
 
     ...boundaries,
 
