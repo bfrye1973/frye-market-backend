@@ -1405,18 +1405,13 @@ function findRecoverableDirectionalMemoryChild({
         return null;
       }
 
-      const entryZone = {
-        id: record.zoneId,
-        zoneId: record.zoneId,
-        upstreamId: zone.upstreamId,
-        source: zone.source,
-        sourcePath: zone.sourcePath,
-        type: zone.type,
-        timeframe: zone.timeframe,
-        low: zone.lo,
-        high: zone.hi,
-        midline: zone.mid,
-      };
+      const entryZone =
+        buildEngine26TradeZoneView(
+          zone,
+          {
+            zoneId: record.zoneId,
+          }
+        );
 
       const boundaries = buildBoundaries({
         directionBias: direction,
@@ -1610,23 +1605,19 @@ function findRecoverablePromotedContactMemoryChild({
           zone,
           symbol,
           strategyId,
-        })
+        }) 
+      
       ) {
         return null;
       }
 
-      const entryZone = {
-        id: record.zoneId,
-        zoneId: record.zoneId,
-        upstreamId: zone.upstreamId,
-        source: zone.source,
-        sourcePath: zone.sourcePath,
-        type: zone.type,
-        timeframe: zone.timeframe,
-        low: zone.lo,
-        high: zone.hi,
-        midline: zone.mid,
-      };
+      const entryZone =
+        buildEngine26TradeZoneView(
+          zone,
+          {
+            zoneId: record.zoneId,
+          }
+        );
 
       return {
         record,
@@ -5801,38 +5792,12 @@ export function buildEngine26ReactionHandoff({
     expectedReactions:
       candidate.expectedReactions || [],
 
-    zone:
-      candidate.location
-        ? {
-            source:
-              candidate.location.source,
-
-            sourcePath:
-              candidate.location.sourcePath,
-
-            type:
-              candidate.location.type,
-
-            timeframe:
-              candidate.location.timeframe,
-
-            lo:
-              candidate.location.lo,
-
-            hi:
-              candidate.location.hi,
-
-            mid:
-              candidate.location.mid,
-
-            relation:
-              candidate.location.relation,
-
-            distancePoints:
-              candidate.location.distancePoints,
-          }
-        : null,
-
+zone:
+  candidate.location
+    ? buildEngine26LocationView(
+        candidate.location
+      )
+    : null, 
     triggerLevel:
       candidate.triggerLevel,
 
