@@ -1,3 +1,6 @@
+'fetchEngine29PolygonThirtyMinute'
+]
+render@srv-d2ds5nodl3ps73b7i2og-866d65df45-2krqp:~/project/src$ cd /opt/render/project/src && sed -n '1,620p' services/core/logic/engine29/data/buildMarketDataBundle.js
 // services/core/logic/engine29/data/buildMarketDataBundle.js
 
 import {
@@ -18,6 +21,7 @@ import {
   fetchEngine29PolygonDaily,
   fetchEngine29PolygonHourly,
   fetchEngine29PolygonThirtyMinute,
+  fetchEngine29PolygonTenMinute,
 } from "./providers/polygonMarketData.js";
 import { fetchEngine29FredDaily } from "./providers/fredMarketData.js";
 import { fetchEngine29FuturesProductBars } from "./providers/futuresProductMarketData.js";
@@ -47,8 +51,10 @@ function buildUnavailableEntry({ definition, reason }) {
     structural: null,
     tactical: null,
     fastTactical: null,
+    liveMonitor: null,
     tacticalAvailable: false,
     fastTacticalAvailable: false,
+    liveMonitorAvailable: false,
     errors: [reason],
   };
 }
@@ -76,9 +82,12 @@ async function loadPolygonSymbol({
   tacticalTo,
   fastTacticalFrom,
   fastTacticalTo,
+  liveMonitorFrom,
+  liveMonitorTo,
   now,
   includeTactical,
   includeFastTactical,
+  includeLiveMonitor,
 }) {
   const errors = [];
 
@@ -170,6 +179,36 @@ async function loadPolygonSymbol({
     }
   }
 
+  let liveMonitor = null;
+  if (includeLiveMonitor) {
+    try {
+      const tenMinute = await fetchEngine29PolygonTenMinute({
+        symbol: source.symbol,
+        apiKey: polygonApiKey,
+        from: liveMonitorFrom,
+        to: liveMonitorTo,
+      });
+      const bars = normalizePolygonBars(tenMinute.bars);
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: "10m",
+        now,
+      });
+
+      liveMonitor = {
+        timeframe: "10m",
+        sourceTimeframe: "10m",
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+      };
+    } catch (err) {
+      errors.push(`LIVE_MONITOR: ${err.message}`);
+    }
+  }
+
   const meta = sourceMetadata(source);
 
   return {
@@ -186,6 +225,8 @@ async function loadPolygonSymbol({
     tacticalAvailable: Boolean(tactical?.latest),
     fastTactical,
     fastTacticalAvailable: Boolean(fastTactical?.latest),
+    liveMonitor,
+    liveMonitorAvailable: Boolean(liveMonitor?.latest),
     errors,
   };
 }
@@ -244,6 +285,9 @@ async function loadFredSymbol({
     fastTactical: null,
     fastTacticalAvailable: false,
     fastTacticalUnavailableReason: "FRED_DAILY_ONLY",
+    liveMonitor: null,
+    liveMonitorAvailable: false,
+    liveMonitorUnavailableReason: "FRED_DAILY_ONLY",
     errors,
   };
 }
@@ -257,9 +301,12 @@ async function loadFuturesProductSymbol({
   tacticalTo,
   fastTacticalFrom,
   fastTacticalTo,
+  liveMonitorFrom,
+  liveMonitorTo,
   now,
   includeTactical,
   includeFastTactical,
+  includeLiveMonitor,
 }) {
   const errors = [];
   let resolvedSymbol = null;
@@ -390,6 +437,9 @@ async function loadFuturesProductSymbol({
     tacticalAvailable: Boolean(tactical?.latest),
     fastTactical,
     fastTacticalAvailable: Boolean(fastTactical?.latest),
+    liveMonitor: null,
+    liveMonitorAvailable: false,
+    liveMonitorUnavailableReason: "NOT_WIRED_YET",
     resolver,
     errors,
   };
@@ -425,9 +475,12 @@ async function loadSource({
       tacticalTo,
       fastTacticalFrom,
       fastTacticalTo,
+      liveMonitorFrom,
+      liveMonitorTo,
       now,
       includeTactical,
       includeFastTactical,
+      includeLiveMonitor,
     });
   }
 
@@ -451,9 +504,12 @@ async function loadSource({
       tacticalTo,
       fastTacticalFrom,
       fastTacticalTo,
+      liveMonitorFrom,
+      liveMonitorTo,
       now,
       includeTactical,
       includeFastTactical,
+      includeLiveMonitor,
     });
   }
 
@@ -470,9 +526,11 @@ export async function buildEngine29MarketDataBundle({
   structuralLookbackDays = 2200,
   tacticalLookbackDays = 45,
   fastTacticalLookbackDays = 30,
+  liveMonitorLookbackDays = 3,
   includeOptionalSymbols = true,
   includeTactical = true,
   includeFastTactical = true,
+  includeLiveMonitor = true,
 } = {}) {
   const structuralTo = dateString(now);
   const structuralFrom = dateString(now - structuralLookbackDays * DAY_MS);
@@ -480,6 +538,8 @@ export async function buildEngine29MarketDataBundle({
   const tacticalFrom = dateString(now - tacticalLookbackDays * DAY_MS);
   const fastTacticalTo = structuralTo;
   const fastTacticalFrom = dateString(now - fastTacticalLookbackDays * DAY_MS);
+  const liveMonitorTo = structuralTo;
+  const liveMonitorFrom = dateString(now - liveMonitorLookbackDays * DAY_MS);
 
   const definitions = Object.values(ENGINE29_SYMBOL_REGISTRY).filter(
     (definition) => includeOptionalSymbols || definition.required
@@ -520,9 +580,12 @@ export async function buildEngine29MarketDataBundle({
         tacticalTo,
         fastTacticalFrom,
         fastTacticalTo,
+        liveMonitorFrom,
+        liveMonitorTo,
         now,
         includeTactical,
         includeFastTactical,
+        includeLiveMonitor,
       });
 
       entry = {
@@ -557,6 +620,9 @@ export async function buildEngine29MarketDataBundle({
   const fastTacticalAvailableSymbols = values
     .filter((item) => item.fastTacticalAvailable)
     .map((item) => item.canonicalSymbol);
+  const liveMonitorAvailableSymbols = values
+    .filter((item) => item.liveMonitorAvailable)
+    .map((item) => item.canonicalSymbol);
 
   const errors = values.flatMap((item) =>
     (item.errors || []).map((error) => ({
@@ -571,6 +637,7 @@ export async function buildEngine29MarketDataBundle({
     structuralTimeframe: ENGINE29_TIMEFRAMES.STRUCTURAL,
     tacticalTimeframe: ENGINE29_TIMEFRAMES.TACTICAL,
     fastTacticalTimeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+    liveMonitorTimeframe: "10m",
     sourceWindows: {
       structural: {
         sourceTimeframe: "1D",
@@ -587,6 +654,11 @@ export async function buildEngine29MarketDataBundle({
         from: fastTacticalFrom,
         to: fastTacticalTo,
       },
+      liveMonitor: {
+        sourceTimeframe: "10m",
+        from: liveMonitorFrom,
+        to: liveMonitorTo,
+      },
     },
     dataDegraded:
       missingRequiredSymbols.length > 0 || staleRequiredSymbols.length > 0,
@@ -599,9 +671,11 @@ export async function buildEngine29MarketDataBundle({
       proxySymbols,
       tacticalAvailableSymbols,
       fastTacticalAvailableSymbols,
+      liveMonitorAvailableSymbols,
       errorCount: errors.length,
     },
     symbols,
     errors,
   };
 }
+render@srv-d2ds5nodl3ps73b7i2og-866d65df45-2krqp:~/project/src$ 
