@@ -1,6 +1,3 @@
-'fetchEngine29PolygonThirtyMinute'
-]
-render@srv-d2ds5nodl3ps73b7i2og-866d65df45-2krqp:~/project/src$ cd /opt/render/project/src && sed -n '1,620p' services/core/logic/engine29/data/buildMarketDataBundle.js
 // services/core/logic/engine29/data/buildMarketDataBundle.js
 
 import {
@@ -301,12 +298,9 @@ async function loadFuturesProductSymbol({
   tacticalTo,
   fastTacticalFrom,
   fastTacticalTo,
-  liveMonitorFrom,
-  liveMonitorTo,
   now,
   includeTactical,
   includeFastTactical,
-  includeLiveMonitor,
 }) {
   const errors = [];
   let resolvedSymbol = null;
@@ -456,9 +450,12 @@ async function loadSource({
   tacticalTo,
   fastTacticalFrom,
   fastTacticalTo,
+  liveMonitorFrom,
+  liveMonitorTo,
   now,
   includeTactical,
   includeFastTactical,
+  includeLiveMonitor,
 }) {
   if (!source) {
     return buildUnavailableEntry({ definition, reason: "NO_VERIFIED_DATA_SOURCE" });
@@ -504,12 +501,9 @@ async function loadSource({
       tacticalTo,
       fastTacticalFrom,
       fastTacticalTo,
-      liveMonitorFrom,
-      liveMonitorTo,
       now,
       includeTactical,
       includeFastTactical,
-      includeLiveMonitor,
     });
   }
 
@@ -562,9 +556,12 @@ export async function buildEngine29MarketDataBundle({
       tacticalTo,
       fastTacticalFrom,
       fastTacticalTo,
+      liveMonitorFrom,
+      liveMonitorTo,
       now,
       includeTactical,
       includeFastTactical,
+      includeLiveMonitor,
     });
 
     if (!entry?.available && fallback) {
@@ -678,4 +675,3 @@ export async function buildEngine29MarketDataBundle({
     errors,
   };
 }
-render@srv-d2ds5nodl3ps73b7i2og-866d65df45-2krqp:~/project/src$ 
