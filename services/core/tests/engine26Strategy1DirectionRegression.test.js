@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import {
   buildEngine26A,
@@ -12,9 +13,23 @@ import {
 
 const SETUP = "NEGOTIATED_ZONE_ROTATION";
 
-const TEST_MEMORY_DIR = fs.mkdtempSync(
-  path.join(os.tmpdir(), "engine26-direction-regression-memory-")
+const TEST_DIR = path.dirname(
+  fileURLToPath(import.meta.url)
 );
+
+const TEST_MANUAL_ZONES_PATH = path.join(
+  TEST_DIR,
+  "fixtures",
+  "es-smz-manual-zones-strategy1.txt"
+);
+
+const TEST_MEMORY_DIR = fs.mkdtempSync(
+  path.join(
+    os.tmpdir(),
+    "engine26-direction-regression-memory-"
+  )
+);
+
 const TEST_MEMORY_PATH = path.join(
   TEST_MEMORY_DIR,
   "negotiated-zone-memory.json"
@@ -57,14 +72,22 @@ test(
       symbol: "ES",
       strategyId: "intraday_scalp@10m",
       timeframe: "10m",
+
+      manualZonesFilePath:
+        TEST_MANUAL_ZONES_PATH,
+
       currentPrice: 7445.75,
       snapshotTime: "2026-07-28T15:15:00.000Z",
-      engine22WaveStrategy: minuteDownContext(),
+
+      engine22WaveStrategy:
+        minuteDownContext(),
+
       ema10Posture: {
         posture: "BULLISH",
         ema10: 7440,
         currentPrice: 7445.75,
       },
+
       bars10m: [
         {
           time: "2026-07-28T14:40:00.000Z",
@@ -83,33 +106,53 @@ test(
           completed: true,
         },
       ],
-      memoryFilePath: TEST_MEMORY_PATH,
-      persistMemory: false,
+
+      memoryFilePath:
+        TEST_MEMORY_PATH,
+
+      persistMemory:
+        false,
     });
 
-    const candidate = result.engine26LocationCandidate;
+    const candidate =
+      result.engine26LocationCandidate;
 
-    assert.equal(candidate.setupClass, SETUP);
-    assert.equal(candidate.directionBias, "LONG");
+    assert.equal(
+      candidate.setupClass,
+      SETUP
+    );
+
+    assert.equal(
+      candidate.directionBias,
+      "LONG"
+    );
+
     assert.equal(
       candidate.directionState,
       "LONG_REVERSAL_DEVELOPING"
     );
-    assert.equal(candidate.ema10Posture.posture, "BULLISH");
+
+    assert.equal(
+      candidate.ema10Posture.posture,
+      "BULLISH"
+    );
+
     assert.equal(
       candidate.invalidationFacts
         .completedCloseInvalidationConfirmed,
       false
     );
+
     assert.equal(
       candidate.structuralContext.minuteStage,
       "C_COMPLETION_WATCH"
     );
+
     assert.ok(
       candidate.reasonCodes.includes(
         "ENGINE22_INTERNAL_LEG_DIRECTION_NOT_USED_WITHOUT_EXPLICIT_TRAVEL_CONTRACT"
-     )
-   );
+      )
+    );
   }
 );
 
@@ -120,14 +163,22 @@ test(
       symbol: "ES",
       strategyId: "intraday_scalp@10m",
       timeframe: "10m",
+
+      manualZonesFilePath:
+        TEST_MANUAL_ZONES_PATH,
+
       currentPrice: 7502,
       snapshotTime: "2026-07-28T18:10:00.000Z",
-      engine22WaveStrategy: minuteDownContext(),
+
+      engine22WaveStrategy:
+        minuteDownContext(),
+
       ema10Posture: {
         posture: "BEARISH",
         ema10: 7508,
         currentPrice: 7502,
       },
+
       bars10m: [
         {
           time: "2026-07-28T17:30:00.000Z",
@@ -154,19 +205,36 @@ test(
           completed: true,
         },
       ],
-      memoryFilePath: TEST_MEMORY_PATH,
-      persistMemory: false,
+
+      memoryFilePath:
+        TEST_MEMORY_PATH,
+
+      persistMemory:
+        false,
     });
 
-    const candidate = result.engine26LocationCandidate;
+    const candidate =
+      result.engine26LocationCandidate;
 
-    assert.equal(candidate.setupClass, SETUP);
-    assert.equal(candidate.directionBias, "SHORT");
+    assert.equal(
+      candidate.setupClass,
+      SETUP
+    );
+
+    assert.equal(
+      candidate.directionBias,
+      "SHORT"
+    );
+
     assert.equal(
       candidate.directionState,
       "SHORT_REVERSAL_DEVELOPING"
     );
-    assert.equal(candidate.ema10Posture.posture, "BEARISH");
+
+    assert.equal(
+      candidate.ema10Posture.posture,
+      "BEARISH"
+    );
   }
 );
 
@@ -177,14 +245,22 @@ test(
       symbol: "ES",
       strategyId: "intraday_scalp@10m",
       timeframe: "10m",
+
+      manualZonesFilePath:
+        TEST_MANUAL_ZONES_PATH,
+
       currentPrice: 7502,
       snapshotTime: "2026-07-28T18:20:00.000Z",
-      engine22WaveStrategy: minuteDownContext(),
+
+      engine22WaveStrategy:
+        minuteDownContext(),
+
       ema10Posture: {
         posture: "BULLISH",
         ema10: 7498,
         currentPrice: 7502,
       },
+
       bars10m: [
         {
           time: "2026-07-28T17:30:00.000Z",
@@ -211,19 +287,30 @@ test(
           completed: true,
         },
       ],
-      memoryFilePath: TEST_MEMORY_PATH,
-      persistMemory: false,
+
+      memoryFilePath:
+        TEST_MEMORY_PATH,
+
+      persistMemory:
+        false,
     });
 
-    const candidate = result.engine26LocationCandidate;
+    const candidate =
+      result.engine26LocationCandidate;
 
-    assert.equal(candidate.directionBias, "NEUTRAL");
+    assert.equal(
+      candidate.directionBias,
+      "NEUTRAL"
+    );
+
     assert.equal(
       candidate.directionState,
       "NEUTRAL_NO_DIRECTIONAL_EDGE"
     );
+
     assert.equal(
-      candidate.directionalEvidence.directionalConflict,
+      candidate.directionalEvidence
+        .directionalConflict,
       true
     );
   }
