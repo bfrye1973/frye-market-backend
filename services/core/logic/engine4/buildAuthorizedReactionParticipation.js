@@ -12,10 +12,21 @@
 // - It does not create permission, sizing, management, orders, fills, execution, or journal entries.
 
 import { resolveCandles } from "./candles/resolveCandles.js";
+import { resolveIdentity } from "./identity/resolveIdentity.js";
+import { safeUpper } from "./contracts/inputUtils.js";
+import {
+  resolveReactionState,
+  resolveEvaluationAuthorized,
+  resolveReactionConfirmed,
+  resolveParticipationEvaluationEligibility,
+  resolveDirection,
+  resolveQuality,
+  resolvePromotedContactContext,
+  resolveParticipationEvaluationDirection,
+} from "./contracts/resolveEngine3Input.js";
 
 const ENGINE = "engine4.authorizedReactionParticipation.v1";
 const PARTICIPATION_CONTRACT_VERSION = "engine4.strategy1.v1";
-const STRATEGY_1_SETUP_CLASS = "NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION";
 
 const STATES = {
   WAITING: "PARTICIPATION_WAITING",
@@ -25,11 +36,6 @@ const STATES = {
   INVALIDATED: "CANDIDATE_INVALIDATED",
   IDENTITY_MISMATCH: "IDENTITY_MISMATCH",
 };
-
-function safeUpper(value, fallback = "") {
-  const text = String(value ?? "").trim();
-  return text ? text.toUpperCase() : fallback;
-}
 
 function toNum(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -49,13 +55,6 @@ function clonePlain(value) {
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
-}
-
-function pickFirst(...values) {
-  for (const value of values) {
-    if (value !== null && value !== undefined && value !== "") return value;
-  }
-  return null;
 }
 
 function getNested(obj, path) {
@@ -268,342 +267,6 @@ function computeVolumeMetadata({ reaction, tacticalParticipation }) {
     broader10mParticipationState: null,
     broader10mParticipationQuality: null,
   };
-}
-
-function resolveIdentity({ reaction, engine26LocationCandidate = null, engine26ReactionHandoff = null }) {
-  const candidateId = pickFirst(
-    reaction?.candidateId,
-    reaction?.engine26LocationContext?.candidateId,
-    engine26ReactionHandoff?.candidateId,
-    engine26LocationCandidate?.candidateId
-  );
-
-  const zoneId = pickFirst(
-    reaction?.zoneId,
-    reaction?.engine26LocationContext?.zoneId,
-    engine26ReactionHandoff?.zoneId,
-    engine26LocationCandidate?.zoneId
-  );
-
-  const laneId = pickFirst(
-    reaction?.laneId,
-    reaction?.engine26LocationContext?.laneId,
-    engine26ReactionHandoff?.laneId,
-    engine26LocationCandidate?.laneId,
-    "minute"
-  );
-
-  const strategyId = pickFirst(
-    reaction?.strategyId,
-    reaction?.engine26LocationContext?.strategyId,
-    engine26ReactionHandoff?.strategyId,
-    engine26LocationCandidate?.strategyId,
-    "intraday_scalp@10m"
-  );
-
-  const symbol = pickFirst(
-    reaction?.symbol,
-    reaction?.engine26LocationContext?.symbol,
-    engine26ReactionHandoff?.symbol,
-    engine26LocationCandidate?.symbol,
-    "ES"
-  );
-
-  const setupClass = pickFirst(
-    reaction?.setupClass,
-    reaction?.engine26LocationContext?.setupClass,
-    engine26ReactionHandoff?.setupClass,
-    engine26LocationCandidate?.setupClass,
-    STRATEGY_1_SETUP_CLASS
-  );
-
-  const setupGrade = pickFirst(
-    reaction?.setupGrade,
-    reaction?.engine26LocationContext?.setupGrade,
-    engine26ReactionHandoff?.setupGrade,
-    engine26LocationCandidate?.setupGrade,
-    "A+++"
-  );
-
-  const identitySetupKey = pickFirst(
-    reaction?.identitySetupKey,
-    reaction?.engine26LocationContext?.identitySetupKey,
-    engine26ReactionHandoff?.identitySetupKey,
-    engine26LocationCandidate?.identitySetupKey,
-    setupClass
-  );
-
-  const candidateIdentityVersion = pickFirst(
-    reaction?.candidateIdentityVersion,
-    reaction?.engine26LocationContext?.candidateIdentityVersion,
-    engine26ReactionHandoff?.candidateIdentityVersion,
-    engine26LocationCandidate?.candidateIdentityVersion,
-    "engine26.strategy1.v1"
-  );
-
-  const comparedCandidateId = engine26LocationCandidate?.candidateId || engine26ReactionHandoff?.candidateId || null;
-  const comparedZoneId = engine26LocationCandidate?.zoneId || engine26ReactionHandoff?.zoneId || null;
-
-  const missing = [];
-  if (!candidateId) missing.push("CANDIDATE_ID_MISSING");
-  if (!zoneId) missing.push("ZONE_ID_MISSING");
-  if (!laneId) missing.push("LANE_ID_MISSING");
-  if (!strategyId) missing.push("STRATEGY_ID_MISSING");
-
-  const mismatches = [];
-  if (comparedCandidateId && candidateId && comparedCandidateId !== candidateId) {
-    mismatches.push("CANDIDATE_ID_MISMATCH");
-  }
-  if (comparedZoneId && zoneId && comparedZoneId !== zoneId) {
-    mismatches.push("ZONE_ID_MISMATCH");
-  }
-  if (laneId && laneId !== "minute") mismatches.push("LANE_ID_MISMATCH");
-  if (strategyId && strategyId !== "intraday_scalp@10m") mismatches.push("STRATEGY_ID_MISMATCH");
-
-  return {
-    laneId,
-    strategyId,
-    candidateId,
-    zoneId,
-    symbol,
-    setupClass,
-    setupGrade,
-    identitySetupKey,
-    candidateIdentityVersion,
-    identityMissing: missing.length > 0,
-    identityMismatch: mismatches.length > 0,
-    identityMissingCodes: missing,
-    identityMismatchCodes: mismatches,
-  };
-}
-
-function resolveReactionState(reaction) {
-  return safeUpper(
-    reaction?.reactionState ||
-      reaction?.authorizedReactionState ||
-      reaction?.state ||
-      reaction?.fastReactionState ||
-      "NO_REACTION",
-    "NO_REACTION"
-  );
-}
-
-function resolveEvaluationAuthorized(reaction) {
-  return (
-    reaction?.evaluationAuthorized === true ||
-    reaction?.authorizeEngine3Evaluation === true ||
-    reaction?.authorized === true ||
-    false
-  );
-}
-
-function resolveReactionConfirmed(reaction) {
-  return (
-    reaction?.reactionConfirmed === true ||
-    (
-      reaction?.confirmed === true &&
-      safeUpper(reaction?.authorizedReactionState || reaction?.reactionState || reaction?.state) === "REACTION_CONFIRMED"
-    ) ||
-    false
-  );
-}
-
-function resolveParticipationEvaluationEligibility(reaction) {
-  const explicitlyPublished =
-    reaction &&
-    Object.prototype.hasOwnProperty.call(
-      reaction,
-      "participationEvaluationEligible"
-    );
-
-  return {
-    explicitlyPublished,
-    eligible:
-      explicitlyPublished
-        ? reaction?.participationEvaluationEligible === true
-        : resolveReactionConfirmed(reaction),
-  };
-}
-
-function resolveDirection(reaction, tacticalParticipation) {
-  return safeUpper(
-    reaction?.direction ||
-      reaction?.tradeDirectionBias ||
-      tacticalParticipation?.intendedDirection ||
-      tacticalParticipation?.direction ||
-      "NEUTRAL",
-    "NEUTRAL"
-  );
-}
-
-function resolveQuality(reaction, tacticalParticipation) {
-  return safeUpper(
-    reaction?.quality ||
-      tacticalParticipation?.participationQuality ||
-      tacticalParticipation?.quality ||
-      "WEAK",
-    "WEAK"
-  );
-}
-
-
-function resolvePromotedContactContext({
-  reaction = null,
-  engine26LocationCandidate = null,
-  engine26ReactionHandoff = null,
-} = {}) {
-  const reactionLocationContext = reaction?.engine26LocationContext || null;
-
-  const contactState = pickFirst(
-    reaction?.contactState,
-    reactionLocationContext?.contactState,
-    engine26ReactionHandoff?.contactState,
-    engine26LocationCandidate?.contactState
-  );
-
-  const directionState = pickFirst(
-    reaction?.directionState,
-    reactionLocationContext?.directionState,
-    engine26ReactionHandoff?.directionState,
-    engine26LocationCandidate?.directionState
-  );
-
-  const chainArmed =
-    reaction?.chainArmed === true ||
-    reactionLocationContext?.chainArmed === true ||
-    engine26ReactionHandoff?.chainArmed === true ||
-    engine26LocationCandidate?.chainArmed === true;
-
-  const armed =
-    reaction?.armed === true ||
-    reactionLocationContext?.armed === true ||
-    engine26ReactionHandoff?.armed === true ||
-    chainArmed === true;
-
-  const expectedReactionDirection = safeUpper(
-    pickFirst(
-      reaction?.expectedReactionDirection,
-      reactionLocationContext?.expectedReactionDirection,
-      engine26ReactionHandoff?.expectedReactionDirection,
-      engine26LocationCandidate?.expectedReactionDirection,
-      engine26LocationCandidate?.expectedReversalDirection
-    ),
-    ""
-  );
-
-  const expectedParticipationDirection = safeUpper(
-    pickFirst(
-      reaction?.expectedParticipationDirection,
-      reactionLocationContext?.expectedParticipationDirection,
-      engine26ReactionHandoff?.expectedParticipationDirection,
-      engine26LocationCandidate?.expectedParticipationDirection,
-      expectedReactionDirection
-    ),
-    ""
-  );
-
-  const expectedReversalDirection = safeUpper(
-    pickFirst(
-      reaction?.expectedReversalDirection,
-      reactionLocationContext?.expectedReversalDirection,
-      engine26ReactionHandoff?.expectedReversalDirection,
-      engine26LocationCandidate?.expectedReversalDirection
-    ),
-    ""
-  );
-
-  const promotedContactActive =
-    contactState === "NEGOTIATED_LINE_CONTACT" &&
-    chainArmed === true &&
-    directionState === "SHORT_REVERSAL_WATCH";
-
-  return {
-    armed,
-    chainArmed,
-    contactState: contactState || null,
-    directionState: directionState || null,
-    expectedReactionDirection: expectedReactionDirection || null,
-    expectedParticipationDirection:
-      expectedParticipationDirection ||
-      (promotedContactActive ? "SHORT" : null),
-    expectedReversalDirection: expectedReversalDirection || null,
-    promotedContactActive,
-
-    priorCandidateId: pickFirst(
-      reaction?.priorCandidateId,
-      reactionLocationContext?.priorCandidateId,
-      engine26ReactionHandoff?.priorCandidateId,
-      engine26LocationCandidate?.priorCandidateId
-    ),
-    priorZoneId: pickFirst(
-      reaction?.priorZoneId,
-      reactionLocationContext?.priorZoneId,
-      engine26ReactionHandoff?.priorZoneId,
-      engine26LocationCandidate?.priorZoneId
-    ),
-    priorRotationDirection: pickFirst(
-      reaction?.priorRotationDirection,
-      reactionLocationContext?.priorRotationDirection,
-      engine26ReactionHandoff?.priorRotationDirection,
-      engine26LocationCandidate?.priorRotationDirection
-    ),
-    priorRotationCompletionState: pickFirst(
-      reaction?.priorRotationCompletionState,
-      reactionLocationContext?.priorRotationCompletionState,
-      engine26ReactionHandoff?.priorRotationCompletionState,
-      engine26LocationCandidate?.priorRotationCompletionState
-    ),
-    priorRotationFullyComplete:
-      reaction?.priorRotationFullyComplete === true ||
-      reactionLocationContext?.priorRotationFullyComplete === true ||
-      engine26ReactionHandoff?.priorRotationFullyComplete === true ||
-      engine26LocationCandidate?.priorRotationFullyComplete === true,
-    promotedFromTargetCompletion:
-      reaction?.promotedFromTargetCompletion === true ||
-      reactionLocationContext?.promotedFromTargetCompletion === true ||
-      engine26ReactionHandoff?.promotedFromTargetCompletion === true ||
-      engine26LocationCandidate?.promotedFromTargetCompletion === true,
-    promotionReason: pickFirst(
-      reaction?.promotionReason,
-      reactionLocationContext?.promotionReason,
-      engine26ReactionHandoff?.promotionReason,
-      engine26LocationCandidate?.promotionReason
-    ),
-  };
-}
-
-function resolveParticipationEvaluationDirection({
-  reaction,
-  direction,
-  promotedContext,
-  participationEligibility,
-}) {
-  const reactionDirection = safeUpper(
-    reaction?.direction,
-    "NEUTRAL"
-  );
-
-  if (participationEligibility?.explicitlyPublished === true) {
-    return (
-      participationEligibility.eligible === true &&
-      ["LONG", "SHORT"].includes(reactionDirection)
-    )
-      ? reactionDirection
-      : "NEUTRAL";
-  }
-
-  // Legacy compatibility only for pre-D2 reaction objects that do not
-  // publish participationEvaluationEligible.
-  const expected = safeUpper(
-    promotedContext?.expectedParticipationDirection,
-    ""
-  );
-
-  if (["LONG", "SHORT"].includes(expected)) {
-    return expected;
-  }
-
-  return safeUpper(direction, "NEUTRAL");
 }
 
 function buildPlainEnglishLines(result) {
