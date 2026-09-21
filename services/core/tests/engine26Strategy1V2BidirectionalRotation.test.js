@@ -25,8 +25,20 @@ import {
   evaluateStrategy1Geometry,
 } from "../logic/engine26/strategy1/evaluateStrategy1Geometry.js";
 
+import { fileURLToPath } from "node:url";
+
 const SETUP = "NEGOTIATED_ZONE_ROTATION";
 const VERSION = "engine26.strategy1.v2";
+
+const TEST_DIR = path.dirname(
+  fileURLToPath(import.meta.url)
+);
+
+const DEFAULT_TEST_MANUAL_ZONES_PATH = path.join(
+  TEST_DIR,
+  "fixtures",
+  "es-smz-manual-zones-strategy1.txt"
+);
 
 /*
  * Keep the focused suite isolated from the live persistent
@@ -81,7 +93,7 @@ function buildAtPrice({
   ema10Posture = null,
   snapshotTime =
     "2026-07-28T15:00:00.000Z",
-  manualZonesFilePath = undefined,
+  manualZonesFilePath = DEFAULT_TEST_MANUAL_ZONES_PATH,
   memoryFilePath = undefined,
   persistMemory = false,
   engine22WaveStrategy = engine22Context(),
