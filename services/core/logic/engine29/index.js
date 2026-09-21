@@ -38,6 +38,7 @@ export * from "./tacticalCharacter/detectUnderlyingPressure.js";
 export * from "./tacticalCharacter/detectSqueezeCharacter.js";
 export * from "./tacticalCharacter/resolveMoveCharacter.js";
 export * from "./tacticalCharacter/buildTacticalCharacter.js";
+export * from "./tacticalCharacter/buildSqueezeTransitionMonitor.js";
 
 export * from "./aggregate/overallStateConstants.js";
 export * from "./aggregate/resolveStructuralState.js";
