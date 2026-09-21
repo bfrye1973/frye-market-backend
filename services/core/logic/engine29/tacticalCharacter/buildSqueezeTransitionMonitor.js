@@ -9,8 +9,22 @@
 // Purpose:
 // Measure whether a squeeze-like move is accelerating, holding, weakening,
 // fading, failing, or broadening into a healthier rally/selloff.
+//
+// Phase 4.95 guardrails:
+// - "BROAD" participation cannot by itself promote a move.
+// - headline momentum must still be materially active.
+// - 20m persistence must still support the move.
+// - leadership cannot be materially opposing / deteriorating.
+// - contrary VIX action blocks "healthy broadening" promotion.
+// These rules specifically prevent a near-flat headline denominator from
+// falsely producing BROADENING_INTO_RALLY / BROADENING_INTO_SELLOFF.
 
 const EPS = 1e-9;
+
+const MATERIAL_HEADLINE_10M_PCT = 0.03;
+const MATERIAL_HEADLINE_20M_PCT = 0.05;
+const MATERIAL_BREADTH_10M_PCT = 0.02;
+const CONTRARY_VIX_10M_PCT = 0.10;
 
 export const ENGINE29_SQUEEZE_MONITOR_STATES = Object.freeze({
   MONITORING: "MONITORING",
@@ -111,17 +125,28 @@ function resolveDirection(headline10, headline20) {
   return "FLAT";
 }
 
+function directionalMagnitude(value, direction) {
+  if (!finite(value)) return null;
+  if (direction === "UP") return value;
+  if (direction === "DOWN") return -value;
+  return 0;
+}
+
+function materiallyAligned(value, direction, minimumPct) {
+  const magnitude = directionalMagnitude(value, direction);
+  return finite(magnitude) && magnitude >= minimumPct;
+}
+
 function participationFor({ direction, headline10, breadth10 }) {
   if (!finite(headline10) || !finite(breadth10) || direction === "FLAT") {
     return ENGINE29_PARTICIPATION_STATES.UNKNOWN;
   }
 
-  const h = direction === "UP" ? headline10 : -headline10;
-  const b = direction === "UP" ? breadth10 : -breadth10;
+  const h = directionalMagnitude(headline10, direction);
+  const b = directionalMagnitude(breadth10, direction);
 
-  if (h <= 0) return ENGINE29_PARTICIPATION_STATES.MIXED;
-
-  if (b <= 0) return ENGINE29_PARTICIPATION_STATES.NARROW;
+  if (!finite(h) || h <= 0) return ENGINE29_PARTICIPATION_STATES.MIXED;
+  if (!finite(b) || b <= 0) return ENGINE29_PARTICIPATION_STATES.NARROW;
 
   const ratio = b / Math.max(Math.abs(h), EPS);
 
@@ -147,13 +172,8 @@ function opposing(value, direction) {
 function momentumWeakening(current10, prior10, direction) {
   if (!finite(current10) || !finite(prior10)) return false;
 
-  if (direction === "UP") {
-    return current10 < prior10;
-  }
-
-  if (direction === "DOWN") {
-    return current10 > prior10;
-  }
+  if (direction === "UP") return current10 < prior10;
+  if (direction === "DOWN") return current10 > prior10;
 
   return false;
 }
@@ -161,15 +181,83 @@ function momentumWeakening(current10, prior10, direction) {
 function momentumAccelerating(current10, prior10, direction) {
   if (!finite(current10) || !finite(prior10)) return false;
 
+  if (direction === "UP") return current10 > prior10 && current10 > 0;
+  if (direction === "DOWN") return current10 < prior10 && current10 < 0;
+
+  return false;
+}
+
+function contraryVix(vix10, direction) {
+  if (!finite(vix10)) return false;
+
   if (direction === "UP") {
-    return current10 > prior10 && current10 > 0;
+    return vix10 >= CONTRARY_VIX_10M_PCT;
   }
 
   if (direction === "DOWN") {
-    return current10 < prior10 && current10 < 0;
+    return vix10 <= -CONTRARY_VIX_10M_PCT;
   }
 
   return false;
+}
+
+function buildGuardrails({
+  direction,
+  headline,
+  breadth,
+  leadership,
+  credit,
+  financials,
+  vix,
+}) {
+  const headline10Material = materiallyAligned(
+    headline.move10,
+    direction,
+    MATERIAL_HEADLINE_10M_PCT
+  );
+
+  const headline20Material = materiallyAligned(
+    headline.move20,
+    direction,
+    MATERIAL_HEADLINE_20M_PCT
+  );
+
+  const breadth10Material = materiallyAligned(
+    breadth.move10,
+    direction,
+    MATERIAL_BREADTH_10M_PCT
+  );
+
+  const leadershipOpposing = opposing(leadership.move10, direction);
+  const leadershipWeakening = momentumWeakening(
+    leadership.move10,
+    leadership.prior10,
+    direction
+  );
+
+  const creditConfirming = aligned(credit.move10, direction);
+  const financialsConfirming = aligned(financials.move10, direction);
+  const vixContrary = contraryVix(vix.move10, direction);
+
+  return {
+    headline10Material,
+    headline20Material,
+    breadth10Material,
+    leadershipOpposing,
+    leadershipWeakening,
+    creditConfirming,
+    financialsConfirming,
+    vixContrary,
+    broadeningEligible:
+      headline10Material &&
+      headline20Material &&
+      breadth10Material &&
+      !leadershipOpposing &&
+      !leadershipWeakening &&
+      creditConfirming &&
+      financialsConfirming &&
+      !vixContrary,
+  };
 }
 
 function reasonText({
@@ -181,6 +269,7 @@ function reasonText({
   credit,
   financials,
   vix,
+  guardrails,
 }) {
   const reasons = [];
 
@@ -192,42 +281,57 @@ function reasonText({
     reasons.push("BREADTH_BROADENING_WITH_MOVE");
   }
 
+  if (!guardrails.headline10Material) {
+    reasons.push("HEADLINE_10M_MOVE_NOT_MATERIAL");
+  }
+
+  if (!guardrails.headline20Material) {
+    reasons.push("HEADLINE_20M_PERSISTENCE_NOT_MATERIAL");
+  }
+
   if (aligned(leadership.move10, direction)) {
     reasons.push("LEADERSHIP_SUPPORTING_MOVE");
   } else if (opposing(leadership.move10, direction)) {
     reasons.push("LEADERSHIP_OPPOSING_MOVE");
   }
 
-  if (aligned(credit.move10, direction)) {
+  if (guardrails.leadershipWeakening) {
+    reasons.push("LEADERSHIP_MOMENTUM_WEAKENING");
+  }
+
+  if (guardrails.creditConfirming) {
     reasons.push("CREDIT_SUPPORTING_MOVE");
   } else {
     reasons.push("CREDIT_NOT_CONFIRMING_MOVE");
   }
 
-  if (aligned(financials.move10, direction)) {
+  if (guardrails.financialsConfirming) {
     reasons.push("FINANCIALS_SUPPORTING_MOVE");
   } else {
     reasons.push("FINANCIALS_NOT_CONFIRMING_MOVE");
   }
 
-  if (direction === "UP" && finite(vix.move10) && vix.move10 > 0) {
-    reasons.push("VIX_RISING_AGAINST_UP_MOVE");
-  }
-
-  if (direction === "DOWN" && finite(vix.move10) && vix.move10 < 0) {
-    reasons.push("VIX_FALLING_AGAINST_DOWN_MOVE");
+  if (guardrails.vixContrary) {
+    reasons.push(
+      direction === "UP"
+        ? "VIX_RISING_AGAINST_UP_MOVE"
+        : "VIX_FALLING_AGAINST_DOWN_MOVE"
+    );
   }
 
   if (momentumWeakening(headline.move10, headline.prior10, direction)) {
     reasons.push("HEADLINE_MOMENTUM_WEAKENING");
   }
 
-  if (momentumWeakening(leadership.move10, leadership.prior10, direction)) {
-    reasons.push("LEADERSHIP_MOMENTUM_WEAKENING");
-  }
-
   if (momentumAccelerating(headline.move10, headline.prior10, direction)) {
     reasons.push("HEADLINE_MOMENTUM_ACCELERATING");
+  }
+
+  if (
+    participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
+    !guardrails.broadeningEligible
+  ) {
+    reasons.push("BROADENING_PROMOTION_BLOCKED");
   }
 
   return reasons;
@@ -242,6 +346,7 @@ function resolveState({
   credit,
   financials,
   vix,
+  guardrails,
 }) {
   if (direction === "FLAT") {
     return ENGINE29_SQUEEZE_MONITOR_STATES.MONITORING;
@@ -251,62 +356,58 @@ function resolveState({
   const headlineAligned20 = aligned(headline.move20, direction);
   const headlineOpposing10 = opposing(headline.move10, direction);
 
-  const breadthAligned10 = aligned(breadth.move10, direction);
   const breadthOpposing10 = opposing(breadth.move10, direction);
-
   const leadershipAligned10 = aligned(leadership.move10, direction);
   const leadershipOpposing10 = opposing(leadership.move10, direction);
-
-  const creditAligned10 = aligned(credit.move10, direction);
-  const financialsAligned10 = aligned(financials.move10, direction);
 
   const headlineWeakening =
     momentumWeakening(headline.move10, headline.prior10, direction);
 
-  const leadershipWeakening =
-    momentumWeakening(leadership.move10, leadership.prior10, direction);
-
   const headlineAccelerating =
     momentumAccelerating(headline.move10, headline.prior10, direction);
-
-  const vixAgainstUpside =
-    direction === "UP" && finite(vix.move10) && vix.move10 > 0;
-
-  const vixAgainstDownside =
-    direction === "DOWN" && finite(vix.move10) && vix.move10 < 0;
-
-  const volatilityAgainstMove = vixAgainstUpside || vixAgainstDownside;
 
   if (
     headlineOpposing10 &&
     breadthOpposing10 &&
-    (leadershipOpposing10 || volatilityAgainstMove)
+    (leadershipOpposing10 || guardrails.vixContrary)
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_FAILED;
   }
 
   if (
     headlineOpposing10 ||
-    (!headlineAligned10 && leadershipOpposing10 && volatilityAgainstMove)
+    (!headlineAligned10 && leadershipOpposing10 && guardrails.vixContrary)
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_FADING;
   }
 
   if (
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
-    headlineAligned10 &&
-    breadthAligned10 &&
-    creditAligned10 &&
-    financialsAligned10
+    guardrails.broadeningEligible
   ) {
     return direction === "UP"
       ? ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_RALLY
       : ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_SELLOFF;
   }
 
+  // Important edge case:
+  // If breadth looks "broad" only because headline momentum has nearly stopped,
+  // do not promote. Treat the squeeze as weakening while breadth attempts to catch up.
+  if (
+    participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
+    headlineAligned20 &&
+    (!guardrails.headline10Material ||
+      !guardrails.headline20Material ||
+      guardrails.leadershipWeakening ||
+      guardrails.vixContrary)
+  ) {
+    return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_WEAKENING;
+  }
+
   if (
     headlineAligned20 &&
     headlineAligned10 &&
+    guardrails.headline10Material &&
     participation === ENGINE29_PARTICIPATION_STATES.NARROW &&
     leadershipAligned10 &&
     headlineAccelerating
@@ -318,9 +419,9 @@ function resolveState({
     headlineAligned20 &&
     headlineAligned10 &&
     (headlineWeakening ||
-      leadershipWeakening ||
+      guardrails.leadershipWeakening ||
       leadershipOpposing10 ||
-      volatilityAgainstMove)
+      guardrails.vixContrary)
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_WEAKENING;
   }
@@ -328,6 +429,7 @@ function resolveState({
   if (
     headlineAligned20 &&
     headlineAligned10 &&
+    guardrails.headline10Material &&
     participation === ENGINE29_PARTICIPATION_STATES.NARROW
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_HOLDING;
@@ -341,13 +443,12 @@ function plainEnglish({
   direction,
   participation,
   headline,
-  breadth,
   leadership,
   credit,
   vix,
+  guardrails,
 }) {
   const directionWord = direction === "DOWN" ? "downside" : "upside";
-
   const why = [];
 
   if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
@@ -355,25 +456,41 @@ function plainEnglish({
   }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.BROAD) {
-    why.push("Breadth is now participating strongly with the headline move.");
+    if (guardrails.broadeningEligible) {
+      why.push("Breadth is participating strongly with the headline move.");
+    } else {
+      why.push("Breadth is trying to catch up, but the move has not earned broad-rally confirmation.");
+    }
+  }
+
+  if (!guardrails.headline10Material) {
+    why.push("Headline momentum has become too small to confirm healthy broadening.");
+  }
+
+  if (!guardrails.headline20Material) {
+    why.push("The headline move does not yet have enough 20-minute persistence.");
   }
 
   if (opposing(leadership.move10, direction)) {
     why.push("Tech and semiconductor leadership are moving against the squeeze.");
-  } else if (momentumWeakening(leadership.move10, leadership.prior10, direction)) {
+  } else if (guardrails.leadershipWeakening) {
     why.push("Tech and semiconductor leadership are losing momentum.");
   }
 
-  if (!aligned(credit.move10, direction)) {
+  if (!guardrails.creditConfirming) {
     why.push("High-yield credit is not confirming the move.");
   }
 
-  if (direction === "UP" && finite(vix.move10) && vix.move10 > 0) {
-    why.push("VIX is rising instead of confirming the rally.");
+  if (!guardrails.financialsConfirming) {
+    why.push("Financials are not confirming the move.");
   }
 
-  if (direction === "DOWN" && finite(vix.move10) && vix.move10 < 0) {
-    why.push("VIX is falling instead of confirming the selloff.");
+  if (guardrails.vixContrary) {
+    why.push(
+      direction === "UP"
+        ? "VIX is rising enough to argue against calling this a healthy broad rally."
+        : "VIX is falling enough to argue against calling this a healthy broad selloff."
+    );
   }
 
   const headlineText = {
@@ -398,10 +515,7 @@ function plainEnglish({
   return {
     headline: headlineText,
     why,
-    summary:
-      why.length > 0
-        ? `${headlineText} ${why.join(" ")}`
-        : headlineText,
+    summary: why.length ? `${headlineText} ${why.join(" ")}` : headlineText,
   };
 }
 
@@ -423,6 +537,16 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     breadth10: breadth.move10,
   });
 
+  const guardrails = buildGuardrails({
+    direction,
+    headline,
+    breadth,
+    leadership,
+    credit,
+    financials,
+    vix,
+  });
+
   const state = resolveState({
     direction,
     participation,
@@ -432,6 +556,7 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     credit,
     financials,
     vix,
+    guardrails,
   });
 
   const reasonCodes = reasonText({
@@ -443,6 +568,7 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     credit,
     financials,
     vix,
+    guardrails,
   });
 
   const display = plainEnglish({
@@ -453,11 +579,13 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     breadth,
     leadership,
     credit,
+    financials,
     vix,
+    guardrails,
   });
 
   return {
-    version: "engine29.squeezeTransitionMonitor.v1",
+    version: "engine29.squeezeTransitionMonitor.v1.1",
     generatedAt: marketDataBundle?.generatedAt ?? new Date().toISOString(),
     timeframe: "10m",
     persistenceWindow: "20m",
@@ -465,6 +593,15 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     state,
     direction,
     participation,
+    guardrails: {
+      ...guardrails,
+      thresholds: {
+        materialHeadline10mPct: MATERIAL_HEADLINE_10M_PCT,
+        materialHeadline20mPct: MATERIAL_HEADLINE_20M_PCT,
+        materialBreadth10mPct: MATERIAL_BREADTH_10M_PCT,
+        contraryVix10mPct: CONTRARY_VIX_10M_PCT,
+      },
+    },
     metrics: {
       headline,
       breadth,
