@@ -6,16 +6,15 @@
 // - does NOT overwrite 1H tactical truth
 // - does NOT overwrite 1W structural truth
 //
-// Purpose:
-// Measure whether an active 30m squeeze-like move is accelerating, holding,
-// weakening, fading, failing, or broadening into a healthier rally/selloff.
+// v1.3 adds explicit 30m context:
+// - aligned with 30m
+// - countertrend to 30m
+// - early broadening that may be trying to overturn 30m
 //
-// v1.2:
-// - accepts parentMoveCharacter so the 10m monitor knows whether a 30m squeeze
-//   is currently active.
-// - when the parent 30m state is a squeeze and 10m/20m momentum falls below
-//   material thresholds, returns SQUEEZE_WEAKENING instead of generic MONITORING.
-// - preserves all v1.1 broadening guardrails.
+// This lets the monitor distinguish:
+//   30m selling + 10m broad buying  -> COUNTERTREND_BUYING_BROADENING
+//   30m buying  + 10m broad buying  -> BROADENING_INTO_RALLY
+//   active squeeze losing momentum  -> SQUEEZE_WEAKENING
 
 const EPS = 1e-9;
 
@@ -26,11 +25,18 @@ const CONTRARY_VIX_10M_PCT = 0.10;
 
 export const ENGINE29_SQUEEZE_MONITOR_STATES = Object.freeze({
   MONITORING: "MONITORING",
+
   SQUEEZE_ACCELERATING: "SQUEEZE_ACCELERATING",
   SQUEEZE_HOLDING: "SQUEEZE_HOLDING",
   SQUEEZE_WEAKENING: "SQUEEZE_WEAKENING",
   SQUEEZE_FADING: "SQUEEZE_FADING",
   SQUEEZE_FAILED: "SQUEEZE_FAILED",
+
+  COUNTERTREND_BUYING_BROADENING: "COUNTERTREND_BUYING_BROADENING",
+  COUNTERTREND_SELLING_BROADENING: "COUNTERTREND_SELLING_BROADENING",
+  COUNTERTREND_RALLY_FADING: "COUNTERTREND_RALLY_FADING",
+  COUNTERTREND_SELLOFF_FADING: "COUNTERTREND_SELLOFF_FADING",
+
   BROADENING_INTO_RALLY: "BROADENING_INTO_RALLY",
   BROADENING_INTO_SELLOFF: "BROADENING_INTO_SELLOFF",
 });
@@ -68,6 +74,7 @@ function barTime(bar) {
 
 function symbolMove(entry) {
   const bars = entry?.liveMonitor?.bars;
+
   if (!Array.isArray(bars) || bars.length < 4) {
     return {
       available: false,
@@ -95,9 +102,11 @@ function symbolMove(entry) {
 
 function buildMoves(symbols) {
   const result = {};
+
   for (const [symbol, entry] of Object.entries(symbols || {})) {
     result[symbol] = symbolMove(entry);
   }
+
   return result;
 }
 
@@ -117,6 +126,7 @@ function block(moves, names) {
 
 function resolveDirection(headline10, headline20) {
   const composite = avg([headline10, headline20]);
+
   if (!finite(composite)) return "FLAT";
   if (composite > 0.015) return "UP";
   if (composite < -0.015) return "DOWN";
@@ -183,8 +193,10 @@ function momentumAccelerating(current10, prior10, direction) {
 
 function contraryVix(vix10, direction) {
   if (!finite(vix10)) return false;
+
   if (direction === "UP") return vix10 >= CONTRARY_VIX_10M_PCT;
   if (direction === "DOWN") return vix10 <= -CONTRARY_VIX_10M_PCT;
+
   return false;
 }
 
@@ -216,6 +228,39 @@ function normalizeParentMove(parentMoveCharacter) {
     direction,
     squeezeActive: upside || downside,
     squeezeDirection: upside ? "UP" : downside ? "DOWN" : null,
+  };
+}
+
+function normalizeFastTacticalState(fastTacticalState) {
+  const state =
+    typeof fastTacticalState === "string"
+      ? fastTacticalState
+      : fastTacticalState?.state ?? null;
+
+  const s = String(state || "").toUpperCase();
+
+  let direction = "NEUTRAL";
+
+  if (
+    s.includes("BUYING_PRESSURE") ||
+    s.includes("BROAD_MOVE_UP") ||
+    s.includes("UPSIDE_SQUEEZE") ||
+    s.includes("RECOVERY_ATTEMPT")
+  ) {
+    direction = "UP";
+  } else if (
+    s.includes("SELLING_PRESSURE") ||
+    s.includes("BROAD_MOVE_DOWN") ||
+    s.includes("DOWNSIDE_SQUEEZE")
+  ) {
+    direction = "DOWN";
+  } else if (s.includes("STABILIZING")) {
+    direction = "NEUTRAL";
+  }
+
+  return {
+    state,
+    direction,
   };
 }
 
@@ -266,6 +311,7 @@ function buildGuardrails({
     creditConfirming,
     financialsConfirming,
     vixContrary,
+
     broadeningEligible:
       headline10Material &&
       headline20Material &&
@@ -278,89 +324,14 @@ function buildGuardrails({
   };
 }
 
-function reasonText({
+function resolveContext({
   direction,
-  participation,
-  headline,
-  leadership,
-  guardrails,
-  parent,
+  fast,
 }) {
-  const reasons = [];
-
-  if (parent.squeezeActive) {
-    reasons.push("PARENT_30M_SQUEEZE_ACTIVE");
-  }
-
-  if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
-    reasons.push("HEADLINE_MOVE_OUTRUNNING_BREADTH");
-  } else if (participation === ENGINE29_PARTICIPATION_STATES.PARTIAL) {
-    reasons.push("BREADTH_PARTIALLY_PARTICIPATING");
-  } else if (participation === ENGINE29_PARTICIPATION_STATES.BROAD) {
-    reasons.push("BREADTH_BROADENING_WITH_MOVE");
-  }
-
-  if (!guardrails.headline10Material) {
-    reasons.push("HEADLINE_10M_MOVE_NOT_MATERIAL");
-  }
-
-  if (!guardrails.headline20Material) {
-    reasons.push("HEADLINE_20M_PERSISTENCE_NOT_MATERIAL");
-  }
-
-  if (aligned(leadership.move10, direction)) {
-    reasons.push("LEADERSHIP_SUPPORTING_MOVE");
-  } else if (opposing(leadership.move10, direction)) {
-    reasons.push("LEADERSHIP_OPPOSING_MOVE");
-  }
-
-  if (guardrails.leadershipWeakening) {
-    reasons.push("LEADERSHIP_MOMENTUM_WEAKENING");
-  }
-
-  if (guardrails.creditConfirming) {
-    reasons.push("CREDIT_SUPPORTING_MOVE");
-  } else {
-    reasons.push("CREDIT_NOT_CONFIRMING_MOVE");
-  }
-
-  if (guardrails.financialsConfirming) {
-    reasons.push("FINANCIALS_SUPPORTING_MOVE");
-  } else {
-    reasons.push("FINANCIALS_NOT_CONFIRMING_MOVE");
-  }
-
-  if (guardrails.vixContrary) {
-    reasons.push(
-      direction === "UP"
-        ? "VIX_RISING_AGAINST_UP_MOVE"
-        : "VIX_FALLING_AGAINST_DOWN_MOVE"
-    );
-  }
-
-  if (momentumWeakening(headline.move10, headline.prior10, direction)) {
-    reasons.push("HEADLINE_MOMENTUM_WEAKENING");
-  }
-
-  if (momentumAccelerating(headline.move10, headline.prior10, direction)) {
-    reasons.push("HEADLINE_MOMENTUM_ACCELERATING");
-  }
-
-  if (
-    participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
-    !guardrails.broadeningEligible
-  ) {
-    reasons.push("BROADENING_PROMOTION_BLOCKED");
-  }
-
-  if (
-    parent.squeezeActive &&
-    (!guardrails.headline10Material || !guardrails.headline20Material)
-  ) {
-    reasons.push("ACTIVE_SQUEEZE_LOSING_MATERIAL_MOMENTUM");
-  }
-
-  return reasons;
+  if (direction === "FLAT") return "NO_LIVE_DIRECTION";
+  if (fast.direction === "NEUTRAL") return "FAST_NEUTRAL";
+  if (fast.direction === direction) return "ALIGNED_WITH_30M";
+  return "COUNTERTREND_TO_30M";
 }
 
 function resolveState({
@@ -371,6 +342,8 @@ function resolveState({
   leadership,
   guardrails,
   parent,
+  fast,
+  context,
 }) {
   const effectiveDirection =
     direction !== "FLAT" ? direction : parent.squeezeDirection ?? "FLAT";
@@ -382,16 +355,27 @@ function resolveState({
   const headlineAligned10 = aligned(headline.move10, effectiveDirection);
   const headlineAligned20 = aligned(headline.move20, effectiveDirection);
   const headlineOpposing10 = opposing(headline.move10, effectiveDirection);
+
   const breadthOpposing10 = opposing(breadth.move10, effectiveDirection);
   const leadershipAligned10 = aligned(leadership.move10, effectiveDirection);
-  const leadershipOpposing10 = opposing(leadership.move10, effectiveDirection);
+  const leadershipOpposing10 = opposing(
+    leadership.move10,
+    effectiveDirection
+  );
 
-  const headlineWeakening =
-    momentumWeakening(headline.move10, headline.prior10, effectiveDirection);
+  const headlineWeakening = momentumWeakening(
+    headline.move10,
+    headline.prior10,
+    effectiveDirection
+  );
 
-  const headlineAccelerating =
-    momentumAccelerating(headline.move10, headline.prior10, effectiveDirection);
+  const headlineAccelerating = momentumAccelerating(
+    headline.move10,
+    headline.prior10,
+    effectiveDirection
+  );
 
+  // Existing 30m squeeze management.
   if (
     parent.squeezeActive &&
     parent.squeezeDirection === effectiveDirection &&
@@ -406,12 +390,40 @@ function resolveState({
     parent.squeezeActive &&
     parent.squeezeDirection === effectiveDirection &&
     (headlineOpposing10 ||
-      (!headlineAligned10 && leadershipOpposing10 && guardrails.vixContrary))
+      (!headlineAligned10 &&
+        leadershipOpposing10 &&
+        guardrails.vixContrary))
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_FADING;
   }
 
+  // A broad 10m move that opposes 30m authority is not yet a confirmed rally/selloff.
   if (
+    context === "COUNTERTREND_TO_30M" &&
+    participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
+    guardrails.broadeningEligible
+  ) {
+    return effectiveDirection === "UP"
+      ? ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_BUYING_BROADENING
+      : ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_SELLING_BROADENING;
+  }
+
+  // If the countertrend move starts losing material momentum before 30m turns,
+  // call it fading rather than allowing it to masquerade as a confirmed reversal.
+  if (
+    context === "COUNTERTREND_TO_30M" &&
+    (!guardrails.headline10Material ||
+      !guardrails.headline20Material ||
+      headlineOpposing10)
+  ) {
+    return effectiveDirection === "UP"
+      ? ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_RALLY_FADING
+      : ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_SELLOFF_FADING;
+  }
+
+  // Only aligned/neutral 30m context may promote to broad rally/selloff.
+  if (
+    context !== "COUNTERTREND_TO_30M" &&
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
     guardrails.broadeningEligible
   ) {
@@ -420,9 +432,6 @@ function resolveState({
       : ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_SELLOFF;
   }
 
-  // If a 30m squeeze is active but the 10m/20m headline move has fallen
-  // below material thresholds, the squeeze is weakening even if individual
-  // confirming groups remain positive.
   if (
     parent.squeezeActive &&
     parent.squeezeDirection === effectiveDirection &&
@@ -476,6 +485,96 @@ function resolveState({
   return ENGINE29_SQUEEZE_MONITOR_STATES.MONITORING;
 }
 
+function reasonText({
+  direction,
+  participation,
+  headline,
+  leadership,
+  guardrails,
+  parent,
+  fast,
+  context,
+}) {
+  const reasons = [];
+
+  if (parent.squeezeActive) {
+    reasons.push("PARENT_30M_SQUEEZE_ACTIVE");
+  }
+
+  if (fast.state) {
+    reasons.push(`PARENT_30M_STATE_${String(fast.state).toUpperCase()}`);
+  }
+
+  if (context === "COUNTERTREND_TO_30M") {
+    reasons.push("LIVE_10M_COUNTERTREND_TO_30M");
+  } else if (context === "ALIGNED_WITH_30M") {
+    reasons.push("LIVE_10M_ALIGNED_WITH_30M");
+  }
+
+  if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
+    reasons.push("HEADLINE_MOVE_OUTRUNNING_BREADTH");
+  } else if (participation === ENGINE29_PARTICIPATION_STATES.PARTIAL) {
+    reasons.push("BREADTH_PARTIALLY_PARTICIPATING");
+  } else if (participation === ENGINE29_PARTICIPATION_STATES.BROAD) {
+    reasons.push("BREADTH_BROADENING_WITH_MOVE");
+  }
+
+  if (!guardrails.headline10Material) {
+    reasons.push("HEADLINE_10M_MOVE_NOT_MATERIAL");
+  }
+
+  if (!guardrails.headline20Material) {
+    reasons.push("HEADLINE_20M_PERSISTENCE_NOT_MATERIAL");
+  }
+
+  if (aligned(leadership.move10, direction)) {
+    reasons.push("LEADERSHIP_SUPPORTING_MOVE");
+  } else if (opposing(leadership.move10, direction)) {
+    reasons.push("LEADERSHIP_OPPOSING_MOVE");
+  }
+
+  if (guardrails.leadershipWeakening) {
+    reasons.push("LEADERSHIP_MOMENTUM_WEAKENING");
+  }
+
+  reasons.push(
+    guardrails.creditConfirming
+      ? "CREDIT_SUPPORTING_MOVE"
+      : "CREDIT_NOT_CONFIRMING_MOVE"
+  );
+
+  reasons.push(
+    guardrails.financialsConfirming
+      ? "FINANCIALS_SUPPORTING_MOVE"
+      : "FINANCIALS_NOT_CONFIRMING_MOVE"
+  );
+
+  if (guardrails.vixContrary) {
+    reasons.push(
+      direction === "UP"
+        ? "VIX_RISING_AGAINST_UP_MOVE"
+        : "VIX_FALLING_AGAINST_DOWN_MOVE"
+    );
+  }
+
+  if (momentumWeakening(headline.move10, headline.prior10, direction)) {
+    reasons.push("HEADLINE_MOMENTUM_WEAKENING");
+  }
+
+  if (momentumAccelerating(headline.move10, headline.prior10, direction)) {
+    reasons.push("HEADLINE_MOMENTUM_ACCELERATING");
+  }
+
+  if (
+    participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
+    !guardrails.broadeningEligible
+  ) {
+    reasons.push("BROADENING_PROMOTION_BLOCKED");
+  }
+
+  return reasons;
+}
+
 function plainEnglish({
   state,
   direction,
@@ -483,15 +582,24 @@ function plainEnglish({
   leadership,
   guardrails,
   parent,
+  fast,
+  context,
 }) {
-  const effectiveDirection =
-    direction !== "FLAT" ? direction : parent.squeezeDirection ?? "UP";
-
-  const directionWord = effectiveDirection === "DOWN" ? "downside" : "upside";
+  const directionWord = direction === "DOWN" ? "downside" : "upside";
   const why = [];
 
+  if (fast.state) {
+    why.push(`The 30-minute tactical state is ${fast.state}.`);
+  }
+
+  if (context === "COUNTERTREND_TO_30M") {
+    why.push(
+      `The 10-minute ${directionWord} move is running against the current 30-minute tactical direction.`
+    );
+  }
+
   if (parent.squeezeActive) {
-    why.push(`The 30-minute engine still has an active ${directionWord} squeeze.`);
+    why.push(`The 30-minute move character still has an active ${directionWord} squeeze.`);
   }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
@@ -503,23 +611,19 @@ function plainEnglish({
   }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.BROAD) {
-    if (guardrails.broadeningEligible) {
-      why.push("Breadth is participating strongly with the headline move.");
-    } else {
-      why.push("Breadth is trying to catch up, but the move has not earned broad-rally confirmation.");
-    }
+    why.push("Breadth is participating strongly with the live move.");
   }
 
   if (!guardrails.headline10Material) {
-    why.push("Headline momentum has become too small to confirm continued squeeze strength.");
+    why.push("Headline momentum is too small to confirm continued move strength.");
   }
 
   if (!guardrails.headline20Material) {
-    why.push("The headline move no longer has enough 20-minute persistence.");
+    why.push("The headline move does not have enough 20-minute persistence.");
   }
 
-  if (opposing(leadership.move10, effectiveDirection)) {
-    why.push("Tech and semiconductor leadership are moving against the squeeze.");
+  if (opposing(leadership.move10, direction)) {
+    why.push("Tech and semiconductor leadership are moving against the live move.");
   } else if (guardrails.leadershipWeakening) {
     why.push("Tech and semiconductor leadership are losing momentum.");
   }
@@ -534,7 +638,7 @@ function plainEnglish({
 
   if (guardrails.vixContrary) {
     why.push(
-      effectiveDirection === "UP"
+      direction === "UP"
         ? "VIX is rising enough to argue against calling this a healthy broad rally."
         : "VIX is falling enough to argue against calling this a healthy broad selloff."
     );
@@ -551,10 +655,21 @@ function plainEnglish({
       `The ${directionWord} squeeze is fading.`,
     [ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_FAILED]:
       `The ${directionWord} squeeze has failed.`,
+
+    [ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_BUYING_BROADENING]:
+      "Countertrend buying is broadening, but 30-minute authority has not turned bullish.",
+    [ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_SELLING_BROADENING]:
+      "Countertrend selling is broadening, but 30-minute authority has not turned bearish.",
+    [ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_RALLY_FADING]:
+      "The countertrend rally is fading before 30-minute authority has turned bullish.",
+    [ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_SELLOFF_FADING]:
+      "The countertrend selloff is fading before 30-minute authority has turned bearish.",
+
     [ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_RALLY]:
       "The upside move is broadening into a healthier rally.",
     [ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_SELLOFF]:
       "The downside move is broadening into a healthier selloff.",
+
     [ENGINE29_SQUEEZE_MONITOR_STATES.MONITORING]:
       "The live monitor does not yet have a decisive transition.",
   }[state];
@@ -568,7 +683,10 @@ function plainEnglish({
 
 export function buildEngine29SqueezeTransitionMonitor(
   marketDataBundle,
-  { parentMoveCharacter = null } = {}
+  {
+    parentMoveCharacter = null,
+    fastTacticalState = null,
+  } = {}
 ) {
   const moves = buildMoves(marketDataBundle?.symbols);
 
@@ -579,26 +697,34 @@ export function buildEngine29SqueezeTransitionMonitor(
   const financials = block(moves, ["XLF", "KRE"]);
   const vix = block(moves, ["VIX"]);
 
-  const direction = resolveDirection(headline.move10, headline.move20);
+  const rawDirection = resolveDirection(headline.move10, headline.move20);
   const parent = normalizeParentMove(parentMoveCharacter);
+  const fast = normalizeFastTacticalState(fastTacticalState);
 
-  const effectiveDirection =
-    direction !== "FLAT" ? direction : parent.squeezeDirection ?? "FLAT";
+  const direction =
+    rawDirection !== "FLAT"
+      ? rawDirection
+      : parent.squeezeDirection ?? "FLAT";
 
   const participation = participationFor({
-    direction: effectiveDirection,
+    direction,
     headline10: headline.move10,
     breadth10: breadth.move10,
   });
 
   const guardrails = buildGuardrails({
-    direction: effectiveDirection,
+    direction,
     headline,
     breadth,
     leadership,
     credit,
     financials,
     vix,
+  });
+
+  const context = resolveContext({
+    direction,
+    fast,
   });
 
   const state = resolveState({
@@ -609,36 +735,47 @@ export function buildEngine29SqueezeTransitionMonitor(
     leadership,
     guardrails,
     parent,
+    fast,
+    context,
   });
 
   const reasonCodes = reasonText({
-    direction: effectiveDirection,
+    direction,
     participation,
     headline,
     leadership,
     guardrails,
     parent,
+    fast,
+    context,
   });
 
   const display = plainEnglish({
     state,
-    direction: effectiveDirection,
+    direction,
     participation,
     leadership,
     guardrails,
     parent,
+    fast,
+    context,
   });
 
   return {
-    version: "engine29.squeezeTransitionMonitor.v1.2",
+    version: "engine29.squeezeTransitionMonitor.v1.3",
     generatedAt: marketDataBundle?.generatedAt ?? new Date().toISOString(),
     timeframe: "10m",
     persistenceWindow: "20m",
     authority: "DIAGNOSTIC_ONLY",
+
     state,
-    direction: effectiveDirection,
+    direction,
     participation,
+    context,
+
     parentMove: parent,
+    fastTacticalContext: fast,
+
     guardrails: {
       ...guardrails,
       thresholds: {
@@ -648,6 +785,7 @@ export function buildEngine29SqueezeTransitionMonitor(
         contraryVix10mPct: CONTRARY_VIX_10M_PCT,
       },
     },
+
     metrics: {
       headline,
       breadth,
@@ -655,15 +793,18 @@ export function buildEngine29SqueezeTransitionMonitor(
       credit,
       financials,
       vix,
+
       headlineBreadthGap:
         finite(headline.move10) && finite(breadth.move10)
           ? headline.move10 - breadth.move10
           : null,
+
       leadershipBreadthGap:
         finite(leadership.move10) && finite(breadth.move10)
           ? leadership.move10 - breadth.move10
           : null,
     },
+
     reasonCodes,
     display,
     symbolMoves: moves,
