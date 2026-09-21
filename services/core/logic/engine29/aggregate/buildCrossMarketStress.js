@@ -5,6 +5,7 @@ import { buildEngine29MarketDataBundle } from "../data/buildMarketDataBundle.js"
 import { buildEngine29StructureBundle } from "../structure/buildStructureBundle.js";
 import { buildEngine29GroupStateBundle } from "../groups/buildGroupStateBundle.js";
 import { buildEngine29TacticalCharacterWithEs } from "../tacticalCharacter/buildTacticalCharacter.js";
+import { buildEngine29SqueezeTransitionMonitor } from "../tacticalCharacter/buildSqueezeTransitionMonitor.js";
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
 import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
@@ -125,6 +126,10 @@ export async function buildEngine29CrossMarketStress({
   const groups = groupBundle || buildEngine29GroupStateBundle(structure, { now, financialConditions });
   const move = moveCharacter || await buildEngine29TacticalCharacterWithEs(structure, groups, { now });
 
+  // 10m / 20m diagnostic-only squeeze transition monitor.
+  // This does not alter 30m, 1H, or 1W authority.
+  const liveMonitor = buildEngine29SqueezeTransitionMonitor(market);
+
   const structural = resolveEngine29StructuralState(groups);
   const tactical = resolveEngine29TacticalState(groups, move);
   const fastTactical = resolveEngine29FastTacticalShift(move);
@@ -151,6 +156,7 @@ export async function buildEngine29CrossMarketStress({
     tactical,
     fastTactical,
     moveCharacter: move,
+    liveMonitor,
 
     groups: groups?.groups || {},
     symbols: compactSymbols(structure),
@@ -167,6 +173,7 @@ export async function buildEngine29CrossMarketStress({
       ...(tactical.reasonCodes || []),
       ...(fastTactical.reasonCodes || []),
       ...(move?.reasonCodes || []),
+      ...(liveMonitor?.reasonCodes || []),
     ]),
 
     dataQuality: {
@@ -174,6 +181,7 @@ export async function buildEngine29CrossMarketStress({
       degradedGroups: groups?.summary?.degradedGroups || [],
       directVixAvailable: Boolean(move?.directVixAvailable),
       esResolvedSymbol: move?.esResolvedSymbol || null,
+      liveMonitorAvailableSymbols: market?.summary?.liveMonitorAvailableSymbols || [],
     },
 
     display: {
@@ -194,6 +202,17 @@ export async function buildEngine29CrossMarketStress({
         moveCharacter: move?.moveCharacter ?? null,
         status: move?.display?.status ?? null,
         summary: move?.display?.summary ?? null,
+      },
+      liveMonitor: {
+        timeframe: liveMonitor?.timeframe ?? "10m",
+        persistenceWindow: liveMonitor?.persistenceWindow ?? "20m",
+        authority: liveMonitor?.authority ?? "DIAGNOSTIC_ONLY",
+        state: liveMonitor?.state ?? null,
+        direction: liveMonitor?.direction ?? null,
+        participation: liveMonitor?.participation ?? null,
+        headline: liveMonitor?.display?.headline ?? null,
+        summary: liveMonitor?.display?.summary ?? null,
+        why: liveMonitor?.display?.why ?? [],
       },
       underTheHood: {
         largeIndexes: displayGroups.headlineIndex,
