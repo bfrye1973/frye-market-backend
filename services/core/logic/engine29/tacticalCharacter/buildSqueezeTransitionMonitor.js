@@ -7,17 +7,15 @@
 // - does NOT overwrite 1W structural truth
 //
 // Purpose:
-// Measure whether a squeeze-like move is accelerating, holding, weakening,
-// fading, failing, or broadening into a healthier rally/selloff.
+// Measure whether an active 30m squeeze-like move is accelerating, holding,
+// weakening, fading, failing, or broadening into a healthier rally/selloff.
 //
-// Phase 4.95 guardrails:
-// - "BROAD" participation cannot by itself promote a move.
-// - headline momentum must still be materially active.
-// - 20m persistence must still support the move.
-// - leadership cannot be materially opposing / deteriorating.
-// - contrary VIX action blocks "healthy broadening" promotion.
-// These rules specifically prevent a near-flat headline denominator from
-// falsely producing BROADENING_INTO_RALLY / BROADENING_INTO_SELLOFF.
+// v1.2:
+// - accepts parentMoveCharacter so the 10m monitor knows whether a 30m squeeze
+//   is currently active.
+// - when the parent 30m state is a squeeze and 10m/20m momentum falls below
+//   material thresholds, returns SQUEEZE_WEAKENING instead of generic MONITORING.
+// - preserves all v1.1 broadening guardrails.
 
 const EPS = 1e-9;
 
@@ -171,34 +169,54 @@ function opposing(value, direction) {
 
 function momentumWeakening(current10, prior10, direction) {
   if (!finite(current10) || !finite(prior10)) return false;
-
   if (direction === "UP") return current10 < prior10;
   if (direction === "DOWN") return current10 > prior10;
-
   return false;
 }
 
 function momentumAccelerating(current10, prior10, direction) {
   if (!finite(current10) || !finite(prior10)) return false;
-
   if (direction === "UP") return current10 > prior10 && current10 > 0;
   if (direction === "DOWN") return current10 < prior10 && current10 < 0;
-
   return false;
 }
 
 function contraryVix(vix10, direction) {
   if (!finite(vix10)) return false;
-
-  if (direction === "UP") {
-    return vix10 >= CONTRARY_VIX_10M_PCT;
-  }
-
-  if (direction === "DOWN") {
-    return vix10 <= -CONTRARY_VIX_10M_PCT;
-  }
-
+  if (direction === "UP") return vix10 >= CONTRARY_VIX_10M_PCT;
+  if (direction === "DOWN") return vix10 <= -CONTRARY_VIX_10M_PCT;
   return false;
+}
+
+function normalizeParentMove(parentMoveCharacter) {
+  if (!parentMoveCharacter) {
+    return {
+      moveCharacter: null,
+      direction: null,
+      squeezeActive: false,
+      squeezeDirection: null,
+    };
+  }
+
+  const moveCharacter =
+    typeof parentMoveCharacter === "string"
+      ? parentMoveCharacter
+      : parentMoveCharacter?.moveCharacter ?? null;
+
+  const direction =
+    typeof parentMoveCharacter === "object"
+      ? parentMoveCharacter?.direction ?? null
+      : null;
+
+  const upside = moveCharacter === "POSSIBLE_UPSIDE_SQUEEZE";
+  const downside = moveCharacter === "POSSIBLE_DOWNSIDE_SQUEEZE";
+
+  return {
+    moveCharacter,
+    direction,
+    squeezeActive: upside || downside,
+    squeezeDirection: upside ? "UP" : downside ? "DOWN" : null,
+  };
 }
 
 function buildGuardrails({
@@ -264,14 +282,15 @@ function reasonText({
   direction,
   participation,
   headline,
-  breadth,
   leadership,
-  credit,
-  financials,
-  vix,
   guardrails,
+  parent,
 }) {
   const reasons = [];
+
+  if (parent.squeezeActive) {
+    reasons.push("PARENT_30M_SQUEEZE_ACTIVE");
+  }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
     reasons.push("HEADLINE_MOVE_OUTRUNNING_BREADTH");
@@ -334,6 +353,13 @@ function reasonText({
     reasons.push("BROADENING_PROMOTION_BLOCKED");
   }
 
+  if (
+    parent.squeezeActive &&
+    (!guardrails.headline10Material || !guardrails.headline20Material)
+  ) {
+    reasons.push("ACTIVE_SQUEEZE_LOSING_MATERIAL_MOMENTUM");
+  }
+
   return reasons;
 }
 
@@ -343,30 +369,32 @@ function resolveState({
   headline,
   breadth,
   leadership,
-  credit,
-  financials,
-  vix,
   guardrails,
+  parent,
 }) {
-  if (direction === "FLAT") {
+  const effectiveDirection =
+    direction !== "FLAT" ? direction : parent.squeezeDirection ?? "FLAT";
+
+  if (effectiveDirection === "FLAT") {
     return ENGINE29_SQUEEZE_MONITOR_STATES.MONITORING;
   }
 
-  const headlineAligned10 = aligned(headline.move10, direction);
-  const headlineAligned20 = aligned(headline.move20, direction);
-  const headlineOpposing10 = opposing(headline.move10, direction);
-
-  const breadthOpposing10 = opposing(breadth.move10, direction);
-  const leadershipAligned10 = aligned(leadership.move10, direction);
-  const leadershipOpposing10 = opposing(leadership.move10, direction);
+  const headlineAligned10 = aligned(headline.move10, effectiveDirection);
+  const headlineAligned20 = aligned(headline.move20, effectiveDirection);
+  const headlineOpposing10 = opposing(headline.move10, effectiveDirection);
+  const breadthOpposing10 = opposing(breadth.move10, effectiveDirection);
+  const leadershipAligned10 = aligned(leadership.move10, effectiveDirection);
+  const leadershipOpposing10 = opposing(leadership.move10, effectiveDirection);
 
   const headlineWeakening =
-    momentumWeakening(headline.move10, headline.prior10, direction);
+    momentumWeakening(headline.move10, headline.prior10, effectiveDirection);
 
   const headlineAccelerating =
-    momentumAccelerating(headline.move10, headline.prior10, direction);
+    momentumAccelerating(headline.move10, headline.prior10, effectiveDirection);
 
   if (
+    parent.squeezeActive &&
+    parent.squeezeDirection === effectiveDirection &&
     headlineOpposing10 &&
     breadthOpposing10 &&
     (leadershipOpposing10 || guardrails.vixContrary)
@@ -375,8 +403,10 @@ function resolveState({
   }
 
   if (
-    headlineOpposing10 ||
-    (!headlineAligned10 && leadershipOpposing10 && guardrails.vixContrary)
+    parent.squeezeActive &&
+    parent.squeezeDirection === effectiveDirection &&
+    (headlineOpposing10 ||
+      (!headlineAligned10 && leadershipOpposing10 && guardrails.vixContrary))
   ) {
     return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_FADING;
   }
@@ -385,14 +415,22 @@ function resolveState({
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
     guardrails.broadeningEligible
   ) {
-    return direction === "UP"
+    return effectiveDirection === "UP"
       ? ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_RALLY
       : ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_SELLOFF;
   }
 
-  // Important edge case:
-  // If breadth looks "broad" only because headline momentum has nearly stopped,
-  // do not promote. Treat the squeeze as weakening while breadth attempts to catch up.
+  // If a 30m squeeze is active but the 10m/20m headline move has fallen
+  // below material thresholds, the squeeze is weakening even if individual
+  // confirming groups remain positive.
+  if (
+    parent.squeezeActive &&
+    parent.squeezeDirection === effectiveDirection &&
+    (!guardrails.headline10Material || !guardrails.headline20Material)
+  ) {
+    return ENGINE29_SQUEEZE_MONITOR_STATES.SQUEEZE_WEAKENING;
+  }
+
   if (
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
     headlineAligned20 &&
@@ -442,17 +480,26 @@ function plainEnglish({
   state,
   direction,
   participation,
-  headline,
   leadership,
-  credit,
-  vix,
   guardrails,
+  parent,
 }) {
-  const directionWord = direction === "DOWN" ? "downside" : "upside";
+  const effectiveDirection =
+    direction !== "FLAT" ? direction : parent.squeezeDirection ?? "UP";
+
+  const directionWord = effectiveDirection === "DOWN" ? "downside" : "upside";
   const why = [];
+
+  if (parent.squeezeActive) {
+    why.push(`The 30-minute engine still has an active ${directionWord} squeeze.`);
+  }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.NARROW) {
     why.push("Headline indexes are moving faster than the broader market.");
+  }
+
+  if (participation === ENGINE29_PARTICIPATION_STATES.PARTIAL) {
+    why.push("Breadth is participating, but not strongly enough to call the move broad.");
   }
 
   if (participation === ENGINE29_PARTICIPATION_STATES.BROAD) {
@@ -464,14 +511,14 @@ function plainEnglish({
   }
 
   if (!guardrails.headline10Material) {
-    why.push("Headline momentum has become too small to confirm healthy broadening.");
+    why.push("Headline momentum has become too small to confirm continued squeeze strength.");
   }
 
   if (!guardrails.headline20Material) {
-    why.push("The headline move does not yet have enough 20-minute persistence.");
+    why.push("The headline move no longer has enough 20-minute persistence.");
   }
 
-  if (opposing(leadership.move10, direction)) {
+  if (opposing(leadership.move10, effectiveDirection)) {
     why.push("Tech and semiconductor leadership are moving against the squeeze.");
   } else if (guardrails.leadershipWeakening) {
     why.push("Tech and semiconductor leadership are losing momentum.");
@@ -487,7 +534,7 @@ function plainEnglish({
 
   if (guardrails.vixContrary) {
     why.push(
-      direction === "UP"
+      effectiveDirection === "UP"
         ? "VIX is rising enough to argue against calling this a healthy broad rally."
         : "VIX is falling enough to argue against calling this a healthy broad selloff."
     );
@@ -519,7 +566,10 @@ function plainEnglish({
   };
 }
 
-export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
+export function buildEngine29SqueezeTransitionMonitor(
+  marketDataBundle,
+  { parentMoveCharacter = null } = {}
+) {
   const moves = buildMoves(marketDataBundle?.symbols);
 
   const headline = block(moves, ["SPY", "QQQ"]);
@@ -530,15 +580,19 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
   const vix = block(moves, ["VIX"]);
 
   const direction = resolveDirection(headline.move10, headline.move20);
+  const parent = normalizeParentMove(parentMoveCharacter);
+
+  const effectiveDirection =
+    direction !== "FLAT" ? direction : parent.squeezeDirection ?? "FLAT";
 
   const participation = participationFor({
-    direction,
+    direction: effectiveDirection,
     headline10: headline.move10,
     breadth10: breadth.move10,
   });
 
   const guardrails = buildGuardrails({
-    direction,
+    direction: effectiveDirection,
     headline,
     breadth,
     leadership,
@@ -553,46 +607,38 @@ export function buildEngine29SqueezeTransitionMonitor(marketDataBundle) {
     headline,
     breadth,
     leadership,
-    credit,
-    financials,
-    vix,
     guardrails,
+    parent,
   });
 
   const reasonCodes = reasonText({
-    direction,
+    direction: effectiveDirection,
     participation,
     headline,
-    breadth,
     leadership,
-    credit,
-    financials,
-    vix,
     guardrails,
+    parent,
   });
 
   const display = plainEnglish({
     state,
-    direction,
+    direction: effectiveDirection,
     participation,
-    headline,
-    breadth,
     leadership,
-    credit,
-    financials,
-    vix,
     guardrails,
+    parent,
   });
 
   return {
-    version: "engine29.squeezeTransitionMonitor.v1.1",
+    version: "engine29.squeezeTransitionMonitor.v1.2",
     generatedAt: marketDataBundle?.generatedAt ?? new Date().toISOString(),
     timeframe: "10m",
     persistenceWindow: "20m",
     authority: "DIAGNOSTIC_ONLY",
     state,
-    direction,
+    direction: effectiveDirection,
     participation,
+    parentMove: parent,
     guardrails: {
       ...guardrails,
       thresholds: {
