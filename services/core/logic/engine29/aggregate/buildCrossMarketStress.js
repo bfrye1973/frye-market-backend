@@ -82,10 +82,6 @@ function buildMissingConfirmations(groupBundle, structural, tacticalCharacter) {
   const groups = groupBundle?.groups || {};
 
   if (!structural?.gates?.creditConfirmed) missing.push("CREDIT");
-
-  // Data availability and market confirmation are separate questions.
-  // DIRECT_VIX is only missing when the canonical direct VIX feed is unavailable.
-  // A live direct VIX feed can still be present without confirming volatility stress.
   if (!tacticalCharacter?.directVixAvailable) missing.push("DIRECT_VIX");
 
   for (const group of Object.values(groups)) {
@@ -126,9 +122,9 @@ export async function buildEngine29CrossMarketStress({
   const groups = groupBundle || buildEngine29GroupStateBundle(structure, { now, financialConditions });
   const move = moveCharacter || await buildEngine29TacticalCharacterWithEs(structure, groups, { now });
 
-  // 10m / 20m diagnostic-only squeeze transition monitor.
-  // This does not alter 30m, 1H, or 1W authority.
-  const liveMonitor = buildEngine29SqueezeTransitionMonitor(market);
+  const liveMonitor = buildEngine29SqueezeTransitionMonitor(market, {
+    parentMoveCharacter: move,
+  });
 
   const structural = resolveEngine29StructuralState(groups);
   const tactical = resolveEngine29TacticalState(groups, move);
