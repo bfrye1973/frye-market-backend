@@ -5,6 +5,7 @@
 // Purpose:
 // - Reuse the same CL/BZ nearby-contract resolution logic already proven by Engine 25.
 // - Fetch current outright futures bars for structural + tactical Engine 29 layers.
+// - Support 10m diagnostic monitoring where needed.
 // - Keep WTI/Brent canonical product roots stable while the resolved contract rolls.
 //
 // Canonical roots:
@@ -18,6 +19,7 @@ const RESOLUTION_BY_TIMEFRAME = Object.freeze({
   "1D": "1day",
   "1H": "1hour",
   "30m": "30min",
+  "10m": "10min",
 });
 
 function normalizeFuturesBars(bars = []) {
@@ -68,16 +70,25 @@ export async function fetchEngine29FuturesProductBars({
   const tf = String(timeframe || "");
   const resolution = RESOLUTION_BY_TIMEFRAME[tf];
 
-  if (!code) throw new Error("Engine 29 futures productCode is required");
+  if (!code) {
+    throw new Error("Engine 29 futures productCode is required");
+  }
+
   if (!resolution) {
     throw new Error(`Unsupported Engine 29 futures timeframe: ${tf}`);
   }
 
-  const resolver = await resolveEngine25FuturesContract(code, new Date(now));
+  const resolver = await resolveEngine25FuturesContract(
+    code,
+    new Date(now)
+  );
+
   const resolvedSymbol = resolver?.resolvedSymbol || null;
 
   if (!resolvedSymbol) {
-    throw new Error(`Could not resolve Engine 29 futures product ${code}`);
+    throw new Error(
+      `Could not resolve Engine 29 futures product ${code}`
+    );
   }
 
   const rawBars = await fetchFuturesAggs({
