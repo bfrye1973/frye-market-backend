@@ -1,7 +1,7 @@
 {
   "version": "5m-deltas-r12.8",
-  "deltasUpdatedAt": "2026-09-22T15:10:54.516222+00:00",
-  "sourceUpdatedAt": "2026-09-22T15:05:46Z",
+  "deltasUpdatedAt": "2026-09-22T15:15:55.158789+00:00",
+  "sourceUpdatedAt": "2026-09-22T15:10:46Z",
   "deltas": {
     "sectors": {
       "Information Technology": {
@@ -41,7 +41,7 @@
         "netTilt": 23.21
       },
       "tech": {
-        "netTilt": -24.69
+        "netTilt": -18.09
       }
     }
   }
