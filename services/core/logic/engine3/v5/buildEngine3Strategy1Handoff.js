@@ -1,671 +1,697 @@
-// services/core/logic/engine3/v5/buildEngine3Strategy1Handoff.js
+// services/core/logic/engine3/v5/buildEngine3V5Shadow.js
 //
-// Engine 3 v5 — Strategy 1 stable downstream handoff.
+// Engine 3 v5 — Top-level canonical builder.
 //
-// PURPOSE
-// -------
-// Convert Engine 3 v5 canonical state into ONE stable contract that existing
-// Engine 4 / Engine 6 consumers can read.
-//
-// IMPORTANT OWNERSHIP RULES
-// -------------------------
-// - Engine 26 owns WHERE / candidate / zone / authorization.
-// - Engine 3 v5 owns canonical LONG / SHORT / NEUTRAL.
-// - Engine 4 owns participation.
-// - Engine 6 owns final PAPER permission.
-//
-// CRITICAL SIGNAL RULE
-// --------------------
-// Once Engine 3 v5 has established a canonical LONG or SHORT, this handoff
-// keeps reactionConfirmed = true while that canonical direction remains held.
-//
-// Temporary local price-action states such as:
-//   CONTESTED / ABSORPTION / NO_CONTROL
-// do NOT withdraw the canonical signal.
-//
-// Only the Engine 3 v5 state machine may reverse or reset the canonical signal.
-//
-// This module creates:
-// - no Engine 6 permission
-// - no ticket
-// - no execution
-// - no journal event
+// Contract:
+// - Engine 26 owns WHERE / zone / lifecycle.
+// - Engine 3 owns WHAT PRICE IS DOING THERE.
+// - 1m is diagnostic only.
+// - completed 5m price-action evidence resolves fresh buyer/seller control.
+// - 10m is broader context.
+// - completed 10m + EMA10 manage post-departure travel only.
+// - Before an actual OPEN PAPER trade exists, an old canonical LONG/SHORT is
+//   reevaluable and must be released when fresh control no longer supports it.
+// - After an actual OPEN PAPER trade exists, that trade direction is locked
+//   until the trade is no longer open or Engine 26 reports full target completion.
+// - No Engine 4 authority.
+// - No Engine 6 authority.
+// - No permission.
+// - No execution.
 
-const ENGINE = "engine3.v5.strategy1Handoff.v1";
-const SOURCE = "engine3.v5.buildEngine3Strategy1Handoff";
+import {
+  normalizeNegotiatedZone,
+} from "./zone/normalizeNegotiatedZone.js";
 
-function safeUpper(value, fallback = "") {
-  const text = String(value ?? "").trim().toUpperCase();
-  return text || fallback;
-}
+import {
+  build1mEvidence,
+} from "./timeframe/build1mEvidence.js";
+
+import {
+  build5mReaction,
+} from "./timeframe/build5mReaction.js";
+
+import {
+  buildPriceActionControl,
+} from "./priceAction/buildPriceActionControl.js";
+
+import {
+  build10mContext,
+} from "./timeframe/build10mContext.js";
+
+import {
+  resolveDepartureState,
+} from "./state/departureState.js";
+
+import {
+  resolveEma10TravelState,
+} from "./state/ema10TravelState.js";
+
+import {
+  runDirectionStateMachine,
+} from "./state/directionStateMachine.js";
+
+import {
+  buildCanonicalEngine3,
+} from "./canonical/buildCanonicalEngine3.js";
+
+import {
+  buildEngine3Trace,
+} from "./diagnostics/buildEngine3Trace.js";
+
+import {
+  validateEngine3Contract,
+} from "./diagnostics/validateEngine3Contract.js";
+
+const ENGINE = "engine3.v5.shadow.v1";
+const SOURCE = "engine3.v5.buildEngine3V5Shadow";
 
 function normalizeDirection(value) {
-  const d = safeUpper(value, "NEUTRAL");
+  const direction =
+    String(value || "")
+      .trim()
+      .toUpperCase();
 
-  if (d === "LONG") return "LONG";
-  if (d === "SHORT") return "SHORT";
+  if (direction === "LONG") return "LONG";
+  if (direction === "SHORT") return "SHORT";
 
   return "NEUTRAL";
 }
 
-function normalizeQuality(value) {
-  const q = safeUpper(value, "WEAK");
-
-  if (["STRONG", "GOOD", "MIXED", "WEAK"].includes(q)) {
-    return q;
-  }
-
-  return "WEAK";
+function isDirectional(direction) {
+  return direction === "LONG" || direction === "SHORT";
 }
 
-function toNumberOrNull(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
+function directionFromControl(controlState) {
+  const control =
+    String(controlState || "")
+      .trim()
+      .toUpperCase();
+
+  if (control === "BUYERS_CONTROL") return "LONG";
+  if (control === "SELLERS_CONTROL") return "SHORT";
+
+  return "NEUTRAL";
 }
 
-function unique(values = []) {
-  return [...new Set(values.filter(Boolean))];
+function controlFromDirection(direction) {
+  if (direction === "LONG") return "BUYERS_CONTROL";
+  if (direction === "SHORT") return "SELLERS_CONTROL";
+
+  return "NO_CONTROL";
 }
 
-function normalizeZone(zone = null) {
-  if (!zone || typeof zone !== "object") {
-    return null;
-  }
+function normalizePreviousCanonical(
+  previousCanonical = null
+) {
+  const direction =
+    normalizeDirection(
+      previousCanonical?.direction ||
+      previousCanonical
+        ?.canonical
+        ?.direction
+    );
 
-  const low =
-    toNumberOrNull(zone.low) ??
-    toNumberOrNull(zone.lo);
-
-  const high =
-    toNumberOrNull(zone.high) ??
-    toNumberOrNull(zone.hi);
-
-  if (low == null || high == null) {
-    return null;
-  }
-
-  const midline =
-    toNumberOrNull(zone.midline) ??
-    toNumberOrNull(zone.mid) ??
-    Number(((low + high) / 2).toFixed(2));
-
-  const zoneId =
-    zone.zoneId ??
-    zone.id ??
-    null;
+  const travelModeActive =
+    previousCanonical?.travelModeActive === true ||
+    previousCanonical
+      ?.canonical
+      ?.travelModeActive === true;
 
   return {
-    ...zone,
+    direction,
 
-    zoneId,
-    id: zoneId,
+    candidateId:
+      previousCanonical?.candidateId ||
+      previousCanonical
+        ?.currentCandidateId ||
+      null,
 
-    low,
-    high,
-    midline,
+    travelModeActive,
 
-    // Compatibility aliases for older downstream readers.
-    lo: low,
-    hi: high,
-    mid: midline,
+    travelDirection:
+      travelModeActive
+        ? normalizeDirection(
+            previousCanonical?.travelDirection ||
+            previousCanonical
+              ?.canonical
+              ?.travelDirection ||
+            direction
+          )
+        : "NEUTRAL",
   };
 }
 
-export function buildEngine3Strategy1Handoff({
-  engine3V5 = null,
-
+export function buildEngine3V5Shadow({
   engine26LocationCandidate = null,
   engine26ReactionHandoff = null,
 
-  observation1m = null,
-  validation5m = null,
-  confirmation10m = null,
-} = {}) {
+  bars1m = [],
+  bars5m = [],
+  bars10m = [],
+
+  evaluationTimeMs = null,
+
+  tenMinuteEma10 = null,
+
+  previousCanonical = null,
+
   /*
-   * Current v5 canonical shape:
+   * Trade lifecycle truth is supplied by buildStrategySnapshot.js.
    *
-   * engine3V5.canonical.canonical
-   *
-   * Keep a small fallback to stateMachine so this handoff fails gracefully
-   * if the canonical wrapper is temporarily absent during development.
+   * Engine 3 does NOT query Engine 10 directly.
    */
-  const canonicalEnvelope =
-    engine3V5?.canonical &&
-    typeof engine3V5.canonical === "object"
-      ? engine3V5.canonical
-      : null;
+  openTradeActive = false,
+  lockedTradeDirection = "NEUTRAL",
 
-  const canonical =
-    canonicalEnvelope?.canonical &&
-    typeof canonicalEnvelope.canonical === "object"
-      ? canonicalEnvelope.canonical
-      : null;
+  forceReset = false,
+  resetReason = null,
 
-  const stateMachine =
-    engine3V5?.stateMachine &&
-    typeof engine3V5.stateMachine === "object"
-      ? engine3V5.stateMachine
-      : null;
+  shadowMode = true,
+} = {}) {
+  const normalizedZoneInput =
+    normalizeNegotiatedZone({
+      engine26LocationCandidate,
+      engine26ReactionHandoff,
+    });
 
   /*
-   * Price-action control is diagnostic/supporting evidence here.
+   * 1m remains immediate diagnostic evidence only.
+   * It is NEVER fed into canonical price-action control.
+   */
+  const oneMinuteEvidence =
+    build1mEvidence({
+      bars:
+        bars1m,
+
+      normalizedZoneInput,
+
+      evaluationTimeMs,
+    });
+
+  /*
+   * 5m separates forming/current diagnostics from completed mature evidence.
+   */
+  const fiveMinuteReaction =
+    build5mReaction({
+      bars:
+        bars5m,
+
+      normalizedZoneInput,
+
+      evaluationTimeMs,
+    });
+
+  /*
+   * Fresh canonical price-action control is resolved from the COMPLETED 5m
+   * price-action stack:
    *
-   * It must never override the state machine's canonical direction.
+   * approach
+   * contact
+   * reaction
+   * follow-through
+   * sequence / momentum
+   *
+   * The 5m candle itself does not "vote" LONG or SHORT.
+   * The completed 5m bars are simply the stable evidence window used by
+   * the price-action control resolver.
    */
   const priceActionControl =
-    engine3V5?.priceActionControl ||
-    engine3V5?.evidence?.priceActionControl ||
-    engine3V5?.evidence?.priceAction ||
-    null;
+    buildPriceActionControl({
+      normalizedZoneInput,
 
-  const canonicalDirection =
+      priceActionEvidence:
+        fiveMinuteReaction?.completed ||
+        null,
+
+      sourceResolution:
+        "COMPLETED_5M_PRICE_PATH",
+    });
+
+  /*
+   * 10m is broader context only until a direction has already been
+   * established and the post-zone travel lifecycle becomes active.
+   */
+  const tenMinuteContext =
+    build10mContext({
+      bars:
+        bars10m,
+
+      normalizedZoneInput,
+
+      evaluationTimeMs,
+    });
+
+  const prior =
+    normalizePreviousCanonical(
+      previousCanonical
+    );
+
+  const normalizedLockedTradeDirection =
     normalizeDirection(
-      canonical?.direction ??
-      stateMachine?.direction
+      lockedTradeDirection
     );
 
-  const canonicalQuality =
-    normalizeQuality(
-      canonical?.quality ??
-      stateMachine?.quality ??
-      priceActionControl?.quality
+  const tradeDirectionLockActive =
+    openTradeActive === true &&
+    isDirectional(
+      normalizedLockedTradeDirection
     );
 
-  const directional =
-    canonicalDirection === "LONG" ||
-    canonicalDirection === "SHORT";
+  const freshControlDirection =
+    directionFromControl(
+      priceActionControl?.controlState
+    );
+
+  const freshControlResolved =
+    priceActionControl?.eligible === true &&
+    priceActionControl?.canonicalControlAuthority === true &&
+    priceActionControl?.controlResolved === true &&
+    isDirectional(
+      freshControlDirection
+    );
+
+  const freshControlSupportsPrior =
+    isDirectional(prior.direction) &&
+    freshControlResolved === true &&
+    freshControlDirection ===
+      prior.direction;
 
   /*
-   * Engine 3 v5 must itself be healthy.
+   * Engine 26 owns trip lifecycle.
    *
-   * We intentionally do NOT fall back to legacy Engine 3 direction here.
+   * FULL_TARGET_COMPLETION ends the old trip even if candidateId / zoneId
+   * remain unchanged.
    */
-  const v5Available =
-    engine3V5 &&
-    typeof engine3V5 === "object";
-
-  const v5FailClosed =
-    engine3V5?.failClosed === true;
-
-  const validationExplicitlyFailed =
-    engine3V5?.validation?.valid === false;
-
-  const v5Usable =
-    v5Available &&
-    v5FailClosed !== true &&
-    validationExplicitlyFailed !== true;
-
-  /*
-   * Engine 26 remains the upstream authorization owner.
-   */
-  const engine26Authorized =
-    engine26ReactionHandoff?.authorizeEngine3Evaluation === true &&
-    engine26ReactionHandoff?.terminalLifecycle !== true;
-
-  const candidateId =
-    canonicalEnvelope?.candidateId ??
-    engine26ReactionHandoff?.candidateId ??
-    engine26LocationCandidate?.candidateId ??
-    null;
-
-  const zoneId =
-    canonicalEnvelope?.zoneId ??
-    engine26ReactionHandoff?.zoneId ??
-    engine26LocationCandidate?.zoneId ??
-    null;
-
-  const laneId =
-    canonicalEnvelope?.laneId ??
-    engine26ReactionHandoff?.laneId ??
-    engine26LocationCandidate?.laneId ??
-    "minute";
-
-  const strategyId =
-    canonicalEnvelope?.strategyId ??
-    engine26ReactionHandoff?.strategyId ??
-    engine26LocationCandidate?.strategyId ??
-    "intraday_scalp@10m";
-
-  const symbol =
-    canonicalEnvelope?.symbol ??
-    engine26ReactionHandoff?.symbol ??
-    engine26LocationCandidate?.symbol ??
-    "ES";
-
-  const identityComplete =
-    candidateId != null &&
-    zoneId != null &&
-    laneId === "minute" &&
-    strategyId === "intraday_scalp@10m";
-
-  const resetNow =
-    canonical?.resetNow === true ||
-    stateMachine?.resetNow === true;
-
-  /*
-   * THIS IS THE STABLE SIGNAL.
-   *
-   * Once canonical direction is LONG or SHORT, reactionConfirmed stays true
-   * while that canonical direction remains held.
-   *
-   * Local price-action noise is NOT allowed to switch this off.
-   */
-  const stableCanonicalSignal =
-    v5Usable &&
-    engine26Authorized &&
-    identityComplete &&
-    directional &&
-    resetNow !== true;
-
-  const reactionConfirmed =
-    stableCanonicalSignal;
-
-  const participationEvaluationEligible =
-    stableCanonicalSignal;
-
-  const authorizedReactionState =
-    engine26ReactionHandoff?.terminalLifecycle === true
-      ? "REACTION_INVALIDATED"
-      : stableCanonicalSignal
-      ? "REACTION_CONFIRMED"
-      : "REACTION_WAITING";
-
-  const zone =
-    normalizeZone(
-      canonicalEnvelope?.zone ??
-      engine26ReactionHandoff?.zone ??
-      engine26LocationCandidate?.entryZone ??
-      null
+  const engine26TripReset =
+    engine26ReactionHandoff?.priorRotationFullyComplete === true &&
+    engine26ReactionHandoff?.priorRotationCompletionState ===
+      "FULL_TARGET_COMPLETION" &&
+    (
+      prior.direction === "LONG" ||
+      prior.direction === "SHORT" ||
+      prior.travelModeActive === true ||
+      tradeDirectionLockActive === true
     );
 
-  const localControlState =
-    safeUpper(
-      priceActionControl?.controlState ??
-      priceActionControl?.state,
-      "NO_CONTROL"
-    );
+  /*
+   * PRE-TRADE RELEASE RULE
+   * ----------------------
+   *
+   * If there is NO actual OPEN trade, an old canonical direction is not
+   * protected just because it was previously persisted.
+   *
+   * The old direction may remain only while fresh resolved control still
+   * supports the same side.
+   *
+   * If fresh control becomes opposite OR unresolved/mixed, release the old
+   * direction back to NEUTRAL before running the state machine.
+   *
+   * This is NOT an explicit state-machine reset event. We intentionally
+   * neutralize the previous input so the same snapshot may immediately
+   * establish a fresh opposite direction when current control supports it.
+   */
+  const preTradeDirectionReleased =
+    tradeDirectionLockActive !== true &&
+    engine26TripReset !== true &&
+    isDirectional(prior.direction) &&
+    freshControlSupportsPrior !== true;
 
-  const stateTransition =
-    canonical?.stateTransition ??
-    stateMachine?.stateTransition ??
-    null;
+  /*
+   * TRADE-DIRECTION LOCK RULE
+   * -------------------------
+   *
+   * Once Engine 8 / Engine 10 truth says a PAPER trade is actually OPEN,
+   * that trade direction becomes protected.
+   *
+   * Local opposite price action may remain visible diagnostically, but it
+   * cannot reverse the canonical trade direction while the trade is OPEN.
+   *
+   * Engine 26 FULL_TARGET_COMPLETION still has higher lifecycle authority.
+   */
+  const effectivePrior =
+    engine26TripReset
+      ? {
+          ...prior,
+          direction: "NEUTRAL",
+          travelModeActive: false,
+          travelDirection: "NEUTRAL",
+        }
+      : tradeDirectionLockActive
+      ? {
+          ...prior,
+          direction:
+            normalizedLockedTradeDirection,
+          travelDirection:
+            prior.travelModeActive === true
+              ? normalizedLockedTradeDirection
+              : "NEUTRAL",
+        }
+      : preTradeDirectionReleased
+      ? {
+          ...prior,
+          direction: "NEUTRAL",
+          travelModeActive: false,
+          travelDirection: "NEUTRAL",
+        }
+      : prior;
 
-  const establishedNow =
-    canonical?.establishedNow === true ||
-    stateMachine?.establishedNow === true;
+  /*
+   * While a real OPEN trade is protected, the state machine receives a
+   * lock-preserving control handoff so it cannot reverse the trade because
+   * of local counter-price-action noise.
+   *
+   * IMPORTANT:
+   * The real priceActionControl object above remains unchanged and is still
+   * published for diagnostics.
+   */
+  const stateMachinePriceActionHandoff =
+    tradeDirectionLockActive === true &&
+    engine26TripReset !== true
+      ? {
+          ...(priceActionControl || {}),
 
-  const reversedNow =
-    canonical?.reversedNow === true ||
-    stateMachine?.reversedNow === true;
+          eligible: true,
+          canonicalControlAuthority: true,
+          controlResolved: true,
 
-  const heldNow =
-    canonical?.heldNow === true ||
-    stateMachine?.heldNow === true;
+          controlState:
+            controlFromDirection(
+              normalizedLockedTradeDirection
+            ),
 
-  const blockers = unique([
-    !v5Available
-      ? "ENGINE3_V5_UNAVAILABLE"
-      : null,
+          tradeDirectionLockApplied: true,
+          tradeDirectionLock:
+            normalizedLockedTradeDirection,
 
-    v5FailClosed
-      ? "ENGINE3_V5_FAIL_CLOSED"
-      : null,
+          actualObservedControlState:
+            priceActionControl?.controlState ??
+            "NO_CONTROL",
 
-    validationExplicitlyFailed
-      ? "ENGINE3_V5_VALIDATION_FAILED"
-      : null,
+          actualObservedControlDirection:
+            freshControlDirection,
 
-    !engine26Authorized
-      ? "ENGINE26_ENGINE3_EVALUATION_NOT_AUTHORIZED"
-      : null,
+          sourceResolution:
+            "OPEN_TRADE_DIRECTION_LOCK",
+        }
+      : priceActionControl;
 
-    !identityComplete
-      ? "ENGINE3_V5_IDENTITY_INCOMPLETE"
-      : null,
+  /*
+   * Departure is evaluated from the effective established direction.
+   * It cannot manufacture initial direction from NEUTRAL.
+   */
+  const departureState =
+    resolveDepartureState({
+      establishedDirection:
+        effectivePrior.direction,
 
-    !directional
-      ? "ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL"
-      : null,
+      zone:
+        normalizedZoneInput?.zone,
 
-    resetNow
-      ? "ENGINE3_V5_CANONICAL_SIGNAL_RESET"
-      : null,
-  ]);
+      tenMinuteContext,
 
-  const reasonCodes = unique([
-    "ENGINE3_V5_STRATEGY1_HANDOFF",
+      previousTravelModeActive:
+        effectivePrior.travelModeActive === true,
 
-    stableCanonicalSignal
-      ? "ENGINE3_V5_STABLE_CANONICAL_SIGNAL_ACTIVE"
-      : "ENGINE3_V5_STABLE_CANONICAL_SIGNAL_INACTIVE",
+      previousTravelDirection:
+        effectivePrior.travelDirection,
+    });
 
-    stableCanonicalSignal
-      ? `ENGINE3_V5_REACTION_CONFIRMED_${canonicalDirection}`
-      : "ENGINE3_V5_REACTION_NOT_CONFIRMED",
+  /*
+   * EMA10 travel state manages only an already-established trip.
+   * EMA10 never creates initial Engine 3 direction.
+   */
+  const ema10TravelState =
+    resolveEma10TravelState({
+      establishedDirection:
+        effectivePrior.direction,
 
-    establishedNow
-      ? "ENGINE3_V5_SIGNAL_ESTABLISHED_NOW"
-      : null,
+      departureState,
 
-    reversedNow
-      ? "ENGINE3_V5_SIGNAL_REVERSED_NOW"
-      : null,
+      tenMinuteContext,
 
-    heldNow
-      ? "ENGINE3_V5_SIGNAL_HELD"
-      : null,
+      ema10:
+        tenMinuteEma10,
+    });
 
-    resetNow
-      ? "ENGINE3_V5_SIGNAL_RESET"
-      : null,
+  /*
+   * Sole canonical direction authority.
+   */
+  const stateMachine =
+    runDirectionStateMachine({
+      normalizedZoneInput,
 
-    `ENGINE3_V5_CANONICAL_DIRECTION_${canonicalDirection}`,
+      priceActionHandoff:
+        stateMachinePriceActionHandoff ||
+        null,
 
-    `ENGINE3_V5_LOCAL_CONTROL_${localControlState}`,
+      previousCanonical:
+        effectivePrior,
 
-    "ENGINE3_V5_LOCAL_CONTROL_CANNOT_WITHDRAW_HELD_CANONICAL_SIGNAL",
-    "ENGINE3_V5_TIMEFRAME_LABELS_HAVE_NO_DIRECTION_AUTHORITY",
+      departureState,
 
-    "ENGINE4_PARTICIPATION_REQUIRED",
-    "ENGINE6_FINAL_PAPER_PERMISSION_REQUIRED",
+      ema10TravelState,
 
-    "NO_PERMISSION_CREATED",
-    "NO_EXECUTION",
-  ]);
+      forceReset:
+        forceReset === true ||
+        engine26TripReset,
+
+      resetReason:
+        engine26TripReset
+          ? "ENGINE26_FULL_TARGET_COMPLETION"
+          : resetReason,
+    });
+
+  const canonical =
+    buildCanonicalEngine3({
+      normalizedZoneInput,
+
+      oneMinuteEvidence,
+
+      /*
+       * Publish REAL observed price-action control, not the synthetic
+       * lock-preserving handoff used internally by the state machine.
+       */
+      priceActionControl,
+
+      fiveMinuteReaction,
+
+      tenMinuteContext,
+
+      departureState,
+
+      ema10TravelState,
+
+      stateMachine,
+
+      shadowMode,
+    });
+
+  const trace =
+    buildEngine3Trace({
+      normalizedZoneInput,
+
+      oneMinuteEvidence,
+
+      priceActionControl,
+
+      fiveMinuteReaction,
+
+      tenMinuteContext,
+
+      departureState,
+
+      ema10TravelState,
+
+      stateMachine,
+
+      canonical,
+    });
+
+  const validation =
+    validateEngine3Contract({
+      normalizedZoneInput,
+
+      oneMinuteEvidence,
+
+      priceActionControl,
+
+      fiveMinuteReaction,
+
+      tenMinuteContext,
+
+      departureState,
+
+      ema10TravelState,
+
+      stateMachine,
+
+      canonical,
+
+      shadowMode,
+    });
+
+  const failClosed =
+    validation?.valid !== true;
 
   return {
-    active:
-      v5Usable &&
-      identityComplete,
+    ok:
+      validation?.valid === true,
 
-    engine: ENGINE,
-    source: SOURCE,
-    version: "engine3.v5",
+    engine:
+      ENGINE,
 
-    mode: "PAPER_ONLY",
+    source:
+      SOURCE,
 
-    /*
-     * Canonical Engine 3 signal.
-     */
-    direction:
-      canonicalDirection,
+    version:
+      "engine3.v5",
 
-    quality:
-      canonicalQuality,
+    mode:
+      shadowMode === true
+        ? "SHADOW_READ_ONLY"
+        : "CANONICAL_ACTIVE",
 
-    state:
-      authorizedReactionState,
+    shadowMode:
+      shadowMode === true,
 
-    reactionState:
-      authorizedReactionState,
+    failClosed,
 
-    authorizedReactionState,
+    normalizedZoneInput,
 
-    reactionConfirmed,
-    confirmed:
-      reactionConfirmed,
+    evidence: {
+      oneMinute:
+        oneMinuteEvidence,
 
-    /*
-     * Engine 4 gate.
-     *
-     * Existing Engine 4 already understands this explicit field.
-     */
-    participationEvaluationEligible,
+      priceAction:
+        priceActionControl,
 
-    /*
-     * Compatibility field.
-     *
-     * Existing Engine 6 code still reads .allowed as part of its legacy /
-     * transitional Strategy 1 qualification path.
-     *
-     * This is NOT final Engine 6 trade permission.
-     */
-    allowed:
-      reactionConfirmed,
+      fiveMinute:
+        fiveMinuteReaction,
+
+      tenMinute:
+        tenMinuteContext,
+    },
 
     /*
-     * Explicit v5 qualification publication.
+     * Explicit diagnostics so we can see WHY a prior direction was held
+     * or released on every snapshot.
      */
-    engine3Strategy1QualifiedForEngine6:
-      reactionConfirmed,
+    tradeLifecycle: {
+      openTradeActive:
+        openTradeActive === true,
 
-    qualificationExplicitlyPublished:
-      true,
+      lockedTradeDirection:
+        normalizedLockedTradeDirection,
 
-    /*
-     * Engine 26 authorization.
-     */
-    authorized:
-      engine26Authorized,
+      tradeDirectionLockActive,
 
-    evaluationAuthorized:
-      engine26Authorized,
+      priorDirection:
+        prior.direction,
 
-    authorizeEngine3Evaluation:
-      engine26Authorized,
+      freshControlState:
+        priceActionControl?.controlState ??
+        "NO_CONTROL",
 
-    /*
-     * Strategy identity.
-     */
-    symbol,
-    laneId,
-    strategyId,
-    candidateId,
-    zoneId,
+      freshControlDirection,
 
-    setupClass:
-      canonicalEnvelope?.setupClass ??
-      engine26ReactionHandoff?.setupClass ??
-      engine26LocationCandidate?.setupClass ??
-      null,
+      freshControlResolved,
 
-    setupGrade:
-      engine26ReactionHandoff?.setupGrade ??
-      engine26LocationCandidate?.setupGrade ??
-      null,
+      freshControlSupportsPrior,
 
-    identitySetupKey:
-      engine26ReactionHandoff?.identitySetupKey ??
-      engine26LocationCandidate?.identitySetupKey ??
-      null,
+      preTradeDirectionReleased,
 
-    candidateIdentityVersion:
-      canonicalEnvelope?.candidateIdentityVersion ??
-      engine26ReactionHandoff?.candidateIdentityVersion ??
-      engine26LocationCandidate?.candidateIdentityVersion ??
-      null,
+      engine26TripReset,
 
-    snapshotTime:
-      canonicalEnvelope?.snapshotTime ??
-      engine26ReactionHandoff?.snapshotTime ??
-      engine26LocationCandidate?.snapshotTime ??
-      null,
+      effectivePriorDirection:
+        effectivePrior.direction,
+    },
 
-    /*
-     * Zone identity / compatibility.
-     */
-    zone,
-    entryZone:
-      zone,
-    negotiatedZone:
-      zone,
+    travel: {
+      departureState,
+      ema10TravelState,
+    },
 
-    /*
-     * Signal lifecycle diagnostics.
-     */
-    canonicalMode:
-      canonical?.mode ??
-      stateMachine?.mode ??
-      null,
+    stateMachine,
 
-    canonicalSource:
-      canonical?.canonicalSource ??
-      stateMachine?.canonicalSource ??
-      null,
+    canonical:
+      failClosed
+        ? {
+            ...canonical,
 
-    stateTransition,
-    establishedNow,
-    reversedNow,
-    heldNow,
-    resetNow,
+            authoritativeDownstream:
+              false,
 
-    stableCanonicalSignal,
+            contractInvalid:
+              true,
+          }
+        : canonical,
 
-    /*
-     * Local control is diagnostic only.
-     */
-    localControlState,
+    trace,
 
-    localControlConfidence:
-      priceActionControl?.controlConfidence ??
-      priceActionControl?.confidence ??
-      null,
+    validation,
 
-    localControlQuality:
-      priceActionControl?.quality ??
-      null,
+    safety: {
+      engine4Authority:
+        false,
 
-    /*
-     * Preserve evidence objects for downstream diagnostics.
-     *
-     * They do NOT own canonical direction.
-     */
-    reactionObservation1m:
-      observation1m,
+      engine6Authority:
+        false,
 
-    reactionValidation5m:
-      validation5m,
+      noPermissionCreated:
+        true,
 
-    tenMinuteConfirmation:
-      confirmation10m,
+      noExecution:
+        true,
 
-    /*
-     * Existing Engine 4 candle-source compatibility contract.
-     *
-     * Source truth comes from the already-built 1m observation and 5m
-     * validation objects. These fields are transport only; they do not
-     * change Engine 3 canonical direction or held-signal behavior.
-     */
-    sourceTimeframe:
-      observation1m?.sourceTimeframe ??
-      null,
+      noSizing:
+        true,
 
-    reactionTimeframe:
-      observation1m?.sourceTimeframe ??
-      null,
+      noTicket:
+        true,
 
-    candleSourceFresh:
-      observation1m?.stale === false &&
-      (
-        validation5m == null ||
-        validation5m?.stale === false
-      ),
+      noOrder:
+        true,
+    },
 
-    sourceAgeMs:
-      observation1m?.sourceAgeMs ??
-      null,
+    reasonCodes: [
+      "ENGINE3_V5_SHADOW_BUILT",
 
-    stale:
-      observation1m?.stale === true,
+      shadowMode === true
+        ? "ENGINE3_V5_SHADOW_READ_ONLY"
+        : "ENGINE3_V5_CANONICAL_ACTIVE",
 
-    staleReason:
-      observation1m?.staleReason ??
-      null,
+      "ENGINE3_V5_1M_DIAGNOSTIC_ONLY",
+      "ENGINE3_V5_FORMING_5M_DIAGNOSTIC_ONLY",
+      "ENGINE3_V5_COMPLETED_5M_CANONICAL_PRICE_ACTION_EVIDENCE",
+      "ENGINE3_V5_10M_BROADER_CONTEXT_ONLY",
+      "ENGINE3_V5_EMA10_POST_DEPARTURE_HOLD_RESET_ONLY",
 
-    currentCandle:
-      observation1m?.currentCandle ??
-      null,
+      tradeDirectionLockActive
+        ? `ENGINE3_V5_OPEN_TRADE_DIRECTION_LOCK_${normalizedLockedTradeDirection}`
+        : "ENGINE3_V5_NO_OPEN_TRADE_DIRECTION_LOCK",
 
-    lastCandle:
-      observation1m?.currentCandle ??
-      null,
-
-    priorCandle:
-      observation1m?.priorCandle ??
-      null,
-
-    currentCandleStatus:
-      observation1m?.currentCandleStatus ??
-      null,
-
-    priorCandleStatus:
-      observation1m?.priorCandleStatus ??
-      null,
-
-    candleClosed:
-      observation1m?.currentCandleStatus === "COMPLETED"
-        ? true
-        : observation1m?.currentCandleStatus === "FORMING"
-        ? false
+      preTradeDirectionReleased
+        ? "ENGINE3_V5_PRETRADE_STALE_DIRECTION_RELEASED"
         : null,
 
-    priorCandleCompleted:
-      observation1m?.priorCandleStatus === "COMPLETED"
-        ? true
-        : observation1m?.priorCandleStatus === "FORMING"
-        ? false
+      freshControlSupportsPrior
+        ? "ENGINE3_V5_FRESH_CONTROL_SUPPORTS_PRIOR_DIRECTION"
         : null,
 
-    supportingBarTime:
-      observation1m?.supportingBarTime ??
-      null,
+      engine26TripReset
+        ? "ENGINE3_V5_ENGINE26_FULL_TARGET_COMPLETION_RESET_CONSUMED"
+        : null,
 
-    evaluationTimeMs:
-      observation1m?.evaluationTimeMs ??
-      observation1m?.observedAt ??
-      null,
+      validation?.valid === true
+        ? "ENGINE3_V5_CONTRACT_VALID"
+        : "ENGINE3_V5_CONTRACT_INVALID_FAIL_CLOSED",
 
-    currentPrice:
-      toNumberOrNull(
-        observation1m?.currentPrice ??
-        engine26LocationCandidate?.currentPrice
-      ),
-
-    /*
-     * Engine 26 context is transported for identity/contact diagnostics only.
-     */
-    contactState:
-      engine26ReactionHandoff?.contactState ??
-      engine26LocationCandidate?.contactState ??
-      null,
-
-    chainArmed:
-      engine26ReactionHandoff?.chainArmed === true ||
-      engine26LocationCandidate?.chainArmed === true,
-
-    armed:
-      engine26ReactionHandoff?.armed === true ||
-      engine26LocationCandidate?.armed === true,
-
-    directionState:
-      engine26ReactionHandoff?.directionState ??
-      engine26LocationCandidate?.directionState ??
-      null,
-
-    /*
-     * Safety.
-     */
-    requiresEngine6PaperApproval:
-      true,
-
-    noPermissionCreated:
-      true,
-
-    noRealPermissionCreated:
-      true,
-
-    noExecution:
-      true,
-
-    realExecutionAuthority:
-      false,
-
-    executable:
-      false,
-
-    blockers,
-    reasonCodes,
+      "ENGINE3_V5_ENGINE4_AUTHORITY_FALSE",
+      "ENGINE3_V5_ENGINE6_AUTHORITY_FALSE",
+      "ENGINE3_V5_NO_PERMISSION_CREATED",
+      "ENGINE3_V5_NO_EXECUTION",
+    ].filter(Boolean),
   };
 }
 
-export default buildEngine3Strategy1Handoff;
+export default buildEngine3V5Shadow;
