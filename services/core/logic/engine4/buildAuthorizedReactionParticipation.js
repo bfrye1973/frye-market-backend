@@ -71,43 +71,43 @@ function isCandidateInvalidated(reaction) {
   );
 }
 
-function isConstructiveParticipation({ direction, reactionState, quality, tacticalParticipation, volumeMeta }) {
-  const supportiveTactical =
-    tacticalParticipation?.hardBlocked !== true &&
-    (
-      tacticalParticipation?.allowed === true ||
-      tacticalParticipation?.participationConfirmed === true ||
-      ["GOOD", "STRONG", "CLEAN", "MIXED"].includes(
-        safeUpper(tacticalParticipation?.participationQuality)
-      )
-    );
+function resolve5mParticipationAuthority({ direction, volumeMeta }) {
+  const canonicalDirection = safeUpper(direction, "NEUTRAL");
+  const validationDirection = safeUpper(volumeMeta?.validation5mDirection, "NEUTRAL");
 
-  const longState =
-    direction === "LONG" &&
-    (
-      reactionState.includes("RECLAIM") ||
-      reactionState.includes("HELD") ||
-      reactionState.includes("ACCEPT") ||
-      reactionState.includes("WICK") ||
-      reactionState.includes("SELLER_FAILURE") ||
-      reactionState.includes("SUPPORT") ||
-      reactionState === "REACTION_CONFIRMED"
-    );
+  const validationUsable =
+    volumeMeta?.validation5mActive === true &&
+    volumeMeta?.validation5mStale !== true;
 
-  const shortState =
-    direction === "SHORT" &&
-    (
-      reactionState.includes("REJECT") ||
-      reactionState.includes("LOST") ||
-      reactionState.includes("FAIL") ||
-      reactionState === "REACTION_CONFIRMED"
-    );
+  if (
+    validationUsable !== true ||
+    !["LONG", "SHORT"].includes(canonicalDirection) ||
+    !["LONG", "SHORT"].includes(validationDirection)
+  ) {
+    return "UNRESOLVED";
+  }
 
-  const qualityOk = ["GOOD", "STRONG", "MIXED"].includes(quality);
+  return validationDirection === canonicalDirection
+    ? "SUPPORTIVE"
+    : "ADVERSE";
+}
+
+function broader10mWeakensParticipation(volumeMeta) {
+  return (
+    volumeMeta?.broader10mActive === true &&
+    safeUpper(volumeMeta?.broader10mVolumeTrend) === "FADING"
+  );
+}
+
+function isConstructiveParticipation({ direction, volumeMeta }) {
+  const participationAuthority = resolve5mParticipationAuthority({
+    direction,
+    volumeMeta,
+  });
 
   return (
-    supportiveTactical ||
-    ((longState || shortState) && qualityOk && volumeMeta.formingCandle !== true)
+    participationAuthority === "SUPPORTIVE" &&
+    broader10mWeakensParticipation(volumeMeta) !== true
   );
 }
 
@@ -124,100 +124,23 @@ function completedZoneLossAgainstLong({ reaction, volumeMeta }) {
   );
 }
 
-function completedAdverseEvidence({ reaction, direction, tacticalParticipation, volumeMeta }) {
-  if (volumeMeta.currentCandleClosed !== true) return false;
-
-  const current = volumeMeta.currentCandle;
-  const prior = volumeMeta.priorCandle;
-
-  const red =
-    current.open != null &&
-    current.close != null &&
-    current.close < current.open;
-
-  const green =
-    current.open != null &&
-    current.close != null &&
-    current.close > current.open;
-
-  const lowerClose =
-    current.close != null &&
-    prior.close != null &&
-    current.close < prior.close;
-
-  const higherClose =
-    current.close != null &&
-    prior.close != null &&
-    current.close > prior.close;
-
-  const volumeExpansion =
-    tacticalParticipation?.volumeExpansion === true;
-
-  const adverseAbsorption =
-    (
-      tacticalParticipation?.absorptionRisk === true ||
-      tacticalParticipation?.absorptionHardBlock === true
-    ) &&
-    tacticalParticipation?.supportsDirection !== true;
-
-  const highVolumeNoProgress =
-    tacticalParticipation?.highVolumeNoProgress === true &&
-    tacticalParticipation?.supportsDirection !== true;
-
-  const participationState =
-    safeUpper(tacticalParticipation?.participationState);
-
-  /*
-   * Directionally adverse completed evidence only.
-   *
-   * Weak participation, fading volume, or high-volume/no-progress alone
-   * should prevent confirmation, but should not become an adverse hard block
-   * unless completed price action is actually against the trade direction.
-   */
-  const bearishAgainstLong =
-    red === true &&
-    lowerClose === true &&
-    volumeExpansion === true;
-
-  const bullishAgainstShort =
-    green === true &&
-    higherClose === true &&
-    volumeExpansion === true;
-
-  const explicitDirectionalRiskAgainstLong =
-    participationState.includes("BEARISH_AGAINST_LONG") ||
-    participationState.includes("SELLING_AGAINST_LONG");
-
-  const explicitDirectionalRiskAgainstShort =
-    participationState.includes("BULLISH_AGAINST_SHORT") ||
-    participationState.includes("BUYING_AGAINST_SHORT");
-
-  if (direction === "LONG") {
-    return (
-      completedZoneLossAgainstLong({ reaction, volumeMeta }) ||
-      bearishAgainstLong ||
-      adverseAbsorption ||
-      (
-        highVolumeNoProgress === true &&
-        bearishAgainstLong === true
-      ) ||
-      explicitDirectionalRiskAgainstLong
-    );
+function completedAdverseEvidence({ reaction, direction, volumeMeta }) {
+  if (
+    direction === "LONG" &&
+    completedZoneLossAgainstLong({ reaction, volumeMeta })
+  ) {
+    return true;
   }
 
-  if (direction === "SHORT") {
-    return (
-      bullishAgainstShort ||
-      adverseAbsorption ||
-      (
-        highVolumeNoProgress === true &&
-        bullishAgainstShort === true
-      ) ||
-      explicitDirectionalRiskAgainstShort
-    );
-  }
+  const participationAuthority = resolve5mParticipationAuthority({
+    direction,
+    volumeMeta,
+  });
 
-  return false;
+  return (
+    participationAuthority === "ADVERSE" &&
+    broader10mWeakensParticipation(volumeMeta) !== true
+  );
 }
 
 export function buildEngine4AuthorizedReactionParticipation({
@@ -367,41 +290,7 @@ export function buildEngine4AuthorizedReactionParticipation({
     });
   }
 
-  const candleContractPublished =
-    volumeMeta.sourceTimeframe != null ||
-    volumeMeta.currentCandleStatus != null ||
-    reaction?.candleSourceFresh !== undefined;
-  const currentCandlePresent =
-    volumeMeta.currentCandle?.time != null &&
-    volumeMeta.currentCandle?.close != null;
-
-  if (
-    candleContractPublished &&
-    (volumeMeta.candleSourceFresh !== true || currentCandlePresent !== true)
-  ) {
-    return finalizeResult({
-      ...result,
-      participationDeveloping: false,
-      participationConfirmed: false,
-      participationState: STATES.WAITING,
-      status: STATES.WAITING,
-      participationQuality: "WEAK",
-      allowed: false,
-      confirmed: false,
-      hardBlocked: false,
-      direction: "NEUTRAL",
-      blockers: [
-        currentCandlePresent ? "CANDLE_SOURCE_NOT_FRESH" : "CURRENT_CANDLE_MISSING",
-      ],
-      reasonCodes: unique([
-        ...result.reasonCodes,
-        currentCandlePresent ? "CANDLE_SOURCE_NOT_FRESH" : "CURRENT_CANDLE_MISSING",
-        "PARTICIPATION_WAITING",
-      ]),
-    });
-  }
-
-  const adverseCompleted = completedAdverseEvidence({ reaction, direction: participationEvaluationDirection, tacticalParticipation, volumeMeta });
+  const adverseCompleted = completedAdverseEvidence({ reaction, direction: participationEvaluationDirection, volumeMeta });
 
   const qualifiedParticipationEvaluation =
     result.qualifiedParticipationEvaluation === true;
@@ -426,46 +315,8 @@ export function buildEngine4AuthorizedReactionParticipation({
 
   const constructive = isConstructiveParticipation({
     direction: participationEvaluationDirection,
-    reactionState,
-    quality,
-    tacticalParticipation,
     volumeMeta,
   });
-
-  if (volumeMeta.formingCandle === true) {
-    const supportDefenseDeveloping =
-      participationEvaluationDirection === "LONG" &&
-      engine3GateSatisfied &&
-      constructive === true;
-
-    const sellerFailureDeveloping =
-      participationEvaluationDirection === "LONG" &&
-      engine3GateSatisfied &&
-      reactionState.includes("SELLER_FAILURE");
-
-    return finalizeResult({
-      ...result,
-      participationDeveloping:
-        engine3GateSatisfied || constructive === true,
-      participationConfirmed: false,
-      participationState: STATES.FORMING,
-      status: STATES.FORMING,
-      participationQuality: "PROVISIONAL",
-      supportDefenseDeveloping,
-      sellerFailureParticipationDeveloping: sellerFailureDeveloping,
-      hardBlocked: false,
-      allowed: false,
-      confirmed: false,
-      direction: "NEUTRAL",
-      reasonCodes: unique([
-        ...result.reasonCodes,
-        "FORMING_CANDLE_PARTICIPATION_DEVELOPING",
-        "RAW_FORMING_VOLUME_RATIO_DIAGNOSTIC_ONLY",
-        volumeMeta.rawCurrentVsPriorVolumeRatio != null ? "RAW_VOLUME_RATIO_RETAINED_DIAGNOSTIC" : null,
-        "ENGINE6_FINAL_PERMISSION_REQUIRED",
-      ]),
-    });
-  }
 
   if (engine3GateSatisfied !== true) {
     const explicitEligibilityBlocked =
