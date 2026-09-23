@@ -43,6 +43,7 @@ import {
   normalizeEngine26Zone,
   buildEngine26TradeZoneView,
   buildEngine26LocationView,
+  buildEngine26LogicalZoneKey,
 } from "./engine26ZoneContract.js";
 
 const DEFAULT_TICK_SIZE = 0.25;
@@ -429,6 +430,30 @@ function buildCanonicalZoneId(symbol, zone) {
     zone?.lo,
     zone?.hi,
   ]);
+}
+
+function buildLegacyOriginalBasisZoneId(symbol, zone) {
+  const originalLo = toFiniteNumber(zone?.originalLo);
+  const originalHi = toFiniteNumber(zone?.originalHi);
+
+  if (originalLo === null || originalHi === null) {
+    return null;
+  }
+
+  return stableHash("E26Z", [
+    symbol,
+    zone?.source,
+    zone?.type,
+    zone?.timeframe,
+    originalLo,
+    originalHi,
+  ]);
+}
+
+function logicalZoneKeysMatch(left, right) {
+  const a = String(left || "").trim();
+  const b = String(right || "").trim();
+  return Boolean(a && b && a === b);
 }
 
 function selectLongTargetZone({ negotiatedZones, entryZone }) {
@@ -1275,13 +1300,159 @@ function findZoneByCanonicalId({
   zones,
   symbol,
   zoneId,
+  logicalZoneKey = null,
 }) {
-  if (!zoneId) return null;
+  const expectedZoneId = normalizeId(zoneId);
+  const expectedLogicalZoneKey = String(
+    logicalZoneKey || ""
+  ).trim();
 
-  return zones.find(
-    (zone) =>
-      buildCanonicalZoneId(symbol, zone) === zoneId
-  ) || null;
+  if (!expectedZoneId && !expectedLogicalZoneKey) {
+    return null;
+  }
+
+  return (
+    zones.find((zone) => {
+      const currentZoneId =
+        buildCanonicalZoneId(symbol, zone);
+
+      if (
+        expectedZoneId &&
+        currentZoneId === expectedZoneId
+      ) {
+        return true;
+      }
+
+      const currentLogicalZoneKey =
+        zone?.logicalZoneKey ??
+        buildEngine26LogicalZoneKey(zone);
+
+      if (
+        logicalZoneKeysMatch(
+          currentLogicalZoneKey,
+          expectedLogicalZoneKey
+        )
+      ) {
+        return true;
+      }
+
+      /*
+       * One-time rollover bridge for memory written before logicalZoneKey
+       * existed. Current production zones preserve original contract-basis
+       * prices, allowing the old price-derived zoneId to map back to the
+       * same economic manual zone after the display contract rolls.
+       */
+      const legacyOriginalBasisZoneId =
+        buildLegacyOriginalBasisZoneId(
+          symbol,
+          zone
+        );
+
+      return Boolean(
+        expectedZoneId &&
+        legacyOriginalBasisZoneId &&
+        legacyOriginalBasisZoneId ===
+          expectedZoneId
+      );
+    }) || null
+  );
+}
+
+function resolveCurrentTradeZoneView({
+  tradeZone,
+  zones,
+  symbol,
+}) {
+  if (!tradeZone || typeof tradeZone !== "object") {
+    return null;
+  }
+
+  const preservedZoneId =
+    tradeZone?.zoneId ??
+    tradeZone?.id ??
+    null;
+
+  const logicalZoneKey =
+    tradeZone?.logicalZoneKey ??
+    buildEngine26LogicalZoneKey(tradeZone);
+
+  const currentZone = findZoneByCanonicalId({
+    zones,
+    symbol,
+    zoneId: preservedZoneId,
+    logicalZoneKey,
+  });
+
+  if (!currentZone) {
+    return tradeZone;
+  }
+
+  return buildEngine26TradeZoneView(
+    currentZone,
+    {
+      zoneId:
+        preservedZoneId ??
+        buildCanonicalZoneId(
+          symbol,
+          currentZone
+        ),
+    }
+  );
+}
+
+function rebaseCandidateToCurrentZoneBasis({
+  candidate,
+  originZone,
+  zones,
+  symbol,
+}) {
+  if (!candidate || typeof candidate !== "object") {
+    return candidate;
+  }
+
+  const rebasedEntryZone = originZone
+    ? buildEngine26TradeZoneView(
+        originZone,
+        {
+          zoneId:
+            candidate?.zoneId ??
+            candidate?.entryZone?.zoneId ??
+            candidate?.entryZone?.id ??
+            buildCanonicalZoneId(
+              symbol,
+              originZone
+            ),
+        }
+      )
+    : candidate?.entryZone ?? null;
+
+  const rebasedTargetZone =
+    resolveCurrentTradeZoneView({
+      tradeZone: candidate?.targetZone,
+      zones,
+      symbol,
+    });
+
+  const rebasedLogicalZoneKey =
+    originZone?.logicalZoneKey ??
+    buildEngine26LogicalZoneKey(originZone) ??
+    candidate?.logicalZoneKey ??
+    candidate?.entryZone?.logicalZoneKey ??
+    null;
+
+  return {
+    ...candidate,
+    logicalZoneKey:
+      rebasedLogicalZoneKey,
+    entryZone:
+      rebasedEntryZone,
+    targetZone:
+      rebasedTargetZone,
+    location:
+      originZone
+        ? buildEngine26LocationView(originZone)
+        : candidate?.location ?? null,
+  };
 }
 
 function getPriorMemoryRecord({
@@ -1293,16 +1464,47 @@ function getPriorMemoryRecord({
   const priorZoneId =
     previousLocationCandidate?.zoneId || null;
 
-  if (!priorZoneId) return null;
+  const records = memoryStore?.records || {};
 
-  const priorMemoryKey = buildStrategy1MemoryKey({
-    laneId: "minute",
-    symbol,
-    strategyId,
-    zoneId: priorZoneId,
-  });
+  if (priorZoneId) {
+    const priorMemoryKey = buildStrategy1MemoryKey({
+      laneId: "minute",
+      symbol,
+      strategyId,
+      zoneId: priorZoneId,
+    });
 
-  return memoryStore?.records?.[priorMemoryKey] || null;
+    const direct = records?.[priorMemoryKey] || null;
+    if (direct) return direct;
+  }
+
+  const logicalZoneKey =
+    previousLocationCandidate?.logicalZoneKey ??
+    previousLocationCandidate?.entryZone
+      ?.logicalZoneKey ??
+    null;
+
+  if (!logicalZoneKey) return null;
+
+  return (
+    Object.values(records)
+      .filter((record) =>
+        record?.laneId === "minute" &&
+        record?.strategyId === strategyId &&
+        String(record?.symbol || "").toUpperCase() ===
+          String(symbol || "").toUpperCase() &&
+        logicalZoneKeysMatch(
+          record?.logicalZoneKey,
+          logicalZoneKey
+        )
+      )
+      .sort((a, b) =>
+        String(b?.lastSeenAt || "")
+          .localeCompare(
+            String(a?.lastSeenAt || "")
+          )
+      )[0] || null
+  );
 }
 
 function findRecoverableDirectionalMemoryChild({
@@ -1339,6 +1541,8 @@ function findRecoverableDirectionalMemoryChild({
         zones,
         symbol,
         zoneId: record?.zoneId,
+        logicalZoneKey:
+          record?.logicalZoneKey ?? null,
       });
 
       const identityValid =
@@ -1413,6 +1617,13 @@ function findRecoverableDirectionalMemoryChild({
           }
         );
 
+      const targetZone =
+        resolveCurrentTradeZoneView({
+          tradeZone: record?.targetZone,
+          zones,
+          symbol,
+        });
+
       const boundaries = buildBoundaries({
         directionBias: direction,
         zone,
@@ -1475,6 +1686,10 @@ function findRecoverableDirectionalMemoryChild({
           strategyId,
           candidateId: record.currentCandidateId,
           zoneId: record.zoneId,
+          logicalZoneKey:
+            record?.logicalZoneKey ??
+            zone?.logicalZoneKey ??
+            buildEngine26LogicalZoneKey(zone),
           directionBias: direction,
           direction,
           tradeDirectionBias: direction,
@@ -1496,7 +1711,7 @@ function findRecoverableDirectionalMemoryChild({
             record.candidateLifecycleStartTime ||
             snapshotTime,
           entryZone,
-          targetZone: record.targetZone || null,
+          targetZone,
           invalidationFacts:
             currentFacts?.invalidationFacts ||
             record.invalidationFacts ||
@@ -1597,6 +1812,8 @@ function findRecoverablePromotedContactMemoryChild({
         zones,
         symbol,
         zoneId: record?.zoneId,
+        logicalZoneKey:
+          record?.logicalZoneKey ?? null,
       });
 
       if (
@@ -1619,6 +1836,13 @@ function findRecoverablePromotedContactMemoryChild({
           }
         );
 
+      const targetZone =
+        resolveCurrentTradeZoneView({
+          tradeZone: record?.targetZone,
+          zones,
+          symbol,
+        });
+
       return {
         record,
         zone,
@@ -1630,6 +1854,10 @@ function findRecoverablePromotedContactMemoryChild({
           strategyId,
           candidateId: record.currentCandidateId,
           zoneId: record.zoneId,
+          logicalZoneKey:
+            record?.logicalZoneKey ??
+            zone?.logicalZoneKey ??
+            buildEngine26LogicalZoneKey(zone),
           directionBias: "NEUTRAL",
           direction: "NEUTRAL",
           tradeDirectionBias: "NEUTRAL",
@@ -1658,7 +1886,7 @@ function findRecoverablePromotedContactMemoryChild({
             snapshotTime,
           directionResolvedAt: null,
           entryZone,
-          targetZone: record.targetZone || null,
+          targetZone,
           invalidationFacts:
             record.invalidationFacts || null,
           priorCandidateId:
@@ -3207,11 +3435,27 @@ const immediatePreviousZone =
     zones: approvedNegotiatedZones,
     symbol: normalizedSymbol,
     zoneId: previousLocationCandidate?.zoneId,
+    logicalZoneKey:
+      previousLocationCandidate?.logicalZoneKey ??
+      previousLocationCandidate?.entryZone
+        ?.logicalZoneKey ??
+      null,
   });
+
+const immediatePreviousCandidateCurrentBasis =
+  immediatePreviousZone
+    ? rebaseCandidateToCurrentZoneBasis({
+        candidate: previousLocationCandidate,
+        originZone: immediatePreviousZone,
+        zones: approvedNegotiatedZones,
+        symbol: normalizedSymbol,
+      })
+    : previousLocationCandidate;
 
 const immediatePreviousReleaseState =
   evaluatePreviousChildRelease({
-    previousLocationCandidate,
+    previousLocationCandidate:
+      immediatePreviousCandidateCurrentBasis,
     priorMemoryRecord:
       immediatePriorMemoryRecord,
     currentPrice: normalizedPrice,
@@ -3343,9 +3587,9 @@ const recoveredMemoryChild =
 
 const continuityLocationCandidate =
   immediatePreviousPromotedContactPreservable
-    ? previousLocationCandidate
+    ? immediatePreviousCandidateCurrentBasis
     : immediatePreviousChildPreservable
-    ? previousLocationCandidate
+    ? immediatePreviousCandidateCurrentBasis
     : recoveredPromotedContactChild?.candidate ||
       recoveredMemoryChild?.candidate ||
       null;
@@ -3420,7 +3664,7 @@ const absoluteMidpointCompletionState =
 
 const absoluteMidpointCompletionSourceCandidate =
   immediateMidpointCompletion
-    ? previousLocationCandidate
+    ? immediatePreviousCandidateCurrentBasis
     : recoveredMidpointCompletion
     ? continuityLocationCandidate
     : null;
@@ -3637,17 +3881,41 @@ const structuralDirectionBias =
     engine22WaveStrategy,
   });
 
-const selectedZoneId =
+const selectedZoneCanonicalId =
   buildCanonicalZoneId(
     normalizedSymbol,
     selectedZone
   );
 
+const selectedLogicalZoneKey =
+  selectedZone?.logicalZoneKey ??
+  buildEngine26LogicalZoneKey(selectedZone);
+
+const continuityLogicalZoneKey =
+  continuityLocationCandidate?.logicalZoneKey ??
+  continuityLocationCandidate?.entryZone
+    ?.logicalZoneKey ??
+  priorMemoryRecord?.logicalZoneKey ??
+  null;
+
+const preserveTripIdentityAcrossPriceBasisChange =
+  previousChildPreservable === true &&
+  logicalZoneKeysMatch(
+    selectedLogicalZoneKey,
+    continuityLogicalZoneKey
+  ) &&
+  Boolean(continuityLocationCandidate?.zoneId);
+
+const selectedZoneId =
+  preserveTripIdentityAcrossPriceBasisChange
+    ? continuityLocationCandidate.zoneId
+    : selectedZoneCanonicalId;
+
 const promotionSourceCandidate =
   absoluteMidpointCompletionSourceCandidate ||
   (
     immediatePreviousReleaseState.released === true
-      ? previousLocationCandidate
+      ? immediatePreviousCandidateCurrentBasis
       : continuityLocationCandidate
   );
 
@@ -4309,6 +4577,8 @@ const strategyFacts =
       symbol: normalizedSymbol,
       strategyId: normalizedStrategyId,
       zoneId,
+      logicalZoneKey:
+        selectedLogicalZoneKey,
       candidateId,
       directionBias,
       setupClass:
@@ -4661,6 +4931,8 @@ const strategyFacts =
 
     candidateId,
     zoneId,
+    logicalZoneKey:
+      selectedLogicalZoneKey,
 
     symbol:
       normalizedSymbol,
@@ -5345,6 +5617,10 @@ location:
 
       previousChildPreservable
         ? "ENGINE26_STRATEGY1_ESTABLISHED_CHILD_BYPASSED_DISCOVERY_RANGE"
+        : null,
+
+      preserveTripIdentityAcrossPriceBasisChange
+        ? "ENGINE26_STRATEGY1_TRIP_IDENTITY_PRESERVED_ACROSS_PRICE_BASIS_CHANGE"
         : null,
 
       previousReleaseState.targetApproachCompletionWatch
