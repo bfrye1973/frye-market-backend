@@ -186,6 +186,41 @@ export function buildEngine3V5Shadow({
     );
 
   /*
+   * Engine 26 owns trip lifecycle.
+   *
+   * FULL_TARGET_COMPLETION means the prior Engine 3 trip is finished,
+   * even when candidateId / zoneId remain unchanged.
+   *
+   * Consume the lifecycle reset while an old directional/travel state
+   * still exists so the completed trip cannot leak into the next cycle.
+   */
+  const engine26TripReset =
+    engine26ReactionHandoff?.priorRotationFullyComplete === true &&
+    engine26ReactionHandoff?.priorRotationCompletionState ===
+      "FULL_TARGET_COMPLETION" &&
+    (
+      prior.direction === "LONG" ||
+      prior.direction === "SHORT" ||
+      prior.travelModeActive === true
+    );
+
+  /*
+   * Reset must happen BEFORE departure / EMA10 travel evaluation.
+   *
+   * Otherwise the finished trip could still be fed into the travel
+   * modules during the same snapshot.
+   */
+  const effectivePrior =
+    engine26TripReset
+      ? {
+          ...prior,
+          direction: "NEUTRAL",
+          travelModeActive: false,
+          travelDirection: "NEUTRAL",
+        }
+      : prior;
+
+  /*
    * Departure is evaluated from the PREVIOUS established canonical
    * direction only.
    *
@@ -195,7 +230,7 @@ export function buildEngine3V5Shadow({
   const departureState =
     resolveDepartureState({
       establishedDirection:
-        prior.direction,
+        effectivePrior.direction,
 
       zone:
         normalizedZoneInput?.zone,
@@ -203,16 +238,16 @@ export function buildEngine3V5Shadow({
       tenMinuteContext,
 
       previousTravelModeActive:
-        prior.travelModeActive === true,
+        effectivePrior.travelModeActive === true,
 
       previousTravelDirection:
-        prior.travelDirection,
+        effectivePrior.travelDirection,
     });
 
   const ema10TravelState =
     resolveEma10TravelState({
       establishedDirection:
-        prior.direction,
+        effectivePrior.direction,
 
       departureState,
 
@@ -231,15 +266,20 @@ export function buildEngine3V5Shadow({
         null,
 
       previousCanonical:
-        prior,
+        effectivePrior,
 
       departureState,
 
       ema10TravelState,
 
-      forceReset,
+      forceReset:
+        forceReset === true ||
+        engine26TripReset,
 
-      resetReason,
+      resetReason:
+        engine26TripReset
+          ? "ENGINE26_FULL_TARGET_COMPLETION"
+          : resetReason,
     });
 
   const canonical =
@@ -403,6 +443,10 @@ export function buildEngine3V5Shadow({
         ? "ENGINE3_V5_SHADOW_READ_ONLY"
         : "ENGINE3_V5_CANONICAL_ACTIVE",
 
+      engine26TripReset
+        ? "ENGINE3_V5_ENGINE26_FULL_TARGET_COMPLETION_RESET_CONSUMED"
+        : null,
+
       validation?.valid === true
         ? "ENGINE3_V5_CONTRACT_VALID"
         : "ENGINE3_V5_CONTRACT_INVALID_FAIL_CLOSED",
@@ -411,7 +455,7 @@ export function buildEngine3V5Shadow({
       "ENGINE3_V5_ENGINE6_AUTHORITY_FALSE",
       "ENGINE3_V5_NO_PERMISSION_CREATED",
       "ENGINE3_V5_NO_EXECUTION",
-    ],
+    ].filter(Boolean),
   };
 }
 
