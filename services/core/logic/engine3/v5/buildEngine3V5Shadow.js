@@ -8,7 +8,7 @@
 // - Builds:
 //     normalized Engine 26 zone input
 //     1m diagnostics
-//     5m mature reaction/control
+//     completed 5m canonical price-action/control evidence
 //     10m broader context
 //     departure state
 //     EMA10 travel state
@@ -27,6 +27,13 @@
 // Engine 3 v5 -> WHAT PRICE IS DOING THERE
 // Engine 4 -> volume/participation
 // Engine 6 -> final paper permission
+//
+// Timeframe authority:
+// 1m -> diagnostic only
+// forming 5m -> diagnostic only
+// completed 5m -> canonical price-action/control evidence
+// 10m -> broader context
+// completed 10m + EMA10 -> post-departure hold/reset only
 
 import {
   normalizeNegotiatedZone,
@@ -132,6 +139,10 @@ export function buildEngine3V5Shadow({
       engine26ReactionHandoff,
     });
 
+  /*
+   * 1m remains immediate diagnostic evidence only.
+   * It is NEVER fed into canonical price-action control.
+   */
   const oneMinuteEvidence =
     build1mEvidence({
       bars:
@@ -142,6 +153,9 @@ export function buildEngine3V5Shadow({
       evaluationTimeMs,
     });
 
+  /*
+   * 5m separates forming/current diagnostics from completed mature evidence.
+   */
   const fiveMinuteReaction =
     build5mReaction({
       bars:
@@ -153,23 +167,32 @@ export function buildEngine3V5Shadow({
     });
 
   /*
-   * Canonical price-action control is timeframe-agnostic.
+   * CANONICAL PRICE-ACTION CONTROL
    *
-   * We currently use the densest available price path (the evidence
-   * already built from bars1m) as transport resolution only.
-   * The 1m label has ZERO canonical authority.
+   * IMPORTANT:
+   * Canonical control is built ONLY from the COMPLETED 5m evidence stack.
+   *
+   * This prevents a forming 1m candle from establishing, flipping, or
+   * withdrawing canonical Engine 3 direction.
+   *
+   * The state machine remains the sole LONG / SHORT / NEUTRAL publisher.
    */
   const priceActionControl =
     buildPriceActionControl({
       normalizedZoneInput,
 
       priceActionEvidence:
-        oneMinuteEvidence?.current || null,
+        fiveMinuteReaction?.completed ||
+        null,
 
       sourceResolution:
-        "DENSEST_AVAILABLE_PRICE_PATH",
+        "COMPLETED_5M_PRICE_PATH",
     });
 
+  /*
+   * 10m is broader context only until a direction has already been
+   * established and the post-zone travel lifecycle becomes active.
+   */
   const tenMinuteContext =
     build10mContext({
       bars:
@@ -190,9 +213,6 @@ export function buildEngine3V5Shadow({
    *
    * FULL_TARGET_COMPLETION means the prior Engine 3 trip is finished,
    * even when candidateId / zoneId remain unchanged.
-   *
-   * Consume the lifecycle reset while an old directional/travel state
-   * still exists so the completed trip cannot leak into the next cycle.
    */
   const engine26TripReset =
     engine26ReactionHandoff?.priorRotationFullyComplete === true &&
@@ -206,9 +226,7 @@ export function buildEngine3V5Shadow({
 
   /*
    * Reset must happen BEFORE departure / EMA10 travel evaluation.
-   *
-   * Otherwise the finished trip could still be fed into the travel
-   * modules during the same snapshot.
+   * The completed trip must not leak into the next cycle.
    */
   const effectivePrior =
     engine26TripReset
@@ -221,11 +239,8 @@ export function buildEngine3V5Shadow({
       : prior;
 
   /*
-   * Departure is evaluated from the PREVIOUS established canonical
-   * direction only.
-   *
-   * This prevents 10m departure evidence from manufacturing a fresh
-   * direction in the same snapshot.
+   * Departure is evaluated from an already-established canonical direction.
+   * It cannot manufacture initial direction from NEUTRAL.
    */
   const departureState =
     resolveDepartureState({
@@ -244,6 +259,10 @@ export function buildEngine3V5Shadow({
         effectivePrior.travelDirection,
     });
 
+  /*
+   * EMA10 travel state manages only an already-established trip.
+   * EMA10 never creates initial Engine 3 direction.
+   */
   const ema10TravelState =
     resolveEma10TravelState({
       establishedDirection:
@@ -257,6 +276,9 @@ export function buildEngine3V5Shadow({
         tenMinuteEma10,
     });
 
+  /*
+   * Sole canonical direction authority.
+   */
   const stateMachine =
     runDirectionStateMachine({
       normalizedZoneInput,
@@ -442,6 +464,12 @@ export function buildEngine3V5Shadow({
       shadowMode === true
         ? "ENGINE3_V5_SHADOW_READ_ONLY"
         : "ENGINE3_V5_CANONICAL_ACTIVE",
+
+      "ENGINE3_V5_1M_DIAGNOSTIC_ONLY",
+      "ENGINE3_V5_FORMING_5M_DIAGNOSTIC_ONLY",
+      "ENGINE3_V5_COMPLETED_5M_CANONICAL_PRICE_ACTION_EVIDENCE",
+      "ENGINE3_V5_10M_BROADER_CONTEXT_ONLY",
+      "ENGINE3_V5_EMA10_POST_DEPARTURE_HOLD_RESET_ONLY",
 
       engine26TripReset
         ? "ENGINE3_V5_ENGINE26_FULL_TARGET_COMPLETION_RESET_CONSUMED"
