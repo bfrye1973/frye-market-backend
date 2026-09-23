@@ -1734,6 +1734,186 @@ function findRecoverableDirectionalMemoryChild({
   return candidates[0] || null;
 }
 
+function findUnrecordedMidpointCompletionFromMemory({
+  memoryStore,
+  zones,
+  symbol,
+  strategyId,
+  currentPrice,
+  bars10m,
+  snapshotTime,
+}) {
+  const records = Object.values(
+    memoryStore?.records || {}
+  );
+
+  const completions = records
+    .map((record) => {
+      const direction = normalizeDirection(
+        record?.directionBias ??
+        record?.direction
+      );
+
+      const lifecycleActive = [
+        "ACTIVE",
+        "TARGET_APPROACH_COMPLETION_WATCH",
+      ].includes(
+        String(record?.lifecycleStatus || "")
+          .trim()
+          .toUpperCase()
+      );
+
+      const alreadyTerminal =
+        record?.targetMidlineReached === true ||
+        record?.priorRotationFullyComplete === true ||
+        record?.priorRotationCompletionState ===
+          "FULL_TARGET_COMPLETION" ||
+        record?.promotedFromTargetCompletion === true ||
+        record?.invalidationFacts
+          ?.completedCloseInvalidationConfirmed === true ||
+        Boolean(record?.invalidatedAt) ||
+        Boolean(record?.retiredAt) ||
+        Boolean(record?.releaseReason);
+
+      if (
+        record?.laneId !== "minute" ||
+        record?.strategyId !== strategyId ||
+        String(record?.symbol || "").toUpperCase() !==
+          symbol ||
+        record?.setupClass !== STRATEGY1_SETUP_CLASS ||
+        record?.identitySetupKey !== STRATEGY1_SETUP_CLASS ||
+        record?.candidateIdentityVersion !==
+          "engine26.strategy1.v2" ||
+        !["LONG", "SHORT"].includes(direction) ||
+        !record?.currentCandidateId ||
+        !lifecycleActive ||
+        alreadyTerminal ||
+        !record?.targetZone
+      ) {
+        return null;
+      }
+
+      const originZone = findZoneByCanonicalId({
+        zones,
+        symbol,
+        zoneId: record?.zoneId,
+        logicalZoneKey:
+          record?.logicalZoneKey ?? null,
+      });
+
+      const targetZoneSource =
+        findZoneByCanonicalId({
+          zones,
+          symbol,
+          zoneId:
+            record?.targetZone?.zoneId ??
+            record?.targetZone?.id ??
+            null,
+          logicalZoneKey:
+            record?.targetZone?.logicalZoneKey ??
+            null,
+        });
+
+      if (!originZone || !targetZoneSource) {
+        return null;
+      }
+
+      const candidate = {
+        active: true,
+        status: "ACTIVE_DIRECTIONAL_CHILD",
+        laneId: "minute",
+        symbol,
+        strategyId,
+        candidateId: record.currentCandidateId,
+        zoneId: record.zoneId,
+        logicalZoneKey:
+          record?.logicalZoneKey ??
+          originZone?.logicalZoneKey ??
+          buildEngine26LogicalZoneKey(originZone),
+        directionBias: direction,
+        direction,
+        tradeDirectionBias: direction,
+        preferredDirection: direction,
+        directionState:
+          `${direction}_DIRECTIONAL_CHILD_ACTIVE`,
+        setupType: STRATEGY1_SETUP_CLASS,
+        setupClass: record.setupClass,
+        setupGrade: record.setupGrade,
+        identitySetupKey: record.identitySetupKey,
+        candidateIdentityVersion:
+          record.candidateIdentityVersion,
+        candidateLifecycleStartTime:
+          record?.candidateLifecycleStartTime ||
+          record?.directionResolvedAt ||
+          snapshotTime,
+        directionResolvedAt:
+          record?.directionResolvedAt ||
+          record?.candidateLifecycleStartTime ||
+          snapshotTime,
+        entryZone:
+          buildEngine26TradeZoneView(
+            originZone,
+            { zoneId: record.zoneId }
+          ),
+        targetZone:
+          buildEngine26TradeZoneView(
+            targetZoneSource,
+            {
+              zoneId:
+                record?.targetZone?.zoneId ??
+                record?.targetZone?.id ??
+                buildCanonicalZoneId(
+                  symbol,
+                  targetZoneSource
+                ),
+            }
+          ),
+        invalidationFacts:
+          record?.invalidationFacts ?? null,
+        snapshotTime:
+          record?.lastSeenAt || snapshotTime,
+        noPermissionCreated: true,
+        noExecution: true,
+      };
+
+      const releaseState =
+        evaluatePreviousChildRelease({
+          previousLocationCandidate: candidate,
+          priorMemoryRecord: record,
+          currentPrice,
+          bars10m,
+        });
+
+      const completedAtMidpoint =
+        releaseState?.released === true &&
+        releaseState?.releaseReason ===
+          "TARGET_ZONE_REACHED" &&
+        releaseState?.targetMidlineReached === true &&
+        releaseState?.priorRotationFullyComplete === true;
+
+      if (!completedAtMidpoint) {
+        return null;
+      }
+
+      return {
+        record,
+        originZone,
+        targetZone: targetZoneSource,
+        candidate,
+        releaseState,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      String(b.record?.lastSeenAt || "")
+        .localeCompare(
+          String(a.record?.lastSeenAt || "")
+        )
+    );
+
+  return completions[0] || null;
+}
+
 const PROMOTED_CONTACT_COMPLETION_REASON =
   "NEGOTIATED_LINE_TARGET_COMPLETION";
 
@@ -3422,6 +3602,19 @@ const strategy1MemoryRead =
         malformed: false,
       };
 
+const unrecordedMidpointCompletion =
+  selectionPurpose === "STRATEGY1_CHILD"
+    ? findUnrecordedMidpointCompletionFromMemory({
+        memoryStore: strategy1MemoryRead.store,
+        zones: approvedNegotiatedZones,
+        symbol: normalizedSymbol,
+        strategyId: normalizedStrategyId,
+        currentPrice: normalizedPrice,
+        bars10m,
+        snapshotTime,
+      })
+    : null;
+
 const immediatePriorMemoryRecord =
   getPriorMemoryRecord({
     memoryStore: strategy1MemoryRead.store,
@@ -3651,15 +3844,22 @@ const recoveredMidpointCompletion =
     "TARGET_ZONE_REACHED" &&
   previousReleaseState?.targetMidlineReached === true;
 
+const historicalMidpointCompletion =
+  unrecordedMidpointCompletion?.releaseState
+    ?.targetMidlineReached === true;
+
 const absoluteMidpointCompletion =
   immediateMidpointCompletion ||
-  recoveredMidpointCompletion;
+  recoveredMidpointCompletion ||
+  historicalMidpointCompletion;
 
 const absoluteMidpointCompletionState =
   immediateMidpointCompletion
     ? immediatePreviousReleaseState
     : recoveredMidpointCompletion
     ? previousReleaseState
+    : historicalMidpointCompletion
+    ? unrecordedMidpointCompletion.releaseState
     : null;
 
 const absoluteMidpointCompletionSourceCandidate =
@@ -3667,6 +3867,8 @@ const absoluteMidpointCompletionSourceCandidate =
     ? immediatePreviousCandidateCurrentBasis
     : recoveredMidpointCompletion
     ? continuityLocationCandidate
+    : historicalMidpointCompletion
+    ? unrecordedMidpointCompletion.candidate
     : null;
 
 const absoluteMidpointTargetZoneId =
@@ -3678,11 +3880,16 @@ const absoluteMidpointTargetZoneId =
   null;
 
 const absoluteMidpointTargetZone =
-  absoluteMidpointTargetZoneId
+  historicalMidpointCompletion
+    ? unrecordedMidpointCompletion.targetZone
+    : absoluteMidpointTargetZoneId
     ? findZoneByCanonicalId({
         zones: approvedNegotiatedZones,
         symbol: normalizedSymbol,
         zoneId: absoluteMidpointTargetZoneId,
+        logicalZoneKey:
+          absoluteMidpointCompletionSourceCandidate
+            ?.targetZone?.logicalZoneKey ?? null,
       })
     : null;
 
@@ -4054,14 +4261,21 @@ const remainingRunnerExpected =
 const completionBoundary =
   promotedContactLifecycle
     ? (
-        continuityLocationCandidate
-          ?.completionBoundary ??
-        promotionReleaseState
-          ?.completionBoundary ??
-        toFiniteNumber(
-          promotionSourceCandidate
-            ?.targetZone?.midline
-        )
+        freshTargetMidlineContact
+          ? promotionReleaseState
+              ?.completionBoundary ??
+            toFiniteNumber(
+              promotionSourceCandidate
+                ?.targetZone?.midline
+            )
+          : continuityLocationCandidate
+              ?.completionBoundary ??
+            promotionReleaseState
+              ?.completionBoundary ??
+            toFiniteNumber(
+              promotionSourceCandidate
+                ?.targetZone?.midline
+            )
       )
     : previousReleaseState
         ?.completionBoundary ??
@@ -5609,6 +5823,10 @@ location:
 
       recoveredMemoryChild
         ? "ENGINE26_STRATEGY1_DIRECTIONAL_CHILD_RECOVERED_FROM_MEMORY"
+        : null,
+
+      historicalMidpointCompletion
+        ? "ENGINE26_STRATEGY1_UNRECORDED_MIDPOINT_COMPLETION_RECONCILED"
         : null,
 
       previousChildPreservable
