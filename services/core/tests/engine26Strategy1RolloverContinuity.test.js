@@ -218,3 +218,203 @@ test(
     }
   }
 );
+
+
+test(
+  "missed prior SHORT midpoint completion overrides a newer wrong SHORT child and restores NEUTRAL",
+  () => {
+    const tempDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "engine26-midpoint-reconcile-")
+    );
+
+    const oldMemoryPath = path.join(
+      tempDir,
+      "old-trip-memory.json"
+    );
+
+    const wrongMemoryPath = path.join(
+      tempDir,
+      "wrong-trip-memory.json"
+    );
+
+    const priorAdjustment =
+      process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT;
+
+    try {
+      process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT = "0";
+
+      const oldShort = buildEngine26A({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        timeframe: "10m",
+        currentPrice: 7695,
+        snapshotTime: "2026-09-01T15:00:00.000Z",
+        ema10Posture: "BEARISH",
+        bars10m: shortEvidenceBars(),
+        memoryFilePath: oldMemoryPath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(oldShort.directionBias, "SHORT");
+      assert.equal(oldShort.entryZone.low, 7687.25);
+      assert.equal(oldShort.targetZone.low, 7635.5);
+      assert.equal(oldShort.targetZone.high, 7658.75);
+      assert.equal(oldShort.targetZone.midline, 7647.25);
+
+      const wrongShort = buildEngine26A({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        timeframe: "10m",
+        currentPrice: 7630,
+        snapshotTime: "2026-09-01T15:30:00.000Z",
+        ema10Posture: "BEARISH",
+        bars10m: [
+          {
+            time: "2026-09-01T15:00:00.000Z",
+            open: 7648,
+            high: 7660,
+            low: 7645,
+            close: 7655,
+            completed: true,
+          },
+          {
+            time: "2026-09-01T15:10:00.000Z",
+            open: 7655,
+            high: 7657,
+            low: 7632,
+            close: 7640,
+            completed: true,
+          },
+          {
+            time: "2026-09-01T15:20:00.000Z",
+            open: 7640,
+            high: 7642,
+            low: 7628,
+            close: 7630,
+            completed: true,
+          },
+        ],
+        memoryFilePath: wrongMemoryPath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(wrongShort.directionBias, "SHORT");
+      assert.equal(wrongShort.entryZone.low, 7635.5);
+      assert.equal(wrongShort.targetZone.midline, 7601);
+
+      /*
+       * Simulate the live defect: the older SHORT that should have completed
+       * at 7647.25 is still ACTIVE in memory, while a newer SHORT child has
+       * already been created from that completed target zone.
+       */
+      const oldStore = JSON.parse(
+        fs.readFileSync(oldMemoryPath, "utf8")
+      );
+      const wrongStore = JSON.parse(
+        fs.readFileSync(wrongMemoryPath, "utf8")
+      );
+
+      oldStore.records = {
+        ...(oldStore.records || {}),
+        ...(wrongStore.records || {}),
+      };
+
+      fs.writeFileSync(
+        oldMemoryPath,
+        JSON.stringify(oldStore, null, 2),
+        "utf8"
+      );
+
+      const reconciled = buildEngine26A({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        timeframe: "10m",
+        currentPrice: 7665,
+        snapshotTime: "2026-09-01T15:40:00.000Z",
+        previousLocationCandidate: wrongShort,
+        ema10Posture: "BULLISH",
+        bars10m: [
+          {
+            time: "2026-09-01T15:20:00.000Z",
+            open: 7652,
+            high: 7656,
+            low: 7647.25,
+            close: 7651,
+            completed: true,
+          },
+          {
+            time: "2026-09-01T15:30:00.000Z",
+            open: 7651,
+            high: 7666,
+            low: 7650,
+            close: 7665,
+            completed: true,
+          },
+        ],
+        memoryFilePath: oldMemoryPath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(reconciled.directionBias, "NEUTRAL");
+      assert.equal(reconciled.direction, "NEUTRAL");
+      assert.equal(reconciled.directionState, "NEUTRAL");
+      assert.equal(reconciled.entryZone.low, 7635.5);
+      assert.equal(reconciled.entryZone.high, 7658.75);
+      assert.equal(reconciled.completionBoundary, 7647.25);
+      assert.equal(reconciled.priorRotationFullyComplete, true);
+      assert.equal(
+        reconciled.priorRotationCompletionState,
+        "FULL_TARGET_COMPLETION"
+      );
+      assert.equal(reconciled.promotedFromTargetCompletion, true);
+      assert.equal(reconciled.priorCandidateId, oldShort.candidateId);
+      assert.equal(reconciled.priorZoneId, oldShort.zoneId);
+      assert.notEqual(reconciled.candidateId, wrongShort.candidateId);
+      assert.ok(
+        reconciled.reasonCodes.includes(
+          "ENGINE26_STRATEGY1_UNRECORDED_MIDPOINT_COMPLETION_RECONCILED"
+        )
+      );
+
+      const nextSnapshot = buildEngine26A({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        timeframe: "10m",
+        currentPrice: 7670,
+        snapshotTime: "2026-09-01T15:50:00.000Z",
+        previousLocationCandidate: reconciled,
+        ema10Posture: "BULLISH",
+        bars10m: [
+          {
+            time: "2026-09-01T15:40:00.000Z",
+            open: 7665,
+            high: 7672,
+            low: 7664,
+            close: 7670,
+            completed: true,
+          },
+        ],
+        memoryFilePath: oldMemoryPath,
+        persistMemory: true,
+      }).engine26LocationCandidate;
+
+      assert.equal(nextSnapshot.candidateId, reconciled.candidateId);
+      assert.equal(nextSnapshot.zoneId, reconciled.zoneId);
+      assert.equal(nextSnapshot.directionBias, "NEUTRAL");
+      assert.equal(nextSnapshot.contactState, "NEGOTIATED_LINE_CONTACT");
+      assert.equal(nextSnapshot.priorRotationFullyComplete, true);
+    } finally {
+      if (priorAdjustment === undefined) {
+        delete process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT;
+      } else {
+        process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT =
+          priorAdjustment;
+      }
+
+      fs.rmSync(tempDir, {
+        recursive: true,
+        force: true,
+      });
+    }
+  }
+);
