@@ -174,6 +174,53 @@ function buildRolloverMetadata(zone) {
   };
 }
 
+
+export function buildEngine26LogicalZoneKey(zone) {
+  if (!zone || typeof zone !== "object") return null;
+
+  const upstreamId = String(
+    zone.upstreamId ??
+    zone.id ??
+    zone.zoneId ??
+    zone.raw?.upstreamId ??
+    zone.raw?.id ??
+    ""
+  ).trim();
+
+  if (!upstreamId) return null;
+
+  const source = String(zone.source ?? "UNKNOWN")
+    .trim()
+    .toUpperCase();
+
+  const type = String(
+    zone.type ??
+    zone.zoneType ??
+    zone.raw?.type ??
+    zone.raw?.zoneType ??
+    "ZONE"
+  )
+    .trim()
+    .toUpperCase();
+
+  const timeframe = String(
+    zone.timeframe ??
+    zone.tf ??
+    zone.raw?.timeframe ??
+    zone.raw?.tf ??
+    "UNKNOWN"
+  )
+    .trim()
+    .toUpperCase();
+
+  return [
+    source,
+    type,
+    timeframe,
+    upstreamId.toUpperCase(),
+  ].join("|");
+}
+
 export function normalizeEngine26Zone({
   zone,
   source,
@@ -219,6 +266,26 @@ export function normalizeEngine26Zone({
       zone.id ??
       zone.zoneId ??
       null,
+
+    logicalZoneKey:
+      buildEngine26LogicalZoneKey({
+        ...zone,
+        source,
+        type: String(
+          zone.zoneType ??
+          zone.type ??
+          zone.label ??
+          defaultType
+        ).toUpperCase(),
+        timeframe:
+          zone.timeframe ??
+          zone.tf ??
+          defaultTimeframe,
+        upstreamId:
+          zone.id ??
+          zone.zoneId ??
+          null,
+      }),
 
     source,
     sourcePath,
@@ -285,6 +352,10 @@ export function buildEngine26TradeZoneView(
     upstreamId:
       zone.upstreamId ?? null,
 
+    logicalZoneKey:
+      zone.logicalZoneKey ??
+      buildEngine26LogicalZoneKey(zone),
+
     source:
       zone.source ?? null,
 
@@ -322,6 +393,10 @@ export function buildEngine26LocationView(zone) {
 
     upstreamId:
       zone.upstreamId ?? null,
+
+    logicalZoneKey:
+      zone.logicalZoneKey ??
+      buildEngine26LogicalZoneKey(zone),
 
     type:
       zone.type ?? null,
@@ -364,4 +439,5 @@ export default {
   normalizeEngine26Zone,
   buildEngine26TradeZoneView,
   buildEngine26LocationView,
+  buildEngine26LogicalZoneKey,
 };
