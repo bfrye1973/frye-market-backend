@@ -37,6 +37,8 @@ import {
   pctChange,
 } from "../logic/engine25IntradayMacro.js";
 
+import { buildEngine25Engine29Parity } from "../logic/engine25Engine29Parity.js";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
@@ -1024,6 +1026,22 @@ export async function buildAndWriteEngine25IntradayMacro({
     },
     warnings: newsEventInput.warnings,
   };
+  // Phase 1 Engine 29 parity diagnostics.
+  // READ ONLY: this is attached after canonical Engine 25 interpretation has
+  // already been built. It cannot change state, severity, equityImpact,
+  // marketConfirmation, macroShock, scoring, or permission.
+  canonical.engine29Parity = buildEngine25Engine29Parity({
+    now,
+    engine25: {
+      wti: products.CL.read,
+      brent: products.BZ.read,
+      zn: products.ZN.read,
+      zb: products.ZB.read,
+      tlt: tltRead,
+      slowContext,
+    },
+  });
+
   canonical.phase = "ENGINE25_INTRADAY_MACRO_PHASE_5";
   canonical.note =
     "Phase 5 canonical output: futures + TLT + FRED slow context + temporary-event adapter + canonical Finlight news handoff. Finlight event types are preserved unchanged; news identifies events and existing CL/BZ/ZN/ZB/TLT logic remains market-confirmation authority.";
