@@ -17,6 +17,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { updateEngine12StorageHealthSafe } from "../logic/engine12/storageHealth.js";
 
 const AZ_TZ = "America/Phoenix";
 const EXCHANGE_TZ = "America/Chicago";
@@ -62,7 +63,7 @@ const CANONICAL_STRATEGY_IDS = Object.freeze([
   "subminute_scalp@10m",
   "intraday_scalp@10m",
   "minor_swing@1h",
-  "intermediate_swing@4h",
+  "intermediate_long@4h",
   "primary_position@1d",
 ]);
 
@@ -1261,7 +1262,7 @@ function validateCanonicalSource(
   };
 }
 
-export function runReplayArchive({
+function runReplayArchiveCore({
   now = new Date(),
   sourceFile =
     SOURCE_FILE,
@@ -1573,6 +1574,37 @@ export function runReplayArchive({
       sessionDecision
         .holidayOverrideStatus,
   };
+}
+
+export function runReplayArchive(options = {}) {
+  const sourceFile = options.sourceFile ?? SOURCE_FILE;
+  const replayRoot = options.replayRoot ?? ES_REPLAY_ROOT;
+
+  try {
+    const result = runReplayArchiveCore(options);
+
+    // Closed-session health is optional by contract. Preserve the existing
+    // no-artifact closed-session behavior used by Engine 12 session tests.
+    if (result?.reason !== "ES_FUTURES_SESSION_CLOSED") {
+      updateEngine12StorageHealthSafe({
+        now: options.now ?? new Date(),
+        replayRoot,
+        sourceFile,
+        replayResult: result,
+      });
+    }
+
+    return result;
+  } catch (error) {
+    updateEngine12StorageHealthSafe({
+      now: options.now ?? new Date(),
+      replayRoot,
+      sourceFile,
+      replayError: error,
+    });
+
+    throw error;
+  }
 }
 
 function main() {
