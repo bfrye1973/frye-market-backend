@@ -16,10 +16,16 @@ function unique(values = []) {
 
 function compactView(view) {
   if (!view) return null;
+
   return {
     state: view.classification?.state ?? null,
     stage: view.classification?.stage ?? null,
     confidence: view.classification?.confidence ?? null,
+
+    // Canonical per-symbol freshness is preserved unchanged from
+    // Engine 29's existing validation layer.
+    freshness: view.freshness ?? null,
+
     latest: view.latest ?? null,
     movingAverages: view.movingAverages ?? null,
     levels: view.levels ?? null,
@@ -56,22 +62,42 @@ function plainGroupLabel(key, state, group) {
   if (
     key === "volatility" &&
     !state &&
-    group?.structural?.missingRequiredMembers?.includes("VIX_DIRECT")
+    group?.structural?.missingRequiredMembers?.includes(
+      "VIX_DIRECT"
+    )
   ) {
     return "NO DIRECT VIX FEED";
   }
 
-  if (key === "financialConditions" && !state) return "NOT ACTIVE YET";
+  if (
+    key === "financialConditions" &&
+    !state
+  ) {
+    return "NOT ACTIVE YET";
+  }
+
   if (!state) return "NO RELIABLE SIGNAL";
   if (state === "HEALTHY") return "HEALTHY";
   if (state === "RECOVERING") return "RECOVERING";
   if (state === "SEVERE") return "SEVERE STRESS";
 
   if (state === "FORMING") {
-    if (key === "ratesDuration") return "PRESSURE BUILDING";
-    if (key === "energyInflation") return "STRESS BUILDING";
-    if (key === "credit") return "WEAKENING";
-    if (key === "headlineIndex") return "WEAKENING";
+    if (key === "ratesDuration") {
+      return "PRESSURE BUILDING";
+    }
+
+    if (key === "energyInflation") {
+      return "STRESS BUILDING";
+    }
+
+    if (key === "credit") {
+      return "WEAKENING";
+    }
+
+    if (key === "headlineIndex") {
+      return "WEAKENING";
+    }
+
     return "WEAKENING";
   }
 
@@ -84,10 +110,22 @@ function plainGroupLabel(key, state, group) {
       return "BREAKING";
     }
 
-    if (key === "credit") return "CREDIT STRESS CONFIRMED";
-    if (key === "ratesDuration") return "STRESS CONFIRMED";
-    if (key === "energyInflation") return "STRESS CONFIRMED";
-    if (key === "volatility") return "VOLATILITY CONFIRMED";
+    if (key === "credit") {
+      return "CREDIT STRESS CONFIRMED";
+    }
+
+    if (key === "ratesDuration") {
+      return "STRESS CONFIRMED";
+    }
+
+    if (key === "energyInflation") {
+      return "STRESS CONFIRMED";
+    }
+
+    if (key === "volatility") {
+      return "VOLATILITY CONFIRMED";
+    }
+
     return "CONFIRMED";
   }
 
@@ -180,18 +218,26 @@ export async function buildEngine29CrossMarketStress({
 } = {}) {
   const market =
     marketDataBundle ||
-    await buildEngine29MarketDataBundle({ now });
+    await buildEngine29MarketDataBundle({
+      now,
+    });
 
   const structure =
     structureBundle ||
-    buildEngine29StructureBundle(market, { now });
+    buildEngine29StructureBundle(
+      market,
+      { now }
+    );
 
   const groups =
     groupBundle ||
-    buildEngine29GroupStateBundle(structure, {
-      now,
-      financialConditions,
-    });
+    buildEngine29GroupStateBundle(
+      structure,
+      {
+        now,
+        financialConditions,
+      }
+    );
 
   const move =
     moveCharacter ||
@@ -201,17 +247,29 @@ export async function buildEngine29CrossMarketStress({
       { now }
     );
 
-  const structural = resolveEngine29StructuralState(groups);
-  const tactical = resolveEngine29TacticalState(groups, move);
-  const fastTactical = resolveEngine29FastTacticalShift(move);
+  const structural =
+    resolveEngine29StructuralState(groups);
+
+  const tactical =
+    resolveEngine29TacticalState(
+      groups,
+      move
+    );
+
+  const fastTactical =
+    resolveEngine29FastTacticalShift(
+      move
+    );
 
   const liveMonitor =
     buildEngine29SqueezeTransitionMonitor(
       market,
       {
         parentMoveCharacter: move,
-        fastTacticalState: fastTactical.state,
-        esLiveMonitor: move?.esLiveMonitor || null,
+        fastTacticalState:
+          fastTactical.state,
+        esLiveMonitor:
+          move?.esLiveMonitor || null,
       }
     );
 
@@ -227,7 +285,10 @@ export async function buildEngine29CrossMarketStress({
 
   const displayGroups = {};
 
-  for (const [key, state] of Object.entries(structuralStates)) {
+  for (
+    const [key, state] of
+    Object.entries(structuralStates)
+  ) {
     displayGroups[key] =
       plainGroupLabel(
         key,
@@ -237,19 +298,31 @@ export async function buildEngine29CrossMarketStress({
   }
 
   return {
-    version: `${ENGINE29_VERSION}.phase5`,
-    timestamp: new Date(now).toISOString(),
+    version:
+      `${ENGINE29_VERSION}.phase5`,
+
+    timestamp:
+      new Date(now).toISOString(),
 
     dataDegraded:
       Boolean(market?.dataDegraded) ||
       Boolean(groups?.dataDegraded) ||
       Boolean(move?.dataDegraded),
 
-    overallState: structural.state,
-    structuralState: structural.state,
-    tacticalState: tactical.state,
-    fastTacticalState: fastTactical.state,
-    esNqBackdrop: structural.backdrop,
+    overallState:
+      structural.state,
+
+    structuralState:
+      structural.state,
+
+    tacticalState:
+      tactical.state,
+
+    fastTacticalState:
+      fastTactical.state,
+
+    esNqBackdrop:
+      structural.backdrop,
 
     structural,
     tactical,
@@ -257,126 +330,202 @@ export async function buildEngine29CrossMarketStress({
     moveCharacter: move,
     liveMonitor,
 
-    groups: groups?.groups || {},
-    symbols: compactSymbols(structure),
+    groups:
+      groups?.groups || {},
 
-    confirmations: structural.confirmedGroups,
+    symbols:
+      compactSymbols(structure),
 
-    warnings: structural.activeGroups.filter(
-      (key) =>
-        !structural.confirmedGroups.includes(key)
-    ),
+    confirmations:
+      structural.confirmedGroups,
 
-    recoveries: Object.entries(groups?.groups || {})
-      .filter(
-        ([, group]) =>
-          group?.structural?.state === "RECOVERING"
+    warnings:
+      structural.activeGroups.filter(
+        (key) =>
+          !structural.confirmedGroups.includes(
+            key
+          )
+      ),
+
+    recoveries:
+      Object.entries(
+        groups?.groups || {}
       )
-      .map(([key]) => key),
+        .filter(
+          ([, group]) =>
+            group?.structural?.state ===
+            "RECOVERING"
+        )
+        .map(([key]) => key),
 
     missingConfirmations,
 
-    reasonCodes: unique([
-      ...(structural.reasonCodes || []),
-      ...(tactical.reasonCodes || []),
-      ...(fastTactical.reasonCodes || []),
-      ...(move?.reasonCodes || []),
-      ...(liveMonitor?.reasonCodes || []),
-    ]),
+    reasonCodes:
+      unique([
+        ...(structural.reasonCodes || []),
+        ...(tactical.reasonCodes || []),
+        ...(fastTactical.reasonCodes || []),
+        ...(move?.reasonCodes || []),
+        ...(liveMonitor?.reasonCodes || []),
+      ]),
 
     dataQuality: {
-      marketSummary: market?.summary || null,
+      marketSummary:
+        market?.summary || null,
+
       degradedGroups:
         groups?.summary?.degradedGroups || [],
+
       directVixAvailable:
         Boolean(move?.directVixAvailable),
+
       esResolvedSymbol:
         move?.esResolvedSymbol || null,
+
       esLiveMonitorAvailable:
         Boolean(move?.esLiveMonitorAvailable),
+
       esLiveMonitorFreshness:
         move?.esLiveMonitorFreshness || null,
+
       liveMonitorAvailableSymbols:
-        market?.summary?.liveMonitorAvailableSymbols || [],
+        market?.summary
+          ?.liveMonitorAvailableSymbols || [],
     },
 
     display: {
-      overall: structural.state,
+      overall:
+        structural.state,
+
       overallSummary:
-        structuralSummary(structural.state),
+        structuralSummary(
+          structural.state
+        ),
 
       oneWeek: {
-        state: structural.state,
-        label: structural.state,
+        state:
+          structural.state,
+
+        label:
+          structural.state,
+
         summary:
-          structuralSummary(structural.state),
+          structuralSummary(
+            structural.state
+          ),
       },
 
       oneHour: {
-        state: tactical.state,
-        label: tactical.state,
+        state:
+          tactical.state,
+
+        label:
+          tactical.state,
+
         summary:
-          tacticalSummary(tactical.state),
+          tacticalSummary(
+            tactical.state
+          ),
       },
 
       thirtyMinute: {
-        state: fastTactical.state,
+        state:
+          fastTactical.state,
+
         moveCharacter:
           move?.moveCharacter ?? null,
+
         status:
           move?.display?.status ?? null,
+
         summary:
           move?.display?.summary ?? null,
       },
 
       liveMonitor: {
         timeframe:
-          liveMonitor?.timeframe ?? "10m",
+          liveMonitor?.timeframe ??
+          "10m",
+
         persistenceWindow:
-          liveMonitor?.persistenceWindow ?? "20m",
+          liveMonitor
+            ?.persistenceWindow ??
+          "20m",
+
         authority:
-          liveMonitor?.authority ?? "DIAGNOSTIC_ONLY",
+          liveMonitor?.authority ??
+          "DIAGNOSTIC_ONLY",
+
         anchor:
           liveMonitor?.anchor ?? null,
+
         state:
           liveMonitor?.state ?? null,
+
         direction:
           liveMonitor?.direction ?? null,
+
         participation:
           liveMonitor?.participation ?? null,
+
         context:
           liveMonitor?.context ?? null,
+
         parent30mState:
-          liveMonitor?.fastTacticalContext?.state ?? null,
+          liveMonitor
+            ?.fastTacticalContext
+            ?.state ?? null,
+
         parent30mDirection:
-          liveMonitor?.fastTacticalContext?.direction ?? null,
+          liveMonitor
+            ?.fastTacticalContext
+            ?.direction ?? null,
+
         headline:
-          liveMonitor?.display?.headline ?? null,
+          liveMonitor
+            ?.display
+            ?.headline ?? null,
+
         summary:
-          liveMonitor?.display?.summary ?? null,
+          liveMonitor
+            ?.display
+            ?.summary ?? null,
+
         why:
-          liveMonitor?.display?.why ?? [],
+          liveMonitor
+            ?.display
+            ?.why ?? [],
       },
 
       underTheHood: {
         largeIndexes:
           displayGroups.headlineIndex,
+
         breadth:
           displayGroups.breadth,
+
         techLeadership:
           displayGroups.leadership,
+
         credit:
           displayGroups.credit,
+
         ratesBonds:
           displayGroups.ratesDuration,
+
         oil:
           displayGroups.energyInflation,
+
         volatility:
           displayGroups.volatility,
+
         financialConditions:
           displayGroups.financialConditions,
+
         pressure:
-          move?.display?.underlyingPressure ?? null,
+          move?.display
+            ?.underlyingPressure ??
+          null,
       },
 
       missingConfirmation:
