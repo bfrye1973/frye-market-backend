@@ -1006,6 +1006,146 @@ function scoreCreditFragility(marketData) {
   };
 }
 
+
+function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility) {
+  const creditGroup = engine29Data?.groups?.credit || null;
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const creditGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "credit"
+  );
+
+  const structuralState = creditGroup?.structural?.state || null;
+  const tacticalState = creditGroup?.tactical?.state || null;
+  const fastState = creditGroup?.fastTactical?.state || null;
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  const scoreAvailable =
+    Number.isFinite(Number(structuralScore)) &&
+    Number.isFinite(Number(tacticalScore)) &&
+    Number.isFinite(Number(fastScore));
+
+  const engine29CreditReactionScore = scoreAvailable
+    ? weightedAvg([
+        { value: structuralScore, weight: 0.20 },
+        { value: tacticalScore, weight: 0.40 },
+        { value: fastScore, weight: 0.40 },
+      ])
+    : null;
+
+  const engine25Score = Number.isFinite(Number(engine25CreditFragility?.score))
+    ? Number(engine25CreditFragility.score)
+    : null;
+
+  const difference =
+    Number.isFinite(engine29CreditReactionScore) &&
+    Number.isFinite(engine25Score)
+      ? Number((engine29CreditReactionScore - engine25Score).toFixed(2))
+      : null;
+
+  const absDifference =
+    Number.isFinite(difference) ? Math.abs(difference) : null;
+
+  let comparison = "UNAVAILABLE";
+
+  if (Number.isFinite(absDifference)) {
+    if (absDifference <= 5) comparison = "MATCH";
+    else if (absDifference <= 15) comparison = "MINOR_DIFFERENCE";
+    else comparison = "MATERIAL_DIFFERENCE";
+  }
+
+  const memberSymbols = ["HYG", "JNK", "LQD", "XLF", "KRE"];
+  const members = {};
+
+  for (const symbol of memberSymbols) {
+    const entry = engine29Data?.symbols?.[symbol] || null;
+
+    members[symbol] = entry
+      ? {
+          sourceSymbol: entry?.sourceSymbol || symbol,
+          evidenceQuality: entry?.evidenceQuality || null,
+          structuralState: entry?.structural?.state || null,
+          tacticalState: entry?.tactical?.state || null,
+          fastTacticalState: entry?.fastTactical?.state || null,
+          tacticalFreshness: entry?.tactical?.freshness || null,
+          fastTacticalFreshness: entry?.fastTactical?.freshness || null,
+        }
+      : null;
+  }
+
+  return {
+    mode: "READ_ONLY_SHADOW",
+    authorityChanged: false,
+    scoringChanged: false,
+    permissionChanged: false,
+
+    engine25Current: {
+      score: engine25Score,
+      label: engine25CreditFragility?.label || null,
+      creditRegime: engine25CreditFragility?.creditRegime || null,
+      authority: "ENGINE25_CREDIT_FRAGILITY_CURRENT",
+    },
+
+    engine29Shadow: {
+      available: scoreAvailable,
+      score: engine29CreditReactionScore,
+      label:
+        !scoreAvailable
+          ? "ENGINE29_CREDIT_REACTION_UNAVAILABLE"
+          : engine29CreditReactionScore >= 75
+            ? "ENGINE29_CREDIT_REACTION_HEALTHY"
+            : engine29CreditReactionScore >= 55
+              ? "ENGINE29_CREDIT_REACTION_WATCH"
+              : engine29CreditReactionScore >= 35
+                ? "ENGINE29_CREDIT_REACTION_STRESSED"
+                : "ENGINE29_CREDIT_REACTION_SEVERE",
+      authority: "ENGINE29_GROUPS_CREDIT_SHADOW_ONLY",
+      groupQuality: creditGroupDegraded ? "DEGRADED" : "OK",
+      groupDegraded: creditGroupDegraded,
+      structural1wState: structuralState,
+      tactical1hState: tacticalState,
+      fast30mState: fastState,
+      stateHealthScores: {
+        structural: structuralScore,
+        tactical: tacticalScore,
+        fastTactical: fastScore,
+      },
+      formula:
+        "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+      members,
+    },
+
+    comparison: {
+      result: comparison,
+      engine25Score,
+      engine29ShadowScore: engine29CreditReactionScore,
+      differenceEngine29MinusEngine25: difference,
+      absoluteDifference: absDifference,
+    },
+
+    note:
+      "Shadow only. Engine 25 Credit Fragility remains authoritative for scoring and permission. Engine 29 credit reaction is observed side-by-side until enough live builds are reviewed.",
+  };
+}
+
 function scoreMacroPressure(macroData, marketData, components) {
   const tenYear = getFredValue(macroData, "DGS10");
   const twoYear = getFredValue(macroData, "DGS2");
@@ -1506,6 +1646,10 @@ export function computeEngine25MarketHealth({
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
   const creditFragility = scoreCreditFragility(marketData);
+  const engine29CreditReactionShadow = buildEngine29CreditReactionShadow(
+    engine29Data,
+    creditFragility
+  );
   const distributionPressure = scoreDistributionPressure(sectorHealthData);
   const breadthParticipation = scoreBreadthParticipation(sectorHealthData);
   const eventRisk = scoreEventRisk(fmpData);
@@ -1591,6 +1735,7 @@ export function computeEngine25MarketHealth({
     riskLevel,
     weights,
     components,
+    engine29CreditReactionShadow,
     warnings,
     tradePermission,
     esPermission, 
