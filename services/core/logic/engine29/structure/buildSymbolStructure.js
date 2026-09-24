@@ -3,7 +3,10 @@
 import { ENGINE29_TIMEFRAMES } from "../constants.js";
 import { aggregateDailyToWeekly } from "./aggregateDailyToWeekly.js";
 import { attachEmaSet, emaSlope } from "./calculateEma.js";
-import { detectConfirmedSwings, summarizeSwingTrend } from "./detectSwingStructure.js";
+import {
+  detectConfirmedSwings,
+  summarizeSwingTrend,
+} from "./detectSwingStructure.js";
 import { deriveSupportResistance } from "./deriveSupportResistance.js";
 import { classifySymbolStructure } from "./classifySymbolStructure.js";
 
@@ -13,7 +16,9 @@ function pct(value) {
 
 function latestSnapshot(bars = []) {
   const latest = bars.at(-1) || null;
+
   if (!latest) return null;
+
   return {
     date: latest.date,
     time: latest.time,
@@ -29,11 +34,17 @@ function latestSnapshot(bars = []) {
   };
 }
 
-function prepareIntradayBars(bars = [], now = Date.now(), durationMs = 60 * 60 * 1000) {
+function prepareIntradayBars(
+  bars = [],
+  now = Date.now(),
+  durationMs = 60 * 60 * 1000
+) {
   return bars
     .map((bar) => ({
       ...bar,
-      completed: Number.isFinite(Number(bar?.time)) ? Number(bar.time) + durationMs <= now : true,
+      completed: Number.isFinite(Number(bar?.time))
+        ? Number(bar.time) + durationMs <= now
+        : true,
     }))
     .sort((a, b) => Number(a.time) - Number(b.time));
 }
@@ -43,28 +54,42 @@ function buildOneTimeframe({
   timeframe,
   stressDirection,
   evidenceQuality,
+  freshness = null,
   now,
   swingLeft,
   swingRight,
   supportLookbackBars,
   testingThresholdPct,
 }) {
-  const baseBars = timeframe === ENGINE29_TIMEFRAMES.STRUCTURAL
-    ? aggregateDailyToWeekly(bars, { now })
-    : prepareIntradayBars(
-        bars,
-        now,
-        timeframe === ENGINE29_TIMEFRAMES.FAST_TACTICAL ? 30 * 60 * 1000 : 60 * 60 * 1000,
-      );
+  const baseBars =
+    timeframe === ENGINE29_TIMEFRAMES.STRUCTURAL
+      ? aggregateDailyToWeekly(bars, { now })
+      : prepareIntradayBars(
+          bars,
+          now,
+          timeframe === ENGINE29_TIMEFRAMES.FAST_TACTICAL
+            ? 30 * 60 * 1000
+            : 60 * 60 * 1000
+        );
 
-  const enriched = attachEmaSet(baseBars, [10, 20, 50, 200]);
-  const swings = detectConfirmedSwings(enriched, { left: swingLeft, right: swingRight });
+  const enriched = attachEmaSet(
+    baseBars,
+    [10, 20, 50, 200]
+  );
+
+  const swings = detectConfirmedSwings(enriched, {
+    left: swingLeft,
+    right: swingRight,
+  });
+
   const swingSummary = summarizeSwingTrend(swings);
+
   const levels = deriveSupportResistance({
     bars: enriched,
     swings,
     lookbackBars: supportLookbackBars,
   });
+
   const classification = classifySymbolStructure({
     bars: enriched,
     stressDirection,
@@ -77,16 +102,29 @@ function buildOneTimeframe({
   return {
     timeframe,
     barCount: enriched.length,
+
+    // Preserve the market-data freshness truth unchanged.
+    // The validation layer remains the authority for stale/age thresholds.
+    freshness,
+
     latest: latestSnapshot(enriched),
+
     movingAverages: {
       ema10: enriched.at(-1)?.ema10 ?? null,
       ema20: enriched.at(-1)?.ema20 ?? null,
       ema50: enriched.at(-1)?.ema50 ?? null,
       ema200: enriched.at(-1)?.ema200 ?? null,
-      ema10SlopePct: pct(emaSlope(enriched, "ema10", 3)),
-      ema20SlopePct: pct(emaSlope(enriched, "ema20", 3)),
-      ema50SlopePct: pct(emaSlope(enriched, "ema50", 3)),
+      ema10SlopePct: pct(
+        emaSlope(enriched, "ema10", 3)
+      ),
+      ema20SlopePct: pct(
+        emaSlope(enriched, "ema20", 3)
+      ),
+      ema50SlopePct: pct(
+        emaSlope(enriched, "ema50", 3)
+      ),
     },
+
     swings: {
       trend: swingSummary.trend,
       highStructure: swingSummary.highStructure,
@@ -98,13 +136,17 @@ function buildOneTimeframe({
       confirmedHighCount: swings.highs.length,
       confirmedLowCount: swings.lows.length,
     },
+
     levels,
     classification,
     bars: enriched,
   };
 }
 
-export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } = {}) {
+export function buildEngine29SymbolStructure(
+  symbolEntry,
+  { now = Date.now() } = {}
+) {
   if (!symbolEntry) return null;
 
   const common = {
@@ -117,6 +159,8 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
     ? buildOneTimeframe({
         ...common,
         bars: symbolEntry.structural.bars,
+        freshness:
+          symbolEntry.structural?.freshness ?? null,
         timeframe: ENGINE29_TIMEFRAMES.STRUCTURAL,
         swingLeft: 2,
         swingRight: 2,
@@ -129,6 +173,8 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
     ? buildOneTimeframe({
         ...common,
         bars: symbolEntry.tactical.bars,
+        freshness:
+          symbolEntry.tactical?.freshness ?? null,
         timeframe: ENGINE29_TIMEFRAMES.TACTICAL,
         swingLeft: 2,
         swingRight: 2,
@@ -137,17 +183,21 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
       })
     : null;
 
-  const fastTactical = symbolEntry.fastTactical?.bars?.length
-    ? buildOneTimeframe({
-        ...common,
-        bars: symbolEntry.fastTactical.bars,
-        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
-        swingLeft: 2,
-        swingRight: 2,
-        supportLookbackBars: 160,
-        testingThresholdPct: 0.5,
-      })
-    : null;
+  const fastTactical =
+    symbolEntry.fastTactical?.bars?.length
+      ? buildOneTimeframe({
+          ...common,
+          bars: symbolEntry.fastTactical.bars,
+          freshness:
+            symbolEntry.fastTactical?.freshness ?? null,
+          timeframe:
+            ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+          swingLeft: 2,
+          swingRight: 2,
+          supportLookbackBars: 160,
+          testingThresholdPct: 0.5,
+        })
+      : null;
 
   return {
     canonicalSymbol: symbolEntry.canonicalSymbol,
@@ -162,11 +212,15 @@ export function buildEngine29SymbolStructure(symbolEntry, { now = Date.now() } =
     proxyFor: symbolEntry.proxyFor,
     evidenceQuality: symbolEntry.evidenceQuality,
     available: symbolEntry.available,
+
     structural,
+
     tactical,
     tacticalAvailable: Boolean(tactical),
+
     fastTactical,
     fastTacticalAvailable: Boolean(fastTactical),
+
     errors: symbolEntry.errors || [],
   };
 }
