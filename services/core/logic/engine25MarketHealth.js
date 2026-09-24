@@ -507,26 +507,165 @@ function scoreMarketTrend(marketData) {
   };
 }
 
-function scoreVolatility(marketData) {
+function scoreVolatility(marketData, engine29Data = null) {
   const uvxy = getSymbol(marketData, "volatility", "UVXY");
 
-  const emaScore = avg([
-    boolScore(uvxy?.aboveEma10, 0, 100),
-    boolScore(uvxy?.aboveEma20, 0, 100),
-    boolScore(uvxy?.aboveEma50, 0, 100),
-    boolScore(uvxy?.aboveEma200, 0, 100),
-  ]);
+  function fallbackUvxy() {
+    const emaScore = avg([
+      boolScore(uvxy?.aboveEma10, 0, 100),
+      boolScore(uvxy?.aboveEma20, 0, 100),
+      boolScore(uvxy?.aboveEma50, 0, 100),
+      boolScore(uvxy?.aboveEma200, 0, 100),
+    ]);
 
-  const changeScore = scoreInverse(uvxy?.pctChange20d, -10, 25);
+    const changeScore = scoreInverse(uvxy?.pctChange20d, -10, 25);
 
+    const score = weightedAvg([
+      { value: emaScore, weight: 0.65 },
+      { value: changeScore, weight: 0.35 },
+    ]);
+
+    const warnings = [];
+    if (
+      uvxy?.aboveEma10 === true ||
+      (isNum(uvxy?.pctChange5d) && uvxy.pctChange5d > 10)
+    ) {
+      warnings.push("UVXY volatility pressure rising");
+    }
+
+    return {
+      score,
+      label:
+        score >= 75
+          ? "VOLATILITY_CALM"
+          : score >= 50
+            ? "VOLATILITY_NORMAL"
+            : "VOLATILITY_RISING",
+      authority: "UVXY_FALLBACK",
+      primarySource: "UVXY",
+      fallbackUsed: true,
+      inputs: {
+        UVXY: uvxy,
+        emaScore,
+        changeScore,
+      },
+      warnings,
+    };
+  }
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const volatilityGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "volatility"
+  );
+
+  const vix = engine29Data?.symbols?.VIX || null;
+  const volatilityGroup = engine29Data?.groups?.volatility || null;
+
+  const directVix =
+    vix &&
+    String(vix?.sourceSymbol || "").toUpperCase() === "I:VIX" &&
+    vix?.isProxy !== true &&
+    String(vix?.evidenceQuality || "").toUpperCase() === "DIRECT";
+
+  const structuralFresh = vix?.structural?.freshness?.stale !== true;
+  const tacticalFresh = vix?.tactical?.freshness?.stale !== true;
+  const fastFresh = vix?.fastTactical?.freshness?.stale !== true;
+
+  const structuralState = volatilityGroup?.structural?.state || null;
+  const tacticalState = volatilityGroup?.tactical?.state || null;
+  const fastState = volatilityGroup?.fastTactical?.state || null;
+
+  const hasCanonicalStates =
+    Boolean(structuralState) &&
+    Boolean(tacticalState) &&
+    Boolean(fastState);
+
+  const engine29Usable =
+    directVix &&
+    !volatilityGroupDegraded &&
+    structuralFresh &&
+    tacticalFresh &&
+    fastFresh &&
+    hasCanonicalStates;
+
+  if (!engine29Usable) {
+    const fallback = fallbackUvxy();
+
+    return {
+      ...fallback,
+      engine29VixAuthorityAvailable: false,
+      engine29FallbackReason: !engine29Data
+        ? "ENGINE29_UNAVAILABLE"
+        : !directVix
+          ? "DIRECT_VIX_UNAVAILABLE"
+          : volatilityGroupDegraded
+            ? "VOLATILITY_GROUP_DEGRADED"
+            : !structuralFresh || !tacticalFresh || !fastFresh
+              ? "VIX_STALE"
+              : "VIX_CANONICAL_STATES_UNAVAILABLE",
+      engine29: {
+        directVix,
+        volatilityGroupDegraded,
+        structuralFresh,
+        tacticalFresh,
+        fastFresh,
+        structuralState,
+        tacticalState,
+        fastState,
+      },
+    };
+  }
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  /*
+   * Engine 25 volatility remains a HEALTH score:
+   * higher = calmer / more supportive for equities.
+   *
+   * Engine 29 is now the primary reaction authority.
+   * Weight the 1H + 30m reaction more heavily than the 1W regime so
+   * current volatility expansion can reduce permission before the
+   * structural regime fully changes.
+   */
   const score = weightedAvg([
-    { value: emaScore, weight: 0.65 },
-    { value: changeScore, weight: 0.35 },
+    { value: structuralScore, weight: 0.20 },
+    { value: tacticalScore, weight: 0.40 },
+    { value: fastScore, weight: 0.40 },
   ]);
 
   const warnings = [];
-  if (uvxy?.aboveEma10 === true || (isNum(uvxy?.pctChange5d) && uvxy.pctChange5d > 10)) {
-    warnings.push("UVXY volatility pressure rising");
+
+  if (fastState === "CONFIRMED" || fastState === "SEVERE") {
+    warnings.push("Direct VIX fast volatility pressure confirmed");
+  }
+
+  if (tacticalState === "CONFIRMED" || tacticalState === "SEVERE") {
+    warnings.push("Direct VIX 1H volatility pressure confirmed");
+  }
+
+  if (structuralState === "CONFIRMED" || structuralState === "SEVERE") {
+    warnings.push("Direct VIX structural volatility stress elevated");
+  }
+
+  if (tacticalState === "FORMING" || fastState === "FORMING") {
+    warnings.push("Direct VIX volatility pressure forming");
   }
 
   return {
@@ -537,11 +676,29 @@ function scoreVolatility(marketData) {
         : score >= 50
           ? "VOLATILITY_NORMAL"
           : "VOLATILITY_RISING",
+
+    authority: "ENGINE29_DIRECT_VIX",
+    primarySource: "I:VIX",
+    fallbackUsed: false,
+    engine29VixAuthorityAvailable: true,
+
     inputs: {
-      UVXY: uvxy,
-      emaScore,
-      changeScore,
+      VIX: {
+        sourceSymbol: vix?.sourceSymbol || null,
+        evidenceQuality: vix?.evidenceQuality || null,
+        structural: vix?.structural || null,
+        tactical: vix?.tactical || null,
+        fastTactical: vix?.fastTactical || null,
+      },
+      engine29VolatilityGroup: volatilityGroup,
+      stateHealthScores: {
+        structural: structuralScore,
+        tactical: tacticalScore,
+        fastTactical: fastScore,
+      },
+      UVXYFallbackContext: uvxy,
     },
+
     warnings,
   };
 }
@@ -1335,6 +1492,7 @@ export function computeEngine25MarketHealth({
   fmpData = null,
   sectorHealthData = null,
   esTechnicalContextData = null,
+  engine29Data = null,
 } = {}) {
   
   const labor = scoreLabor(macroData);
@@ -1344,7 +1502,7 @@ export function computeEngine25MarketHealth({
   const inflation = scoreInflation(macroData);
 
   const marketTrend = scoreMarketTrend(marketData);
-  const volatility = scoreVolatility(marketData);
+  const volatility = scoreVolatility(marketData, engine29Data);
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
   const creditFragility = scoreCreditFragility(marketData);
