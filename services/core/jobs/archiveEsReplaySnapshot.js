@@ -452,56 +452,286 @@ function determineSnapshotTime(
   );
 }
 
-function buildCanonicalStrategies(source) {
-  const sourceStrategies = isObject(source?.strategies)
-    ? source.strategies
-    : {};
+function compactEngine3EvidenceStackForReplay(
+  stack
+) {
+  if (!isObject(stack)) {
+    return stack ?? null;
+  }
 
-  // Preserve every emitted strategy lane while applying the one
-  // manager-approved Replay-only optimization:
-  //
-  // - omit strategies[*].analytics.engine5
-  // - omit analytics only when that removal leaves analytics empty
-  //
-  // No other strategy field, value, array, null, false value,
-  // identity, timestamp, lifecycle object, or evidence branch changes.
+  /*
+   * These three branches contain the overwhelming majority
+   * of repeated OHLC/candle history.
+   *
+   * Engine 3 has already converted them into:
+   * approach / contact / reaction / follow-through /
+   * sequence / control / quality.
+   */
+  const {
+    normalized: _omittedNormalized,
+    candleFacts: _omittedCandleFacts,
+    zoneRelation: _omittedZoneRelation,
+    ...causalEvidence
+  } = stack;
+
+  return {
+    ...causalEvidence,
+
+    replayRawMarketDataOmitted: true,
+
+    normalizedSummary:
+      isObject(_omittedNormalized)
+        ? {
+            validBarCount:
+              _omittedNormalized.validBarCount ??
+              null,
+
+            invalidBarCount:
+              _omittedNormalized.invalidBarCount ??
+              null,
+
+            sourceBarCount:
+              _omittedNormalized.sourceBarCount ??
+              null,
+          }
+        : null,
+  };
+}
+
+function compactEngine3TimeframeForReplay(
+  timeframeEvidence
+) {
+  if (!isObject(timeframeEvidence)) {
+    return timeframeEvidence ?? null;
+  }
+
+  return {
+    ...timeframeEvidence,
+
+    current:
+      compactEngine3EvidenceStackForReplay(
+        timeframeEvidence.current
+      ),
+
+    completed:
+      compactEngine3EvidenceStackForReplay(
+        timeframeEvidence.completed
+      ),
+
+    replayProjection:
+      "ENGINE3_CAUSAL_EVIDENCE_NO_RAW_BAR_HISTORY",
+  };
+}
+
+function compactEngine3V5ForReplay(
+  engine3V5
+) {
+  if (!isObject(engine3V5)) {
+    return engine3V5 ?? null;
+  }
+
+  const evidence =
+    isObject(engine3V5.evidence)
+      ? engine3V5.evidence
+      : {};
+
+  const trace =
+    isObject(engine3V5.trace)
+      ? engine3V5.trace
+      : null;
+
+  /*
+   * trace.evidence is effectively another copy of the
+   * already-published Engine 3 evidence tree.
+   *
+   * Preserve the rest of trace because it is small and useful
+   * for historical attribution.
+   */
+  let replayTrace = trace;
+
+  if (trace) {
+    const {
+      evidence: _omittedTraceEvidence,
+      ...remainingTrace
+    } = trace;
+
+    replayTrace = {
+      ...remainingTrace,
+
+      replayEvidenceOmitted:
+        true,
+
+      replayEvidenceSource:
+        "engine3V5.evidence",
+    };
+  }
+
+  return {
+    ...engine3V5,
+
+    evidence: {
+      ...evidence,
+
+      oneMinute:
+        compactEngine3TimeframeForReplay(
+          evidence.oneMinute
+        ),
+
+      fiveMinute:
+        compactEngine3TimeframeForReplay(
+          evidence.fiveMinute
+        ),
+
+      tenMinute:
+        compactEngine3TimeframeForReplay(
+          evidence.tenMinute
+        ),
+    },
+
+    trace:
+      replayTrace,
+
+    replayProjection: {
+      active: true,
+
+      version:
+        "engine3.v5.replay.compact.v1",
+
+      preserves: [
+        "CANONICAL_DIRECTION",
+        "STATE_MACHINE_TRANSITIONS",
+        "BUYER_SELLER_CONTROL",
+        "REACTION_AND_FOLLOW_THROUGH",
+        "1M_DIAGNOSTIC_CONCLUSIONS",
+        "COMPLETED_5M_CONTROL",
+        "10M_CONTEXT_AND_TRAVEL",
+        "CANDIDATE_ZONE_IDENTITY",
+        "BLOCKERS",
+        "REASON_CODES",
+        "TRADE_LIFECYCLE",
+      ],
+
+      omits: [
+        "TRACE_DUPLICATE_EVIDENCE_TREE",
+        "NORMALIZED_BAR_ARRAYS",
+        "CANDLE_FACT_HISTORY_ARRAYS",
+        "ZONE_RELATION_HISTORY_ARRAYS",
+      ],
+
+      tradingLogicChanged:
+        false,
+    },
+  };
+}
+
+function compactEngine3InStrategyForReplay(
+  strategy
+) {
+  if (!isObject(strategy)) {
+    return strategy;
+  }
+
+  const reaction =
+    strategy
+      ?.confluence
+      ?.context
+      ?.reaction;
+
+  if (
+    !isObject(reaction) ||
+    !isObject(reaction.engine3V5)
+  ) {
+    return strategy;
+  }
+
+  return {
+    ...strategy,
+
+    confluence: {
+      ...strategy.confluence,
+
+      context: {
+        ...strategy.confluence.context,
+
+        reaction: {
+          ...reaction,
+
+          engine3V5:
+            compactEngine3V5ForReplay(
+              reaction.engine3V5
+            ),
+        },
+      },
+    },
+  };
+}
+
+function buildCanonicalStrategies(source) {
+  const sourceStrategies =
+    isObject(source?.strategies)
+      ? source.strategies
+      : {};
+
   return Object.fromEntries(
     Object.entries(sourceStrategies).map(
       ([strategyId, strategy]) => {
         if (!isObject(strategy)) {
-          return [strategyId, strategy];
+          return [
+            strategyId,
+            strategy,
+          ];
         }
 
-        const analytics = strategy.analytics;
+        let replayStrategy = {
+          ...strategy,
+        };
+
+        /*
+         * Existing Replay optimization:
+         * omit analytics.engine5 only.
+         */
+        const analytics =
+          replayStrategy.analytics;
 
         if (
-          !isObject(analytics) ||
-          !Object.prototype.hasOwnProperty.call(
+          isObject(analytics) &&
+          Object.prototype.hasOwnProperty.call(
             analytics,
             "engine5"
           )
         ) {
-          return [strategyId, strategy];
+          const {
+            engine5: _omittedEngine5,
+            ...remainingAnalytics
+          } = analytics;
+
+          if (
+            Object.keys(
+              remainingAnalytics
+            ).length > 0
+          ) {
+            replayStrategy.analytics =
+              remainingAnalytics;
+          } else {
+            delete replayStrategy.analytics;
+          }
         }
 
-        const {
-          engine5: _omittedEngine5,
-          ...remainingAnalytics
-        } = analytics;
-
-        const replayStrategy = {
-          ...strategy,
-        };
-
+        /*
+         * Engine 3 Replay storage optimization.
+         *
+         * LIVE Engine 3 remains unchanged.
+         *
+         * Only the archived Replay copy is compacted.
+         */
         if (
-          Object.keys(
-            remainingAnalytics
-          ).length > 0
+          strategyId ===
+          "intraday_scalp@10m"
         ) {
-          replayStrategy.analytics =
-            remainingAnalytics;
-        } else {
-          delete replayStrategy.analytics;
+          replayStrategy =
+            compactEngine3InStrategyForReplay(
+              replayStrategy
+            );
         }
 
         return [
@@ -512,7 +742,6 @@ function buildCanonicalStrategies(source) {
     )
   );
 }
-
 function buildCanonicalReplaySnapshot(
   source,
   parts,
