@@ -1,5 +1,5 @@
 // services/core/logic/engine25Engine29Parity.js
-// Engine 25 ↔ Engine 29 parity diagnostics v0.1
+// Engine 25 ↔ Engine 29 parity diagnostics v0.2
 //
 // READ-ONLY DIAGNOSTIC LAYER.
 // This module does NOT create or modify:
@@ -27,7 +27,7 @@ const ENGINE29_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 const ENGINE25_MARKET_HEALTH_FILE = path.join(DATA_DIR, "engine25-market-health.json");
 
 export const ENGINE25_ENGINE29_PARITY_VERSION =
-  "engine25.engine29Parity.v0.1";
+  "engine25.engine29Parity.v0.2";
 
 export const PARITY_RESULTS = Object.freeze({
   MATCH: "MATCH",
@@ -144,7 +144,7 @@ function engine29Snapshot(engine29, symbol, layerName) {
   };
 }
 
-function isEngine29StaleOrDegraded(engine29, symbol, layerName, groupName = null) {
+function isEngine29SymbolStaleOrUnavailable(engine29, symbol, layerName) {
   const snapshot = engine29Snapshot(engine29, symbol, layerName);
   const freshness = snapshot?.freshness;
 
@@ -156,17 +156,23 @@ function isEngine29StaleOrDegraded(engine29, symbol, layerName, groupName = null
     !getEngine29Symbol(engine29, symbol) ||
     snapshot.value === null;
 
+  return stale || symbolMissing;
+}
+
+function engine29GroupQuality(engine29, groupName) {
   const degradedGroups = Array.isArray(engine29?.dataQuality?.degradedGroups)
     ? engine29.dataQuality.degradedGroups
     : [];
 
-  const groupDegraded =
-    groupName &&
-    degradedGroups.some(
-      (group) => String(group || "").toLowerCase() === String(groupName).toLowerCase()
-    );
+  const degraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === String(groupName || "").toLowerCase()
+  );
 
-  return stale || symbolMissing || groupDegraded;
+  return {
+    group: groupName || null,
+    status: degraded ? "DEGRADED" : "OK",
+    degraded,
+  };
 }
 
 function comparePercentValues(a, b, {
@@ -233,15 +239,17 @@ function wrapComparison({
   engine25,
   engine29,
   comparison,
-  engine29Degraded = false,
+  engine29SymbolStaleOrUnavailable = false,
+  groupQuality = null,
   note = null,
 } = {}) {
-  const result = engine29Degraded
+  const result = engine29SymbolStaleOrUnavailable
     ? PARITY_RESULTS.STALE_OR_DEGRADED
     : comparison?.result || PARITY_RESULTS.UNAVAILABLE;
 
   return {
     result,
+    groupQuality,
     engine25,
     engine29,
     difference: comparison
@@ -301,7 +309,7 @@ function compareCreditSymbol({
   const left = engine25DailyMarketSnapshot(engine25Item, symbol);
   const right = engine29Snapshot(engine29, symbol, engine29Layer);
 
-  const degraded = isEngine29StaleOrDegraded(
+  const degraded = isEngine29SymbolStaleOrUnavailable(
     engine29,
     symbol,
     engine29Layer,
@@ -315,7 +323,8 @@ function compareCreditSymbol({
       matchPct: 0.25,
       minorPct: 1.0,
     }),
-    engine29Degraded: degraded,
+    engine29SymbolStaleOrUnavailable: degraded,
+    groupQuality: engine29GroupQuality(engine29, "credit"),
     note:
       "Engine 25 uses daily market-health structure while Engine 29 tactical uses 1H reaction. Price parity is diagnostic only; normalized reaction authority remains separate during Phase 1.",
   });
@@ -379,12 +388,12 @@ export function buildEngine25Engine29Parity({
         engine25: wti25,
         engine29: wti29,
         comparison: comparePercentValues(wti25.value, wti29.value),
-        engine29Degraded: isEngine29StaleOrDegraded(
+        engine29SymbolStaleOrUnavailable: isEngine29SymbolStaleOrUnavailable(
           e29,
           "WTI",
-          "fastTactical",
-          "energyInflation"
+          "fastTactical"
         ),
+        groupQuality: engine29GroupQuality(e29, "energyInflation"),
         note: "Engine25 CL vs Engine29 WTI/CL.",
       }),
 
@@ -392,12 +401,12 @@ export function buildEngine25Engine29Parity({
         engine25: brent25,
         engine29: brent29,
         comparison: comparePercentValues(brent25.value, brent29.value),
-        engine29Degraded: isEngine29StaleOrDegraded(
+        engine29SymbolStaleOrUnavailable: isEngine29SymbolStaleOrUnavailable(
           e29,
           "BRENT",
-          "fastTactical",
-          "energyInflation"
+          "fastTactical"
         ),
+        groupQuality: engine29GroupQuality(e29, "energyInflation"),
         note: "Engine25 BZ vs Engine29 BRENT/BZ.",
       }),
 
@@ -421,12 +430,12 @@ export function buildEngine25Engine29Parity({
           matchPct: 0.2,
           minorPct: 0.8,
         }),
-        engine29Degraded: isEngine29StaleOrDegraded(
+        engine29SymbolStaleOrUnavailable: isEngine29SymbolStaleOrUnavailable(
           e29,
           "TLT",
-          "tactical",
-          "ratesDuration"
+          "tactical"
         ),
+        groupQuality: engine29GroupQuality(e29, "ratesDuration"),
         note: "Engine25 5m/10m TLT vs Engine29 1H TLT. Diagnostic timeframe mismatch is preserved.",
       }),
     },
@@ -436,12 +445,12 @@ export function buildEngine25Engine29Parity({
         engine25: dgs1025,
         engine29: dgs1029,
         comparison: compareYieldValues(dgs1025.value, dgs1029.value),
-        engine29Degraded: isEngine29StaleOrDegraded(
+        engine29SymbolStaleOrUnavailable: isEngine29SymbolStaleOrUnavailable(
           e29,
           "US10Y",
-          "structural",
-          "ratesDuration"
+          "structural"
         ),
+        groupQuality: engine29GroupQuality(e29, "ratesDuration"),
         note: "Both are slow official-yield context. Engine25 ZN remains separate live Treasury evidence.",
       }),
 
@@ -449,12 +458,12 @@ export function buildEngine25Engine29Parity({
         engine25: dgs3025,
         engine29: dgs3029,
         comparison: compareYieldValues(dgs3025.value, dgs3029.value),
-        engine29Degraded: isEngine29StaleOrDegraded(
+        engine29SymbolStaleOrUnavailable: isEngine29SymbolStaleOrUnavailable(
           e29,
           "US30Y",
-          "structural",
-          "ratesDuration"
+          "structural"
         ),
+        groupQuality: engine29GroupQuality(e29, "ratesDuration"),
         note: "Both are slow official-yield context. Engine25 ZB remains separate live Treasury evidence.",
       }),
 
@@ -554,13 +563,20 @@ export function buildEngine25Engine29Parity({
     overallResult = PARITY_RESULTS.UNAVAILABLE;
   }
 
+  const degradedGroups = Array.isArray(e29?.dataQuality?.degradedGroups)
+    ? e29.dataQuality.degradedGroups
+    : [];
+
   return {
     ok: true,
-    version: ENGINE25_ENGINE29_PARITY_VERSION,
+    version: "engine25.engine29Parity.v0.2",
     mode: "READ_ONLY_DIAGNOSTIC",
     generatedAtUtc: new Date(safeNowMs).toISOString(),
 
     result: overallResult,
+    dataParity: overallResult,
+    engine29Quality: e29?.dataDegraded === true ? "DEGRADED" : "OK",
+    degradedGroups,
 
     authorityChanged: false,
     engine25StillAuthoritative: true,
@@ -575,9 +591,7 @@ export function buildEngine25Engine29Parity({
       tacticalState: e29?.tacticalState || null,
       fastTacticalState: e29?.fastTacticalState || null,
       dataDegraded: e29?.dataDegraded === true,
-      degradedGroups: Array.isArray(e29?.dataQuality?.degradedGroups)
-        ? e29.dataQuality.degradedGroups
-        : [],
+      degradedGroups,
       missingConfirmations: Array.isArray(e29?.missingConfirmations)
         ? e29.missingConfirmations
         : [],
