@@ -16,6 +16,7 @@ const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
 const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
 const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
+const ENGINE29_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 
 const OUTPUT_FILE = path.join(DATA_DIR, "engine25-market-health.json");
 const INTRADAY_DAMAGE_FILE = path.join(DATA_DIR, "engine25-intraday-proxy-damage.json");
@@ -534,6 +535,7 @@ async function main() {
     const fmpData = readJsonSafe(FMP_FILE, false);
     const sectorHealthData = readJsonSafe(SECTOR_FILE, false);
     const esTechnicalContextData = readJsonSafe(ES_TECH_FILE, false);
+    const engine29Data = readJsonSafe(ENGINE29_FILE, false);
 
     const baseResult = computeEngine25MarketHealth({
       macroData,
@@ -541,6 +543,7 @@ async function main() {
       fmpData,
       sectorHealthData,
       esTechnicalContextData,
+      engine29Data,
     });
 
     const intradayProxyDamage = await buildIntradayProxyDamage();
@@ -574,6 +577,19 @@ async function main() {
           bias: result.bias,
           riskLevel: result.riskLevel,
           tacticalOverride: result.tacticalOverride ?? null,
+          volatilityAuthority: result.components?.volatility
+            ? {
+                score: result.components.volatility.score,
+                label: result.components.volatility.label,
+                authority: result.components.volatility.authority,
+                primarySource: result.components.volatility.primarySource,
+                fallbackUsed: result.components.volatility.fallbackUsed,
+                engine29VixAuthorityAvailable:
+                  result.components.volatility.engine29VixAuthorityAvailable,
+                engine29FallbackReason:
+                  result.components.volatility.engine29FallbackReason ?? null,
+              }
+            : null,
           intradayProxyDamage: {
             score: intradayProxyDamage.score,
             label: intradayProxyDamage.label,
