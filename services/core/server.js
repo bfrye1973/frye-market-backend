@@ -35,6 +35,7 @@ import { momentumContextRouter } from "./routes/momentumContext.js";
 import scalpLabRouter from "./routes/scalpLab.js";
 
 import runAllEnginesRouter from "./routes/runAllEngines.js";
+import engine12StorageMaintenanceRouter from "./routes/engine12StorageMaintenance.js";
 import { fibLevelsRouter } from "./routes/fibLevels.js";
 import { activeWaveStateRouter } from "./routes/activeWaveState.js";
 import { tradePermissionRouter } from "./routes/tradePermission.js";
@@ -176,6 +177,7 @@ app.use("/api/v1", chartOverlayRouter);
 app.use("/api/v1", tradeJournalRouter);
 app.use("/api/v1", runShelvesJobRouter);
 app.use("/api/v1", runAllEnginesRouter);
+app.use("/api/v1", engine12StorageMaintenanceRouter);
 app.use("/api/v1", tradePermissionRouter);
 app.use("/api/v1", engine15AlertsRouter);
 app.use("/api/v1", engine21AlignmentRoute);
