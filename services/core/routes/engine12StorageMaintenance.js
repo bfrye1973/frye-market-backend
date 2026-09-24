@@ -4,11 +4,14 @@
 // Contract:
 // - Separate from the existing Replay/run-all-engines cadence.
 // - Intended for the approved once-daily 00:15 America/Phoenix schedule.
-// - Uses the same ENGINE_CRON_TOKEN auth pattern as scheduled engine routes.
+// - Requires ENGINE_CRON_TOKEN unconditionally (fail closed if missing).
+// - Accepts auth only from the X-ENGINE-CRON-TOKEN request header.
+// - Never accepts the token from the URL/query string.
 // - Defaults to dry-run.
 // - Live deletion additionally requires BOTH an explicit live request and
 //   ENGINE12_RETENTION_ENABLED=true inside cleanupEsReplayRetention.js.
 
+import crypto from "crypto";
 import express from "express";
 import { runReplayRetention } from "../jobs/cleanupEsReplayRetention.js";
 
@@ -16,20 +19,33 @@ const router = express.Router();
 
 let IS_RUNNING = false;
 
+function constantTimeEqual(a, b) {
+  const aBuf = Buffer.from(String(a ?? ""), "utf8");
+  const bBuf = Buffer.from(String(b ?? ""), "utf8");
+
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
 function checkToken(req) {
-  const expected = process.env.ENGINE_CRON_TOKEN;
-  if (!expected) return { ok: true };
+  const expected = String(process.env.ENGINE_CRON_TOKEN ?? "").trim();
 
-  const got =
-    req.header("X-ENGINE-CRON-TOKEN") ||
-    req.query.token ||
-    "";
+  // Fail closed when production auth is not configured.
+  if (!expected) {
+    return {
+      ok: false,
+      status: 503,
+      error: "ENGINE12_CRON_AUTH_NOT_CONFIGURED",
+    };
+  }
 
-  if (got !== expected) {
+  const got = String(req.header("X-ENGINE-CRON-TOKEN") ?? "");
+
+  if (!got || !constantTimeEqual(got, expected)) {
     return {
       ok: false,
       status: 401,
-      msg: "Unauthorized",
+      error: "UNAUTHORIZED",
     };
   }
 
@@ -37,9 +53,7 @@ function checkToken(req) {
 }
 
 function parseBoolean(value) {
-  return /^(1|true|yes|on)$/i.test(
-    String(value ?? "").trim()
-  );
+  return /^(1|true|yes|on)$/i.test(String(value ?? "").trim());
 }
 
 function liveRequested(req) {
@@ -62,7 +76,7 @@ function handle(req, res) {
   if (!auth.ok) {
     return res.status(auth.status).json({
       ok: false,
-      error: auth.msg,
+      error: auth.error,
     });
   }
 
