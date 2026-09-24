@@ -288,19 +288,22 @@ function ageSeconds(nowMs, instantMs) {
   return Math.max(0, Math.floor((nowMs - instantMs) / 1000));
 }
 
-function sourceSnapshotInfo(sourceFile, nowMs) {
-  if (!sourceFile) {
-    return {
-      sourceSnapshotTimestamp: null,
-      sourceSnapshotAgeSeconds: null,
-    };
-  }
+function sourceSnapshotInfo(
+  sourceFile,
+  nowMs,
+  preferredTimestamp = null,
+  fallbackTimestamp = null
+) {
+  const source = sourceFile
+    ? readJsonSafe(sourceFile)
+    : null;
 
-  const source = readJsonSafe(sourceFile);
   const timestamp =
+    preferredTimestamp ??
     source?.snapshotTime ??
     source?.generatedAtUtc ??
     source?.updatedAt ??
+    fallbackTimestamp ??
     null;
 
   if (!timestamp) {
@@ -390,7 +393,12 @@ export function updateEngine12StorageHealth({
     normalizedReplayRoot,
     phoenix.dateYmd
   );
-  const source = sourceSnapshotInfo(sourceFile, nowMs);
+  const source = sourceSnapshotInfo(
+    sourceFile,
+    nowMs,
+    replayResult?.snapshotTime ?? null,
+    previous.sourceSnapshotTimestamp ?? null
+  );
 
   const latestInstant = latest
     ? replayInstantMs(latest.dateYmd, latest.timeHHMM)
