@@ -280,6 +280,23 @@ export function runDirectionStateMachine({
     priceActionHandoff?.controlResolved === true &&
     isDirectional(candidateDirection);
 
+  /*
+   * Fresh canonical direction quality gate.
+   *
+   * BUYERS_CONTROL / SELLERS_CONTROL may be resolved while the broader
+   * evidence quality is still MIXED or WEAK.  That is useful diagnostic
+   * information, but it is not mature enough to create a brand-new
+   * canonical LONG / SHORT from NEUTRAL.
+   *
+   * GOOD or STRONG is required only for NEW direction establishment.
+   * Existing-direction persistence remains owned by the surrounding
+   * lifecycle rules (5m same-side support pre-trade, 10m/EMA10 after
+   * confirmed departure, and open-trade direction lock upstream).
+   */
+  const freshDirectionQualityQualified =
+    quality === "GOOD" ||
+    quality === "STRONG";
+
   const reversalEvidence =
     resolveCanonicalReversalEvidence({
       previousDirection,
@@ -341,6 +358,10 @@ export function runDirectionStateMachine({
         directionalControlResolved
           ? "ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_RESOLVED"
           : "ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_NOT_RESOLVED",
+
+        freshDirectionQualityQualified
+          ? "ENGINE3_V5_FRESH_DIRECTION_QUALITY_QUALIFIED"
+          : "ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED",
 
         candidateIdentityChanged
           ? "ENGINE3_V5_CANDIDATE_IDENTITY_CHANGED"
@@ -553,6 +574,35 @@ export function runDirectionStateMachine({
     directionalControlResolved === true
   ) {
     if (previousDirection === "NEUTRAL") {
+      if (freshDirectionQualityQualified !== true) {
+        return {
+          ...base,
+
+          direction:
+            "NEUTRAL",
+
+          mode:
+            "PRICE_ACTION_CONTROL",
+
+          stateTransition:
+            "NEUTRAL_HELD",
+
+          heldNow: true,
+
+          canonicalSource:
+            "WAITING_FOR_QUALITY_QUALIFIED_PRICE_ACTION_CONTROL",
+
+          reasonCodes: [
+            ...base.reasonCodes,
+            "ENGINE3_V5_DIRECTIONAL_CONTROL_PRESENT_BUT_QUALITY_NOT_QUALIFIED",
+            `ENGINE3_V5_CONTROL_${controlState}`,
+            `ENGINE3_V5_QUALITY_${quality}`,
+            "ENGINE3_V5_FRESH_DIRECTION_REQUIRES_GOOD_OR_STRONG_QUALITY",
+            "ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL",
+          ],
+        };
+      }
+
       return {
         ...base,
 
@@ -573,7 +623,9 @@ export function runDirectionStateMachine({
         reasonCodes: [
           ...base.reasonCodes,
           "ENGINE3_V5_PRICE_ACTION_CONTROL_ESTABLISHED_CANONICAL_DIRECTION",
+          "ENGINE3_V5_FRESH_DIRECTION_QUALITY_QUALIFIED",
           `ENGINE3_V5_CONTROL_${controlState}`,
+          `ENGINE3_V5_QUALITY_${quality}`,
           `ENGINE3_V5_CANONICAL_DIRECTION_${candidateDirection}`,
         ],
       };
