@@ -1552,6 +1552,173 @@ function scoreBreadthParticipation(sectorHealthData) {
   };
 }
 
+
+function buildPrimaryBreadthParticipation(engine29Data, legacyBreadthParticipation) {
+  const breadthGroup = engine29Data?.groups?.breadth || null;
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const breadthGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "breadth"
+  );
+
+  const structuralState = breadthGroup?.structural?.state || null;
+  const tacticalState = breadthGroup?.tactical?.state || null;
+  const fastState = breadthGroup?.fastTactical?.state || null;
+
+  const layerDegraded =
+    breadthGroup?.structural?.dataDegraded === true ||
+    breadthGroup?.tactical?.dataDegraded === true ||
+    breadthGroup?.fastTactical?.dataDegraded === true;
+
+  const missingRequiredMembers = [
+    ...(Array.isArray(breadthGroup?.structural?.missingRequiredMembers)
+      ? breadthGroup.structural.missingRequiredMembers
+      : []),
+    ...(Array.isArray(breadthGroup?.tactical?.missingRequiredMembers)
+      ? breadthGroup.tactical.missingRequiredMembers
+      : []),
+    ...(Array.isArray(breadthGroup?.fastTactical?.missingRequiredMembers)
+      ? breadthGroup.fastTactical.missingRequiredMembers
+      : []),
+  ];
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  const hasCanonicalStates =
+    Number.isFinite(Number(structuralScore)) &&
+    Number.isFinite(Number(tacticalScore)) &&
+    Number.isFinite(Number(fastScore));
+
+  const engine29Usable =
+    Boolean(engine29Data) &&
+    Boolean(breadthGroup) &&
+    !breadthGroupDegraded &&
+    !layerDegraded &&
+    missingRequiredMembers.length === 0 &&
+    hasCanonicalStates;
+
+  if (!engine29Usable) {
+    return {
+      ...(legacyBreadthParticipation || {}),
+      authority: "ENGINE25_LEGACY_BREADTH_FALLBACK",
+      primarySource: "ENGINE25_SECTOR_BREADTH",
+      fallbackUsed: true,
+      engine29BreadthAuthorityAvailable: false,
+      engine29FallbackReason: !engine29Data
+        ? "ENGINE29_UNAVAILABLE"
+        : !breadthGroup
+          ? "ENGINE29_BREADTH_GROUP_UNAVAILABLE"
+          : breadthGroupDegraded
+            ? "ENGINE29_BREADTH_GROUP_DEGRADED"
+            : layerDegraded
+              ? "ENGINE29_BREADTH_LAYER_DEGRADED"
+              : missingRequiredMembers.length > 0
+                ? "ENGINE29_BREADTH_REQUIRED_MEMBER_MISSING"
+                : "ENGINE29_BREADTH_CANONICAL_STATES_UNAVAILABLE",
+      engine29: {
+        structural1wState: structuralState,
+        tactical1hState: tacticalState,
+        fast30mState: fastState,
+        groupDegraded: breadthGroupDegraded,
+        layerDegraded,
+        missingRequiredMembers,
+      },
+    };
+  }
+
+  const score = weightedAvg([
+    { value: structuralScore, weight: 0.20 },
+    { value: tacticalScore, weight: 0.40 },
+    { value: fastScore, weight: 0.40 },
+  ]);
+
+  const structuralStressConfirmed =
+    structuralState === "CONFIRMED" || structuralState === "SEVERE";
+  const tacticalStressConfirmed =
+    tacticalState === "CONFIRMED" || tacticalState === "SEVERE";
+  const fastStressConfirmed =
+    fastState === "CONFIRMED" || fastState === "SEVERE";
+
+  const warnings = [];
+
+  if (structuralStressConfirmed) {
+    warnings.push("Engine 29 structural breadth deterioration confirmed");
+  }
+
+  if (tacticalStressConfirmed) {
+    warnings.push("Engine 29 1H breadth deterioration confirmed");
+  } else if (tacticalState === "FORMING") {
+    warnings.push("Engine 29 1H breadth deterioration forming");
+  }
+
+  if (fastStressConfirmed) {
+    warnings.push("Engine 29 30m breadth deterioration confirmed");
+  } else if (fastState === "FORMING") {
+    warnings.push("Engine 29 30m breadth deterioration forming");
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "BREADTH_PARTICIPATION_STRONG"
+        : score >= 55
+          ? "BREADTH_PARTICIPATION_MIXED"
+          : score >= 35
+            ? "BREADTH_PARTICIPATION_WEAK"
+            : "BREADTH_PARTICIPATION_SEVERE",
+
+    authority: "ENGINE29_GROUPS_BREADTH_PRIMARY",
+    primarySource: "ENGINE29_GROUPS_BREADTH",
+    fallbackUsed: false,
+    engine29BreadthAuthorityAvailable: true,
+
+    structural1wState: structuralState,
+    tactical1hState: tacticalState,
+    fast30mState: fastState,
+
+    structuralStressConfirmed,
+    tacticalStressConfirmed,
+    fastStressConfirmed,
+
+    stateHealthScores: {
+      structural: structuralScore,
+      tactical: tacticalScore,
+      fastTactical: fastScore,
+    },
+
+    formula:
+      "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+
+    inputs: {
+      engine29BreadthGroup: breadthGroup,
+      legacyBreadthParticipation: {
+        score: legacyBreadthParticipation?.score ?? null,
+        label: legacyBreadthParticipation?.label ?? null,
+      },
+    },
+
+    warnings,
+  };
+}
+
 function deriveRegime(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const aiScore = components?.aiLeadership?.score ?? 50;
@@ -1925,7 +2092,14 @@ export function computeEngine25MarketHealth({
     legacyDailyCreditFragility
   );
   const distributionPressure = scoreDistributionPressure(sectorHealthData);
-  const breadthParticipation = scoreBreadthParticipation(sectorHealthData);
+
+  const legacyBreadthParticipation = scoreBreadthParticipation(sectorHealthData);
+
+  const breadthParticipation = buildPrimaryBreadthParticipation(
+    engine29Data,
+    legacyBreadthParticipation
+  );
+
   const eventRisk = scoreEventRisk(fmpData);
 
   const baseComponents = {
@@ -2001,7 +2175,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.4",
+    engine: "engine25.marketHealth.v0.5",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -2010,6 +2184,7 @@ export function computeEngine25MarketHealth({
     weights,
     components,
     legacyDailyCreditFragility,
+    legacyBreadthParticipation,
     engine29CreditReactionShadow,
     warnings,
     tradePermission,
