@@ -817,6 +817,171 @@ function scoreAiLeadership(marketData) {
   };
 }
 
+
+function buildPrimaryAiLeadership(engine29Data, legacyAiLeadership) {
+  const leadershipGroup = engine29Data?.groups?.leadership || null;
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const leadershipGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "leadership"
+  );
+
+  const structuralState = leadershipGroup?.structural?.state || null;
+  const tacticalState = leadershipGroup?.tactical?.state || null;
+  const fastState = leadershipGroup?.fastTactical?.state || null;
+
+  const layerDegraded =
+    leadershipGroup?.structural?.dataDegraded === true ||
+    leadershipGroup?.tactical?.dataDegraded === true ||
+    leadershipGroup?.fastTactical?.dataDegraded === true;
+
+  const missingRequiredMembers = [
+    ...(Array.isArray(leadershipGroup?.structural?.missingRequiredMembers)
+      ? leadershipGroup.structural.missingRequiredMembers
+      : []),
+    ...(Array.isArray(leadershipGroup?.tactical?.missingRequiredMembers)
+      ? leadershipGroup.tactical.missingRequiredMembers
+      : []),
+    ...(Array.isArray(leadershipGroup?.fastTactical?.missingRequiredMembers)
+      ? leadershipGroup.fastTactical.missingRequiredMembers
+      : []),
+  ];
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  const hasCanonicalStates =
+    Number.isFinite(Number(structuralScore)) &&
+    Number.isFinite(Number(tacticalScore)) &&
+    Number.isFinite(Number(fastScore));
+
+  const engine29Usable =
+    Boolean(engine29Data) &&
+    Boolean(leadershipGroup) &&
+    !leadershipGroupDegraded &&
+    !layerDegraded &&
+    missingRequiredMembers.length === 0 &&
+    hasCanonicalStates;
+
+  if (!engine29Usable) {
+    return {
+      ...(legacyAiLeadership || {}),
+      authority: "ENGINE25_LEGACY_AI_LEADERSHIP_FALLBACK",
+      primarySource: "ENGINE25_DAILY_AI_LEADERSHIP",
+      fallbackUsed: true,
+      engine29LeadershipAuthorityAvailable: false,
+      engine29FallbackReason: !engine29Data
+        ? "ENGINE29_UNAVAILABLE"
+        : !leadershipGroup
+          ? "ENGINE29_LEADERSHIP_GROUP_UNAVAILABLE"
+          : leadershipGroupDegraded
+            ? "ENGINE29_LEADERSHIP_GROUP_DEGRADED"
+            : layerDegraded
+              ? "ENGINE29_LEADERSHIP_LAYER_DEGRADED"
+              : missingRequiredMembers.length > 0
+                ? "ENGINE29_LEADERSHIP_REQUIRED_MEMBER_MISSING"
+                : "ENGINE29_LEADERSHIP_CANONICAL_STATES_UNAVAILABLE",
+      engine29: {
+        structural1wState: structuralState,
+        tactical1hState: tacticalState,
+        fast30mState: fastState,
+        groupDegraded: leadershipGroupDegraded,
+        layerDegraded,
+        missingRequiredMembers,
+      },
+    };
+  }
+
+  const score = weightedAvg([
+    { value: structuralScore, weight: 0.20 },
+    { value: tacticalScore, weight: 0.40 },
+    { value: fastScore, weight: 0.40 },
+  ]);
+
+  const structuralStressConfirmed =
+    structuralState === "CONFIRMED" || structuralState === "SEVERE";
+  const tacticalStressConfirmed =
+    tacticalState === "CONFIRMED" || tacticalState === "SEVERE";
+  const fastStressConfirmed =
+    fastState === "CONFIRMED" || fastState === "SEVERE";
+
+  const warnings = [];
+
+  if (structuralStressConfirmed) {
+    warnings.push("Engine 29 structural leadership deterioration confirmed");
+  }
+  if (tacticalStressConfirmed) {
+    warnings.push("Engine 29 1H leadership deterioration confirmed");
+  } else if (tacticalState === "FORMING") {
+    warnings.push("Engine 29 1H leadership deterioration forming");
+  }
+  if (fastStressConfirmed) {
+    warnings.push("Engine 29 30m leadership deterioration confirmed");
+  } else if (fastState === "FORMING") {
+    warnings.push("Engine 29 30m leadership deterioration forming");
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "AI_LEADERSHIP_STRONG"
+        : score >= 55
+          ? "AI_LEADERSHIP_MIXED_SUPPORTIVE"
+          : score >= 35
+            ? "AI_LEADERSHIP_WEAK"
+            : "AI_LEADERSHIP_SEVERE",
+
+    authority: "ENGINE29_GROUPS_LEADERSHIP_PRIMARY",
+    primarySource: "ENGINE29_GROUPS_LEADERSHIP",
+    fallbackUsed: false,
+    engine29LeadershipAuthorityAvailable: true,
+
+    structural1wState: structuralState,
+    tactical1hState: tacticalState,
+    fast30mState: fastState,
+
+    structuralStressConfirmed,
+    tacticalStressConfirmed,
+    fastStressConfirmed,
+
+    stateHealthScores: {
+      structural: structuralScore,
+      tactical: tacticalScore,
+      fastTactical: fastScore,
+    },
+
+    formula:
+      "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+
+    inputs: {
+      engine29LeadershipGroup: leadershipGroup,
+      legacyAiLeadership: {
+        score: legacyAiLeadership?.score ?? null,
+        label: legacyAiLeadership?.label ?? null,
+      },
+    },
+
+    warnings,
+  };
+}
+
 function scoreEventRisk(fmpData) {
   const economicEvents = fmpData?.quickRead?.economicCalendar || [];
   const earningsEvents = fmpData?.quickRead?.earningsCalendar || [];
@@ -1722,6 +1887,10 @@ function buildPrimaryBreadthParticipation(engine29Data, legacyBreadthParticipati
 function deriveRegime(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const aiScore = components?.aiLeadership?.score ?? 50;
+  const leadershipStressConfirmed =
+    components?.aiLeadership?.structuralStressConfirmed === true ||
+    components?.aiLeadership?.tacticalStressConfirmed === true ||
+    components?.aiLeadership?.fastStressConfirmed === true;
   const inflationScore = components?.inflation?.score ?? 50;
   const bondScore = components?.bondMarket?.score ?? 50;
 
@@ -1733,7 +1902,12 @@ function deriveRegime(score, components) {
 
   if (score >= 68) return "HEALTHY_RISK_ON";
 
-  if (score >= 55 && aiScore >= 65 && macroPressureScore < 55) {
+  if (
+    score >= 55 &&
+    aiScore >= 65 &&
+    macroPressureScore < 55 &&
+    !leadershipStressConfirmed
+  ) {
     return "AI_HOLDING_MARKET_UP";
   }
 
@@ -1890,6 +2064,10 @@ function deriveTradePermission(score, bias, components) {
 
 function deriveEsPermission(score, regime, bias, riskLevel, components, tradePermission) {
   const creditFragilityScore = components?.creditFragility?.score ?? 50;
+  const leadershipStressConfirmed =
+    components?.aiLeadership?.structuralStressConfirmed === true ||
+    components?.aiLeadership?.tacticalStressConfirmed === true ||
+    components?.aiLeadership?.fastStressConfirmed === true;
   const structuralCreditStress =
     components?.creditFragility?.structuralStressConfirmed === true;
   const tacticalCreditStress =
@@ -1911,7 +2089,8 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
     score >= 60 &&
     marketTrendScore >= 65 &&
     volatilityScore >= 55 &&
-    aiLeadershipScore >= 55
+    aiLeadershipScore >= 55 &&
+    !leadershipStressConfirmed
   ) {
     esBias = "SELECTIVE_LONG";
     esMode = "CONFIRMED_LONG_SCALPS_ONLY";
@@ -2078,7 +2257,13 @@ export function computeEngine25MarketHealth({
   const marketTrend = scoreMarketTrend(marketData);
   const volatility = scoreVolatility(marketData, engine29Data);
   const sectorRotation = scoreSectorRotation(marketData);
-  const aiLeadership = scoreAiLeadership(marketData);
+
+  const legacyAiLeadership = scoreAiLeadership(marketData);
+
+  const aiLeadership = buildPrimaryAiLeadership(
+    engine29Data,
+    legacyAiLeadership
+  );
 
   const legacyDailyCreditFragility = scoreCreditFragility(marketData);
 
@@ -2175,7 +2360,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.5",
+    engine: "engine25.marketHealth.v0.6",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -2185,6 +2370,7 @@ export function computeEngine25MarketHealth({
     components,
     legacyDailyCreditFragility,
     legacyBreadthParticipation,
+    legacyAiLeadership,
     engine29CreditReactionShadow,
     warnings,
     tradePermission,
