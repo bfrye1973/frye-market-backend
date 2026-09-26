@@ -507,6 +507,169 @@ function scoreMarketTrend(marketData) {
   };
 }
 
+
+function buildPrimaryMarketTrend(engine29Data, legacyMarketTrend) {
+  const headlineGroup = engine29Data?.groups?.headlineIndex || null;
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const headlineGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "headlineindex"
+  );
+
+  const structuralState = headlineGroup?.structural?.state || null;
+  const tacticalState = headlineGroup?.tactical?.state || null;
+  const fastState = headlineGroup?.fastTactical?.state || null;
+
+  const layerDegraded =
+    headlineGroup?.structural?.dataDegraded === true ||
+    headlineGroup?.tactical?.dataDegraded === true ||
+    headlineGroup?.fastTactical?.dataDegraded === true;
+
+  const missingRequiredMembers = [
+    ...(Array.isArray(headlineGroup?.structural?.missingRequiredMembers)
+      ? headlineGroup.structural.missingRequiredMembers
+      : []),
+    ...(Array.isArray(headlineGroup?.tactical?.missingRequiredMembers)
+      ? headlineGroup.tactical.missingRequiredMembers
+      : []),
+    ...(Array.isArray(headlineGroup?.fastTactical?.missingRequiredMembers)
+      ? headlineGroup.fastTactical.missingRequiredMembers
+      : []),
+  ];
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  const hasCanonicalStates =
+    Number.isFinite(Number(structuralScore)) &&
+    Number.isFinite(Number(tacticalScore)) &&
+    Number.isFinite(Number(fastScore));
+
+  const engine29Usable =
+    Boolean(engine29Data) &&
+    Boolean(headlineGroup) &&
+    !headlineGroupDegraded &&
+    !layerDegraded &&
+    missingRequiredMembers.length === 0 &&
+    hasCanonicalStates;
+
+  if (!engine29Usable) {
+    return {
+      ...(legacyMarketTrend || {}),
+      authority: "ENGINE25_LEGACY_MARKET_TREND_FALLBACK",
+      primarySource: "ENGINE25_DAILY_INDEX_TREND",
+      fallbackUsed: true,
+      engine29HeadlineIndexAuthorityAvailable: false,
+      engine29FallbackReason: !engine29Data
+        ? "ENGINE29_UNAVAILABLE"
+        : !headlineGroup
+          ? "ENGINE29_HEADLINE_INDEX_GROUP_UNAVAILABLE"
+          : headlineGroupDegraded
+            ? "ENGINE29_HEADLINE_INDEX_GROUP_DEGRADED"
+            : layerDegraded
+              ? "ENGINE29_HEADLINE_INDEX_LAYER_DEGRADED"
+              : missingRequiredMembers.length > 0
+                ? "ENGINE29_HEADLINE_INDEX_REQUIRED_MEMBER_MISSING"
+                : "ENGINE29_HEADLINE_INDEX_CANONICAL_STATES_UNAVAILABLE",
+      engine29: {
+        structural1wState: structuralState,
+        tactical1hState: tacticalState,
+        fast30mState: fastState,
+        groupDegraded: headlineGroupDegraded,
+        layerDegraded,
+        missingRequiredMembers,
+      },
+    };
+  }
+
+  const score = weightedAvg([
+    { value: structuralScore, weight: 0.20 },
+    { value: tacticalScore, weight: 0.40 },
+    { value: fastScore, weight: 0.40 },
+  ]);
+
+  const structuralStressConfirmed =
+    structuralState === "CONFIRMED" || structuralState === "SEVERE";
+  const tacticalStressConfirmed =
+    tacticalState === "CONFIRMED" || tacticalState === "SEVERE";
+  const fastStressConfirmed =
+    fastState === "CONFIRMED" || fastState === "SEVERE";
+
+  const warnings = [];
+
+  if (structuralStressConfirmed) {
+    warnings.push("Engine 29 structural headline-index deterioration confirmed");
+  }
+  if (tacticalStressConfirmed) {
+    warnings.push("Engine 29 1H headline-index deterioration confirmed");
+  } else if (tacticalState === "FORMING") {
+    warnings.push("Engine 29 1H headline-index deterioration forming");
+  }
+  if (fastStressConfirmed) {
+    warnings.push("Engine 29 30m headline-index deterioration confirmed");
+  } else if (fastState === "FORMING") {
+    warnings.push("Engine 29 30m headline-index deterioration forming");
+  }
+
+  return {
+    score,
+    label:
+      score >= 75
+        ? "MARKET_TREND_STRONG"
+        : score >= 55
+          ? "MARKET_TREND_HEALTHY"
+          : "MARKET_TREND_WEAK",
+
+    authority: "ENGINE29_GROUPS_HEADLINE_INDEX_PRIMARY",
+    primarySource: "ENGINE29_GROUPS_HEADLINE_INDEX",
+    fallbackUsed: false,
+    engine29HeadlineIndexAuthorityAvailable: true,
+
+    structural1wState: structuralState,
+    tactical1hState: tacticalState,
+    fast30mState: fastState,
+
+    structuralStressConfirmed,
+    tacticalStressConfirmed,
+    fastStressConfirmed,
+
+    stateHealthScores: {
+      structural: structuralScore,
+      tactical: tacticalScore,
+      fastTactical: fastScore,
+    },
+
+    formula:
+      "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+
+    inputs: {
+      engine29HeadlineIndexGroup: headlineGroup,
+      legacyMarketTrend: {
+        score: legacyMarketTrend?.score ?? null,
+        label: legacyMarketTrend?.label ?? null,
+      },
+    },
+
+    warnings,
+  };
+}
+
 function scoreVolatility(marketData, engine29Data = null) {
   const uvxy = getSymbol(marketData, "volatility", "UVXY");
 
@@ -1925,6 +2088,10 @@ function deriveRegime(score, components) {
 function deriveBias(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const marketTrendScore = components?.marketTrend?.score ?? 50;
+  const marketTrendStressConfirmed =
+    components?.marketTrend?.structuralStressConfirmed === true ||
+    components?.marketTrend?.tacticalStressConfirmed === true ||
+    components?.marketTrend?.fastStressConfirmed === true;
   const volatilityScore = components?.volatility?.score ?? 50;
   const creditFragilityScore = components?.creditFragility?.score ?? 50;
   const structuralCreditStress =
@@ -1938,6 +2105,7 @@ function deriveBias(score, components) {
   if (
     score >= 70 &&
     marketTrendScore >= 65 &&
+    !marketTrendStressConfirmed &&
     volatilityScore >= 60 &&
     macroPressureScore >= 60 &&
     creditFragilityScore >= 55 &&
@@ -2076,6 +2244,10 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
     components?.creditFragility?.fastStressConfirmed === true;
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const marketTrendScore = components?.marketTrend?.score ?? 50;
+  const marketTrendStressConfirmed =
+    components?.marketTrend?.structuralStressConfirmed === true ||
+    components?.marketTrend?.tacticalStressConfirmed === true ||
+    components?.marketTrend?.fastStressConfirmed === true;
   const aiLeadershipScore = components?.aiLeadership?.score ?? 50;
   const volatilityScore = components?.volatility?.score ?? 50;
 
@@ -2088,6 +2260,7 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
   if (
     score >= 60 &&
     marketTrendScore >= 65 &&
+    !marketTrendStressConfirmed &&
     volatilityScore >= 55 &&
     aiLeadershipScore >= 55 &&
     !leadershipStressConfirmed
@@ -2254,7 +2427,13 @@ export function computeEngine25MarketHealth({
   const liquidity = scoreLiquidity(macroData);
   const inflation = scoreInflation(macroData);
 
-  const marketTrend = scoreMarketTrend(marketData);
+  const legacyMarketTrend = scoreMarketTrend(marketData);
+
+  const marketTrend = buildPrimaryMarketTrend(
+    engine29Data,
+    legacyMarketTrend
+  );
+
   const volatility = scoreVolatility(marketData, engine29Data);
   const sectorRotation = scoreSectorRotation(marketData);
 
@@ -2360,7 +2539,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.6",
+    engine: "engine25.marketHealth.v0.7",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -2371,6 +2550,7 @@ export function computeEngine25MarketHealth({
     legacyDailyCreditFragility,
     legacyBreadthParticipation,
     legacyAiLeadership,
+    legacyMarketTrend,
     engine29CreditReactionShadow,
     warnings,
     tradePermission,
