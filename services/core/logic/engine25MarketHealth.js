@@ -1007,6 +1007,228 @@ function scoreCreditFragility(marketData) {
 }
 
 
+function buildPrimaryCreditFragility(engine29Data, legacyDailyCreditFragility) {
+  const creditGroup = engine29Data?.groups?.credit || null;
+
+  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
+    ? engine29Data.dataQuality.degradedGroups
+    : [];
+
+  const creditGroupDegraded = degradedGroups.some(
+    (group) => String(group || "").toLowerCase() === "credit"
+  );
+
+  const structuralState = creditGroup?.structural?.state || null;
+  const tacticalState = creditGroup?.tactical?.state || null;
+  const fastState = creditGroup?.fastTactical?.state || null;
+
+  const layerDegraded =
+    creditGroup?.structural?.dataDegraded === true ||
+    creditGroup?.tactical?.dataDegraded === true ||
+    creditGroup?.fastTactical?.dataDegraded === true;
+
+  const requiredSymbols = ["HYG", "JNK", "LQD", "XLF", "KRE"];
+
+  const requiredMembers = requiredSymbols.map((symbol) => {
+    const entry = engine29Data?.symbols?.[symbol] || null;
+
+    return {
+      symbol,
+      entry,
+      available: Boolean(entry),
+      tacticalStale: entry?.tactical?.freshness?.stale === true,
+      fastStale: entry?.fastTactical?.freshness?.stale === true,
+      structuralStale: entry?.structural?.freshness?.stale === true,
+    };
+  });
+
+  const missingRequiredSymbols = requiredMembers
+    .filter((member) => !member.available)
+    .map((member) => member.symbol);
+
+  const staleRequiredSymbols = requiredMembers
+    .filter(
+      (member) =>
+        member.available &&
+        (member.structuralStale || member.tacticalStale || member.fastStale)
+    )
+    .map((member) => member.symbol);
+
+  function stateHealthScore(state) {
+    const normalized = String(state || "").toUpperCase();
+
+    if (normalized === "HEALTHY") return 90;
+    if (normalized === "RECOVERING") return 75;
+    if (normalized === "FORMING") return 55;
+    if (normalized === "CONFIRMED") return 35;
+    if (normalized === "SEVERE") return 15;
+
+    return null;
+  }
+
+  const structuralScore = stateHealthScore(structuralState);
+  const tacticalScore = stateHealthScore(tacticalState);
+  const fastScore = stateHealthScore(fastState);
+
+  const hasCanonicalStates =
+    Number.isFinite(Number(structuralScore)) &&
+    Number.isFinite(Number(tacticalScore)) &&
+    Number.isFinite(Number(fastScore));
+
+  const engine29Usable =
+    Boolean(engine29Data) &&
+    Boolean(creditGroup) &&
+    !creditGroupDegraded &&
+    !layerDegraded &&
+    missingRequiredSymbols.length === 0 &&
+    staleRequiredSymbols.length === 0 &&
+    hasCanonicalStates;
+
+  if (!engine29Usable) {
+    return {
+      ...(legacyDailyCreditFragility || {}),
+      authority: "ENGINE25_LEGACY_DAILY_CREDIT_FALLBACK",
+      primarySource: "ENGINE25_DAILY_CREDIT",
+      fallbackUsed: true,
+      engine29CreditAuthorityAvailable: false,
+      engine29FallbackReason: !engine29Data
+        ? "ENGINE29_UNAVAILABLE"
+        : !creditGroup
+          ? "ENGINE29_CREDIT_GROUP_UNAVAILABLE"
+          : creditGroupDegraded
+            ? "ENGINE29_CREDIT_GROUP_DEGRADED"
+            : layerDegraded
+              ? "ENGINE29_CREDIT_LAYER_DEGRADED"
+              : missingRequiredSymbols.length > 0
+                ? "ENGINE29_CREDIT_REQUIRED_SYMBOL_MISSING"
+                : staleRequiredSymbols.length > 0
+                  ? "ENGINE29_CREDIT_REQUIRED_SYMBOL_STALE"
+                  : "ENGINE29_CREDIT_CANONICAL_STATES_UNAVAILABLE",
+      engine29: {
+        structural1wState: structuralState,
+        tactical1hState: tacticalState,
+        fast30mState: fastState,
+        groupDegraded: creditGroupDegraded,
+        layerDegraded,
+        missingRequiredSymbols,
+        staleRequiredSymbols,
+      },
+    };
+  }
+
+  const score = weightedAvg([
+    { value: structuralScore, weight: 0.20 },
+    { value: tacticalScore, weight: 0.40 },
+    { value: fastScore, weight: 0.40 },
+  ]);
+
+  const structuralStressConfirmed =
+    structuralState === "CONFIRMED" || structuralState === "SEVERE";
+
+  const tacticalStressConfirmed =
+    tacticalState === "CONFIRMED" || tacticalState === "SEVERE";
+
+  const fastStressConfirmed =
+    fastState === "CONFIRMED" || fastState === "SEVERE";
+
+  const tacticalStressForming = tacticalState === "FORMING";
+  const fastStressForming = fastState === "FORMING";
+
+  const warnings = [];
+
+  if (structuralStressConfirmed) {
+    warnings.push("Engine 29 structural credit stress confirmed");
+  }
+
+  if (tacticalStressConfirmed) {
+    warnings.push("Engine 29 1H credit stress confirmed");
+  } else if (tacticalStressForming) {
+    warnings.push("Engine 29 1H credit stress forming");
+  }
+
+  if (fastStressConfirmed) {
+    warnings.push("Engine 29 30m credit stress confirmed");
+  } else if (fastStressForming) {
+    warnings.push("Engine 29 30m credit stress forming");
+  }
+
+  let label = "CREDIT_FRAGILITY_LOW";
+  let creditRegime = "ENGINE29_CREDIT_SURFACE_STRONG";
+
+  if (score < 35) {
+    label = "CREDIT_FRAGILITY_HIGH";
+    creditRegime = "ENGINE29_FAST_CREDIT_SEVERE";
+  } else if (score < 55) {
+    label = "CREDIT_FRAGILITY_ELEVATED";
+    creditRegime = "ENGINE29_FAST_CREDIT_STRESSED";
+  } else if (score < 75) {
+    label = "CREDIT_FRAGILITY_WATCH";
+    creditRegime = structuralStressConfirmed
+      ? "ENGINE29_STRUCTURAL_CREDIT_STRESS_FAST_NOT_CONFIRMED"
+      : "ENGINE29_FAST_CREDIT_WATCH";
+  }
+
+  return {
+    score,
+    label,
+    creditRegime,
+
+    authority: "ENGINE29_GROUPS_CREDIT_PRIMARY",
+    primarySource: "ENGINE29_GROUPS_CREDIT",
+    fallbackUsed: false,
+    engine29CreditAuthorityAvailable: true,
+
+    structural1wState: structuralState,
+    tactical1hState: tacticalState,
+    fast30mState: fastState,
+
+    structuralStressConfirmed,
+    tacticalStressConfirmed,
+    fastStressConfirmed,
+    tacticalStressForming,
+    fastStressForming,
+
+    stateHealthScores: {
+      structural: structuralScore,
+      tactical: tacticalScore,
+      fastTactical: fastScore,
+    },
+
+    formula:
+      "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+
+    inputs: {
+      engine29CreditGroup: creditGroup,
+      requiredSymbols: requiredMembers.reduce((out, member) => {
+        const entry = member.entry;
+
+        out[member.symbol] = entry
+          ? {
+              sourceSymbol: entry?.sourceSymbol || member.symbol,
+              evidenceQuality: entry?.evidenceQuality || null,
+              structuralState: entry?.structural?.state || null,
+              tacticalState: entry?.tactical?.state || null,
+              fastTacticalState: entry?.fastTactical?.state || null,
+              structuralFreshness: entry?.structural?.freshness || null,
+              tacticalFreshness: entry?.tactical?.freshness || null,
+              fastTacticalFreshness: entry?.fastTactical?.freshness || null,
+            }
+          : null;
+
+        return out;
+      }, {}),
+      legacyDailyCreditFragility: {
+        score: legacyDailyCreditFragility?.score ?? null,
+        label: legacyDailyCreditFragility?.label ?? null,
+        creditRegime: legacyDailyCreditFragility?.creditRegime ?? null,
+      },
+    },
+
+    warnings,
+  };
+}
+
+
 function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility) {
   const creditGroup = engine29Data?.groups?.credit || null;
 
@@ -1092,10 +1314,10 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
   }
 
   return {
-    mode: "READ_ONLY_SHADOW",
-    authorityChanged: false,
-    scoringChanged: false,
-    permissionChanged: false,
+    mode: "PROMOTION_COMPARISON",
+    authorityChanged: true,
+    scoringChanged: true,
+    permissionChanged: true,
 
     engine25Current: {
       score: engine25Score,
@@ -1117,7 +1339,7 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
               : engine29CreditReactionScore >= 35
                 ? "ENGINE29_CREDIT_REACTION_STRESSED"
                 : "ENGINE29_CREDIT_REACTION_SEVERE",
-      authority: "ENGINE29_GROUPS_CREDIT_SHADOW_ONLY",
+      authority: "ENGINE29_GROUPS_CREDIT_PRIMARY",
       groupQuality: creditGroupDegraded ? "DEGRADED" : "OK",
       groupDegraded: creditGroupDegraded,
       structural1wState: structuralState,
@@ -1142,7 +1364,7 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
     },
 
     note:
-      "Shadow only. Engine 25 Credit Fragility remains authoritative for scoring and permission. Engine 29 credit reaction is observed side-by-side until enough live builds are reviewed.",
+      "Promotion comparison. Engine 29 groups.credit is now primary fast traded-credit authority when fresh and non-degraded; legacy Engine 25 daily credit remains diagnostic/fallback.",
   };
 }
 
@@ -1364,6 +1586,12 @@ function deriveBias(score, components) {
   const marketTrendScore = components?.marketTrend?.score ?? 50;
   const volatilityScore = components?.volatility?.score ?? 50;
   const creditFragilityScore = components?.creditFragility?.score ?? 50;
+  const structuralCreditStress =
+    components?.creditFragility?.structuralStressConfirmed === true;
+  const tacticalCreditStress =
+    components?.creditFragility?.tacticalStressConfirmed === true;
+  const fastCreditStress =
+    components?.creditFragility?.fastStressConfirmed === true;
 
   // Full long bias is not allowed when underlying credit fragility is high.
   if (
@@ -1371,13 +1599,24 @@ function deriveBias(score, components) {
     marketTrendScore >= 65 &&
     volatilityScore >= 60 &&
     macroPressureScore >= 60 &&
-    creditFragilityScore >= 55
+    creditFragilityScore >= 55 &&
+    !structuralCreditStress &&
+    !tacticalCreditStress &&
+    !fastCreditStress
   ) {
     return "LONG_FAVORED";
   }
 
   if (score >= 60 && macroPressureScore >= 45) {
-    if (creditFragilityScore < 45) return "SELECTIVE_LONGS_CREDIT_FRAGILITY";
+    if (
+      creditFragilityScore < 45 ||
+      structuralCreditStress ||
+      tacticalCreditStress ||
+      fastCreditStress
+    ) {
+      return "SELECTIVE_LONGS_CREDIT_FRAGILITY";
+    }
+
     return "SELECTIVE_LONGS";
   }
 
@@ -1396,11 +1635,23 @@ function deriveRiskLevel(score) {
 function deriveTradePermission(score, bias, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const creditFragilityScore = components?.creditFragility?.score ?? 50;
+  const structuralCreditStress =
+    components?.creditFragility?.structuralStressConfirmed === true;
+  const tacticalCreditStress =
+    components?.creditFragility?.tacticalStressConfirmed === true;
+  const fastCreditStress =
+    components?.creditFragility?.fastStressConfirmed === true;
 
   // Credit fragility override:
   // Public credit may look calm, but if HYG/JNK/LQD/KRE/IWM are weak,
   // Engine 25 cannot allow full-size aggression.
-  if (creditFragilityScore < 45 && score >= 60) {
+  if (
+    (creditFragilityScore < 45 ||
+      structuralCreditStress ||
+      tacticalCreditStress ||
+      fastCreditStress) &&
+    score >= 60
+  ) {
     return {
       longScalps: true,
       shortScalps: false,
@@ -1472,6 +1723,12 @@ function deriveTradePermission(score, bias, components) {
 
 function deriveEsPermission(score, regime, bias, riskLevel, components, tradePermission) {
   const creditFragilityScore = components?.creditFragility?.score ?? 50;
+  const structuralCreditStress =
+    components?.creditFragility?.structuralStressConfirmed === true;
+  const tacticalCreditStress =
+    components?.creditFragility?.tacticalStressConfirmed === true;
+  const fastCreditStress =
+    components?.creditFragility?.fastStressConfirmed === true;
   const macroPressureScore = components?.macroPressure?.score ?? 50;
   const marketTrendScore = components?.marketTrend?.score ?? 50;
   const aiLeadershipScore = components?.aiLeadership?.score ?? 50;
@@ -1495,7 +1752,12 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
     shortScalps = false;
   }
 
-  if (creditFragilityScore < 45) {
+  if (
+    creditFragilityScore < 45 ||
+    structuralCreditStress ||
+    tacticalCreditStress ||
+    fastCreditStress
+  ) {
     esMode = "SELECTIVE_LONG_CREDIT_FRAGILITY_REDUCED_SIZE";
     sizeMultiplier = Math.min(sizeMultiplier, 0.75);
   }
@@ -1531,7 +1793,12 @@ function deriveEsPermission(score, regime, bias, riskLevel, components, tradePer
     notes.push("No blind ES shorts while market trend, AI leadership, and volatility remain supportive.");
   }
 
-  if (creditFragilityScore < 45) {
+  if (
+    creditFragilityScore < 45 ||
+    structuralCreditStress ||
+    tacticalCreditStress ||
+    fastCreditStress
+  ) {
     notes.push("Credit fragility is elevated; do not use full-size ES aggression.");
     notes.push("Avoid weak small-cap, regional-bank, junk-credit, and lower-quality sympathy risk.");
   }
@@ -1645,10 +1912,17 @@ export function computeEngine25MarketHealth({
   const volatility = scoreVolatility(marketData, engine29Data);
   const sectorRotation = scoreSectorRotation(marketData);
   const aiLeadership = scoreAiLeadership(marketData);
-  const creditFragility = scoreCreditFragility(marketData);
+
+  const legacyDailyCreditFragility = scoreCreditFragility(marketData);
+
+  const creditFragility = buildPrimaryCreditFragility(
+    engine29Data,
+    legacyDailyCreditFragility
+  );
+
   const engine29CreditReactionShadow = buildEngine29CreditReactionShadow(
     engine29Data,
-    creditFragility
+    legacyDailyCreditFragility
   );
   const distributionPressure = scoreDistributionPressure(sectorHealthData);
   const breadthParticipation = scoreBreadthParticipation(sectorHealthData);
@@ -1727,7 +2001,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.3",
+    engine: "engine25.marketHealth.v0.4",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -1735,6 +2009,7 @@ export function computeEngine25MarketHealth({
     riskLevel,
     weights,
     components,
+    legacyDailyCreditFragility,
     engine29CreditReactionShadow,
     warnings,
     tradePermission,
