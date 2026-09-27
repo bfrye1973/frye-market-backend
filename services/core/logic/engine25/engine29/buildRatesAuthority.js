@@ -59,21 +59,65 @@ export function buildRatesAuthority({
   const tacticalState = group?.tactical?.state || null;
   const fastState = group?.fastTactical?.state || null;
 
-  const layerDegraded =
-    group?.structural?.dataDegraded === true ||
-    group?.tactical?.dataDegraded === true ||
-    group?.fastTactical?.dataDegraded === true;
+  const structuralDegraded = group?.structural?.dataDegraded === true;
+  const tacticalDegraded = group?.tactical?.dataDegraded === true;
+  const fastDegraded = group?.fastTactical?.dataDegraded === true;
 
-  const missingRequiredMembers = [
-    ...(Array.isArray(group?.structural?.missingRequiredMembers)
-      ? group.structural.missingRequiredMembers
-      : []),
-    ...(Array.isArray(group?.tactical?.missingRequiredMembers)
-      ? group.tactical.missingRequiredMembers
-      : []),
-    ...(Array.isArray(group?.fastTactical?.missingRequiredMembers)
-      ? group.fastTactical.missingRequiredMembers
-      : []),
+  const structuralMissing = Array.isArray(group?.structural?.missingRequiredMembers)
+    ? group.structural.missingRequiredMembers
+    : [];
+
+  const tacticalMissing = Array.isArray(group?.tactical?.missingRequiredMembers)
+    ? group.tactical.missingRequiredMembers
+    : [];
+
+  const fastMissing = Array.isArray(group?.fastTactical?.missingRequiredMembers)
+    ? group.fastTactical.missingRequiredMembers
+    : [];
+
+  const expectedIntradayYieldGaps = ["US10Y", "US30Y"];
+
+  const tacticalMissingOnlyExpectedYields =
+    tacticalMissing.length > 0 &&
+    tacticalMissing.every((symbol) => expectedIntradayYieldGaps.includes(symbol));
+
+  const fastMissingOnlyExpectedYields =
+    fastMissing.length > 0 &&
+    fastMissing.every((symbol) => expectedIntradayYieldGaps.includes(symbol));
+
+  const tacticalDurationAvailable =
+    group?.tactical?.subgroups?.DURATION_BLOCK?.members?.some(
+      (member) => member?.canonicalSymbol === "TLT" && member?.available === true
+    ) === true;
+
+  const fastDurationAvailable =
+    group?.fastTactical?.subgroups?.DURATION_BLOCK?.members?.some(
+      (member) => member?.canonicalSymbol === "TLT" && member?.available === true
+    ) === true;
+
+  const expectedTacticalDegradation =
+    tacticalDegraded &&
+    tacticalMissingOnlyExpectedYields &&
+    tacticalDurationAvailable;
+
+  const expectedFastDegradation =
+    fastDegraded &&
+    fastMissingOnlyExpectedYields &&
+    fastDurationAvailable;
+
+  const unexpectedLayerDegradation =
+    structuralDegraded ||
+    (tacticalDegraded && !expectedTacticalDegradation) ||
+    (fastDegraded && !expectedFastDegradation);
+
+  const unexpectedMissingRequiredMembers = [
+    ...structuralMissing,
+    ...tacticalMissing.filter(
+      (symbol) => !expectedIntradayYieldGaps.includes(symbol)
+    ),
+    ...fastMissing.filter(
+      (symbol) => !expectedIntradayYieldGaps.includes(symbol)
+    ),
   ];
 
   const structuralScore = stateHealthScore(structuralState);
@@ -88,10 +132,17 @@ export function buildRatesAuthority({
   const usable =
     Boolean(engine29Data) &&
     Boolean(group) &&
-    !groupDegraded &&
-    !layerDegraded &&
-    missingRequiredMembers.length === 0 &&
-    hasCanonicalStates;
+    hasCanonicalStates &&
+    !unexpectedLayerDegradation &&
+    unexpectedMissingRequiredMembers.length === 0 &&
+    (
+      !groupDegraded ||
+      (
+        structuralDegraded === false &&
+        expectedTacticalDegradation &&
+        expectedFastDegradation
+      )
+    );
 
   if (!usable) {
     return {
@@ -106,18 +157,25 @@ export function buildRatesAuthority({
           ? "ENGINE29_RATES_DURATION_GROUP_UNAVAILABLE"
           : groupDegraded
             ? "ENGINE29_RATES_DURATION_GROUP_DEGRADED"
-            : layerDegraded
-              ? "ENGINE29_RATES_DURATION_LAYER_DEGRADED"
-              : missingRequiredMembers.length > 0
-                ? "ENGINE29_RATES_DURATION_REQUIRED_MEMBER_MISSING"
+            : unexpectedLayerDegradation
+              ? "ENGINE29_RATES_DURATION_UNEXPECTED_LAYER_DEGRADATION"
+              : unexpectedMissingRequiredMembers.length > 0
+                ? "ENGINE29_RATES_DURATION_UNEXPECTED_REQUIRED_MEMBER_MISSING"
                 : "ENGINE29_RATES_DURATION_CANONICAL_STATES_UNAVAILABLE",
       engine29: {
         structural1wState: structuralState,
         tactical1hState: tacticalState,
         fast30mState: fastState,
         groupDegraded,
-        layerDegraded,
-        missingRequiredMembers,
+        structuralDegraded,
+        tacticalDegraded,
+        fastDegraded,
+        expectedTacticalDegradation,
+        expectedFastDegradation,
+        structuralMissing,
+        tacticalMissing,
+        fastMissing,
+        unexpectedMissingRequiredMembers,
       },
     };
   }
@@ -160,10 +218,14 @@ export function buildRatesAuthority({
           ? "BONDS_MIXED"
           : "BONDS_PRESSURE",
 
-    authority: "ENGINE29_GROUPS_RATES_DURATION_PRIMARY",
+    authority: "ENGINE29_GROUPS_RATES_DURATION_HYBRID_PRIMARY",
     primarySource: "ENGINE29_GROUPS_RATES_DURATION",
     fallbackUsed: false,
     engine29RatesAuthorityAvailable: true,
+    tacticalEvidenceMode:
+      expectedTacticalDegradation || expectedFastDegradation
+        ? "TLT_DURATION_INTRADAY_WITH_DAILY_YIELD_STRUCTURAL_CONTEXT"
+        : "FULL_RATES_DURATION",
 
     structural1wState: structuralState,
     tactical1hState: tacticalState,
@@ -181,6 +243,22 @@ export function buildRatesAuthority({
 
     formula:
       "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
+
+    dataQuality: {
+      groupDegraded,
+      structuralDegraded,
+      tacticalDegraded,
+      fastDegraded,
+      expectedTacticalDegradation,
+      expectedFastDegradation,
+      structuralMissing,
+      tacticalMissing,
+      fastMissing,
+      note:
+        expectedTacticalDegradation || expectedFastDegradation
+          ? "FRED yields are daily structural context; TLT supplies the verified 1H/30m duration reaction."
+          : null,
+    },
 
     inputs: {
       engine29RatesDurationGroup: group,
