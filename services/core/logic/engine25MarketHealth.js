@@ -1,5 +1,7 @@
 // services/core/logic/engine25MarketHealth.js
 
+import { buildRatesAuthority } from "./engine25/engine29/buildRatesAuthority.js";
+
 function clamp(value, min = 0, max = 100) {
   if (!Number.isFinite(value)) return 50;
   return Math.max(min, Math.min(max, Math.round(value)));
@@ -2049,6 +2051,11 @@ function buildPrimaryBreadthParticipation(engine29Data, legacyBreadthParticipati
 
 function deriveRegime(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
+
+  const ratesStressConfirmed =
+    components?.bondMarket?.structuralStressConfirmed === true ||
+    components?.bondMarket?.tacticalStressConfirmed === true ||
+    components?.bondMarket?.fastStressConfirmed === true;
   const aiScore = components?.aiLeadership?.score ?? 50;
   const leadershipStressConfirmed =
     components?.aiLeadership?.structuralStressConfirmed === true ||
@@ -2076,10 +2083,12 @@ function deriveRegime(score, components) {
 
   if (score >= 55) return "MIXED_BULLISH";
 
-  if (score >= 45 && (inflationScore < 50 || bondScore < 55)) {
+  if (
+    score >= 45 &&
+    (inflationScore < 50 || bondScore < 55 || ratesStressConfirmed)
+  ) {
     return "NEUTRAL_CHOP_WITH_RATE_PRESSURE";
   }
-
   if (score >= 45) return "NEUTRAL_CHOP";
   if (score >= 35) return "RISK_OFF_WARNING";
   return "MARKET_STRESS";
@@ -2421,10 +2430,17 @@ export function computeEngine25MarketHealth({
   engine29Data = null,
 } = {}) {
   
-  const labor = scoreLabor(macroData);
-  const creditStress = scoreCreditStress(macroData);
-  const bondMarket = scoreBondMarket(macroData);
-  const liquidity = scoreLiquidity(macroData);
+const labor = scoreLabor(macroData);
+const creditStress = scoreCreditStress(macroData);
+
+const legacyBondMarket = scoreBondMarket(macroData);
+
+const bondMarket = buildRatesAuthority({
+  engine29Data,
+  legacyBondMarket,
+});
+
+const liquidity = scoreLiquidity(macroData);
   const inflation = scoreInflation(macroData);
 
   const legacyMarketTrend = scoreMarketTrend(marketData);
@@ -2539,7 +2555,7 @@ export function computeEngine25MarketHealth({
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.7",
+    engine: "engine25.marketHealth.v0.8",
     updatedAt: new Date().toISOString(),
     score,
     regime,
@@ -2551,6 +2567,7 @@ export function computeEngine25MarketHealth({
     legacyBreadthParticipation,
     legacyAiLeadership,
     legacyMarketTrend,
+    legacyBondMarket,
     engine29CreditReactionShadow,
     warnings,
     tradePermission,
