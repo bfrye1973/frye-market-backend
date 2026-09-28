@@ -36,6 +36,7 @@ import { buildTargetClusterConfidence } from "./buildTargetClusterConfidence.js"
 import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 import { buildDegreeStates } from "./buildDegreeStates.js";
+import { buildEngine22Display } from "./buildEngine22Display.js";
 
 function round2(x) {
   const n = Number(x);
@@ -1722,6 +1723,8 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: context.currentPrice,
   });
 
+  const engine22Display = buildEngine22Display({ degreeStates });
+
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
     degreeStates,
@@ -1920,6 +1923,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
     waveFibState,
     degreeStates,
+    engine22Display,
 
     // Canonical active structural Fib model for Strategy 1 Minute.
     // Consumers should prefer this over selecting targetModel vs
