@@ -94,9 +94,6 @@ import {
   buildEngine9OfficialManagementPlan,
 } from "../logic/engine9/v1/buildOfficialManagementPlan.js";
 import {
-  buildEngine7FinalPositionSizing,
-} from "../logic/engine7/v2/buildFinalPositionSizing.js";
-import {
   buildEngine8CanonicalPaperAdapter,
 } from "../logic/trading/engine8CanonicalPaperAdapter.js";
 import {
