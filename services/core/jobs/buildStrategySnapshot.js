@@ -81,8 +81,10 @@ import {
   isEngine6FastLaneId,
   resolveEngine3Strategy1Qualification,
 } from "../logic/engine6/strategy1PermissionContract.js";
+
 import {
   buildEngine7ProposedSizingPreview,
+  buildEngine7PositionSizingCompatibility,
 } from "../logic/engine7/v2/buildProposedSizingPreview.js";
 
 import {
@@ -10955,34 +10957,12 @@ scalp.engine9OfficialManagementPlan =
     
 
 scalp.engine7PositionSizing =
-  buildEngine7FinalPositionSizing({
-    engine7SizingPreview:
+  buildEngine7PositionSizingCompatibility({
+    engine7Sizing:
       scalp.engine7SizingPreview || null,
-
-    engine6PaperPermission:
-      scalp.permission?.paper || null,
-
-    engine27MinuteReadiness:
-      engine27MinuteDecision || null,
 
     engine9OfficialManagementPlan:
       scalp.engine9OfficialManagementPlan || null,
-
-    riskConfig:
-      ES_PAPER_RISK_CONFIG,
-
-    tradeState: {
-      duplicateBlocked: false,
-      candidateAlreadySized: false,
-      candidateAlreadyOrdered: false,
-      openTradeForStrategy: false,
-      idempotencyKeyAlreadyUsed: false,
-    },
-
-    snapshotTime:
-      scalp.engine9OfficialManagementPlan?.snapshotTime ||
-      result?.now ||
-      nowIso(),
   });
 
 const engine8DuplicateState =
