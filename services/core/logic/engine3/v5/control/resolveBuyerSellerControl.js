@@ -151,6 +151,7 @@ function buildScores({
       "RECLAIM",
       "REJECTION_LOW",
       "ACCEPTANCE_ABOVE",
+      "IN_ZONE_PRESSURE_UP",
     ].includes(reactionState)
   ) {
     addEvidence(
@@ -168,6 +169,7 @@ function buildScores({
       "REJECTION_HIGH",
       "ACCEPTANCE_BELOW",
       "LOST_ZONE",
+      "IN_ZONE_PRESSURE_DOWN",
     ].includes(reactionState)
   ) {
     addEvidence(
