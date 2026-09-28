@@ -1,6 +1,7 @@
 // services/core/logic/engine25MarketHealth.js
 
 import { buildRatesAuthority } from "./engine25/engine29/buildRatesAuthority.js";
+import { buildEnergyAuthority } from "./engine25/engine29/buildEnergyAuthority.js";
 
 function clamp(value, min = 0, max = 100) {
   if (!Number.isFinite(value)) return 50;
@@ -1698,7 +1699,7 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
   };
 }
 
-function scoreMacroPressure(macroData, marketData, components) {
+function scoreMacroPressure(macroData, marketData, components, engine29Data) {
   const tenYear = getFredValue(macroData, "DGS10");
   const twoYear = getFredValue(macroData, "DGS2");
   const tenMinusTwo = getFredValue(macroData, "T10Y2Y");
@@ -1726,11 +1727,19 @@ function scoreMacroPressure(macroData, marketData, components) {
     { value: scoreDirect(tlt?.pctChange20d, -8, 5), weight: 0.3 },
   ]);
 
-  const oilPressureScore = weightedAvg([
+  const legacyOilPressureScore = weightedAvg([
     { value: boolScore(uso?.aboveEma20, 30, 80), weight: 0.35 },
     { value: boolScore(uso?.aboveEma50, 30, 80), weight: 0.25 },
     { value: scoreInverse(uso?.pctChange20d, 2, 15), weight: 0.4 },
   ]);
+
+  const energyAuthority = buildEnergyAuthority({
+    engine29Data,
+    legacyOilPressureScore,
+    legacyUso: uso,
+  });
+
+  const oilPressureScore = energyAuthority.score;
 
   const dollarPressureScore = weightedAvg([
     { value: boolScore(uup?.aboveEma20, 35, 75), weight: 0.4 },
@@ -1817,31 +1826,39 @@ function scoreMacroPressure(macroData, marketData, components) {
             ? "MACRO_PRESSURE_ELEVATED"
             : "MACRO_PRESSURE_HIGH",
     inputs: {
-      tenYear,
-      twoYear,
-      tenMinusTwo,
-      USO: uso,
-      TLT: tlt,
-      UUP: uup,
-      SPY: spy,
-      QQQ: qqq,
-      IWM: iwm,
-      aiAbove20,
-      aiAbove50,
-      tenYearPressureScore,
-      twoYearPressureScore,
-      tltTrendScore,
-      oilPressureScore,
-      dollarPressureScore,
-      smallCapParticipationScore,
-      aiBreadthScore,
-      narrowLeadershipScore,
-      fedHawkishScore,
-    },
-    warnings,
-  };
-}
+  tenYear,
+  twoYear,
+  tenMinusTwo,
 
+  USO: uso,
+  legacyOilPressureScore,
+  energyAuthority,
+
+  TLT: tlt,
+  UUP: uup,
+
+  SPY: spy,
+  QQQ: qqq,
+  IWM: iwm,
+
+  aiAbove20,
+  aiAbove50,
+
+  tenYearPressureScore,
+  twoYearPressureScore,
+  tltTrendScore,
+
+  oilPressureScore,
+  dollarPressureScore,
+
+  smallCapParticipationScore,
+  aiBreadthScore,
+  narrowLeadershipScore,
+  fedHawkishScore,
+},
+warnings,
+};
+}
 function scoreDistributionPressure(sectorHealthData) {
   const block = sectorHealthData?.distributionPressure;
 
@@ -2498,7 +2515,12 @@ const liquidity = scoreLiquidity(macroData);
   eventRisk,
 };
 
-  const macroPressure = scoreMacroPressure(macroData, marketData, baseComponents);
+  const macroPressure = scoreMacroPressure(
+    macroData,
+    marketData,
+    baseComponents,
+    engine29Data
+  );
   const esTechnicalContext = normalizeEsTechnicalContext(esTechnicalContextData);
 
   const components = {
@@ -2555,7 +2577,7 @@ const liquidity = scoreLiquidity(macroData);
 
   return {
     ok: true,
-    engine: "engine25.marketHealth.v0.8",
+    engine: "engine25.marketHealth.v0.9",
     updatedAt: new Date().toISOString(),
     score,
     regime,
