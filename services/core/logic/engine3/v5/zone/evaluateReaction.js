@@ -315,8 +315,38 @@ function classifyReaction({
   const acceptingBelow =
     consecutiveBelow >= 2;
 
+  const recentThreeBars =
+    bars.slice(-3);
+
+  const threeInside =
+    recentThreeBars.length === 3 &&
+    recentThreeBars.every(
+      (bar) =>
+        relationOfClose(bar, zone) === "INSIDE_ZONE"
+    );
+
+  const threeClosesProgressingDown =
+    threeInside &&
+    recentThreeBars[1].close < recentThreeBars[0].close &&
+    recentThreeBars[2].close < recentThreeBars[1].close;
+
+  const threeClosesProgressingUp =
+    threeInside &&
+    recentThreeBars[1].close > recentThreeBars[0].close &&
+    recentThreeBars[2].close > recentThreeBars[1].close;
+
+  const inZonePressureDown =
+    threeClosesProgressingDown &&
+    latest.close < zone.midline;
+
+  const inZonePressureUp =
+    threeClosesProgressingUp &&
+    latest.close > zone.midline;
+
   const choppingInside =
     consecutiveInside >= 2 &&
+    inZonePressureDown !== true &&
+    inZonePressureUp !== true &&
     (
       sequencePhase === "COMPRESSION" ||
       sequencePhase === "MIXED" ||
@@ -350,6 +380,56 @@ function classifyReaction({
   const bearishSequenceSupport =
     sequenceBias === "DOWN" ||
     sequencePhase.includes("DOWN");
+
+  if (inZonePressureDown) {
+    return {
+      reactionState: "IN_ZONE_PRESSURE_DOWN",
+      reactionBias: "DOWN",
+      facts: {
+        failedBreakoutAbove,
+        failedBreakdownBelow,
+        failedReclaimFromBelow,
+        failedAcceptanceAbove,
+        failedAcceptanceBelow,
+        rejectionHigh,
+        rejectionLow,
+        reclaimedAboveZone,
+        lostBelowZone,
+        acceptingAbove,
+        acceptingBelow,
+        choppingInside,
+        inZonePressureDown,
+        inZonePressureUp,
+        threeClosesProgressingDown,
+        threeClosesProgressingUp,
+      },
+    };
+  }
+
+  if (inZonePressureUp) {
+    return {
+      reactionState: "IN_ZONE_PRESSURE_UP",
+      reactionBias: "UP",
+      facts: {
+        failedBreakoutAbove,
+        failedBreakdownBelow,
+        failedReclaimFromBelow,
+        failedAcceptanceAbove,
+        failedAcceptanceBelow,
+        rejectionHigh,
+        rejectionLow,
+        reclaimedAboveZone,
+        lostBelowZone,
+        acceptingAbove,
+        acceptingBelow,
+        choppingInside,
+        inZonePressureDown,
+        inZonePressureUp,
+        threeClosesProgressingDown,
+        threeClosesProgressingUp,
+      },
+    };
+  }
 
   if (failedBreakoutAbove) {
     return {
