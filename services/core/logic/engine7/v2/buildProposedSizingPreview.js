@@ -60,13 +60,12 @@ function isStrategy1PaperDataCollectionEnabled() {
 }
 
 function isExactMinuteStrategy1Scope(geometry) {
+  // Engine 7 owns sizing only. Strategy routing must not depend on
+  // optional setup metadata that belongs to upstream qualification.
   return (
-    normalizeIdentityValue(geometry?.laneId) ===
-      STRATEGY1_LANE_ID &&
     normalizeIdentityValue(geometry?.strategyId) ===
       STRATEGY1_STRATEGY_ID &&
-    safeUpper(geometry?.setupClass) ===
-      STRATEGY1_SETUP_CLASS
+    safeUpper(geometry?.symbol) === ES_SYMBOL
   );
 }
 
@@ -343,98 +342,67 @@ function buildStrategy1Phase7Preview({
   });
 
   const identity = strategy1Identity(geometry);
-  const engine6Identity = strategy1Identity(engine6);
-  const engine27Identity = strategy1Identity(engine27);
-
   const testingDataCollectionMode =
-    isStrategy1TestingPublicationScope({
-      geometry,
-      engine6,
-      engine27,
-    });
-
-  const identityReasons = [
-    ...compareStrategy1Identity(identity, engine6Identity, "ENGINE6"),
-    ...compareStrategy1Identity(identity, engine27Identity, "ENGINE27E"),
-  ];
-
-  if (!geometry?.snapshotTime) {
-    identityReasons.push("ENGINE26B_SNAPSHOT_TIME_MISSING");
-  }
-
-  if (geometry?.candidateIdentityPreserved !== true) {
-    identityReasons.push(
-      "ENGINE26B_CANDIDATE_IDENTITY_NOT_PRESERVED"
-    );
-  }
-
-  if (identity.laneId !== STRATEGY1_LANE_ID) {
-    identityReasons.push("ENGINE7A_STRATEGY1_LANE_MISMATCH");
-  }
-
-  if (identity.strategyId !== STRATEGY1_STRATEGY_ID) {
-    identityReasons.push("ENGINE7A_STRATEGY1_STRATEGY_MISMATCH");
-  }
-
-  if (identity.setupClass !== STRATEGY1_SETUP_CLASS) {
-    identityReasons.push("ENGINE7A_STRATEGY1_SETUP_CLASS_MISMATCH");
-  }
+    isStrategy1TestingPublicationScope({ geometry });
 
   const riskValidation = validateRiskConfig(riskConfig);
+  const direction = safeUpper(geometry?.direction);
   const entryPrice = toNumber(geometry?.proposedEntryPrice);
   const stopPrice = toNumber(geometry?.proposedStopPrice);
   const providedStopDistance =
     toNumber(geometry?.proposedStopDistancePoints);
+
   const calculatedStopDistance =
     entryPrice != null && stopPrice != null
       ? round2(Math.abs(entryPrice - stopPrice))
       : null;
+
   const stopDistanceDifference =
-    calculatedStopDistance != null && providedStopDistance != null
-      ? round2(Math.abs(calculatedStopDistance - providedStopDistance))
+    calculatedStopDistance != null &&
+    providedStopDistance != null
+      ? round2(
+          Math.abs(
+            calculatedStopDistance -
+              providedStopDistance
+          )
+        )
       : null;
 
-  const targetRead = buildStrategy1Targets(
-    geometry?.proposedTargets
-  );
+  const directionValid =
+    direction === "LONG" || direction === "SHORT";
 
-  const engine6Ready =
-    engine6.decision === "FAST_INTRADAY_PAPER_ALLOW" &&
-    engine6.explicitAllowed === true &&
-    engine6.planningAllowed === true;
+  const stopDirectionValid =
+    direction === "LONG"
+      ? entryPrice != null &&
+        stopPrice != null &&
+        stopPrice < entryPrice
+      : direction === "SHORT"
+      ? entryPrice != null &&
+        stopPrice != null &&
+        stopPrice > entryPrice
+      : false;
 
-  const geometryReady =
-    geometry?.geometryReady === true;
-
-  const geometryValid =
+  const sizingGeometryValid =
+    directionValid &&
     isPositiveNumber(entryPrice) &&
     isPositiveNumber(stopPrice) &&
-    stopPrice < entryPrice &&
+    stopDirectionValid &&
     isPositiveNumber(providedStopDistance) &&
     stopDistanceDifference != null &&
     stopDistanceDifference <= ES_TICK_SIZE;
 
-  const target1Ready =
-    isPositiveNumber(targetRead.target1Price);
-  const target2Ready =
-    isPositiveNumber(targetRead.target2Price);
-  const runnerReady =
-    targetRead.target3Purpose === "ENGINE9_RUNNER_HANDOFF" &&
-    targetRead.target3Price === null &&
-    geometry?.runnerHandoffRequired === true;
-
-  const engine27Ready =
-    engine27.reactionReady === true &&
-    engine27.participationReady === true &&
-    engine27.permissionReady === true &&
-    engine27.plannerReady === true &&
-    engine27.invalidated !== true;
-
   const config = riskValidation.config;
+
   const rawRiskPerContract =
-    riskValidation.valid && calculatedStopDistance != null
-      ? round2(calculatedStopDistance * config.dollarsPerPoint)
+    riskValidation.valid &&
+    sizingGeometryValid &&
+    calculatedStopDistance != null
+      ? round2(
+          calculatedStopDistance *
+            config.dollarsPerPoint
+        )
       : null;
+
   const slippageRisk =
     riskValidation.valid
       ? round2(
@@ -443,52 +411,64 @@ function buildStrategy1Phase7Preview({
             config.dollarsPerPoint
         )
       : null;
+
   const riskPerContract =
-    rawRiskPerContract != null && slippageRisk != null
+    rawRiskPerContract != null &&
+    slippageRisk != null
       ? round2(
           rawRiskPerContract +
             slippageRisk +
             config.commissionDollarsPerContractRoundTrip
         )
       : null;
+
   const uncappedSupported =
     riskPerContract != null && riskPerContract > 0
-      ? Math.floor(config.riskBudgetDollars / riskPerContract)
+      ? Math.floor(
+          config.riskBudgetDollars /
+            riskPerContract
+        )
       : 0;
-  const riskSupportedContracts = riskValidation.valid
-    ? Math.max(0, Math.min(uncappedSupported, config.maximumContracts))
-    : 0;
-  const proposedContracts = Math.min(
+
+  const riskSupportedContracts =
+    riskValidation.valid && sizingGeometryValid
+      ? Math.max(
+          0,
+          Math.min(
+            uncappedSupported,
+            config.maximumContracts
+          )
+        )
+      : 0;
+
+  const productionContracts = Math.min(
     STRATEGY1_REQUESTED_CONTRACTS,
     riskSupportedContracts
   );
-  const riskLimited =
+
+  const productionRiskLimited =
     riskValidation.valid &&
-    riskSupportedContracts < STRATEGY1_REQUESTED_CONTRACTS;
+    sizingGeometryValid &&
+    riskSupportedContracts <
+      STRATEGY1_REQUESTED_CONTRACTS;
 
-  const invalidated =
-    engine27.invalidated === true ||
-    safeUpper(geometry?.candidateStatus).includes("INVALIDATED") ||
-    safeUpper(geometry?.lifecycleStatus).includes("INVALIDATED");
+  const productionThreeContractPlanQualified =
+    riskValidation.valid &&
+    sizingGeometryValid &&
+    riskSupportedContracts >=
+      STRATEGY1_REQUESTED_CONTRACTS;
 
-  const nonRiskGatesPass =
-    identityReasons.length === 0 &&
-    identity.laneId === STRATEGY1_LANE_ID &&
-    identity.strategyId === STRATEGY1_STRATEGY_ID &&
-    identity.setupClass === STRATEGY1_SETUP_CLASS &&
-    invalidated !== true &&
-    engine6Ready === true &&
-    geometryReady === true &&
-    geometryValid === true &&
-    target1Ready === true &&
-    target2Ready === true &&
-    runnerReady === true &&
-    engine27Ready === true;
-
+  /*
+   * Engine 7 owns sizing only.
+   *
+   * Paper data collection may override production dollar-risk and
+   * maximum-contract limits. It does not re-qualify permission,
+   * identity, readiness, candidate lifecycle, targets, or management.
+   */
   const testingThreeContractPlanQualified =
     testingDataCollectionMode === true &&
     riskValidation.valid === true &&
-    nonRiskGatesPass === true;
+    sizingGeometryValid === true;
 
   const paperTestingContracts =
     testingThreeContractPlanQualified
@@ -496,59 +476,98 @@ function buildStrategy1Phase7Preview({
       : 0;
 
   const testingRiskOverrideApplied =
-    testingThreeContractPlanQualified === true;
+    testingThreeContractPlanQualified === true &&
+    productionThreeContractPlanQualified !== true;
+
+  const finalContracts =
+    testingThreeContractPlanQualified
+      ? STRATEGY1_REQUESTED_CONTRACTS
+      : productionContracts;
+
+  const finalSizingMode =
+    testingThreeContractPlanQualified
+      ? "PAPER_TESTING_DATA_COLLECTION"
+      : finalContracts > 0
+      ? "PRODUCTION_RISK"
+      : "UNAVAILABLE";
+
+  const finalSizingReady =
+    riskValidation.valid === true &&
+    sizingGeometryValid === true &&
+    Number.isInteger(finalContracts) &&
+    finalContracts > 0;
+
+  const productionEstimatedRiskDollars =
+    riskPerContract == null
+      ? 0
+      : round2(
+          productionContracts * riskPerContract
+        );
+
+  const estimatedTotalRiskDollars =
+    riskPerContract == null
+      ? 0
+      : round2(finalContracts * riskPerContract);
 
   const blockers = unique([
-    ...identityReasons,
-    !engine6Ready ? "ENGINE6_PLANNING_PERMISSION_REQUIRED" : null,
-    !geometryReady ? "ENGINE26B_GEOMETRY_READY_REQUIRED" : null,
-    !geometryValid ? "ENGINE26B_GEOMETRY_INVALID" : null,
-    !target1Ready ? "ENGINE26B_TARGET1_REQUIRED" : null,
-    !target2Ready ? "ENGINE26B_TARGET2_REQUIRED" : null,
-    !runnerReady ? "ENGINE26B_RUNNER_HANDOFF_REQUIRED" : null,
-    !engine27.reactionReady ? "ENGINE27E_REACTION_READY_REQUIRED" : null,
-    !engine27.participationReady ? "ENGINE27E_PARTICIPATION_READY_REQUIRED" : null,
-    !engine27.permissionReady ? "ENGINE27E_PERMISSION_READY_REQUIRED" : null,
-    !engine27.plannerReady ? "ENGINE27E_PLANNER_READY_REQUIRED" : null,
-    invalidated ? "ENGINE27E_CANDIDATE_INVALIDATED" : null,
-    !riskValidation.valid ? riskValidation.status : null,
-    riskLimited ? "ENGINE7A_RISK_SUPPORTS_FEWER_THAN_THREE" : null,
+    !riskValidation.valid
+      ? riskValidation.status
+      : null,
+    !directionValid
+      ? "ENGINE7_DIRECTION_REQUIRED_FOR_SIZING"
+      : null,
+    !isPositiveNumber(entryPrice)
+      ? "ENGINE7_ENTRY_REQUIRED_FOR_SIZING"
+      : null,
+    !isPositiveNumber(stopPrice)
+      ? "ENGINE7_STOP_REQUIRED_FOR_SIZING"
+      : null,
+    directionValid && !stopDirectionValid
+      ? "ENGINE7_STOP_DIRECTION_INVALID_FOR_SIZING"
+      : null,
+    !isPositiveNumber(providedStopDistance)
+      ? "ENGINE7_STOP_DISTANCE_REQUIRED_FOR_SIZING"
+      : null,
+    stopDistanceDifference != null &&
+    stopDistanceDifference > ES_TICK_SIZE
+      ? "ENGINE7_STOP_DISTANCE_MISMATCH"
+      : null,
+    riskValidation.valid &&
+    sizingGeometryValid &&
+    finalContracts <
+      (config?.minimumContracts ?? 1)
+      ? "ENGINE7_RISK_SUPPORTS_ZERO_CONTRACTS"
+      : null,
   ]);
 
-  const threeContractPlanQualified =
-    blockers.length === 0 &&
-    riskSupportedContracts >= STRATEGY1_REQUESTED_CONTRACTS;
-  const sizingReady = threeContractPlanQualified;
+  const status = finalSizingReady
+    ? "FINAL_SIZE_READY"
+    : !riskValidation.valid
+    ? riskValidation.status
+    : !sizingGeometryValid
+    ? "SIZING_GEOMETRY_INVALID"
+    : "RISK_BUDGET_TOO_SMALL";
 
-  let sizingState = "WAITING_FOR_UPSTREAM";
-  let status = "STRATEGY1_PRELIMINARY_SIZING_WAITING";
+  const targetRead = buildStrategy1Targets(
+    geometry?.proposedTargets
+  );
 
-  if (invalidated) {
-    sizingState = "INVALIDATED";
-    status = "CANDIDATE_INVALIDATED";
-  } else if (identityReasons.length > 0) {
-    sizingState = "IDENTITY_MISMATCH";
-    status = "PROPOSED_GEOMETRY_IDENTITY_MISMATCH";
-  } else if (!riskValidation.valid) {
-    sizingState = "RISK_EVIDENCE_UNAVAILABLE";
-    status = riskValidation.status;
-  } else if (riskLimited) {
-    sizingState = "RISK_LIMITED";
-    status = "STRATEGY1_RISK_LIMITED";
-  } else if (sizingReady) {
-    sizingState = "THREE_CONTRACT_PREVIEW_READY";
-    status = "STRATEGY1_THREE_CONTRACT_PREVIEW_READY";
-  }
+  const qualifiedThreeBlock =
+    testingThreeContractPlanQualified ||
+    productionThreeContractPlanQualified;
 
   return {
     ...base,
     active: true,
 
+    // Correlation metadata only; never a sizing veto.
     laneId: identity.laneId,
     strategyId: identity.strategyId,
     candidateId: identity.candidateId,
     zoneId: identity.zoneId,
     symbol: identity.symbol,
+    direction: geometry?.direction ?? null,
+    setupType: geometry?.setupType ?? null,
     setupClass: identity.setupClass,
     setupGrade: identity.setupGrade,
     identitySetupKey: identity.identitySetupKey,
@@ -557,106 +576,104 @@ function buildStrategy1Phase7Preview({
 
     proposedEntryPrice: entryPrice,
     proposedStopPrice: stopPrice,
-    proposedStopDistancePoints: providedStopDistance,
-    providedStopDistancePoints: providedStopDistance,
-    calculatedStopDistancePoints: calculatedStopDistance,
-    stopDistanceDifferencePoints: stopDistanceDifference,
+    proposedStopDistancePoints:
+      providedStopDistance,
+    providedStopDistancePoints:
+      providedStopDistance,
+    calculatedStopDistancePoints:
+      calculatedStopDistance,
+    stopDistanceDifferencePoints:
+      stopDistanceDifference,
     proposedTargets: targetRead.targets,
-    runnerHandoffRequired:
-      geometry?.runnerHandoffRequired === true,
 
+    // Upstream state is diagnostic only.
     engine6Permission: engine6.decision,
     engine6Allowed: engine6.explicitAllowed === true,
     engine6PlanningAllowed:
       engine6.planningAllowed === true,
-
     reactionReady: engine27.reactionReady === true,
     participationReady:
       engine27.participationReady === true,
     permissionReady:
       engine27.permissionReady === true,
     plannerReady: engine27.plannerReady === true,
-    invalidated,
-
-    geometryReady,
-    target1Ready,
-    target2Ready,
-    runnerHandoffReady: runnerReady,
+    invalidated: engine27.invalidated === true,
 
     riskBudgetDollars:
       config?.riskBudgetDollars ?? null,
     dollarsPerPoint:
-      config?.dollarsPerPoint ?? ES_DOLLARS_PER_POINT,
+      config?.dollarsPerPoint ??
+      ES_DOLLARS_PER_POINT,
     minimumContracts:
       config?.minimumContracts ?? null,
     maximumContracts:
       config?.maximumContracts ?? null,
     rawRiskPerContract,
-    estimatedSlippageRiskPerContract: slippageRisk,
+    estimatedSlippageRiskPerContract:
+      slippageRisk,
     commissionDollarsPerContractRoundTrip:
-      config?.commissionDollarsPerContractRoundTrip ?? null,
+      config?.commissionDollarsPerContractRoundTrip ??
+      null,
     estimatedRiskPerContract: riskPerContract,
+    effectiveRiskPerContract: riskPerContract,
 
-    threeContractPlanRequested: true,
-    requestedContracts: STRATEGY1_REQUESTED_CONTRACTS,
-    threeContractPlanQualified,
+    requestedContracts:
+      STRATEGY1_REQUESTED_CONTRACTS,
     riskSupportedContracts,
-    proposedContracts,
-    estimatedContracts: proposedContracts,
+    proposedContracts: productionContracts,
+    estimatedContracts: productionContracts,
     estimatedRiskDollars:
-      riskPerContract == null
-        ? 0
-        : round2(proposedContracts * riskPerContract),
-    riskLimited,
+      productionEstimatedRiskDollars,
+    riskLimited: productionRiskLimited,
 
     productionRiskBudgetDollars:
       config?.riskBudgetDollars ?? null,
     productionRiskSupportedContracts:
       riskSupportedContracts,
-    productionEstimatedRiskDollars:
-      riskPerContract == null
-        ? 0
-        : round2(proposedContracts * riskPerContract),
-    productionThreeContractPlanQualified:
-      threeContractPlanQualified,
-    productionRiskLimited:
-      riskLimited,
+    productionEstimatedRiskDollars,
+    productionThreeContractPlanQualified,
+    productionRiskLimited,
 
     testingDataCollectionMode,
     paperTestingContracts,
     testingThreeContractPlanQualified,
     testingRiskOverrideApplied,
 
-    allocation: STRATEGY1_ALLOCATION.map((block) => ({
-      ...block,
-    })),
+    allocation: STRATEGY1_ALLOCATION.map(
+      (block) => ({ ...block })
+    ),
     threeContractAllocation: {
       ...STRATEGY1_THREE_CONTRACT_ALLOCATION,
-      block1Contracts:
-        testingThreeContractPlanQualified ? 1 : 0,
-      block2Contracts:
-        testingThreeContractPlanQualified ? 1 : 0,
-      block3Contracts:
-        testingThreeContractPlanQualified ? 1 : 0,
-      totalContracts:
-        testingThreeContractPlanQualified
-          ? STRATEGY1_REQUESTED_CONTRACTS
-          : 0,
+      block1Contracts: qualifiedThreeBlock ? 1 : 0,
+      block2Contracts: qualifiedThreeBlock ? 1 : 0,
+      block3Contracts: qualifiedThreeBlock ? 1 : 0,
+      totalContracts: qualifiedThreeBlock ? 3 : 0,
     },
-    totalContracts:
-      sizingReady ? STRATEGY1_REQUESTED_CONTRACTS : proposedContracts,
-    target1Contracts: sizingReady ? 1 : 0,
-    target2Contracts: sizingReady ? 1 : 0,
-    runnerContracts: sizingReady ? 1 : 0,
 
-    sizingReady,
-    sizingState,
+    finalProductionContracts:
+      productionContracts,
+    finalPaperTestingContracts:
+      paperTestingContracts,
+    finalContracts,
+    finalSizingMode,
+    finalSizingReady,
+    paperOrderSizingReady: finalSizingReady,
+    estimatedTotalRiskDollars,
+
+    sizingReady: finalSizingReady,
+    sizingState: finalSizingReady
+      ? "SIZE_READY"
+      : "SIZE_UNAVAILABLE",
     sizingPreviewAvailable:
-      riskValidation.valid && geometryValid,
-    allowedPreview: sizingReady,
+      riskValidation.valid && sizingGeometryValid,
+    allowedPreview: finalSizingReady,
 
-    executableSizing: false,
+    // Compatibility fields mean only "Engine 7 produced a usable size".
+    // They do not create trade permission or execution authority.
+    allowed: finalSizingReady,
+    executableSizing: finalSizingReady,
     nonExecutable: true,
+
     noPermissionCreated: true,
     noOfficialPlanCreated: true,
     noManagementCreated: true,
@@ -671,27 +688,25 @@ function buildStrategy1Phase7Preview({
     blockers,
     warnings: [],
     reasonCodes: unique([
-      "ENGINE7A_STRATEGY1_PHASE7_APPLIED",
-      engine6Ready ? "ENGINE6_PLANNING_PERMISSION_READY" : null,
-      geometryReady ? "ENGINE26B_GEOMETRY_READY" : null,
-      engine27Ready ? "ENGINE27E_FULLY_READY" : null,
-      runnerReady ? "ENGINE9_RUNNER_HANDOFF_PRESERVED" : null,
-      sizingReady ? "ENGINE7A_THREE_CONTRACT_PREVIEW_READY" : null,
-      riskLimited ? "ENGINE7A_THREE_CONTRACT_PLAN_RISK_LIMITED" : null,
-      testingDataCollectionMode
-        ? "ENGINE7A_PAPER_DATA_COLLECTION_MODE_ACTIVE"
-        : "ENGINE7A_PAPER_DATA_COLLECTION_MODE_OFF",
-      testingThreeContractPlanQualified
-        ? "ENGINE7A_TESTING_THREE_CONTRACT_PLAN_QUALIFIED"
-        : null,
-      testingRiskOverrideApplied
-        ? "ENGINE7A_TESTING_RISK_OVERRIDE_APPLIED"
-        : null,
       ...riskValidation.reasonCodes,
-      ...blockers,
-      "ENGINE7A_PRELIMINARY_SIZING_ONLY",
+      "ENGINE7_SINGLE_SIZING_OWNER",
+      "ENGINE7_SIZING_ONLY",
+      sizingGeometryValid
+        ? "ENGINE7_SIZING_GEOMETRY_VALID"
+        : null,
+      finalSizingReady
+        ? "ENGINE7_FINAL_SIZE_READY"
+        : "ENGINE7_FINAL_CONTRACTS_ZERO",
+      productionRiskLimited
+        ? "ENGINE7_PRODUCTION_RISK_LIMITED"
+        : null,
+      testingDataCollectionMode
+        ? "ENGINE7_PAPER_DATA_COLLECTION_MODE_ACTIVE"
+        : null,
+      testingThreeContractPlanQualified
+        ? "ENGINE7_TESTING_THREE_CONTRACT_SIZE_READY"
+        : null,
       "NO_PERMISSION_CREATED",
-      "NO_MANAGEMENT_CREATED",
       "NO_ORDER_CREATED",
       "NO_EXECUTION",
     ]),
@@ -1449,6 +1464,104 @@ export function buildEngine7ProposedSizingPreview({
 
       "ENGINE9_OFFICIAL_PLAN_REQUIRED",
       "ENGINE7A_PREVIEW_ONLY",
+      "NO_PERMISSION_CREATED",
+      "NO_ORDER_CREATED",
+      "NO_EXECUTION",
+    ]),
+  };
+}
+
+
+/**
+ * Publish the one canonical Engine 7 sizing decision through the historical
+ * engine7PositionSizing interface consumed by Engine 8 / Journal / timeline.
+ *
+ * This is a compatibility projection only. It performs no second sizing
+ * calculation and does not re-qualify permission, readiness, identity,
+ * management, or execution.
+ */
+export function buildEngine7PositionSizingCompatibility({
+  engine7Sizing,
+  engine9OfficialManagementPlan = null,
+} = {}) {
+  const sizing =
+    engine7Sizing && typeof engine7Sizing === "object"
+      ? engine7Sizing
+      : {};
+
+  const plan =
+    engine9OfficialManagementPlan &&
+    typeof engine9OfficialManagementPlan === "object"
+      ? engine9OfficialManagementPlan
+      : {};
+
+  return {
+    ...sizing,
+
+    engine: "engine7.positionSizing.v3",
+    contractVersion: "engine7.positionSizing.v3",
+    mode: "POSITION_SIZING",
+
+    planId: plan?.planId ?? sizing?.planId ?? null,
+    candidateId:
+      plan?.candidateId ?? sizing?.candidateId ?? null,
+    zoneId:
+      plan?.zoneId ?? sizing?.zoneId ?? null,
+    strategyId:
+      plan?.strategyId ?? sizing?.strategyId ?? null,
+    symbol:
+      plan?.symbol ?? sizing?.symbol ?? null,
+    direction:
+      plan?.direction ?? sizing?.direction ?? null,
+    setupType:
+      plan?.setupType ?? sizing?.setupType ?? null,
+    setupClass:
+      plan?.setupClass ?? sizing?.setupClass ?? null,
+    setupGrade:
+      plan?.setupGrade ?? sizing?.setupGrade ?? null,
+    identitySetupKey:
+      plan?.identitySetupKey ??
+      sizing?.identitySetupKey ??
+      null,
+    candidateIdentityVersion:
+      plan?.candidateIdentityVersion ??
+      sizing?.candidateIdentityVersion ??
+      null,
+    snapshotTime:
+      plan?.snapshotTime ??
+      sizing?.snapshotTime ??
+      null,
+
+    officialEntryPrice:
+      toNumber(plan?.officialEntryPrice) ??
+      toNumber(sizing?.proposedEntryPrice),
+
+    officialStopPrice:
+      toNumber(plan?.officialStopPrice) ??
+      toNumber(sizing?.proposedStopPrice),
+
+    officialStopDistancePoints:
+      toNumber(plan?.officialStopDistancePoints) ??
+      toNumber(sizing?.calculatedStopDistancePoints),
+
+    officialTargets:
+      Array.isArray(plan?.officialTargets)
+        ? plan.officialTargets
+        : [],
+
+    engine9PlanStatus:
+      plan?.planStatus ?? null,
+    engine9ManagementReady:
+      plan?.managementReady === true,
+    engine9Official:
+      plan?.official === true,
+
+    reasonCodes: unique([
+      ...(Array.isArray(sizing?.reasonCodes)
+        ? sizing.reasonCodes
+        : []),
+      "ENGINE7_SINGLE_SIZING_DECISION_PUBLISHED",
+      "ENGINE7_POSITION_SIZING_COMPATIBILITY_VIEW",
       "NO_PERMISSION_CREATED",
       "NO_ORDER_CREATED",
       "NO_EXECUTION",
