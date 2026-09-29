@@ -20,6 +20,98 @@ function bar(time, open, high, low, close, completed = true) {
   return { time, open, high, low, close, completed };
 }
 
+
+
+test("structural-only swing is ignored by live liquidity detection", () => {
+  const t = 1_800_000_000_000;
+
+  const result = detectEngine29TrapAuctionEvent({
+    macroLiquidityMap: {
+      locationQuality: "LOW",
+      levels: [{
+        id: "4H|HIGH|internal|7739.25",
+        type: "FOUR_HOUR_SWING_HIGH",
+        timeframe: "4H",
+        side: "HIGH",
+        level: 7739.25,
+        lo: 7739.25,
+        hi: 7739.25,
+        eventEligible: false,
+        significance: "STRUCTURAL_ONLY",
+      }],
+    },
+    esAnchor: {
+      liveMonitor: {
+        bars: [
+          bar(t, 7738.5, 7741.0, 7737.5, 7740.5, false),
+        ],
+      },
+      structure: {
+        fastTactical: {
+          bars: [
+            bar(t - 3_600_000, 7734, 7742, 7730, 7738, true),
+            bar(t - 1_800_000, 7738, 7743, 7733, 7739, true),
+          ],
+        },
+        tactical: { bars: [] },
+      },
+    },
+    now: t + 10 * 60 * 1000,
+  });
+
+  assert.equal(
+    result.liquidityEvent.state,
+    ENGINE29_LIQUIDITY_EVENT_STATES.NO_LIQUIDITY_EVENT
+  );
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+});
+
+test("tiny one-tick cross does not qualify as a meaningful sweep", () => {
+  const t = 1_800_000_000_000;
+
+  const result = detectEngine29TrapAuctionEvent({
+    macroLiquidityMap: {
+      locationQuality: "VERY_HIGH",
+      levels: [{
+        id: "4H|HIGH|major|7800",
+        type: "FOUR_HOUR_SWING_HIGH",
+        timeframe: "4H",
+        side: "HIGH",
+        level: 7800,
+        lo: 7800,
+        hi: 7800,
+        eventEligible: true,
+        significance: "MACRO_EXTREME",
+      }],
+    },
+    esAnchor: {
+      liveMonitor: {
+        bars: [
+          bar(t, 7799.5, 7800.25, 7798.5, 7799.75, false),
+        ],
+      },
+      structure: {
+        fastTactical: {
+          bars: [
+            bar(t - 5_400_000, 7790, 7802, 7788, 7795, true),
+            bar(t - 3_600_000, 7795, 7804, 7791, 7798, true),
+            bar(t - 1_800_000, 7798, 7803, 7792, 7799, true),
+          ],
+        },
+        tactical: { bars: [] },
+      },
+    },
+    now: t + 10 * 60 * 1000,
+  });
+
+  assert.equal(
+    result.liquidityEvent.state,
+    ENGINE29_LIQUIDITY_EVENT_STATES.TEST_HIGH
+  );
+  assert.equal(result.liquidityEvent.swept, false);
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+});
+
 test("low sweep alone is a liquidity event, not a bear trap", () => {
   const t = 1_800_000_000_000;
 
