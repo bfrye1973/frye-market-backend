@@ -20,6 +20,7 @@ export const MACRO_PRESSURE_WEIGHTS = Object.freeze({
 });
 
 function isNum(value) {
+  if (value === null || value === undefined || value === "") return false;
   return Number.isFinite(Number(value));
 }
 
@@ -65,15 +66,12 @@ function boolScore(value, whenTrue, whenFalse) {
 }
 
 function getFredValue(macroData, key) {
-  const entry = macroData?.fred?.[key] ?? macroData?.[key];
-  if (isNum(entry)) return Number(entry);
-  if (isNum(entry?.value)) return Number(entry.value);
-  if (isNum(entry?.latestValue)) return Number(entry.latestValue);
-  return null;
+  const value = macroData?.sources?.fred?.latest?.[key]?.value;
+  return isNum(value) ? Number(value) : null;
 }
 
 function getSymbol(marketData, group, symbol) {
-  return marketData?.[group]?.[symbol] || null;
+  return marketData?.quickRead?.[group]?.[symbol] ?? null;
 }
 
 export function buildMacroPressure({
