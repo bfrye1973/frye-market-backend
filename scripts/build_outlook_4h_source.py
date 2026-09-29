@@ -160,7 +160,7 @@ def fetch_4h_bars(ticker: str, start: date, end: date, sort: str = "asc", limit:
                 "h": float(r.get("h",0.0)),
                 "l": float(r.get("l",0.0)),
                 "c": float(r.get("c",0.0)),
-                "v": float(r["v"]) if r.get("v") is not None else None,
+                "v": r.get("v"),
             })
         except Exception:
             continue
