@@ -44,6 +44,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
+
 UTC = timezone.utc
 POLY_BASE = "https://api.polygon.io"
 
@@ -197,20 +199,22 @@ def compute_daily_flags(bars: List[Dict[str, Any]], L: int) -> Tuple[int, int, i
     return nh, nl, up, dn
 
 
-def process_symbol_daily(sym: str, days: int, L: int) -> Tuple[int, int, int, int]:
+def process_symbol_daily(sym: str, days: int, L: int):
     try:
         bars = fetch_1d_bars(sym, days=days)
         if not bars:
-            return 0, 0, 0, 0
-        return compute_daily_flags(bars, L)
+            return 0, 0, 0, 0, None
+        nh, nl, up, dn = compute_daily_flags(bars, L)
+        return nh, nl, up, dn, bars[-1].get("v")
     except SystemExit:
         raise
     except Exception:
-        return 0, 0, 0, 0
+        return 0, 0, 0, 0, None
 
 
 def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> Dict[str, Any]:
     nh = nl = up = dn = 0
+    volume_observations = []
     if not symbols:
         return {"sector": sector, "nh": 0, "nl": 0, "up": 0, "down": 0}
 
@@ -218,12 +222,14 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
         futs = {ex.submit(process_symbol_daily, s, days, L): s for s in symbols}
         for fut in as_completed(futs):
             try:
-                a, b, c, d = fut.result()
+                a, b, c, d, volume = fut.result()
                 nh += a; nl += b; up += c; dn += d
+                classification = UP if c else (DOWN if d else UNCHANGED)
+                volume_observations.append({"classification": classification, "volume": volume})
             except Exception:
                 continue
 
-    return {"sector": sector, "nh": nh, "nl": nl, "up": up, "down": dn}
+    return {"sector": sector, "nh": nh, "nl": nl, "up": up, "down": dn, **aggregate_sector_volume(volume_observations)}
 
 
 def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict[str, Any]]:
@@ -252,6 +258,7 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
             "nl": nl,
             "up": up,
             "down": dn,
+            **{k: agg[k] for k in ("totalVolume","advancingVolume","decliningVolume","unchangedVolume","advancingVolumePct","decliningVolumePct","stocksScanned","stocksWithVolume")},
         })
     return cards
 
