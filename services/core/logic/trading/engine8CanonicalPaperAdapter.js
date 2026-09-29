@@ -888,28 +888,28 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   if (!engine7Ready) {
     return finish(output, {
       status: "WAITING_FOR_ENGINE7_FINAL_SIZE",
-      blocker: "ENGINE7B_FINAL_SIZE_NOT_READY",
+      blocker: "ENGINE7_FINAL_SIZE_NOT_READY",
       reasonCodes: [
         engine7?.status
-          ? `ENGINE7B_STATUS_${normalizeUpper(
+          ? `ENGINE7_STATUS_${normalizeUpper(
               engine7.status
             )}`
-          : "ENGINE7B_STATUS_MISSING",
+          : "ENGINE7_STATUS_MISSING",
 
         engine7?.allowed !== true
-          ? "ENGINE7B_ALLOWED_FALSE"
+          ? "ENGINE7_ALLOWED_FALSE"
           : null,
 
         engine7?.executableSizing !== true
-          ? "ENGINE7B_EXECUTABLE_SIZING_FALSE"
+          ? "ENGINE7_EXECUTABLE_SIZING_FALSE"
           : null,
 
         !Number.isInteger(finalContracts)
-          ? "ENGINE7B_FINAL_CONTRACTS_NOT_INTEGER"
+          ? "ENGINE7_FINAL_CONTRACTS_NOT_INTEGER"
           : null,
 
         finalContracts <= 0
-          ? "ENGINE7B_FINAL_CONTRACTS_ZERO"
+          ? "ENGINE7_FINAL_CONTRACTS_ZERO"
           : null,
 
         "NO_ORDER_CREATED",
@@ -995,7 +995,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
     right: engine7,
     fields: ENGINE9_ENGINE7_CORRELATION_FIELDS,
     leftName: "ENGINE9",
-    rightName: "ENGINE7B",
+    rightName: "ENGINE7",
   });
 
   const identityMismatches = [
@@ -1118,7 +1118,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
       reasonCodes: [
         "ENGINE6_PAPER_PERMISSION_READY",
         "ENGINE9_OFFICIAL_PLAN_READY",
-        "ENGINE7B_FINAL_SIZE_READY",
+        "ENGINE7_FINAL_SIZE_READY",
         "UPSTREAM_IDENTITY_MATCHED",
         "OFFICIAL_GEOMETRY_MATCHED",
         "DUPLICATE_CHECK_CLEAR",
