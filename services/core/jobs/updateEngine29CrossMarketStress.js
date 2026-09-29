@@ -59,16 +59,28 @@ function compactLog(output) {
       output?.marketCharacter?.trap?.state ??
       output?.trapDetection?.state ??
       "NO_ACTIVE_TRAP",
+    trapCampaignActive:
+      output?.trapCampaign?.active === true,
     trapCampaignId:
-      output?.trapCampaign?.campaign?.campaignId ?? null,
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.campaignId ?? null
+        : null,
     trapCampaignSide:
-      output?.trapCampaign?.campaign?.side ?? null,
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.side ?? null
+        : null,
     trapCampaignState:
-      output?.trapCampaign?.campaign?.state ?? null,
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.state ?? null
+        : null,
     competingTrapSide:
-      output?.trapCampaign?.campaign?.competingDetection?.trapSide ?? null,
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.competingDetection?.trapSide ?? null
+        : null,
     competingTrapState:
-      output?.trapCampaign?.campaign?.competingDetection?.state ?? null,
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.competingDetection?.state ?? null
+        : null,
   };
 }
 
@@ -95,8 +107,13 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   output.trapCampaign = trapCampaign;
 
   if (output?.trapDetection) {
+    // Canonical live pointer exposes only an active campaign.
+    // Historical/inactive campaign memory remains preserved under
+    // output.trapCampaign for audit and replay.
     output.trapDetection.campaign =
-      trapCampaign?.campaign || null;
+      trapCampaign?.active === true
+        ? trapCampaign?.campaign || null
+        : null;
   }
 
   if (!output || typeof output !== "object") {
