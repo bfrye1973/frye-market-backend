@@ -54,6 +54,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
+
 UTC = timezone.utc
 POLY_BASE = "https://api.polygon.io"
 
@@ -158,6 +160,7 @@ def fetch_4h_bars(ticker: str, start: date, end: date, sort: str = "asc", limit:
                 "h": float(r.get("h",0.0)),
                 "l": float(r.get("l",0.0)),
                 "c": float(r.get("c",0.0)),
+                "v": float(r["v"]) if r.get("v") is not None else None,
             })
         except Exception:
             continue
@@ -269,7 +272,7 @@ def process_symbol_baseline(sym: str, lookback_bars: int, lookback_days: int) ->
         if not bars:
             return sym, None
         last_t, nh, nl, u3, d3 = compute_flags_from_bars(bars, lookback_bars)
-        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3}
+        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3, "volume": bars[-1].get("v")}
     except Exception:
         return sym, None
 
@@ -301,7 +304,7 @@ def process_symbol_incremental(sym: str, cache_entry: Optional[dict], lookback_b
             return sym, None, False
 
         last_t, nh, nl, u3, d3 = compute_flags_from_bars(bars, lookback_bars)
-        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3}, True
+        return sym, {"last_bar_time": last_t, "nh": nh, "nl": nl, "u3": u3, "d3": d3, "volume": bars[-1].get("v")}, True
     except Exception:
         return sym, None, False
 
@@ -314,14 +317,19 @@ def aggregate_sector_cards_from_cache(sectors_map: Dict[str, List[str]], cache_s
     # we keep the CSV filenames but order by canonical names if possible
     for sector_file, syms in sorted(sectors_map.items()):
         nh = nl = up = dn = 0
+        volume_observations = []
         for s in syms:
             e = cache_symbols.get(s)
             if not isinstance(e, dict):
+                volume_observations.append({"classification": UNCHANGED, "volume": None})
                 continue
             nh += int(e.get("nh", 0))
             nl += int(e.get("nl", 0))
             up += int(e.get("u3", 0))
             dn += int(e.get("d3", 0))
+            classification = UP if int(e.get("u3", 0)) else (DOWN if int(e.get("d3", 0)) else UNCHANGED)
+            volume_observations.append({"classification": classification, "volume": e.get("volume")})
+        volume = aggregate_sector_volume(volume_observations)
         breadth_pct = round(pct(nh, nh+nl), 2) if (nh+nl) > 0 else 50.0
         mom_pct     = round(pct(up, up+dn), 2) if (up+dn) > 0 else 50.0
         cards.append({
@@ -332,6 +340,7 @@ def aggregate_sector_cards_from_cache(sectors_map: Dict[str, List[str]], cache_s
             "nl": int(nl),
             "up": int(up),
             "down": int(dn),
+            **volume,
         })
     return cards
 
