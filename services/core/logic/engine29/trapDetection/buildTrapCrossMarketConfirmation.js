@@ -18,8 +18,13 @@ function vixRead(moveCharacter, liveMonitor, trapSide) {
   const directAvailable =
     moveCharacter?.directVixAvailable === true;
 
+  const rawMove10 =
+    liveMonitor?.metrics?.vix?.move10;
+
   const move10 =
-    Number(liveMonitor?.metrics?.vix?.move10);
+    rawMove10 === null || rawMove10 === undefined || rawMove10 === ""
+      ? null
+      : Number(rawMove10);
 
   const available =
     directAvailable &&
