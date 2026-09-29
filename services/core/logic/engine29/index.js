@@ -40,6 +40,10 @@ export * from "./tacticalCharacter/resolveMoveCharacter.js";
 export * from "./tacticalCharacter/buildTacticalCharacter.js";
 export * from "./tacticalCharacter/buildSqueezeTransitionMonitor.js";
 
+export * from "./trapDetection/trapConstants.js";
+export * from "./trapDetection/readInstitutionalLiquidity.js";
+export * from "./trapDetection/buildMacroLiquidityMap.js";
+
 export * from "./aggregate/overallStateConstants.js";
 export * from "./aggregate/resolveStructuralState.js";
 export * from "./aggregate/resolveTacticalState.js";
