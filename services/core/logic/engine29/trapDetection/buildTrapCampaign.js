@@ -161,11 +161,29 @@ export function buildEngine29TrapCampaign({
       };
     }
 
+    const priorHighest =
+      priorCampaign?.highestState ||
+      priorCampaign?.state ||
+      ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP;
+
+    const priorRank = RANK[priorHighest] ?? 0;
+    const stickyRank =
+      RANK[ENGINE29_TRAP_STATES.TRAP_FORMING];
+
+    // TRAP_WATCH is intentionally ephemeral. If the live detector no longer
+    // has a trap identity, keep the record for audit/history but remove it
+    // from active campaign state. FORMING and stronger campaigns remain sticky
+    // so they can survive a temporary observation gap.
+    const remainsActive =
+      priorCampaign?.active === true &&
+      priorRank >= stickyRank;
+
     return {
       version: "engine29.trapCampaign.v1",
-      active: priorCampaign?.active === true,
+      active: remainsActive,
       campaign: {
         ...priorCampaign,
+        active: remainsActive,
         lastBuildAt: timestamp,
         currentDetectionState: ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP,
         observationGapCount:
