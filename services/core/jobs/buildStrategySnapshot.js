@@ -10798,6 +10798,9 @@ if (
 
     subminute.engine8PaperOrder =
       buildEngine8CanonicalPaperAdapter({
+        engine26LocationCandidate:
+          subminuteEngine26Candidate,
+
         engine6PaperPermission:
           subminuteEngine6Permission,
 
@@ -10989,6 +10992,9 @@ const engine8DuplicateState =
 
   scalp.engine8PaperOrder =
     buildEngine8CanonicalPaperAdapter({
+      engine26LocationCandidate:
+        scalp.engine26LocationCandidate || null,
+
       engine6PaperPermission:
         scalp.permission?.paper || null,
 
