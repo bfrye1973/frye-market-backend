@@ -43,10 +43,22 @@ function compactLog(output) {
       null,
     dataDegraded: Boolean(output?.dataDegraded),
     missingConfirmations: output?.missingConfirmations || [],
+    liquidityState:
+      output?.marketCharacter?.liquidity?.state ??
+      output?.trapDetection?.liquidity?.state ??
+      "NO_LIQUIDITY_EVENT",
+    moveLane:
+      output?.marketCharacter?.move?.moveCharacter ??
+      output?.moveCharacter?.moveCharacter ??
+      "NO_ACTIVE_MOVE",
     trapSide:
-      output?.trapDetection?.trapSide ?? "NONE",
+      output?.marketCharacter?.trap?.side ??
+      output?.trapDetection?.trapSide ??
+      "NONE",
     trapState:
-      output?.trapDetection?.state ?? "NO_ACTIVE_TRAP",
+      output?.marketCharacter?.trap?.state ??
+      output?.trapDetection?.state ??
+      "NO_ACTIVE_TRAP",
     trapCampaignId:
       output?.trapCampaign?.campaign?.campaignId ?? null,
     trapCampaignSide:
@@ -126,6 +138,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
       `1h=${result.summary.tacticalState} ` +
       `30m=${result.summary.fastTacticalState} ` +
       `move=${result.summary.moveCharacter} ` +
+      `liquidity=${result.summary.liquidityState} ` +
       `trap=${result.summary.trapSide}/${result.summary.trapState} ` +
       `campaign=${result.summary.trapCampaignSide || "NONE"}/${result.summary.trapCampaignState || "NONE"}`
   );
