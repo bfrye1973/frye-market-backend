@@ -7,6 +7,7 @@
 // - Reuse Frye's existing shared futuresOhlcProvider.
 // - Build 1H + 30m ES structure without adding ES to the 1W cross-market universe.
 // - Add 10m ES bars for the diagnostic live squeeze/momentum monitor.
+// - Add 2H + 4H location context for macro trap/liquidity detection only.
 // - SPY/QQQ and all other Engine 29 groups remain confirmation/context.
 
 import { fetchFuturesBars } from "../../../providers/futuresOhlcProvider.js";
@@ -55,6 +56,57 @@ function normalizeFuturesBars(bars = []) {
 
 function latest(bars = []) {
   return bars.at(-1) || null;
+}
+
+function aggregateOneHourToTwoHour(oneHourBars = []) {
+  const bars = (Array.isArray(oneHourBars) ? oneHourBars : [])
+    .filter((bar) =>
+      Number.isFinite(Number(bar?.time)) &&
+      Number.isFinite(Number(bar?.open)) &&
+      Number.isFinite(Number(bar?.high)) &&
+      Number.isFinite(Number(bar?.low)) &&
+      Number.isFinite(Number(bar?.close))
+    )
+    .slice()
+    .sort((a, b) => Number(a.time) - Number(b.time));
+
+  const TWO_HOURS_MS = 2 * 60 * 60 * 1000;
+  const groups = new Map();
+
+  for (const bar of bars) {
+    const bucket = Math.floor(Number(bar.time) / TWO_HOURS_MS) * TWO_HOURS_MS;
+
+    if (!groups.has(bucket)) groups.set(bucket, []);
+    groups.get(bucket).push(bar);
+  }
+
+  return [...groups.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([bucket, members]) => {
+      const ordered = members.slice().sort((a, b) => Number(a.time) - Number(b.time));
+      const first = ordered[0];
+      const last = ordered.at(-1);
+
+      return {
+        date: new Date(bucket).toISOString().slice(0, 10),
+        time: bucket,
+        open: Number(first.open),
+        high: Math.max(...ordered.map((bar) => Number(bar.high))),
+        low: Math.min(...ordered.map((bar) => Number(bar.low))),
+        close: Number(last.close),
+        volume: ordered.reduce(
+          (sum, bar) => sum + (Number.isFinite(Number(bar.volume)) ? Number(bar.volume) : 0),
+          0
+        ),
+        vwap: null,
+        transactions: null,
+        dataShape: "OHLCV",
+        syntheticOhlc: false,
+        derivedFrom: "1H",
+        sourceBarCount: ordered.length,
+      };
+    })
+    .filter((bar) => bar.sourceBarCount === 2);
 }
 
 function marketEntry({
@@ -150,8 +202,9 @@ export async function buildEngine29EsFuturesAnchor({
   oneHourLimit = 2500,
   thirtyMinuteLimit = 3500,
   tenMinuteLimit = 5000,
+  fourHourLimit = 1800,
 } = {}) {
-  const [hourly, thirtyMinute, tenMinute] = await Promise.all([
+  const [hourly, thirtyMinute, tenMinute, fourHour] = await Promise.all([
     fetchFuturesBars({
       symbol,
       timeframe: "1h",
@@ -167,6 +220,11 @@ export async function buildEngine29EsFuturesAnchor({
       timeframe: "10m",
       limit: tenMinuteLimit,
     }),
+    fetchFuturesBars({
+      symbol,
+      timeframe: "4h",
+      limit: fourHourLimit,
+    }),
   ]);
 
   const entry = marketEntry({
@@ -178,8 +236,42 @@ export async function buildEngine29EsFuturesAnchor({
 
   const structure = buildEngine29SymbolStructure(entry, { now });
 
+  const oneHourBars = entry.tactical?.bars || [];
+  const twoHourBars = aggregateOneHourToTwoHour(oneHourBars);
+  const fourHourBars = normalizeFuturesBars(fourHour?.bars);
+
+  const macroContext = {
+    authority: "LOCATION_CONTEXT_ONLY",
+
+    twoHour: {
+      timeframe: "2H",
+      sourceTimeframe: "1H",
+      source: "DERIVED_FROM_CONSECUTIVE_1H_BARS",
+      count: twoHourBars.length,
+      latest: latest(twoHourBars),
+      bars: twoHourBars,
+
+      // No new 2H freshness threshold is invented.
+      // This layer inherits the existing 1H source freshness truth.
+      sourceFreshness: entry.tactical?.freshness || null,
+    },
+
+    fourHour: {
+      timeframe: "4H",
+      sourceTimeframe: "4H",
+      source: "FRYE_FUTURES_OHLC_PROVIDER",
+      count: fourHourBars.length,
+      latest: latest(fourHourBars),
+      bars: fourHourBars,
+
+      // 4H is macro location context only in this phase.
+      // A dedicated 4H freshness policy is intentionally not invented here.
+      freshness: null,
+    },
+  };
+
   return {
-    version: "engine29.esAnchor.v1.1",
+    version: "engine29.esAnchor.v1.2.macroLocation",
     timestamp: new Date(now).toISOString(),
     productCode: symbol,
 
@@ -187,6 +279,7 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolvedSymbol ||
       thirtyMinute?.resolvedSymbol ||
       hourly?.resolvedSymbol ||
+      fourHour?.resolvedSymbol ||
       null,
 
     source: "FRYE_FUTURES_OHLC_PROVIDER",
@@ -195,6 +288,7 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolver ||
       thirtyMinute?.resolver ||
       hourly?.resolver ||
+      fourHour?.resolver ||
       null,
 
     tacticalFreshness: entry.tactical?.freshness || null,
@@ -208,6 +302,9 @@ export async function buildEngine29EsFuturesAnchor({
     // Raw normalized 10m ES bars for the diagnostic live monitor.
     // This does NOT become 30m / 1H / 1W authority.
     liveMonitor: entry.liveMonitor,
+
+    // Macro trap-location context only. It does not overwrite 1H/30m authority.
+    macroContext,
 
     structure,
   };
