@@ -263,6 +263,8 @@ function chooseCandidate(levels = [], bar) {
   const testedLevels = [];
 
   for (const level of Array.isArray(levels) ? levels : []) {
+    if (level?.eventEligible === false) continue;
+
     const side = levelSide(level, bar);
     if (!side) continue;
 
@@ -500,6 +502,10 @@ export function detectEngine29TrapAuctionEvent({
         liveSwept || thirtyMinuteSwept,
       reclaimed: reclaimObserved,
       sweepThresholdPct: sweepThreshold,
+      significance:
+        level.significance ?? null,
+      eventEligible:
+        level.eventEligible !== false,
     },
 
     auctionResult,
