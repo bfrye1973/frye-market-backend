@@ -352,6 +352,15 @@ export async function buildEngine29CrossMarketStress({
     liveMonitor,
     trapDetection,
 
+    marketCharacter: {
+      liquidity:
+        trapDetection?.liquidity || null,
+      move:
+        trapDetection?.moveCharacterLane || null,
+      trap:
+        trapDetection?.trap || null,
+    },
+
     groups:
       groups?.groups || {},
 
@@ -523,6 +532,69 @@ export async function buildEngine29CrossMarketStress({
           liveMonitor
             ?.display
             ?.why ?? [],
+      },
+
+      marketCharacter: {
+        liquidity: {
+          state:
+            trapDetection?.liquidity?.state ??
+            "NO_LIQUIDITY_EVENT",
+          side:
+            trapDetection?.liquidity?.side ?? null,
+          level:
+            trapDetection?.liquidity?.level ?? null,
+          auctionResult:
+            trapDetection?.liquidity?.auctionResult ??
+            "NO_ACTIVE_AUCTION",
+          reclaimObserved:
+            trapDetection?.liquidity?.reclaimObserved === true,
+        },
+
+        move: {
+          moveCharacter:
+            trapDetection?.moveCharacterLane?.moveCharacter ??
+            move?.moveCharacter ??
+            "NO_ACTIVE_MOVE",
+          direction:
+            trapDetection?.moveCharacterLane?.direction ??
+            move?.direction ??
+            null,
+          fastState:
+            trapDetection?.moveCharacterLane?.fastState ??
+            liveMonitor?.state ??
+            null,
+          liveDirection:
+            trapDetection?.moveCharacterLane?.liveDirection ??
+            liveMonitor?.direction ??
+            null,
+          participation:
+            trapDetection?.moveCharacterLane?.participation ??
+            liveMonitor?.participation ??
+            null,
+        },
+
+        trap: {
+          side:
+            trapDetection?.trap?.side ??
+            trapDetection?.trapSide ??
+            "NONE",
+          state:
+            trapDetection?.trap?.state ??
+            trapDetection?.state ??
+            "NO_ACTIVE_TRAP",
+          locationQuality:
+            trapDetection?.trap?.locationQuality ??
+            trapDetection?.locationQuality ??
+            null,
+          confirmationQuality:
+            trapDetection?.trap?.confirmationQuality ??
+            trapDetection?.confirmationQuality ??
+            null,
+          confirmationBlockedBy:
+            trapDetection?.trap?.confirmationBlockedBy ??
+            trapDetection?.confirmationBlockedBy ??
+            [],
+        },
       },
 
       trap: {
