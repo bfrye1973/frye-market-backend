@@ -5,7 +5,12 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { buildEngine29CrossMarketStress } from "../logic/engine29/index.js";
+import {
+  buildEngine29CrossMarketStress,
+  buildEngine29TrapCampaign,
+  readEngine29TrapCampaign,
+  writeEngine29TrapCampaign,
+} from "../logic/engine29/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +43,12 @@ function compactLog(output) {
       null,
     dataDegraded: Boolean(output?.dataDegraded),
     missingConfirmations: output?.missingConfirmations || [],
+    trapSide:
+      output?.trapDetection?.trapSide ?? "NONE",
+    trapState:
+      output?.trapDetection?.state ?? "NO_ACTIVE_TRAP",
+    trapCampaignId:
+      output?.trapCampaign?.campaign?.campaignId ?? null,
   };
 }
 
@@ -50,6 +61,23 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   console.log(`[engine29] BUILD START @ ${startedAt}`);
 
   const output = await buildEngine29CrossMarketStress({ now });
+
+  const priorTrapCampaign =
+    readEngine29TrapCampaign();
+
+  const trapCampaign =
+    buildEngine29TrapCampaign({
+      priorCampaign: priorTrapCampaign,
+      trapDetection: output?.trapDetection || null,
+      now,
+    });
+
+  output.trapCampaign = trapCampaign;
+
+  if (output?.trapDetection) {
+    output.trapDetection.campaign =
+      trapCampaign?.campaign || null;
+  }
 
   if (!output || typeof output !== "object") {
     throw new Error("Engine 29 build returned no canonical output");
@@ -66,6 +94,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   }
 
   writeJsonAtomic(OUTPUT_FILE, output);
+  writeEngine29TrapCampaign(trapCampaign);
 
   const stat = fs.statSync(OUTPUT_FILE);
   const finishedAt = new Date().toISOString();
@@ -88,7 +117,8 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
       `overall=${result.summary.overallState} ` +
       `1h=${result.summary.tacticalState} ` +
       `30m=${result.summary.fastTacticalState} ` +
-      `move=${result.summary.moveCharacter}`
+      `move=${result.summary.moveCharacter} ` +
+      `trap=${result.summary.trapSide}/${result.summary.trapState}`
   );
 
   return result;
