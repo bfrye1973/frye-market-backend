@@ -22,6 +22,76 @@ function bar(time, open, high, low, close, completed = true) {
 
 
 
+test("local 4H plus derived 2H and 1H highs do not become macro liquidity without institutional or macro-extreme support", () => {
+  const t = 1_800_000_000_000;
+
+  const macro = {
+    locationQuality: "LOW",
+    levels: [
+      {
+        id: "4H|HIGH|a|7739.25",
+        type: "FOUR_HOUR_SWING_HIGH",
+        timeframe: "4H",
+        side: "HIGH",
+        level: 7739.25,
+        lo: 7739.25,
+        hi: 7739.25,
+        eventEligible: false,
+        significance: "STRUCTURAL_ONLY",
+      },
+      {
+        id: "2H|HIGH|b|7739.25",
+        type: "TWO_HOUR_SWING_HIGH",
+        timeframe: "2H",
+        side: "HIGH",
+        level: 7739.25,
+        lo: 7739.25,
+        hi: 7739.25,
+        eventEligible: false,
+        significance: "STRUCTURAL_ONLY",
+      },
+      {
+        id: "1H|HIGH|c|7742",
+        type: "ONE_HOUR_SWING_HIGH",
+        timeframe: "1H",
+        side: "HIGH",
+        level: 7742,
+        lo: 7742,
+        hi: 7742,
+        eventEligible: false,
+        significance: "STRUCTURAL_ONLY",
+      },
+    ],
+  };
+
+  const result = detectEngine29TrapAuctionEvent({
+    macroLiquidityMap: macro,
+    esAnchor: {
+      liveMonitor: {
+        bars: [
+          bar(t, 7738.5, 7741.0, 7737.0, 7740.0, false),
+        ],
+      },
+      structure: {
+        fastTactical: {
+          bars: [
+            bar(t - 3_600_000, 7730, 7744, 7728, 7738, true),
+            bar(t - 1_800_000, 7738, 7743, 7734, 7739, true),
+          ],
+        },
+        tactical: { bars: [] },
+      },
+    },
+    now: t + 10 * 60 * 1000,
+  });
+
+  assert.equal(
+    result.liquidityEvent.state,
+    ENGINE29_LIQUIDITY_EVENT_STATES.NO_LIQUIDITY_EVENT
+  );
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+});
+
 test("structural-only swing is ignored by live liquidity detection", () => {
   const t = 1_800_000_000_000;
 
