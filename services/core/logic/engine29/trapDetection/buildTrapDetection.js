@@ -97,7 +97,7 @@ export async function buildEngine29TrapDetection({
     });
 
   return {
-    version: "engine29.trapDetection.v1.phaseB3Participation",
+    version: "engine29.trapDetection.v2.threeLane",
     timestamp: new Date(now).toISOString(),
     authority: "OBSERVATION_CONFIRMATION_ONLY",
 
@@ -105,6 +105,48 @@ export async function buildEngine29TrapDetection({
     state: resolved.state,
     locationQuality: resolved.locationQuality,
     confirmationQuality: resolved.confirmationQuality,
+
+    liquidity: {
+      state:
+        auctionEvent?.liquidityEvent?.state ??
+        "NO_LIQUIDITY_EVENT",
+      side:
+        auctionEvent?.liquidityEvent?.side ?? null,
+      level:
+        auctionEvent?.liquidityLevel ?? null,
+      sweep:
+        auctionEvent?.sweep ?? null,
+      auctionResult:
+        auctionEvent?.auctionResult ??
+        "NO_ACTIVE_AUCTION",
+      reclaimObserved:
+        auctionEvent?.reclaimObserved === true,
+    },
+
+    moveCharacterLane: {
+      moveCharacter:
+        moveCharacter?.moveCharacter ?? "NO_ACTIVE_MOVE",
+      direction:
+        moveCharacter?.direction ?? null,
+      fastState:
+        liveMonitor?.state ?? null,
+      liveDirection:
+        liveMonitor?.direction ?? null,
+      participation:
+        liveMonitor?.participation ?? null,
+      context:
+        liveMonitor?.context ?? null,
+    },
+
+    trap: {
+      side: resolved.trapSide,
+      state: resolved.state,
+      locationQuality: resolved.locationQuality,
+      confirmationQuality:
+        resolved.confirmationQuality,
+      confirmationBlockedBy:
+        resolved.confirmationBlockedBy,
+    },
 
     macroLiquidityMap,
     auctionEvent,
