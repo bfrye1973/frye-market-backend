@@ -271,39 +271,36 @@ function annotateEventEligibility(levels = [], thresholdPoints) {
     ).filter((other) => sameSide(level, other));
 
     const nearInstitutional = nearby.some(isInstitutional);
-    const nearFourHour = nearby.some(isFourHour);
-    const nearTwoHour = nearby.some(isTwoHour);
+    const nearEligibleFourHour = nearby.some(
+      (item) => isFourHour(item) && item.macroExtreme === true
+    );
 
     let eventEligible = false;
     let significance = "STRUCTURAL_ONLY";
 
+    // Institutional inventory and true 4H macro extremes are independently
+    // meaningful liquidity. Ordinary 4H/2H/1H pivots remain structural context
+    // unless they overlap one of those higher-authority locations.
+    //
+    // This intentionally prevents the same local auction from being promoted
+    // merely because it appears as a 4H + derived 2H + 1H swing near one price.
     if (isInstitutional(level)) {
       eventEligible = true;
       significance = "INSTITUTIONAL";
     } else if (isFourHour(level)) {
       eventEligible =
         level.macroExtreme === true ||
-        nearInstitutional ||
-        nearTwoHour;
+        nearInstitutional;
 
       significance = level.macroExtreme
         ? "MACRO_EXTREME"
-        : eventEligible
+        : nearInstitutional
           ? "MACRO_CONFLUENCE"
           : "STRUCTURAL_ONLY";
-    } else if (isTwoHour(level)) {
+    } else if (isTwoHour(level) || isOneHour(level)) {
       eventEligible =
         nearInstitutional ||
-        nearFourHour;
-
-      significance = eventEligible
-        ? "MACRO_CONFLUENCE"
-        : "STRUCTURAL_ONLY";
-    } else if (isOneHour(level)) {
-      eventEligible =
-        nearInstitutional ||
-        nearFourHour ||
-        nearTwoHour;
+        nearEligibleFourHour;
 
       significance = eventEligible
         ? "MACRO_CONFLUENCE"
@@ -397,10 +394,13 @@ export function buildEngine29MacroLiquidityMap({
 
   const confluence = primary
     ? confluenceAt(levels, Number(primary.level), thresholdPoints)
+        .filter((item) => sameSide(primary, item))
     : [];
 
   const quality = primary
-    ? locationQuality(confluence)
+    ? locationQuality(
+        confluence.filter((item) => item.eventEligible === true)
+      )
     : ENGINE29_TRAP_LOCATION_QUALITY.UNAVAILABLE;
 
   const reasonCodes = [];
