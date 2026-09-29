@@ -136,6 +136,50 @@ test("structural-only swing is ignored by live liquidity detection", () => {
   assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
 });
 
+test("bar fully below a prior low is acceptance travel, not a fresh liquidity sweep", () => {
+  const t = 1_800_000_000_000;
+
+  const result = detectEngine29TrapAuctionEvent({
+    macroLiquidityMap: {
+      locationQuality: "VERY_HIGH",
+      levels: [{
+        id: "4H|LOW|accepted|7752.75",
+        type: "FOUR_HOUR_SWING_LOW",
+        timeframe: "4H",
+        side: "LOW",
+        level: 7752.75,
+        lo: 7752.75,
+        hi: 7752.75,
+        eventEligible: true,
+        significance: "MACRO_CONFLUENCE",
+      }],
+    },
+    esAnchor: {
+      liveMonitor: {
+        bars: [
+          bar(t, 7742.5, 7743.0, 7742.25, 7742.75, false),
+        ],
+      },
+      structure: {
+        fastTactical: {
+          bars: [
+            bar(t - 1_800_000, 7739.0, 7749.25, 7738.0, 7743.75, true),
+          ],
+        },
+        tactical: { bars: [] },
+      },
+    },
+    now: t + 10 * 60 * 1000,
+  });
+
+  assert.equal(
+    result.liquidityEvent.state,
+    ENGINE29_LIQUIDITY_EVENT_STATES.NO_LIQUIDITY_EVENT
+  );
+  assert.equal(result.auctionResult, ENGINE29_AUCTION_RESULTS.NO_ACTIVE_AUCTION);
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+});
+
 test("tiny one-tick cross does not qualify as a meaningful sweep", () => {
   const t = 1_800_000_000_000;
 
