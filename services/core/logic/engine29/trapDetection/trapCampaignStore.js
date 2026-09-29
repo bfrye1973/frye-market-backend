@@ -24,7 +24,25 @@ export function readEngine29TrapCampaign(
     const payload = JSON.parse(
       fs.readFileSync(filePath, "utf8")
     );
-    return payload?.campaign || null;
+
+    const campaign = payload?.campaign || null;
+
+    if (!campaign) return null;
+
+    const legacyStates = new Set([
+      "LIQUIDITY_TEST",
+      "LIQUIDITY_SWEEP",
+      "FAILED_ACCEPTANCE",
+    ]);
+
+    if (
+      legacyStates.has(String(campaign?.state || "")) ||
+      legacyStates.has(String(campaign?.highestState || ""))
+    ) {
+      return null;
+    }
+
+    return campaign;
   } catch {
     return null;
   }
