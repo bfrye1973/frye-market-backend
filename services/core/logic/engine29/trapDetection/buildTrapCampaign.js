@@ -10,13 +10,11 @@ import {
 
 const RANK = {
   NO_ACTIVE_TRAP: 0,
-  LIQUIDITY_TEST: 1,
-  LIQUIDITY_SWEEP: 2,
-  FAILED_ACCEPTANCE: 3,
-  TRAP_FORMING: 4,
-  TRAP_CONFIRMED: 5,
-  RESOLVING: 6,
-  INVALIDATED: 7,
+  TRAP_WATCH: 1,
+  TRAP_FORMING: 2,
+  TRAP_CONFIRMED: 3,
+  RESOLVING: 4,
+  INVALIDATED: 5,
 };
 
 const MAX_OBSERVATIONS = 36;
@@ -117,9 +115,7 @@ function campaignId(identity, firstObservedAt) {
 }
 
 function milestoneName(state) {
-  if (state === ENGINE29_TRAP_STATES.LIQUIDITY_TEST) return "firstTestAt";
-  if (state === ENGINE29_TRAP_STATES.LIQUIDITY_SWEEP) return "firstSweepAt";
-  if (state === ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE) return "failedAcceptanceAt";
+  if (state === ENGINE29_TRAP_STATES.TRAP_WATCH) return "watchAt";
   if (state === ENGINE29_TRAP_STATES.TRAP_FORMING) return "formingAt";
   if (state === ENGINE29_TRAP_STATES.TRAP_CONFIRMED) return "confirmedAt";
   return null;
@@ -134,9 +130,7 @@ function applyMilestone(milestones = {}, state, timestamp) {
   }
 
   return {
-    firstTestAt: next.firstTestAt ?? null,
-    firstSweepAt: next.firstSweepAt ?? null,
-    failedAcceptanceAt: next.failedAcceptanceAt ?? null,
+    watchAt: next.watchAt ?? null,
     formingAt: next.formingAt ?? null,
     confirmedAt: next.confirmedAt ?? null,
     resolvingAt: next.resolvingAt ?? null,
@@ -195,7 +189,7 @@ export function buildEngine29TrapCampaign({
     const priorRank = RANK[priorHighest] ?? 0;
     const nextRank = RANK[detectionState] ?? 0;
     const stickyRank =
-      RANK[ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE];
+      RANK[ENGINE29_TRAP_STATES.TRAP_FORMING];
 
     const priorIsSticky =
       priorRank >= stickyRank;
