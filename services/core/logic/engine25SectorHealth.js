@@ -1,3 +1,5 @@
+import { buildDistributionVolumePressure } from "./engine25/buildDistributionVolumePressure.js";
+
 // services/core/logic/engine25SectorHealth.js
 
 const DEFAULT_BACKEND_BASE =
@@ -83,6 +85,14 @@ function normalizeSectorCard(card, mode = "intraday") {
     nl,
     up,
     down,
+    totalVolume: toNumber(card?.totalVolume, null),
+    advancingVolume: toNumber(card?.advancingVolume, null),
+    decliningVolume: toNumber(card?.decliningVolume, null),
+    unchangedVolume: toNumber(card?.unchangedVolume, null),
+    advancingVolumePct: toNumber(card?.advancingVolumePct, null),
+    decliningVolumePct: toNumber(card?.decliningVolumePct, null),
+    stocksScanned: toNumber(card?.stocksScanned, null),
+    stocksWithVolume: toNumber(card?.stocksWithVolume, null),
     netHighsLows: nh - nl,
     bias,
     color:
@@ -150,7 +160,12 @@ function summarizeSectorCards(cards, mode = "intraday") {
   };
 }
 
-function computeDistributionPressure({ intradaySummary, eodSummary }) {
+function computeDistributionPressure({
+  intradaySummary,
+  eodSummary,
+  intradayCards = [],
+  eodCards = [],
+}) {
   const intradayBearishPressure = clamp(intradaySummary.bearishRatio * 100);
   const eodBearishPressure = clamp(eodSummary.bearishRatio * 100);
 
@@ -175,7 +190,7 @@ function computeDistributionPressure({ intradaySummary, eodSummary }) {
       ? clamp(Math.min(100, Math.abs(eodSummary.totalNetHighsLows) / 5))
       : 0;
 
-  const rawPressure = avg([
+  const legacyRawPressure = avg([
     intradayBearishPressure,
     eodBearishPressure,
     intradayBreadthPressure,
@@ -184,6 +199,16 @@ function computeDistributionPressure({ intradaySummary, eodSummary }) {
     eodMomentumPressure,
     netHighsLowsPressure,
   ]);
+
+  const volumeEvidence = buildDistributionVolumePressure({
+    intradayCards,
+    eodCards,
+  });
+
+  const rawPressure = volumeEvidence.available
+    ? legacyRawPressure * 0.70 +
+      Number(volumeEvidence.combinedVolumePressure) * 0.30
+    : legacyRawPressure;
 
   // Engine 25 convention: higher component score is healthier.
   const score = clamp(100 - rawPressure);
@@ -228,6 +253,12 @@ function computeDistributionPressure({ intradaySummary, eodSummary }) {
       intradayMomentumPressure,
       eodMomentumPressure,
       netHighsLowsPressure,
+      legacyRawPressure,
+      volumeEvidence,
+      formula: {
+        legacyPressureWeight: 0.70,
+        volumePressureWeight: 0.30,
+      },
       intradaySummary: {
         count: intradaySummary.count,
         bullishCount: intradaySummary.bullishCount,
@@ -346,6 +377,8 @@ export async function buildEngine25SectorHealth() {
   const distributionPressure = computeDistributionPressure({
     intradaySummary,
     eodSummary,
+    intradayCards,
+    eodCards,
   });
 
   const breadthParticipation = computeBreadthParticipation({
