@@ -192,6 +192,134 @@ function confluenceAt(levels, anchor, threshold) {
     );
 }
 
+function isInstitutional(level) {
+  return level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.INSTITUTIONAL_ZONE;
+}
+
+function isFourHour(level) {
+  return (
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_HIGH ||
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_LOW
+  );
+}
+
+function isTwoHour(level) {
+  return (
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.TWO_HOUR_SWING_HIGH ||
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.TWO_HOUR_SWING_LOW
+  );
+}
+
+function isOneHour(level) {
+  return (
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.ONE_HOUR_SWING_HIGH ||
+    level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.ONE_HOUR_SWING_LOW
+  );
+}
+
+function sameSide(a, b) {
+  if (!a || !b) return false;
+  if (a.side === "BOTH" || b.side === "BOTH") return true;
+  return a.side === b.side;
+}
+
+function markMacroExtremes(levels = []) {
+  const fourHourHighs = levels.filter(
+    (level) =>
+      level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_HIGH
+  );
+  const fourHourLows = levels.filter(
+    (level) =>
+      level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_LOW
+  );
+
+  const highest4h = fourHourHighs.length
+    ? Math.max(...fourHourHighs.map((level) => Number(level.level)))
+    : null;
+
+  const lowest4h = fourHourLows.length
+    ? Math.min(...fourHourLows.map((level) => Number(level.level)))
+    : null;
+
+  return levels.map((level) => ({
+    ...level,
+    macroExtreme:
+      (
+        level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_HIGH &&
+        Number.isFinite(highest4h) &&
+        Number(level.level) === highest4h
+      ) ||
+      (
+        level?.type === ENGINE29_LIQUIDITY_LEVEL_TYPES.FOUR_HOUR_SWING_LOW &&
+        Number.isFinite(lowest4h) &&
+        Number(level.level) === lowest4h
+      ),
+  }));
+}
+
+function annotateEventEligibility(levels = [], thresholdPoints) {
+  return levels.map((level) => {
+    const anchor =
+      isInstitutional(level)
+        ? Number(level.mid ?? level.level)
+        : Number(level.level);
+
+    const nearby = confluenceAt(
+      levels.filter((other) => other.id !== level.id),
+      anchor,
+      thresholdPoints
+    ).filter((other) => sameSide(level, other));
+
+    const nearInstitutional = nearby.some(isInstitutional);
+    const nearFourHour = nearby.some(isFourHour);
+    const nearTwoHour = nearby.some(isTwoHour);
+
+    let eventEligible = false;
+    let significance = "STRUCTURAL_ONLY";
+
+    if (isInstitutional(level)) {
+      eventEligible = true;
+      significance = "INSTITUTIONAL";
+    } else if (isFourHour(level)) {
+      eventEligible =
+        level.macroExtreme === true ||
+        nearInstitutional ||
+        nearTwoHour;
+
+      significance = level.macroExtreme
+        ? "MACRO_EXTREME"
+        : eventEligible
+          ? "MACRO_CONFLUENCE"
+          : "STRUCTURAL_ONLY";
+    } else if (isTwoHour(level)) {
+      eventEligible =
+        nearInstitutional ||
+        nearFourHour;
+
+      significance = eventEligible
+        ? "MACRO_CONFLUENCE"
+        : "STRUCTURAL_ONLY";
+    } else if (isOneHour(level)) {
+      eventEligible =
+        nearInstitutional ||
+        nearFourHour ||
+        nearTwoHour;
+
+      significance = eventEligible
+        ? "MACRO_CONFLUENCE"
+        : "STRUCTURAL_ONLY";
+    }
+
+    return {
+      ...level,
+      eventEligible,
+      significance,
+      confluenceCount:
+        nearby.length,
+    };
+  });
+}
+
 function locationQuality(confluence = []) {
   if (!confluence.length) return ENGINE29_TRAP_LOCATION_QUALITY.LOW;
 
@@ -240,7 +368,7 @@ export function buildEngine29MacroLiquidityMap({
 } = {}) {
   const price = finite(currentPrice);
 
-  const levels = [
+  const rawLevels = [
     ...makeSwingLevels(confirmedSwings(fourHourBars), "4H"),
     ...makeSwingLevels(confirmedSwings(twoHourBars), "2H"),
     ...makeSwingLevels(confirmedSwings(oneHourBars), "1H"),
@@ -248,6 +376,11 @@ export function buildEngine29MacroLiquidityMap({
   ];
 
   const thresholdPoints = adaptiveConfluenceDistance(thirtyMinuteBars);
+
+  const levels = annotateEventEligibility(
+    markMacroExtremes(rawLevels),
+    thresholdPoints
+  );
 
   const nearest = Number.isFinite(price)
     ? levels
@@ -328,6 +461,8 @@ export function buildEngine29MacroLiquidityMap({
     confluence,
     nearestLevels: nearest,
     levelCount: levels.length,
+    eventEligibleLevelCount:
+      levels.filter((level) => level.eventEligible === true).length,
     levels,
     reasonCodes: [...new Set(reasonCodes)],
   };
