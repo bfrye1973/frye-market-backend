@@ -23,11 +23,13 @@ function detection(state, currentPrice = 7702) {
     confirmationQuality:
       state === ENGINE29_TRAP_STATES.TRAP_CONFIRMED
         ? "FULL_CONFIRMATION"
-        : "SWEEP_PRESENT",
+        : state === ENGINE29_TRAP_STATES.TRAP_FORMING
+          ? "STRONG_PRICE_CONFIRMATION"
+          : "RECLAIM_WATCH",
     auctionEvent: {
       currentPrice,
+      reclaimObserved: true,
       failedAcceptance:
-        state === ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE ||
         state === ENGINE29_TRAP_STATES.TRAP_FORMING ||
         state === ENGINE29_TRAP_STATES.TRAP_CONFIRMED,
       liquidityLevel: {
@@ -48,7 +50,8 @@ function detection(state, currentPrice = 7702) {
     },
     momentumRepair: {
       state:
-        state === ENGINE29_TRAP_STATES.TRAP_CONFIRMED
+        state === ENGINE29_TRAP_STATES.TRAP_CONFIRMED ||
+        state === ENGINE29_TRAP_STATES.TRAP_FORMING
           ? "STRONG_CONFIRMATION"
           : "NO_CONFIRMATION",
     },
@@ -80,10 +83,10 @@ function detection(state, currentPrice = 7702) {
   };
 }
 
-test("campaign preserves identity and milestones across rebuilds", () => {
+test("campaign begins at TRAP_WATCH and preserves milestones", () => {
   const first = buildEngine29TrapCampaign({
     trapDetection: detection(
-      ENGINE29_TRAP_STATES.LIQUIDITY_SWEEP
+      ENGINE29_TRAP_STATES.TRAP_WATCH
     ),
     now: Date.parse("2026-09-29T17:00:00.000Z"),
   });
@@ -91,7 +94,7 @@ test("campaign preserves identity and milestones across rebuilds", () => {
   assert.equal(first.active, true);
   assert.equal(first.campaign.observationCount, 1);
   assert.equal(
-    first.campaign.milestones.firstSweepAt,
+    first.campaign.milestones.watchAt,
     "2026-09-29T17:00:00.000Z"
   );
 
@@ -114,13 +117,32 @@ test("campaign preserves identity and milestones across rebuilds", () => {
   );
   assert.equal(second.campaign.observationCount, 2);
   assert.equal(
-    second.campaign.milestones.firstSweepAt,
+    second.campaign.milestones.watchAt,
     "2026-09-29T17:00:00.000Z"
   );
   assert.equal(
     second.campaign.milestones.confirmedAt,
     "2026-09-29T17:10:00.000Z"
   );
+});
+
+test("liquidity sweep with no trap side does not create a trap campaign", () => {
+  const result = buildEngine29TrapCampaign({
+    trapDetection: {
+      trapSide: ENGINE29_TRAP_SIDES.NONE,
+      state: ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP,
+      auctionEvent: {
+        liquidityLevel: {
+          type: "FOUR_HOUR_SWING_LOW",
+          boundary: 7700,
+        },
+      },
+    },
+    now: Date.parse("2026-09-29T17:00:00.000Z"),
+  });
+
+  assert.equal(result.active, false);
+  assert.equal(result.campaign, null);
 });
 
 test("campaign remembers active identity when current build has no active trap", () => {
