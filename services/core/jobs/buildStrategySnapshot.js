@@ -10798,9 +10798,6 @@ if (
 
     subminute.engine8PaperOrder =
       buildEngine8CanonicalPaperAdapter({
-        engine26LocationCandidate:
-          subminuteEngine26Candidate,
-
         engine6PaperPermission:
           subminuteEngine6Permission,
 
