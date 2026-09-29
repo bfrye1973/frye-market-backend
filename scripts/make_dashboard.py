@@ -252,23 +252,39 @@ def ensure_sector_cards(source: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     cards = source.get("sectorCards")
     if isinstance(cards, list) and cards:
-        got = {c.get("sector") for c in cards if isinstance(c, dict)}
+        aliases = {
+            "tech": "Information Technology",
+            "technology": "Information Technology",
+            "info tech": "Information Technology",
+            "healthcare": "Health Care",
+            "health-care": "Health Care",
+        }
+
+        canonical_by_name: Dict[str, Dict[str, Any]] = {}
+        for card in cards:
+            if not isinstance(card, dict):
+                continue
+            raw_name = str(card.get("sector") or "").strip()
+            canonical_name = aliases.get(raw_name.lower(), raw_name)
+            if canonical_name not in ORDER:
+                continue
+            normalized = dict(card)
+            normalized["sector"] = canonical_name
+            canonical_by_name[canonical_name] = normalized
+
         for name in ORDER:
-            if name not in got:
-                cards.append(
-                    {
-                        "sector": name,
-                        "breadth_pct": 0.0,
-                        "momentum_pct": 0.0,
-                        "nh": 0,
-                        "nl": 0,
-                        "up": 0,
-                        "down": 0,
-                    }
-                )
-        key = {n: i for i, n in enumerate(ORDER)}
-        cards.sort(key=lambda c: key.get(c.get("sector", ""), 999))
-        return cards
+            if name not in canonical_by_name:
+                canonical_by_name[name] = {
+                    "sector": name,
+                    "breadth_pct": 0.0,
+                    "momentum_pct": 0.0,
+                    "nh": 0,
+                    "nl": 0,
+                    "up": 0,
+                    "down": 0,
+                }
+
+        return [canonical_by_name[name] for name in ORDER]
 
     groups = source.get("groups") or {}
     derived: List[Dict[str, Any]] = []
