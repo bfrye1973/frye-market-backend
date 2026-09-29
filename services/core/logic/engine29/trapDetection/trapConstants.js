@@ -1,5 +1,10 @@
 // services/core/logic/engine29/trapDetection/trapConstants.js
-// Engine 29 — trap detection canonical vocabulary.
+// Engine 29 — three-lane market-character vocabulary.
+//
+// LIQUIDITY = what meaningful level is being tested/taken?
+// MOVE CHARACTER = what kind of directional move is occurring?
+// TRAP = did the auction fail after liquidity was taken?
+//
 // Observation / confirmation only. No execution or permission authority.
 
 export const ENGINE29_TRAP_SIDES = Object.freeze({
@@ -8,15 +13,35 @@ export const ENGINE29_TRAP_SIDES = Object.freeze({
   BEAR: "BEAR",
 });
 
+export const ENGINE29_LIQUIDITY_EVENT_STATES = Object.freeze({
+  NO_LIQUIDITY_EVENT: "NO_LIQUIDITY_EVENT",
+  TEST_HIGH: "TEST_HIGH",
+  TEST_LOW: "TEST_LOW",
+  SWEEP_HIGH: "SWEEP_HIGH",
+  SWEEP_LOW: "SWEEP_LOW",
+  RECLAIMED_HIGH: "RECLAIMED_HIGH",
+  RECLAIMED_LOW: "RECLAIMED_LOW",
+});
+
 export const ENGINE29_TRAP_STATES = Object.freeze({
   NO_ACTIVE_TRAP: "NO_ACTIVE_TRAP",
-  LIQUIDITY_TEST: "LIQUIDITY_TEST",
-  LIQUIDITY_SWEEP: "LIQUIDITY_SWEEP",
-  FAILED_ACCEPTANCE: "FAILED_ACCEPTANCE",
+  TRAP_WATCH: "TRAP_WATCH",
   TRAP_FORMING: "TRAP_FORMING",
   TRAP_CONFIRMED: "TRAP_CONFIRMED",
   RESOLVING: "RESOLVING",
   INVALIDATED: "INVALIDATED",
+});
+
+export const ENGINE29_AUCTION_RESULTS = Object.freeze({
+  NO_ACTIVE_AUCTION: "NO_ACTIVE_AUCTION",
+  TESTING_HIGH: "TESTING_HIGH",
+  TESTING_LOW: "TESTING_LOW",
+  SWEPT_HIGH: "SWEPT_HIGH",
+  SWEPT_LOW: "SWEPT_LOW",
+  FAILED_ACCEPTANCE_HIGH: "FAILED_ACCEPTANCE_HIGH",
+  FAILED_ACCEPTANCE_LOW: "FAILED_ACCEPTANCE_LOW",
+  ACCEPTING_ABOVE: "ACCEPTING_ABOVE",
+  ACCEPTING_BELOW: "ACCEPTING_BELOW",
 });
 
 export const ENGINE29_TRAP_LOCATION_QUALITY = Object.freeze({
