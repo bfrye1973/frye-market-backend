@@ -6,6 +6,7 @@ import { buildEngine29StructureBundle } from "../structure/buildStructureBundle.
 import { buildEngine29GroupStateBundle } from "../groups/buildGroupStateBundle.js";
 import { buildEngine29TacticalCharacterWithEs } from "../tacticalCharacter/buildTacticalCharacter.js";
 import { buildEngine29SqueezeTransitionMonitor } from "../tacticalCharacter/buildSqueezeTransitionMonitor.js";
+import { buildEngine29TrapDetection } from "../trapDetection/buildTrapDetection.js";
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
 import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
@@ -273,6 +274,13 @@ export async function buildEngine29CrossMarketStress({
       }
     );
 
+  const trapDetection =
+    await buildEngine29TrapDetection({
+      now,
+      moveCharacter: move,
+      liveMonitor,
+    });
+
   const missingConfirmations =
     buildMissingConfirmations(
       groups,
@@ -329,6 +337,7 @@ export async function buildEngine29CrossMarketStress({
     fastTactical,
     moveCharacter: move,
     liveMonitor,
+    trapDetection,
 
     groups:
       groups?.groups || {},
@@ -391,6 +400,12 @@ export async function buildEngine29CrossMarketStress({
       liveMonitorAvailableSymbols:
         market?.summary
           ?.liveMonitorAvailableSymbols || [],
+
+      trapDetectionAvailable:
+        Boolean(trapDetection),
+      trapPrimaryParticipationAvailable:
+        trapDetection?.dataQuality
+          ?.engine25PrimaryParticipationAvailable === true,
     },
 
     display: {
@@ -495,6 +510,19 @@ export async function buildEngine29CrossMarketStress({
           liveMonitor
             ?.display
             ?.why ?? [],
+      },
+
+      trap: {
+        side:
+          trapDetection?.trapSide ?? "NONE",
+        state:
+          trapDetection?.state ?? "NO_ACTIVE_TRAP",
+        locationQuality:
+          trapDetection?.locationQuality ?? null,
+        confirmationQuality:
+          trapDetection?.confirmationQuality ?? null,
+        confirmationBlockedBy:
+          trapDetection?.confirmationBlockedBy || [],
       },
 
       underTheHood: {
