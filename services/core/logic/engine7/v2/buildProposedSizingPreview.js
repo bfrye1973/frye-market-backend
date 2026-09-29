@@ -1090,7 +1090,7 @@ export function buildEngine7ProposedSizingPreview({
       ...output,
       status: "PROPOSED_GEOMETRY_UNAVAILABLE",
       reasonCodes: [
-        "ENGINE7A_PROPOSED_GEOMETRY_MISSING",
+        "ENGINE7_PROPOSED_GEOMETRY_MISSING",
       ],
     };
   }
