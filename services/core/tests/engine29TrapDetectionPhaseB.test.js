@@ -1,5 +1,8 @@
 // services/core/tests/engine29TrapDetectionPhaseB.test.js
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -8,6 +11,8 @@ import {
 } from "../logic/engine29/trapDetection/trapConstants.js";
 import { detectEngine29TrapAuctionEvent } from "../logic/engine29/trapDetection/detectTrapAuctionEvent.js";
 import { resolveEngine29TrapState } from "../logic/engine29/trapDetection/resolveTrapState.js";
+import { readEngine25TrapParticipation } from "../logic/engine29/trapDetection/readEngine25TrapParticipation.js";
+import { buildEngine29TrapCrossMarketConfirmation } from "../logic/engine29/trapDetection/buildTrapCrossMarketConfirmation.js";
 
 function bar(time, open, high, low, close, completed = true) {
   return { time, open, high, low, close, completed };
@@ -220,4 +225,132 @@ test("low-quality location cannot confirm even with participation", () => {
       "MACRO_LOCATION_NOT_HIGH_QUALITY"
     )
   );
+});
+
+
+test("Engine25 scanner breadth + stock volume are consumed read-only for bull trap", () => {
+  const dir = fs.mkdtempSync(
+    path.join(os.tmpdir(), "engine29-trap-")
+  );
+  const filePath = path.join(dir, "sector.json");
+
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify({
+      ok: true,
+      updatedAt: "2026-09-29T17:00:00.000Z",
+      sources: {
+        intraday: {
+          ok: true,
+          updatedAt: "2026-09-29T17:00:00.000Z",
+        },
+        eod: {
+          ok: true,
+          updatedAt: "2026-09-29T16:00:00.000Z",
+        },
+      },
+      breadthParticipation: {
+        score: 32,
+        label: "BREADTH_PARTICIPATION_WEAK",
+        inputs: {
+          intraday: {
+            avgBreadth: 31,
+            avgMomentum: 34,
+          },
+          eod: {
+            avgBreadth: 38,
+            avgMomentum: 40,
+          },
+        },
+      },
+      distributionPressure: {
+        score: 22,
+        label: "DISTRIBUTION_PRESSURE_HIGH",
+        rawPressure: 78,
+        inputs: {
+          volumeEvidence: {
+            available: true,
+            combinedVolumePressure: 86,
+            intraday: {
+              available: true,
+              stocksScanned: 5470,
+              stocksWithVolume: 4800,
+              coveragePct: 87.75,
+              advancingVolumeShare: 0.28,
+              decliningVolumeShare: 0.72,
+              volumeImbalance: 0.44,
+              volumePressure: 91,
+              reason: null,
+            },
+            eod: {
+              available: true,
+              stocksScanned: 5470,
+              stocksWithVolume: 5000,
+              coveragePct: 91.41,
+              advancingVolumeShare: 0.30,
+              decliningVolumeShare: 0.70,
+              volumeImbalance: 0.40,
+              volumePressure: 88,
+              reason: null,
+            },
+          },
+        },
+      },
+    }),
+    "utf8"
+  );
+
+  const result = readEngine25TrapParticipation({
+    trapSide: ENGINE29_TRAP_SIDES.BULL,
+    filePath,
+    now: Date.parse("2026-09-29T17:05:00.000Z"),
+  });
+
+  assert.equal(result.available, true);
+  assert.equal(result.breadthAlignment, "SUPPORTS_TRAP");
+  assert.equal(result.volumeAlignment, "SUPPORTS_TRAP");
+  assert.equal(result.primaryParticipationSupportsTrap, true);
+  assert.equal(result.stockVolume.intraday.coveragePct, 87.75);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("direct VIX may veto otherwise supportive secondary bull-trap confirmation", () => {
+  const moveCharacter = {
+    directVixAvailable: true,
+    underlyingPressure: {
+      blocks: {
+        leadership: { direction: "DOWN" },
+        credit: { direction: "DOWN" },
+        financials: { direction: "FLAT" },
+      },
+    },
+  };
+
+  const supportiveVix = buildEngine29TrapCrossMarketConfirmation({
+    moveCharacter,
+    liveMonitor: {
+      metrics: {
+        vix: { move10: 0.35 },
+      },
+    },
+    trapSide: ENGINE29_TRAP_SIDES.BULL,
+  });
+
+  assert.equal(supportiveVix.secondarySupportsTrap, true);
+  assert.equal(supportiveVix.volatility.supportsTrap, true);
+
+  const opposingVix = buildEngine29TrapCrossMarketConfirmation({
+    moveCharacter,
+    liveMonitor: {
+      metrics: {
+        vix: { move10: -0.35 },
+      },
+    },
+    trapSide: ENGINE29_TRAP_SIDES.BULL,
+  });
+
+  assert.equal(opposingVix.secondarySupportsTrap, false);
+  assert.equal(opposingVix.secondaryOpposesTrap, true);
+  assert.equal(opposingVix.volatility.opposesTrap, true);
 });
