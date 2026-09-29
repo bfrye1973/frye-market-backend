@@ -74,7 +74,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
+from sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
 
 # ------------------------ ENV & CONSTANTS ------------------------
 
