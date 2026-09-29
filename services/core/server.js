@@ -272,6 +272,64 @@ function runStartupSnapshotBuild() {
   });
 }
 
+// --- Engine 29 -> Engine 25 startup recovery ---
+let ENGINE29_ENGINE25_STARTUP_RECOVERY_RUNNING = false;
+
+function runEngine29Engine25StartupRecovery() {
+  if (ENGINE29_ENGINE25_STARTUP_RECOVERY_RUNNING) {
+    console.log("[engine29-engine25-startup] skipped: recovery already running");
+    return;
+  }
+
+  ENGINE29_ENGINE25_STARTUP_RECOVERY_RUNNING = true;
+  console.log(
+    `[engine29-engine25-startup] START @ ${new Date().toISOString()}`
+  );
+
+  const child = spawn("node", ["./jobs/updateEngine29Then25.js"], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.on("data", (d) => {
+    stdout += d.toString();
+  });
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    ENGINE29_ENGINE25_STARTUP_RECOVERY_RUNNING = false;
+
+    if (code === 0) {
+      console.log(
+        `[engine29-engine25-startup] SUCCESS @ ${new Date().toISOString()}`
+      );
+      if (stdout.trim()) console.log(stdout.trim());
+      return;
+    }
+
+    console.error(
+      `[engine29-engine25-startup] FAIL @ ${new Date().toISOString()} | code=${code}`
+    );
+    if (stdout.trim()) console.log(stdout.trim());
+    if (stderr.trim()) console.error(stderr.trim());
+  });
+
+  child.on("error", (err) => {
+    ENGINE29_ENGINE25_STARTUP_RECOVERY_RUNNING = false;
+    console.error(
+      `[engine29-engine25-startup] SPAWN ERROR @ ${new Date().toISOString()} |`,
+      err?.stack || err?.message || String(err)
+    );
+  });
+}
+
 // --- Engine 25 startup news recovery ---
 // WebSocket delivery begins only after the connection is admitted.
 // Restore recent Reuters history first so a restart does not erase the
@@ -382,6 +440,13 @@ app.listen(PORT, HOST, () => {
   setTimeout(() => {
     runStartupSnapshotBuild();
   }, 1500);
+
+  // Engine 29 -> Engine 25 startup contract:
+  // server listens first -> fresh Engine 29 canonical -> synchronized Engine 25 refresh.
+  // Failure is logged and fail-closed for the synchronized refresh; the web server stays up.
+  setTimeout(() => {
+    runEngine29Engine25StartupRecovery();
+  }, 3500);
 
   // Engine 25 news startup contract:
   // REST recovery/backfill first -> persistent WebSocket second.

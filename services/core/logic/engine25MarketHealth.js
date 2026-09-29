@@ -2,6 +2,8 @@
 
 import { buildRatesAuthority } from "./engine25/engine29/buildRatesAuthority.js";
 import { buildEnergyAuthority } from "./engine25/engine29/buildEnergyAuthority.js";
+import { buildBreadthAuthority } from "./engine25/engine29/buildBreadthAuthority.js";
+import { buildMacroPressure } from "./engine25/buildMacroPressure.js";
 
 function clamp(value, min = 0, max = 100) {
   if (!Number.isFinite(value)) return 50;
@@ -1699,166 +1701,6 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
   };
 }
 
-function scoreMacroPressure(macroData, marketData, components, engine29Data) {
-  const tenYear = getFredValue(macroData, "DGS10");
-  const twoYear = getFredValue(macroData, "DGS2");
-  const tenMinusTwo = getFredValue(macroData, "T10Y2Y");
-
-  const uso = getSymbol(marketData, "macroProxies", "USO");
-  const tlt = getSymbol(marketData, "macroProxies", "TLT");
-  const uup = getSymbol(marketData, "macroProxies", "UUP");
-
-  const spy = getSymbol(marketData, "marketTrend", "SPY");
-  const qqq = getSymbol(marketData, "marketTrend", "QQQ");
-  const iwm = getSymbol(marketData, "marketTrend", "IWM");
-
-  const ai = marketData?.quickRead?.aiLeadership || {};
-  const aiSymbols = ["NVDA", "MSFT", "AVGO", "AMD", "META", "GOOGL", "AMZN", "TSM", "ARM", "PLTR"];
-
-  const aiAbove20 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma20 === true).length;
-  const aiAbove50 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma50 === true).length;
-
-  const tenYearPressureScore = scoreInverse(tenYear, 4.25, 5.0);
-  const twoYearPressureScore = scoreInverse(twoYear, 4.0, 5.0);
-
-  const tltTrendScore = weightedAvg([
-    { value: boolScore(tlt?.aboveEma20, 100, 0), weight: 0.35 },
-    { value: boolScore(tlt?.aboveEma50, 100, 0), weight: 0.35 },
-    { value: scoreDirect(tlt?.pctChange20d, -8, 5), weight: 0.3 },
-  ]);
-
-  const legacyOilPressureScore = weightedAvg([
-    { value: boolScore(uso?.aboveEma20, 30, 80), weight: 0.35 },
-    { value: boolScore(uso?.aboveEma50, 30, 80), weight: 0.25 },
-    { value: scoreInverse(uso?.pctChange20d, 2, 15), weight: 0.4 },
-  ]);
-
-  const energyAuthority = buildEnergyAuthority({
-    engine29Data,
-    legacyOilPressureScore,
-    legacyUso: uso,
-  });
-
-  const oilPressureScore = energyAuthority.score;
-
-  const dollarPressureScore = weightedAvg([
-    { value: boolScore(uup?.aboveEma20, 35, 75), weight: 0.4 },
-    { value: scoreInverse(uup?.pctChange20d, 1, 6), weight: 0.6 },
-  ]);
-
-  const smallCapParticipationScore = weightedAvg([
-    { value: boolScore(iwm?.aboveEma20, 100, 0), weight: 0.45 },
-    { value: boolScore(iwm?.aboveEma50, 100, 0), weight: 0.25 },
-    { value: scoreDirect(iwm?.pctChange20d, -5, 5), weight: 0.3 },
-  ]);
-
-  const aiBreadthScore = weightedAvg([
-    { value: scoreDirect(aiAbove20, 3, 8), weight: 0.6 },
-    { value: scoreDirect(aiAbove50, 3, 8), weight: 0.4 },
-  ]);
-
-  const narrowLeadershipScore = weightedAvg([
-    { value: smallCapParticipationScore, weight: 0.45 },
-    { value: aiBreadthScore, weight: 0.55 },
-  ]);
-
-  const inflationScore = components?.inflation?.score ?? 50;
-
-  const fedHawkishScore = weightedAvg([
-    { value: tenYearPressureScore, weight: 0.35 },
-    { value: twoYearPressureScore, weight: 0.3 },
-    { value: inflationScore, weight: 0.25 },
-    { value: scoreDirect(tenMinusTwo, -0.5, 0.75), weight: 0.1 },
-  ]);
-
-  const score = weightedAvg([
-    { value: tenYearPressureScore, weight: 0.15 },
-    { value: twoYearPressureScore, weight: 0.12 },
-    { value: tltTrendScore, weight: 0.16 },
-    { value: oilPressureScore, weight: 0.18 },
-    { value: dollarPressureScore, weight: 0.08 },
-    { value: narrowLeadershipScore, weight: 0.16 },
-    { value: fedHawkishScore, weight: 0.15 },
-  ]);
-
-  const warnings = [];
-
-  if (isNum(tenYear) && Number(tenYear) >= 4.5) {
-    warnings.push("10Y yield pressure elevated");
-  }
-
-  if (isNum(twoYear) && Number(twoYear) >= 4.25) {
-    warnings.push("2Y yield suggests Fed hawkish pressure");
-  }
-
-  if (tlt?.aboveEma20 === false && isNum(tlt?.pctChange20d) && Number(tlt.pctChange20d) < 0) {
-    warnings.push("TLT weak; bond market pressure rising");
-  }
-
-  if (uso?.aboveEma20 === true && isNum(uso?.pctChange20d) && Number(uso.pctChange20d) >= 5) {
-    warnings.push("Oil/energy strength may pressure CPI");
-  }
-
-  if ((components?.inflation?.score ?? 50) < 50 && uso?.aboveEma20 === true) {
-    warnings.push("Inflation pressure plus oil strength creates macro risk");
-  }
-
-  if (spy?.aboveEma20 === true && qqq?.aboveEma20 === true && iwm?.aboveEma20 === false) {
-    warnings.push("Market leadership narrow: SPY/QQQ holding while small caps lag");
-  }
-
-  if (aiAbove20 <= 5) {
-    warnings.push("AI leadership breadth is narrowing");
-  }
-
-  if (fedHawkishScore < 45) {
-    warnings.push("Fed hawkish / higher-for-longer risk elevated");
-  }
-
-  return {
-    score,
-    label:
-      score >= 75
-        ? "MACRO_PRESSURE_LOW"
-        : score >= 60
-          ? "MACRO_PRESSURE_MANAGEABLE"
-          : score >= 45
-            ? "MACRO_PRESSURE_ELEVATED"
-            : "MACRO_PRESSURE_HIGH",
-    inputs: {
-  tenYear,
-  twoYear,
-  tenMinusTwo,
-
-  USO: uso,
-  legacyOilPressureScore,
-  energyAuthority,
-
-  TLT: tlt,
-  UUP: uup,
-
-  SPY: spy,
-  QQQ: qqq,
-  IWM: iwm,
-
-  aiAbove20,
-  aiAbove50,
-
-  tenYearPressureScore,
-  twoYearPressureScore,
-  tltTrendScore,
-
-  oilPressureScore,
-  dollarPressureScore,
-
-  smallCapParticipationScore,
-  aiBreadthScore,
-  narrowLeadershipScore,
-  fedHawkishScore,
-},
-warnings,
-};
-}
 function scoreDistributionPressure(sectorHealthData) {
   const block = sectorHealthData?.distributionPressure;
 
@@ -1899,172 +1741,6 @@ function scoreBreadthParticipation(sectorHealthData) {
   };
 }
 
-
-function buildPrimaryBreadthParticipation(engine29Data, legacyBreadthParticipation) {
-  const breadthGroup = engine29Data?.groups?.breadth || null;
-
-  const degradedGroups = Array.isArray(engine29Data?.dataQuality?.degradedGroups)
-    ? engine29Data.dataQuality.degradedGroups
-    : [];
-
-  const breadthGroupDegraded = degradedGroups.some(
-    (group) => String(group || "").toLowerCase() === "breadth"
-  );
-
-  const structuralState = breadthGroup?.structural?.state || null;
-  const tacticalState = breadthGroup?.tactical?.state || null;
-  const fastState = breadthGroup?.fastTactical?.state || null;
-
-  const layerDegraded =
-    breadthGroup?.structural?.dataDegraded === true ||
-    breadthGroup?.tactical?.dataDegraded === true ||
-    breadthGroup?.fastTactical?.dataDegraded === true;
-
-  const missingRequiredMembers = [
-    ...(Array.isArray(breadthGroup?.structural?.missingRequiredMembers)
-      ? breadthGroup.structural.missingRequiredMembers
-      : []),
-    ...(Array.isArray(breadthGroup?.tactical?.missingRequiredMembers)
-      ? breadthGroup.tactical.missingRequiredMembers
-      : []),
-    ...(Array.isArray(breadthGroup?.fastTactical?.missingRequiredMembers)
-      ? breadthGroup.fastTactical.missingRequiredMembers
-      : []),
-  ];
-
-  function stateHealthScore(state) {
-    const normalized = String(state || "").toUpperCase();
-
-    if (normalized === "HEALTHY") return 90;
-    if (normalized === "RECOVERING") return 75;
-    if (normalized === "FORMING") return 55;
-    if (normalized === "CONFIRMED") return 35;
-    if (normalized === "SEVERE") return 15;
-
-    return null;
-  }
-
-  const structuralScore = stateHealthScore(structuralState);
-  const tacticalScore = stateHealthScore(tacticalState);
-  const fastScore = stateHealthScore(fastState);
-
-  const hasCanonicalStates =
-    Number.isFinite(Number(structuralScore)) &&
-    Number.isFinite(Number(tacticalScore)) &&
-    Number.isFinite(Number(fastScore));
-
-  const engine29Usable =
-    Boolean(engine29Data) &&
-    Boolean(breadthGroup) &&
-    !breadthGroupDegraded &&
-    !layerDegraded &&
-    missingRequiredMembers.length === 0 &&
-    hasCanonicalStates;
-
-  if (!engine29Usable) {
-    return {
-      ...(legacyBreadthParticipation || {}),
-      authority: "ENGINE25_LEGACY_BREADTH_FALLBACK",
-      primarySource: "ENGINE25_SECTOR_BREADTH",
-      fallbackUsed: true,
-      engine29BreadthAuthorityAvailable: false,
-      engine29FallbackReason: !engine29Data
-        ? "ENGINE29_UNAVAILABLE"
-        : !breadthGroup
-          ? "ENGINE29_BREADTH_GROUP_UNAVAILABLE"
-          : breadthGroupDegraded
-            ? "ENGINE29_BREADTH_GROUP_DEGRADED"
-            : layerDegraded
-              ? "ENGINE29_BREADTH_LAYER_DEGRADED"
-              : missingRequiredMembers.length > 0
-                ? "ENGINE29_BREADTH_REQUIRED_MEMBER_MISSING"
-                : "ENGINE29_BREADTH_CANONICAL_STATES_UNAVAILABLE",
-      engine29: {
-        structural1wState: structuralState,
-        tactical1hState: tacticalState,
-        fast30mState: fastState,
-        groupDegraded: breadthGroupDegraded,
-        layerDegraded,
-        missingRequiredMembers,
-      },
-    };
-  }
-
-  const score = weightedAvg([
-    { value: structuralScore, weight: 0.20 },
-    { value: tacticalScore, weight: 0.40 },
-    { value: fastScore, weight: 0.40 },
-  ]);
-
-  const structuralStressConfirmed =
-    structuralState === "CONFIRMED" || structuralState === "SEVERE";
-  const tacticalStressConfirmed =
-    tacticalState === "CONFIRMED" || tacticalState === "SEVERE";
-  const fastStressConfirmed =
-    fastState === "CONFIRMED" || fastState === "SEVERE";
-
-  const warnings = [];
-
-  if (structuralStressConfirmed) {
-    warnings.push("Engine 29 structural breadth deterioration confirmed");
-  }
-
-  if (tacticalStressConfirmed) {
-    warnings.push("Engine 29 1H breadth deterioration confirmed");
-  } else if (tacticalState === "FORMING") {
-    warnings.push("Engine 29 1H breadth deterioration forming");
-  }
-
-  if (fastStressConfirmed) {
-    warnings.push("Engine 29 30m breadth deterioration confirmed");
-  } else if (fastState === "FORMING") {
-    warnings.push("Engine 29 30m breadth deterioration forming");
-  }
-
-  return {
-    score,
-    label:
-      score >= 75
-        ? "BREADTH_PARTICIPATION_STRONG"
-        : score >= 55
-          ? "BREADTH_PARTICIPATION_MIXED"
-          : score >= 35
-            ? "BREADTH_PARTICIPATION_WEAK"
-            : "BREADTH_PARTICIPATION_SEVERE",
-
-    authority: "ENGINE29_GROUPS_BREADTH_PRIMARY",
-    primarySource: "ENGINE29_GROUPS_BREADTH",
-    fallbackUsed: false,
-    engine29BreadthAuthorityAvailable: true,
-
-    structural1wState: structuralState,
-    tactical1hState: tacticalState,
-    fast30mState: fastState,
-
-    structuralStressConfirmed,
-    tacticalStressConfirmed,
-    fastStressConfirmed,
-
-    stateHealthScores: {
-      structural: structuralScore,
-      tactical: tacticalScore,
-      fastTactical: fastScore,
-    },
-
-    formula:
-      "20PCT_STRUCTURAL_1W_PLUS_40PCT_TACTICAL_1H_PLUS_40PCT_FAST_30M",
-
-    inputs: {
-      engine29BreadthGroup: breadthGroup,
-      legacyBreadthParticipation: {
-        score: legacyBreadthParticipation?.score ?? null,
-        label: legacyBreadthParticipation?.label ?? null,
-      },
-    },
-
-    warnings,
-  };
-}
 
 function deriveRegime(score, components) {
   const macroPressureScore = components?.macroPressure?.score ?? 50;
@@ -2492,10 +2168,10 @@ const liquidity = scoreLiquidity(macroData);
 
   const legacyBreadthParticipation = scoreBreadthParticipation(sectorHealthData);
 
-  const breadthParticipation = buildPrimaryBreadthParticipation(
+  const breadthParticipation = buildBreadthAuthority({
+    sectorHealthData,
     engine29Data,
-    legacyBreadthParticipation
-  );
+  });
 
   const eventRisk = scoreEventRisk(fmpData);
 
@@ -2515,12 +2191,11 @@ const liquidity = scoreLiquidity(macroData);
   eventRisk,
 };
 
-  const macroPressure = scoreMacroPressure(
+  const macroPressure = buildMacroPressure({
     macroData,
     marketData,
-    baseComponents,
-    engine29Data
-  );
+    engine29Data,
+  });
   const esTechnicalContext = normalizeEsTechnicalContext(esTechnicalContextData);
 
   const components = {
