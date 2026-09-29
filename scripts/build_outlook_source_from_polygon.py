@@ -276,7 +276,7 @@ def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: in
     nh = nl = u = d = 0
     volume_observations = []
     if not symbols:
-        return {"sector": sector, "nh":0, "nl":0, "u":0, "d":0}
+        return {"sector": sector, "nh":0, "nl":0, "u":0, "d":0, **{"totalVolume":0.0,"advancingVolume":0.0,"decliningVolume":0.0,"unchangedVolume":0.0,"advancingVolumePct":None,"decliningVolumePct":None,"stocksScanned":0,"stocksWithVolume":0}}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futures = {ex.submit(process_symbol_10m, sym, lookback_bars, days): sym for sym in symbols}
         for fut in as_completed(futures):
