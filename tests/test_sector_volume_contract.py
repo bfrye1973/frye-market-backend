@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 import math
+import os
+import sys
 import unittest
 from unittest.mock import patch
+
+SCRIPTS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts"))
+if SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, SCRIPTS_DIR)
 
 from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
 from scripts import build_outlook_source_from_polygon as m10
