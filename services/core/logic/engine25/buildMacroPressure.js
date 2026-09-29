@@ -44,16 +44,16 @@ function weightedAvg(items) {
 }
 
 function scoreDirect(value, badBelow, goodAbove) {
+  if (!isNum(value)) return 50;
   const n = Number(value);
-  if (!Number.isFinite(n)) return 50;
   if (n <= badBelow) return 0;
   if (n >= goodAbove) return 100;
   return clamp(((n - badBelow) / (goodAbove - badBelow)) * 100);
 }
 
 function scoreInverse(value, goodBelow, badAbove) {
+  if (!isNum(value)) return 50;
   const n = Number(value);
-  if (!Number.isFinite(n)) return 50;
   if (n <= goodBelow) return 100;
   if (n >= badAbove) return 0;
   return clamp(100 - ((n - goodBelow) / (badAbove - goodBelow)) * 100);
