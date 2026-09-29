@@ -135,12 +135,19 @@ function tested(bar, level, side) {
 
   if (!Number.isFinite(boundary)) return false;
 
+  const high = finite(bar.high);
+  const low = finite(bar.low);
+
+  if (![high, low].every(Number.isFinite)) return false;
+
+  // A current liquidity test must actually interact with the boundary.
+  // A bar already fully beyond the level is acceptance/travel, not a new test.
   if (side === "HIGH") {
-    return finite(bar.high) >= boundary;
+    return high >= boundary && low <= boundary;
   }
 
   if (side === "LOW") {
-    return finite(bar.low) <= boundary;
+    return low <= boundary && high >= boundary;
   }
 
   return false;
@@ -210,12 +217,19 @@ function swept(
     return false;
   }
 
+  const high = finite(bar.high);
+  const low = finite(bar.low);
+
+  if (![high, low].every(Number.isFinite)) return false;
+
+  // A sweep must cross through the boundary during this bar.
+  // Bars entirely above/below an old level are acceptance/travel, not sweeps.
   if (side === "HIGH") {
-    return extreme > boundary;
+    return extreme > boundary && low <= boundary;
   }
 
   if (side === "LOW") {
-    return extreme < boundary;
+    return extreme < boundary && high >= boundary;
   }
 
   return false;
