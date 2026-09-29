@@ -27,6 +27,7 @@ export async function buildEngine29TrapDetection({
   institutionalInventory = null,
   engine25Participation = null,
   moveCharacter = null,
+  liveMonitor = null,
 } = {}) {
   const anchor =
     esAnchor ||
@@ -82,6 +83,7 @@ export async function buildEngine29TrapDetection({
   const secondaryConfirmation =
     buildEngine29TrapCrossMarketConfirmation({
       moveCharacter,
+      liveMonitor,
       trapSide: auctionEvent?.trapSide,
     });
 
