@@ -46,6 +46,8 @@ export * from "./trapDetection/buildMacroLiquidityMap.js";
 export * from "./trapDetection/detectTrapAuctionEvent.js";
 export * from "./trapDetection/buildTrapMomentumRepair.js";
 export * from "./trapDetection/resolveTrapState.js";
+export * from "./trapDetection/readEngine25TrapParticipation.js";
+export * from "./trapDetection/buildTrapCrossMarketConfirmation.js";
 export * from "./trapDetection/buildTrapDetection.js";
 
 export * from "./aggregate/overallStateConstants.js";
