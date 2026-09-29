@@ -145,6 +145,36 @@ test("liquidity sweep with no trap side does not create a trap campaign", () => 
   assert.equal(result.campaign, null);
 });
 
+test("TRAP_WATCH clears from active campaign when live detection disappears", () => {
+  const first = buildEngine29TrapCampaign({
+    trapDetection: detection(
+      ENGINE29_TRAP_STATES.TRAP_WATCH
+    ),
+    now: Date.parse("2026-09-29T17:00:00.000Z"),
+  });
+
+  const cleared = buildEngine29TrapCampaign({
+    priorCampaign: first.campaign,
+    trapDetection: {
+      trapSide: ENGINE29_TRAP_SIDES.NONE,
+      state: ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP,
+    },
+    now: Date.parse("2026-09-29T17:10:00.000Z"),
+  });
+
+  assert.equal(cleared.active, false);
+  assert.equal(cleared.campaign.active, false);
+  assert.equal(
+    cleared.campaign.currentDetectionState,
+    ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP
+  );
+  assert.equal(cleared.campaign.observationGapCount, 1);
+  assert.equal(
+    cleared.campaign.highestState,
+    ENGINE29_TRAP_STATES.TRAP_WATCH
+  );
+});
+
 test("campaign remembers active identity when current build has no active trap", () => {
   const first = buildEngine29TrapCampaign({
     trapDetection: detection(
