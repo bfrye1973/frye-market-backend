@@ -74,6 +74,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
+
 # ------------------------ ENV & CONSTANTS ------------------------
 
 UTC = timezone.utc
@@ -250,7 +252,7 @@ def compute_intraday_flags_10m(bars: List[Dict[str, Any]], lookback: int) -> Tup
 
 # ------------------------ SECTOR AGG PIPELINE --------------------
 
-def process_symbol_10m(ticker: str, lookback_bars: int, days: int) -> Tuple[int,int,int,int]:
+def process_symbol_10m(ticker: str, lookback_bars: int, days: int):
     """
     Fetch recent 10m bars for a symbol and compute intraday flags.
     """
@@ -258,18 +260,21 @@ def process_symbol_10m(ticker: str, lookback_bars: int, days: int) -> Tuple[int,
         bars = fetch_10m_bars(ticker, days)
         today_bars = todays_completed_10m(bars)
         if not today_bars:
-            return 0,0,0,0
-        return compute_intraday_flags_10m(today_bars, lookback_bars)
+            return 0,0,0,0,None
+        nh, nl, u, d = compute_intraday_flags_10m(today_bars, lookback_bars)
+        volume = today_bars[-1].get("v")
+        return nh, nl, u, d, volume
     except SystemExit:
         raise
     except Exception:
-        return 0,0,0,0
+        return 0,0,0,0,None
 
 def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: int) -> Dict[str, Any]:
     """
     Compute aggregate NH/NL/U/D counts for a sector from intraday 10m bars.
     """
     nh = nl = u = d = 0
+    volume_observations = []
     if not symbols:
         return {"sector": sector, "nh":0, "nl":0, "u":0, "d":0}
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
@@ -277,11 +282,13 @@ def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: in
         for fut in as_completed(futures):
             sym = futures[fut]
             try:
-                f_nh, f_nl, f_u, f_d = fut.result()
+                f_nh, f_nl, f_u, f_d, f_volume = fut.result()
                 nh += f_nh; nl += f_nl; u += f_u; d += f_d
+                classification = UP if f_u else (DOWN if f_d else UNCHANGED)
+                volume_observations.append({"classification": classification, "volume": f_volume})
             except Exception:
                 continue
-    return {"sector": sector, "nh": nh, "nl": nl, "u": u, "d": d}
+    return {"sector": sector, "nh": nh, "nl": nl, "u": u, "d": d, **aggregate_sector_volume(volume_observations)}
 
 def compute_sector_cards(sectors_dir: str, lookback_bars: int, days: int) -> List[Dict[str, Any]]:
     sectors_map = discover_sectors(sectors_dir)
@@ -306,6 +313,7 @@ def compute_sector_cards(sectors_dir: str, lookback_bars: int, days: int) -> Lis
             "nl": int(nl),
             "up": int(up),
             "down": int(down),
+            **{k: agg[k] for k in ("totalVolume","advancingVolume","decliningVolume","unchangedVolume","advancingVolumePct","decliningVolumePct","stocksScanned","stocksWithVolume")},
         })
     return cards
 
