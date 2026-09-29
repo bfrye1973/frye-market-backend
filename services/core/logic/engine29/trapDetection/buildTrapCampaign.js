@@ -186,6 +186,54 @@ export function buildEngine29TrapCampaign({
 
   const obs = observation(trapDetection, timestamp);
 
+  if (!same && priorCampaign?.active === true) {
+    const priorHighest =
+      priorCampaign?.highestState ||
+      priorCampaign?.state ||
+      ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP;
+
+    const priorRank = RANK[priorHighest] ?? 0;
+    const nextRank = RANK[detectionState] ?? 0;
+    const stickyRank =
+      RANK[ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE];
+
+    const priorIsSticky =
+      priorRank >= stickyRank;
+
+    const shouldSupersede =
+      !priorIsSticky &&
+      nextRank > priorRank;
+
+    if (!shouldSupersede) {
+      return {
+        version: "engine29.trapCampaign.v1",
+        active: true,
+        campaign: {
+          ...priorCampaign,
+          lastBuildAt: timestamp,
+          currentDetectionState: detectionState,
+          currentDetectionIdentity: identity,
+          competingObservationCount:
+            Number(
+              priorCampaign?.competingObservationCount || 0
+            ) + 1,
+          competingDetection: {
+            timestamp,
+            identity,
+            state: detectionState,
+            trapSide:
+              trapDetection?.trapSide ??
+              ENGINE29_TRAP_SIDES.NONE,
+            locationQuality:
+              trapDetection?.locationQuality ?? null,
+            confirmationQuality:
+              trapDetection?.confirmationQuality ?? null,
+          },
+        },
+      };
+    }
+  }
+
   if (!same) {
     return {
       version: "engine29.trapCampaign.v1",
@@ -203,6 +251,22 @@ export function buildEngine29TrapCampaign({
         lastBuildAt: timestamp,
         observationCount: 1,
         observationGapCount: 0,
+        competingObservationCount: 0,
+        supersededPrior:
+          priorCampaign?.active === true
+            ? {
+                campaignId:
+                  priorCampaign?.campaignId ?? null,
+                identityKey:
+                  priorCampaign?.identityKey ?? null,
+                side:
+                  priorCampaign?.side ?? null,
+                highestState:
+                  priorCampaign?.highestState ??
+                  priorCampaign?.state ??
+                  null,
+              }
+            : null,
         milestones: applyMilestone({}, detectionState, timestamp),
         latest: obs,
         observations: [obs],
