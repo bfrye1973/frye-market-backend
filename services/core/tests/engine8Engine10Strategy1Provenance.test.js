@@ -260,6 +260,7 @@ test(
 
     const adapter =
       buildEngine8CanonicalPaperAdapter({
+        engine26LocationCandidate: identity,
         engine6PaperPermission: engine6,
         engine9OfficialManagementPlan: engine9,
         engine7PositionSizing: engine7,
