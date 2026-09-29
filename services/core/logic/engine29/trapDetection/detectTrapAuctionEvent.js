@@ -10,8 +10,9 @@
 // - No trade permission or execution authority.
 
 import {
+  ENGINE29_AUCTION_RESULTS,
+  ENGINE29_LIQUIDITY_EVENT_STATES,
   ENGINE29_TRAP_SIDES,
-  ENGINE29_TRAP_STATES,
 } from "./trapConstants.js";
 
 function finite(value) {
@@ -238,15 +239,20 @@ function priorAcceptedThenLost(bars, level, side) {
 
 function buildNoEvent(currentPrice = null) {
   return {
-    version: "engine29.trapAuctionEvent.v1",
+    version: "engine29.trapAuctionEvent.v2.threeLane",
     trapSide: ENGINE29_TRAP_SIDES.NONE,
-    state: ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP,
     currentPrice,
+    liquidityEvent: {
+      state: ENGINE29_LIQUIDITY_EVENT_STATES.NO_LIQUIDITY_EVENT,
+      side: null,
+    },
+    auctionResult: ENGINE29_AUCTION_RESULTS.NO_ACTIVE_AUCTION,
     liquidityLevel: null,
     immediate10m: null,
     acceptance30m: null,
     context1h: null,
     sweep: null,
+    reclaimObserved: false,
     failedAcceptance: false,
     reasonCodes: [],
   };
@@ -293,11 +299,6 @@ export function detectEngine29TrapAuctionEvent({
 
   const { level, side, boundary } = candidate;
 
-  const trapSide =
-    side === "HIGH"
-      ? ENGINE29_TRAP_SIDES.BULL
-      : ENGINE29_TRAP_SIDES.BEAR;
-
   const liveTested = tested(liveBar, level, side);
   const liveSwept = swept(liveBar, level, side);
   const liveFailedHold = liveSwept && failedHold(liveBar, level, side);
@@ -317,14 +318,62 @@ export function detectEngine29TrapAuctionEvent({
     thirtyMinuteFailedHold ||
     priorAcceptanceFailure;
 
-  let state = ENGINE29_TRAP_STATES.LIQUIDITY_TEST;
+  const reclaimObserved =
+    liveFailedHold ||
+    failedAcceptance;
+
+  const trapSide =
+    reclaimObserved
+      ? side === "HIGH"
+        ? ENGINE29_TRAP_SIDES.BULL
+        : ENGINE29_TRAP_SIDES.BEAR
+      : ENGINE29_TRAP_SIDES.NONE;
+
+  let liquidityEventState =
+    side === "HIGH"
+      ? ENGINE29_LIQUIDITY_EVENT_STATES.TEST_HIGH
+      : ENGINE29_LIQUIDITY_EVENT_STATES.TEST_LOW;
 
   if (liveSwept || thirtyMinuteSwept) {
-    state = ENGINE29_TRAP_STATES.LIQUIDITY_SWEEP;
+    liquidityEventState =
+      side === "HIGH"
+        ? ENGINE29_LIQUIDITY_EVENT_STATES.SWEEP_HIGH
+        : ENGINE29_LIQUIDITY_EVENT_STATES.SWEEP_LOW;
+  }
+
+  if (reclaimObserved) {
+    liquidityEventState =
+      side === "HIGH"
+        ? ENGINE29_LIQUIDITY_EVENT_STATES.RECLAIMED_HIGH
+        : ENGINE29_LIQUIDITY_EVENT_STATES.RECLAIMED_LOW;
+  }
+
+  let auctionResult =
+    side === "HIGH"
+      ? ENGINE29_AUCTION_RESULTS.TESTING_HIGH
+      : ENGINE29_AUCTION_RESULTS.TESTING_LOW;
+
+  if (liveSwept || thirtyMinuteSwept) {
+    auctionResult =
+      side === "HIGH"
+        ? ENGINE29_AUCTION_RESULTS.SWEPT_HIGH
+        : ENGINE29_AUCTION_RESULTS.SWEPT_LOW;
   }
 
   if (failedAcceptance) {
-    state = ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE;
+    auctionResult =
+      side === "HIGH"
+        ? ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_HIGH
+        : ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_LOW;
+  } else if (thirtyMinuteSwept && completed30m) {
+    auctionResult =
+      side === "HIGH"
+        ? acceptedBeyond(completed30m, level, side)
+          ? ENGINE29_AUCTION_RESULTS.ACCEPTING_ABOVE
+          : auctionResult
+        : acceptedBeyond(completed30m, level, side)
+          ? ENGINE29_AUCTION_RESULTS.ACCEPTING_BELOW
+          : auctionResult;
   }
 
   const sweepBar =
@@ -361,10 +410,20 @@ export function detectEngine29TrapAuctionEvent({
   }
 
   return {
-    version: "engine29.trapAuctionEvent.v1",
+    version: "engine29.trapAuctionEvent.v2.threeLane",
     trapSide,
-    state,
     currentPrice,
+
+    liquidityEvent: {
+      state: liquidityEventState,
+      side,
+      tested: liveTested,
+      swept:
+        liveSwept || thirtyMinuteSwept,
+      reclaimed: reclaimObserved,
+    },
+
+    auctionResult,
 
     liquidityLevel: {
       id: level.id ?? null,
@@ -432,6 +491,7 @@ export function detectEngine29TrapAuctionEvent({
         }
       : null,
 
+    reclaimObserved,
     failedAcceptance,
     reasonCodes: [...new Set(reasonCodes)],
   };
