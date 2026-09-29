@@ -536,6 +536,16 @@ export function detectEngine29TrapAuctionEvent({
       level: finite(level.level),
       distancePointsAtObservation: candidate.distance,
       sweepThresholdPct: sweepThreshold,
+      significance:
+        level.significance ?? null,
+      eventEligible:
+        level.eventEligible !== false,
+      macroExtreme:
+        level.macroExtreme === true,
+      confluenceCount:
+        Number.isFinite(Number(level.confluenceCount))
+          ? Number(level.confluenceCount)
+          : null,
     },
 
     immediate10m: {
