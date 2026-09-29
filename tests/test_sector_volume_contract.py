@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 import unittest
+from unittest.mock import patch
 
 from scripts.sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
 from scripts import build_outlook_source_from_polygon as m10
@@ -57,6 +58,35 @@ class ProducerClassificationTest(unittest.TestCase):
     def test_4h_price_flags_unchanged(self):
         bars=[{"t":i,"h":i+10,"l":i,"c":i+1,"v":100+i} for i in range(21)]
         self.assertEqual(h4.compute_flags_from_bars(bars,20),(20,1,0,1,0))
+
+
+class ProducerVolumeAggregationTest(unittest.TestCase):
+    def assert_volume_card(self, card):
+        for field in FIELDS:
+            self.assertIn(field, card)
+        self.assertEqual(card["stocksScanned"], 3)
+        self.assertEqual(card["stocksWithVolume"], 2)
+        self.assertEqual(card["totalVolume"], 150)
+        self.assertEqual(card["advancingVolume"], 100)
+        self.assertEqual(card["decliningVolume"], 50)
+        self.assertEqual(card["unchangedVolume"], 0)
+        self.assertLessEqual(card["stocksWithVolume"], card["stocksScanned"])
+        self.assertEqual(card["advancingVolume"] + card["decliningVolume"] + card["unchangedVolume"], card["totalVolume"])
+
+    def test_10m_sector_aggregation(self):
+        vals=iter([(0,0,1,0,100),(0,0,0,1,50),(0,0,0,0,None)])
+        with patch.object(m10, "process_symbol_10m", side_effect=lambda *a: next(vals)):
+            self.assert_volume_card(m10.process_sector("Technology", ["A","B","C"], 3, 2))
+
+    def test_hourly_sector_aggregation(self):
+        vals=iter([(0,0,1,0,100),(0,0,0,1,50),(0,0,0,0,None)])
+        with patch.object(h1, "process_symbol", side_effect=lambda *a: next(vals)):
+            self.assert_volume_card(h1.process_sector("Technology", ["A","B","C"], 72))
+
+    def test_eod_sector_aggregation(self):
+        vals=iter([(0,0,1,0,100),(0,0,0,1,50),(0,0,0,0,None)])
+        with patch.object(d1, "process_symbol_daily", side_effect=lambda *a: next(vals)):
+            self.assert_volume_card(d1.process_sector_daily("Technology", ["A","B","C"], 90, 10))
 
 class FourHourCacheMigrationTest(unittest.TestCase):
     def test_old_cache_missing_volume_fails_missing_not_zero(self):
