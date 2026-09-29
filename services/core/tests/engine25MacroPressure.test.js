@@ -58,7 +58,9 @@ function score(args = {}) {
   return buildMacroPressure({
     macroData: args.macroData ?? macro(),
     marketData: args.marketData ?? market(),
-    engine29Data: args.engine29Data ?? engine29Energy(),
+    engine29Data: Object.prototype.hasOwnProperty.call(args, "engine29Data")
+      ? args.engine29Data
+      : engine29Energy(),
   });
 }
 
