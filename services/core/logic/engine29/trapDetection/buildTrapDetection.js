@@ -17,12 +17,16 @@ import { readEngine29InstitutionalLiquidity } from "./readInstitutionalLiquidity
 import { buildEngine29MacroLiquidityMap } from "./buildMacroLiquidityMap.js";
 import { detectEngine29TrapAuctionEvent } from "./detectTrapAuctionEvent.js";
 import { buildEngine29TrapMomentumRepair } from "./buildTrapMomentumRepair.js";
+import { readEngine25TrapParticipation } from "./readEngine25TrapParticipation.js";
+import { buildEngine29TrapCrossMarketConfirmation } from "./buildTrapCrossMarketConfirmation.js";
 import { resolveEngine29TrapState } from "./resolveTrapState.js";
 
 export async function buildEngine29TrapDetection({
   now = Date.now(),
   esAnchor = null,
   institutionalInventory = null,
+  engine25Participation = null,
+  moveCharacter = null,
 } = {}) {
   const anchor =
     esAnchor ||
@@ -68,15 +72,30 @@ export async function buildEngine29TrapDetection({
       trapSide: auctionEvent?.trapSide,
     });
 
+  const primaryParticipation =
+    engine25Participation ||
+    readEngine25TrapParticipation({
+      trapSide: auctionEvent?.trapSide,
+      now,
+    });
+
+  const secondaryConfirmation =
+    buildEngine29TrapCrossMarketConfirmation({
+      moveCharacter,
+      trapSide: auctionEvent?.trapSide,
+    });
+
   const resolved =
     resolveEngine29TrapState({
       auctionEvent,
       macroLiquidityMap,
       momentumRepair,
+      primaryParticipation,
+      secondaryConfirmation,
     });
 
   return {
-    version: "engine29.trapDetection.v1.phaseB",
+    version: "engine29.trapDetection.v1.phaseB3Participation",
     timestamp: new Date(now).toISOString(),
     authority: "OBSERVATION_CONFIRMATION_ONLY",
 
@@ -88,6 +107,11 @@ export async function buildEngine29TrapDetection({
     macroLiquidityMap,
     auctionEvent,
     momentumRepair,
+
+    participation: {
+      primary: primaryParticipation,
+      secondary: secondaryConfirmation,
+    },
 
     confirmationBlockedBy:
       resolved.confirmationBlockedBy,
@@ -112,6 +136,10 @@ export async function buildEngine29TrapDetection({
         (anchor?.macroContext?.twoHour?.count || 0) > 0,
       fourHourAvailable:
         (anchor?.macroContext?.fourHour?.count || 0) > 0,
+      engine25PrimaryParticipationAvailable:
+        primaryParticipation?.available === true,
+      engine29SecondaryConfirmationAvailable:
+        Boolean(moveCharacter),
     },
 
     noPermissionCreated: true,
