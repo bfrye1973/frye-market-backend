@@ -14,6 +14,12 @@ import {
   ENGINE29_LIQUIDITY_EVENT_STATES,
   ENGINE29_TRAP_SIDES,
 } from "./trapConstants.js";
+import {
+  ENGINE29_MOVE_CHARACTER_DEFAULTS,
+} from "../tacticalCharacter/moveCharacterConstants.js";
+import {
+  medianBarRangePct,
+} from "../tacticalCharacter/tacticalCharacterUtils.js";
 
 function finite(value) {
   const n = Number(value);
@@ -140,19 +146,76 @@ function tested(bar, level, side) {
   return false;
 }
 
-function swept(bar, level, side) {
+function excursionPct(boundary, extreme) {
+  if (
+    !Number.isFinite(boundary) ||
+    !Number.isFinite(extreme) ||
+    boundary === 0
+  ) {
+    return null;
+  }
+
+  return (
+    Math.abs(extreme - boundary) /
+    Math.abs(boundary)
+  ) * 100;
+}
+
+function sweepThresholdPct(
+  fastTacticalView,
+  options = {}
+) {
+  const baselineRange =
+    medianBarRangePct(fastTacticalView);
+
+  return Math.max(
+    options.minSweepExcursionPct ??
+      ENGINE29_MOVE_CHARACTER_DEFAULTS
+        .minSweepExcursionPct,
+    Number.isFinite(baselineRange)
+      ? baselineRange *
+        (
+          options.sweepRangeFraction ??
+          ENGINE29_MOVE_CHARACTER_DEFAULTS
+            .sweepRangeFraction
+        )
+      : 0
+  );
+}
+
+function swept(
+  bar,
+  level,
+  side,
+  thresholdPct = 0
+) {
   if (!bar || !level) return false;
 
   const boundary = rangeBoundary(level, side);
 
   if (!Number.isFinite(boundary)) return false;
 
+  const extreme =
+    side === "HIGH"
+      ? finite(bar.high)
+      : finite(bar.low);
+
+  const excursion =
+    excursionPct(boundary, extreme);
+
+  if (
+    !Number.isFinite(excursion) ||
+    excursion < thresholdPct
+  ) {
+    return false;
+  }
+
   if (side === "HIGH") {
-    return finite(bar.high) > boundary;
+    return extreme > boundary;
   }
 
   if (side === "LOW") {
-    return finite(bar.low) < boundary;
+    return extreme < boundary;
   }
 
   return false;
@@ -279,6 +342,11 @@ export function detectEngine29TrapAuctionEvent({
   const completed30m = bars30m.at(-1) || null;
   const completed1h = bars1h.at(-1) || null;
 
+  const sweepThreshold =
+    sweepThresholdPct(
+      esAnchor?.structure?.fastTactical
+    );
+
   const currentPrice =
     finite(liveBar?.close) ??
     finite(completed30m?.close) ??
@@ -300,11 +368,21 @@ export function detectEngine29TrapAuctionEvent({
   const { level, side, boundary } = candidate;
 
   const liveTested = tested(liveBar, level, side);
-  const liveSwept = swept(liveBar, level, side);
+  const liveSwept = swept(
+    liveBar,
+    level,
+    side,
+    sweepThreshold
+  );
   const liveFailedHold = liveSwept && failedHold(liveBar, level, side);
 
   const thirtyMinuteSwept = completed30m
-    ? swept(completed30m, level, side)
+    ? swept(
+        completed30m,
+        level,
+        side,
+        sweepThreshold
+      )
     : false;
 
   const thirtyMinuteFailedHold = completed30m
@@ -421,6 +499,7 @@ export function detectEngine29TrapAuctionEvent({
       swept:
         liveSwept || thirtyMinuteSwept,
       reclaimed: reclaimObserved,
+      sweepThresholdPct: sweepThreshold,
     },
 
     auctionResult,
@@ -436,6 +515,7 @@ export function detectEngine29TrapAuctionEvent({
       hi: finite(level.hi),
       level: finite(level.level),
       distancePointsAtObservation: candidate.distance,
+      sweepThresholdPct: sweepThreshold,
     },
 
     immediate10m: {
