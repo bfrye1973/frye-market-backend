@@ -1,6 +1,6 @@
 // services/core/logic/engine7/v2/buildProposedSizingPreview.js
 //
-// Engine 7A — Proposed-Geometry Sizing Preview
+// Engine 7 — Proposed-Geometry Sizing Preview
 //
 // Purpose:
 // - Consume Engine 26B proposed geometry.
@@ -14,7 +14,7 @@
 // Permanent output:
 // strategies["intraday_scalp@10m"].engine7SizingPreview
 
-const ENGINE = "engine7A.proposedSizingPreview.v2";
+const ENGINE = "engine7.proposedSizingPreview.v2";
 const CONTRACT_VERSION = "engine7.proposedSizingPreview.v1";
 
 const ES_SYMBOL = "ES";
@@ -718,7 +718,7 @@ function validateRiskConfig(riskConfig) {
     return {
       valid: false,
       status: "RISK_CONFIG_MISSING",
-      reasonCodes: ["ENGINE7A_RISK_CONFIG_MISSING"],
+      reasonCodes: ["ENGINE7_RISK_CONFIG_MISSING"],
       config: null,
     };
   }
@@ -820,7 +820,7 @@ function validateRiskConfig(riskConfig) {
       valid: false,
       status: "RISK_CONFIG_INVALID",
       reasonCodes: unique([
-        "ENGINE7A_RISK_CONFIG_INVALID",
+        "ENGINE7_RISK_CONFIG_INVALID",
         ...invalidReasons,
       ]),
       config: {
@@ -839,7 +839,7 @@ function validateRiskConfig(riskConfig) {
     valid: true,
     status: "RISK_CONFIG_VALID",
     reasonCodes: [
-      "ENGINE7A_RISK_CONFIG_VALID",
+      "ENGINE7_RISK_CONFIG_VALID",
     ],
     config: {
       instrument:
@@ -1045,7 +1045,7 @@ function makeBaseOutput({
 }
 
 /**
- * Build Engine 7A informational sizing from Engine 26B proposed geometry.
+ * Build Engine 7 informational sizing from Engine 26B proposed geometry.
  *
  * Engine 6 permission and Engine 27 readiness affect status only.
  * They do not force the informational estimated contract count to zero.
@@ -1126,7 +1126,7 @@ export function buildEngine7ProposedSizingPreview({
       ...output,
       status: "CANDIDATE_INVALIDATED",
       reasonCodes: [
-        "ENGINE7A_CANDIDATE_INVALIDATED",
+        "ENGINE7_CANDIDATE_INVALIDATED",
       ],
     };
   }
@@ -1154,7 +1154,7 @@ export function buildEngine7ProposedSizingPreview({
       sizingPreviewAvailable: false,
 
       reasonCodes: [
-        "ENGINE7A_IDENTITY_MATCH_REQUIRED",
+        "ENGINE7_IDENTITY_MATCH_REQUIRED",
         !geometry.candidateId
           ? "CANDIDATE_ID_MISSING"
           : null,
@@ -1225,9 +1225,9 @@ export function buildEngine7ProposedSizingPreview({
       status: "PROPOSED_GEOMETRY_INVALID",
 
       reasonCodes: unique([
-        "ENGINE7A_PROPOSED_GEOMETRY_INVALID",
+        "ENGINE7_PROPOSED_GEOMETRY_INVALID",
         symbol !== ES_SYMBOL
-          ? "ENGINE7A_ES_ONLY"
+          ? "ENGINE7_ES_ONLY"
           : null,
         !directionValid
           ? "INVALID_DIRECTION"
@@ -1281,7 +1281,7 @@ export function buildEngine7ProposedSizingPreview({
       sizingPreviewAvailable: false,
 
       reasonCodes: [
-        "ENGINE7A_PROPOSED_STOP_DISTANCE_MISMATCH",
+        "ENGINE7_PROPOSED_STOP_DISTANCE_MISMATCH",
         "PROVIDED_DISTANCE_DOES_NOT_MATCH_ENTRY_STOP",
       ],
     };
@@ -1393,7 +1393,7 @@ export function buildEngine7ProposedSizingPreview({
 
       reasonCodes: unique([
         ...riskValidation.reasonCodes,
-        "ENGINE7A_SIZING_CALCULATED",
+        "ENGINE7_SIZING_CALCULATED",
         "RISK_BUDGET_BELOW_ONE_CONTRACT",
         "ENGINE9_OFFICIAL_PLAN_REQUIRED",
         "NO_EXECUTION",
@@ -1450,9 +1450,9 @@ export function buildEngine7ProposedSizingPreview({
       ...engine6.reasonCodes,
       ...engine27.reasonCodes,
 
-      "ENGINE7A_PROPOSED_GEOMETRY_CONSUMED",
-      "ENGINE7A_STOP_DISTANCE_VALIDATED",
-      "ENGINE7A_INFORMATIONAL_SIZE_CALCULATED",
+      "ENGINE7_PROPOSED_GEOMETRY_CONSUMED",
+      "ENGINE7_STOP_DISTANCE_VALIDATED",
+      "ENGINE7_INFORMATIONAL_SIZE_CALCULATED",
 
       engine6.allowed
         ? "ENGINE6_PERMISSION_READY"
@@ -1463,7 +1463,7 @@ export function buildEngine7ProposedSizingPreview({
         : "ENGINE27_READY_REQUIRED",
 
       "ENGINE9_OFFICIAL_PLAN_REQUIRED",
-      "ENGINE7A_PREVIEW_ONLY",
+      "ENGINE7_PREVIEW_ONLY",
       "NO_PERMISSION_CREATED",
       "NO_ORDER_CREATED",
       "NO_EXECUTION",
