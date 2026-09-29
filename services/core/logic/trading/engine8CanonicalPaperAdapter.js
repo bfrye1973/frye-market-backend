@@ -43,24 +43,23 @@ const ENGINE9_BLOCKED_STATUSES = new Set([
   "MANAGEMENT_BLOCKED",
 ]);
 
-const FULL_IDENTITY_FIELDS = [
-  "planId",
+const ENGINE26A_IDENTITY_FIELDS = [
   "candidateId",
   "zoneId",
+  "laneId",
   "strategyId",
-  "symbol",
-  "direction",
   "setupType",
-  "snapshotTime",
+  "setupClass",
+  "setupGrade",
+  "identitySetupKey",
+  "candidateIdentityVersion",
 ];
 
-const ENGINE6_SHARED_IDENTITY_FIELDS = [
-  "candidateId",
-  "zoneId",
-  "strategyId",
+const ENGINE9_ENGINE7_CORRELATION_FIELDS = [
+  "planId",
   "symbol",
   "direction",
-  "setupType",
+  "snapshotTime",
 ];
 
 const GEOMETRY_FIELDS = [
@@ -161,39 +160,20 @@ function compareFields({
   return mismatches;
 }
 
-function copyIdentity(engine9, engine6, engine7) {
+function copyIdentity(engine26A, engine9, engine6, engine7) {
   return {
-    laneId:
-      engine7?.laneId ??
-      engine9?.laneId ??
-      engine6?.laneId ??
-      null,
+    laneId: engine26A?.laneId ?? null,
 
     planId:
       engine9?.planId ??
       engine7?.planId ??
       null,
 
-    candidateId:
-      engine7?.candidateId ??
-      engine9?.candidateId ??
-      engine6?.candidateId ??
-      engine6?.identity?.candidateId ??
-      null,
+    candidateId: engine26A?.candidateId ?? null,
 
-    zoneId:
-      engine7?.zoneId ??
-      engine9?.zoneId ??
-      engine6?.zoneId ??
-      engine6?.identity?.zoneId ??
-      null,
+    zoneId: engine26A?.zoneId ?? null,
 
-    strategyId:
-      engine7?.strategyId ??
-      engine9?.strategyId ??
-      engine6?.strategyId ??
-      engine6?.identity?.strategyId ??
-      null,
+    strategyId: engine26A?.strategyId ?? null,
 
     symbol:
       engine7?.symbol ??
@@ -207,31 +187,16 @@ function copyIdentity(engine9, engine6, engine7) {
       engine6?.direction ??
       null,
 
-    setupType:
-      engine7?.setupType ??
-      engine9?.setupType ??
-      engine6?.setupType ??
-      null,
+    setupType: engine26A?.setupType ?? null,
 
-    setupClass:
-      engine7?.setupClass ??
-      engine9?.setupClass ??
-      null,
+    setupClass: engine26A?.setupClass ?? null,
 
-    setupGrade:
-      engine7?.setupGrade ??
-      engine9?.setupGrade ??
-      null,
+    setupGrade: engine26A?.setupGrade ?? null,
 
-    identitySetupKey:
-      engine7?.identitySetupKey ??
-      engine9?.identitySetupKey ??
-      null,
+    identitySetupKey: engine26A?.identitySetupKey ?? null,
 
     candidateIdentityVersion:
-      engine7?.candidateIdentityVersion ??
-      engine9?.candidateIdentityVersion ??
-      null,
+      engine26A?.candidateIdentityVersion ?? null,
 
     snapshotTime:
       engine7?.snapshotTime ??
@@ -321,6 +286,7 @@ function copyTargets(engine9) {
 }
 
 function buildBaseOutput({
+  engine26A,
   engine6,
   engine9,
   engine7,
@@ -328,7 +294,7 @@ function buildBaseOutput({
   duplicateState,
 }) {
   const identity =
-    copyIdentity(engine9, engine6, engine7);
+    copyIdentity(engine26A, engine9, engine6, engine7);
 
   return {
     active: true,
@@ -694,6 +660,7 @@ function duplicateBlockers(duplicateState) {
  * Build the canonical read-only Engine 8 paper-order eligibility state.
  */
 export function buildEngine8CanonicalPaperAdapter({
+  engine26LocationCandidate = null,
   engine6PaperPermission = null,
   engine9OfficialManagementPlan = null,
   engine7PositionSizing = null,
@@ -709,11 +676,13 @@ export function buildEngine8CanonicalPaperAdapter({
   allowLiveFutures =
     process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1",
 } = {}) {
+  const engine26A = engine26LocationCandidate;
   const engine6 = engine6PaperPermission;
   const engine9 = engine9OfficialManagementPlan;
   const engine7 = engine7PositionSizing;
 
   let output = buildBaseOutput({
+    engine26A,
     engine6,
     engine9,
     engine7,
@@ -949,43 +918,89 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 9 ↔ Engine 7B full identity.
+   * Engine 26A owns canonical Strategy 1 candidate identity.
+   * Downstream engines are carriers only. Missing optional repeated carrier
+   * fields are skipped; conflicting published values fail closed.
    */
-  const fullIdentityMismatches = compareFields({
+  const canonicalMissingFields = ENGINE26A_IDENTITY_FIELDS.filter((field) => {
+    const value = engine26A?.[field];
+    return (
+      value === null ||
+      value === undefined ||
+      normalizeText(value) === ""
+    );
+  });
+
+  if (canonicalMissingFields.length > 0) {
+    const canonicalMismatches = canonicalMissingFields.map((field) => ({
+      canonicalOwner: "ENGINE26A",
+      field,
+      canonicalValue: engine26A?.[field] ?? null,
+      mismatchedCarrier: "ENGINE26A",
+      carrierValue: null,
+    }));
+
+    output = {
+      ...output,
+      identityMatched: false,
+      identityMismatches: canonicalMismatches,
+    };
+
+    return finish(output, {
+      status: "IDENTITY_MISMATCH",
+      blocker: "UPSTREAM_IDENTITY_MISMATCH",
+      reasonCodes: [
+        ...canonicalMissingFields.map(
+          (field) => `IDENTITY_MISMATCH_${field.toUpperCase()}`
+        ),
+        "ENGINE26A_CANONICAL_IDENTITY_REQUIRED",
+        "ENGINE8_DID_NOT_REPAIR_IDENTITY",
+        "NO_ORDER_CREATED",
+      ],
+    });
+  }
+
+  const carrierIdentityMismatches = [];
+  for (const [carrierName, carrier] of [
+    ["ENGINE6", engine6],
+    ["ENGINE7", engine7],
+    ["ENGINE9", engine9],
+  ]) {
+    for (const field of ENGINE26A_IDENTITY_FIELDS) {
+      const carrierValue = carrier?.[field];
+      const carrierMissing =
+        carrierValue === null ||
+        carrierValue === undefined ||
+        normalizeText(carrierValue) === "";
+
+      if (carrierMissing) continue;
+
+      const canonicalValue = engine26A[field];
+      if (!sameScalar(canonicalValue, carrierValue)) {
+        carrierIdentityMismatches.push({
+          canonicalOwner: "ENGINE26A",
+          field,
+          canonicalValue,
+          mismatchedCarrier: carrierName,
+          carrierValue,
+        });
+      }
+    }
+  }
+
+  /* Engine 9 owns planId. Preserve Engine 7 ↔ Engine 9 correlation and
+   * the existing non-26A execution correlation fields. */
+  const executionCorrelationMismatches = compareFields({
     left: engine9,
     right: engine7,
-    fields: FULL_IDENTITY_FIELDS,
+    fields: ENGINE9_ENGINE7_CORRELATION_FIELDS,
     leftName: "ENGINE9",
     rightName: "ENGINE7B",
   });
 
-  /*
-   * Engine 6 only needs to match fields it actually publishes.
-   * Missing Engine 6 fields are skipped rather than repaired.
-   */
-  const engine6IdentityMismatches = [
-    ...compareFields({
-      left: engine6,
-      right: engine9,
-      fields: ENGINE6_SHARED_IDENTITY_FIELDS,
-      leftName: "ENGINE6",
-      rightName: "ENGINE9",
-      skipWhenEitherMissing: true,
-    }),
-
-    ...compareFields({
-      left: engine6,
-      right: engine7,
-      fields: ENGINE6_SHARED_IDENTITY_FIELDS,
-      leftName: "ENGINE6",
-      rightName: "ENGINE7B",
-      skipWhenEitherMissing: true,
-    }),
-  ];
-
   const identityMismatches = [
-    ...fullIdentityMismatches,
-    ...engine6IdentityMismatches,
+    ...carrierIdentityMismatches,
+    ...executionCorrelationMismatches,
   ];
 
   output = {
