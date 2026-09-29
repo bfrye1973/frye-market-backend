@@ -14,31 +14,43 @@ function pressureBlock(moveCharacter, key) {
   return moveCharacter?.underlyingPressure?.blocks?.[key] || null;
 }
 
-function vixRead(moveCharacter, trapSide) {
-  const symbolMoves =
-    moveCharacter?.liveMonitor?.symbolMoves ||
-    null;
-
+function vixRead(moveCharacter, liveMonitor, trapSide) {
   const directAvailable =
     moveCharacter?.directVixAvailable === true;
 
-  // Existing move-character object does not expose a dedicated VIX direction
-  // block here. Preserve VIX as availability/context only in Phase B3 rather
-  // than inventing a second volatility calculation.
+  const move10 =
+    Number(liveMonitor?.metrics?.vix?.move10);
+
+  const available =
+    directAvailable &&
+    Number.isFinite(move10);
+
+  const supportsTrap =
+    available &&
+    (
+      (trapSide === ENGINE29_TRAP_SIDES.BULL && move10 > 0) ||
+      (trapSide === ENGINE29_TRAP_SIDES.BEAR && move10 < 0)
+    );
+
+  const opposesTrap =
+    available &&
+    (
+      (trapSide === ENGINE29_TRAP_SIDES.BULL && move10 < 0) ||
+      (trapSide === ENGINE29_TRAP_SIDES.BEAR && move10 > 0)
+    );
+
   return {
-    available: directAvailable,
-    supportsTrap: null,
-    opposesTrap: null,
-    note:
-      trapSide === ENGINE29_TRAP_SIDES.NONE
-        ? null
-        : "Direct VIX remains contextual until the existing live VIX move is handed into this adapter.",
-    symbolMoves,
+    available,
+    directAvailable,
+    move10: Number.isFinite(move10) ? move10 : null,
+    supportsTrap,
+    opposesTrap,
   };
 }
 
 export function buildEngine29TrapCrossMarketConfirmation({
   moveCharacter = null,
+  liveMonitor = null,
   trapSide = ENGINE29_TRAP_SIDES.NONE,
 } = {}) {
   const blocks = {
@@ -107,6 +119,22 @@ export function buildEngine29TrapCrossMarketConfirmation({
     }
   }
 
+  const volatility =
+    vixRead(
+      moveCharacter,
+      liveMonitor,
+      trapSide
+    );
+
+  const secondarySupportsTrap =
+    confirming.length >= 2 &&
+    opposing.length === 0 &&
+    volatility.opposesTrap !== true;
+
+  const secondaryOpposesTrap =
+    opposing.length >= 2 ||
+    volatility.opposesTrap === true;
+
   return {
     version:
       "engine29.trapCrossMarketConfirmation.v1",
@@ -121,16 +149,12 @@ export function buildEngine29TrapCrossMarketConfirmation({
     confirmationCount: confirming.length,
     opposingCount: opposing.length,
 
-    secondarySupportsTrap:
-      confirming.length >= 2 &&
-      opposing.length === 0,
+    secondarySupportsTrap,
 
-    secondaryOpposesTrap:
-      opposing.length >= 2,
+    secondaryOpposesTrap,
 
     blocks,
-    volatility:
-      vixRead(moveCharacter, trapSide),
+    volatility,
 
     reasonCodes: [
       confirming.length >= 2
@@ -138,6 +162,12 @@ export function buildEngine29TrapCrossMarketConfirmation({
         : null,
       opposing.length >= 2
         ? "ENGINE29_SECONDARY_BLOCKS_OPPOSE_TRAP"
+        : null,
+      volatility.supportsTrap
+        ? "DIRECT_VIX_SUPPORTS_TRAP"
+        : null,
+      volatility.opposesTrap
+        ? "DIRECT_VIX_OPPOSES_TRAP"
         : null,
     ].filter(Boolean),
   };
