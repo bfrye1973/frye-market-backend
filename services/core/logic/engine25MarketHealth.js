@@ -3,6 +3,7 @@
 import { buildRatesAuthority } from "./engine25/engine29/buildRatesAuthority.js";
 import { buildEnergyAuthority } from "./engine25/engine29/buildEnergyAuthority.js";
 import { buildBreadthAuthority } from "./engine25/engine29/buildBreadthAuthority.js";
+import { buildMacroPressure } from "./engine25/buildMacroPressure.js";
 
 function clamp(value, min = 0, max = 100) {
   if (!Number.isFinite(value)) return 50;
@@ -1700,166 +1701,6 @@ function buildEngine29CreditReactionShadow(engine29Data, engine25CreditFragility
   };
 }
 
-function scoreMacroPressure(macroData, marketData, components, engine29Data) {
-  const tenYear = getFredValue(macroData, "DGS10");
-  const twoYear = getFredValue(macroData, "DGS2");
-  const tenMinusTwo = getFredValue(macroData, "T10Y2Y");
-
-  const uso = getSymbol(marketData, "macroProxies", "USO");
-  const tlt = getSymbol(marketData, "macroProxies", "TLT");
-  const uup = getSymbol(marketData, "macroProxies", "UUP");
-
-  const spy = getSymbol(marketData, "marketTrend", "SPY");
-  const qqq = getSymbol(marketData, "marketTrend", "QQQ");
-  const iwm = getSymbol(marketData, "marketTrend", "IWM");
-
-  const ai = marketData?.quickRead?.aiLeadership || {};
-  const aiSymbols = ["NVDA", "MSFT", "AVGO", "AMD", "META", "GOOGL", "AMZN", "TSM", "ARM", "PLTR"];
-
-  const aiAbove20 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma20 === true).length;
-  const aiAbove50 = aiSymbols.filter((symbol) => ai[symbol]?.aboveEma50 === true).length;
-
-  const tenYearPressureScore = scoreInverse(tenYear, 4.25, 5.0);
-  const twoYearPressureScore = scoreInverse(twoYear, 4.0, 5.0);
-
-  const tltTrendScore = weightedAvg([
-    { value: boolScore(tlt?.aboveEma20, 100, 0), weight: 0.35 },
-    { value: boolScore(tlt?.aboveEma50, 100, 0), weight: 0.35 },
-    { value: scoreDirect(tlt?.pctChange20d, -8, 5), weight: 0.3 },
-  ]);
-
-  const legacyOilPressureScore = weightedAvg([
-    { value: boolScore(uso?.aboveEma20, 30, 80), weight: 0.35 },
-    { value: boolScore(uso?.aboveEma50, 30, 80), weight: 0.25 },
-    { value: scoreInverse(uso?.pctChange20d, 2, 15), weight: 0.4 },
-  ]);
-
-  const energyAuthority = buildEnergyAuthority({
-    engine29Data,
-    legacyOilPressureScore,
-    legacyUso: uso,
-  });
-
-  const oilPressureScore = energyAuthority.score;
-
-  const dollarPressureScore = weightedAvg([
-    { value: boolScore(uup?.aboveEma20, 35, 75), weight: 0.4 },
-    { value: scoreInverse(uup?.pctChange20d, 1, 6), weight: 0.6 },
-  ]);
-
-  const smallCapParticipationScore = weightedAvg([
-    { value: boolScore(iwm?.aboveEma20, 100, 0), weight: 0.45 },
-    { value: boolScore(iwm?.aboveEma50, 100, 0), weight: 0.25 },
-    { value: scoreDirect(iwm?.pctChange20d, -5, 5), weight: 0.3 },
-  ]);
-
-  const aiBreadthScore = weightedAvg([
-    { value: scoreDirect(aiAbove20, 3, 8), weight: 0.6 },
-    { value: scoreDirect(aiAbove50, 3, 8), weight: 0.4 },
-  ]);
-
-  const narrowLeadershipScore = weightedAvg([
-    { value: smallCapParticipationScore, weight: 0.45 },
-    { value: aiBreadthScore, weight: 0.55 },
-  ]);
-
-  const inflationScore = components?.inflation?.score ?? 50;
-
-  const fedHawkishScore = weightedAvg([
-    { value: tenYearPressureScore, weight: 0.35 },
-    { value: twoYearPressureScore, weight: 0.3 },
-    { value: inflationScore, weight: 0.25 },
-    { value: scoreDirect(tenMinusTwo, -0.5, 0.75), weight: 0.1 },
-  ]);
-
-  const score = weightedAvg([
-    { value: tenYearPressureScore, weight: 0.15 },
-    { value: twoYearPressureScore, weight: 0.12 },
-    { value: tltTrendScore, weight: 0.16 },
-    { value: oilPressureScore, weight: 0.18 },
-    { value: dollarPressureScore, weight: 0.08 },
-    { value: narrowLeadershipScore, weight: 0.16 },
-    { value: fedHawkishScore, weight: 0.15 },
-  ]);
-
-  const warnings = [];
-
-  if (isNum(tenYear) && Number(tenYear) >= 4.5) {
-    warnings.push("10Y yield pressure elevated");
-  }
-
-  if (isNum(twoYear) && Number(twoYear) >= 4.25) {
-    warnings.push("2Y yield suggests Fed hawkish pressure");
-  }
-
-  if (tlt?.aboveEma20 === false && isNum(tlt?.pctChange20d) && Number(tlt.pctChange20d) < 0) {
-    warnings.push("TLT weak; bond market pressure rising");
-  }
-
-  if (uso?.aboveEma20 === true && isNum(uso?.pctChange20d) && Number(uso.pctChange20d) >= 5) {
-    warnings.push("Oil/energy strength may pressure CPI");
-  }
-
-  if ((components?.inflation?.score ?? 50) < 50 && uso?.aboveEma20 === true) {
-    warnings.push("Inflation pressure plus oil strength creates macro risk");
-  }
-
-  if (spy?.aboveEma20 === true && qqq?.aboveEma20 === true && iwm?.aboveEma20 === false) {
-    warnings.push("Market leadership narrow: SPY/QQQ holding while small caps lag");
-  }
-
-  if (aiAbove20 <= 5) {
-    warnings.push("AI leadership breadth is narrowing");
-  }
-
-  if (fedHawkishScore < 45) {
-    warnings.push("Fed hawkish / higher-for-longer risk elevated");
-  }
-
-  return {
-    score,
-    label:
-      score >= 75
-        ? "MACRO_PRESSURE_LOW"
-        : score >= 60
-          ? "MACRO_PRESSURE_MANAGEABLE"
-          : score >= 45
-            ? "MACRO_PRESSURE_ELEVATED"
-            : "MACRO_PRESSURE_HIGH",
-    inputs: {
-  tenYear,
-  twoYear,
-  tenMinusTwo,
-
-  USO: uso,
-  legacyOilPressureScore,
-  energyAuthority,
-
-  TLT: tlt,
-  UUP: uup,
-
-  SPY: spy,
-  QQQ: qqq,
-  IWM: iwm,
-
-  aiAbove20,
-  aiAbove50,
-
-  tenYearPressureScore,
-  twoYearPressureScore,
-  tltTrendScore,
-
-  oilPressureScore,
-  dollarPressureScore,
-
-  smallCapParticipationScore,
-  aiBreadthScore,
-  narrowLeadershipScore,
-  fedHawkishScore,
-},
-warnings,
-};
-}
 function scoreDistributionPressure(sectorHealthData) {
   const block = sectorHealthData?.distributionPressure;
 
@@ -2350,12 +2191,11 @@ const liquidity = scoreLiquidity(macroData);
   eventRisk,
 };
 
-  const macroPressure = scoreMacroPressure(
+  const macroPressure = buildMacroPressure({
     macroData,
     marketData,
-    baseComponents,
-    engine29Data
-  );
+    engine29Data,
+  });
   const esTechnicalContext = normalizeEsTechnicalContext(esTechnicalContextData);
 
   const components = {
