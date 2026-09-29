@@ -163,7 +163,7 @@ def fetch_hourly_bars(ticker: str, hours: int) -> List[Dict[str, Any]]:
                 "h": float(r.get("h", 0.0)),
                 "l": float(r.get("l", 0.0)),
                 "c": float(r.get("c", 0.0)),
-                "v": float(r.get("v", 0.0)),
+                "v": r.get("v"),
             })
         except Exception:
             continue
