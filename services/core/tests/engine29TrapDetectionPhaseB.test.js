@@ -114,7 +114,7 @@ test("bull trap: high sweep + 30m close back under reaches FAILED_ACCEPTANCE", (
   assert.equal(result.failedAcceptance, true);
 });
 
-test("Phase B resolver refuses TRAP_CONFIRMED without Engine25 participation", () => {
+test("forming trap cannot confirm when primary participation is unavailable", () => {
   const result = resolveEngine29TrapState({
     auctionEvent: {
       trapSide: ENGINE29_TRAP_SIDES.BEAR,
@@ -130,11 +130,94 @@ test("Phase B resolver refuses TRAP_CONFIRMED without Engine25 participation", (
       state: "STRONG_CONFIRMATION",
       reasonCodes: [],
     },
+    primaryParticipation: {
+      available: false,
+      primaryParticipationSupportsTrap: false,
+      primaryParticipationOpposesTrap: false,
+      reasonCodes: [],
+    },
+    secondaryConfirmation: {
+      secondarySupportsTrap: true,
+      secondaryOpposesTrap: false,
+      reasonCodes: [],
+    },
   });
 
   assert.equal(result.state, ENGINE29_TRAP_STATES.TRAP_FORMING);
-  assert.deepEqual(result.confirmationBlockedBy, [
-    "ENGINE25_SCANNER_BREADTH_NOT_CONNECTED",
-    "ENGINE25_STOCK_VOLUME_NOT_CONNECTED",
-  ]);
+  assert.ok(
+    result.confirmationBlockedBy.includes(
+      "ENGINE25_PRIMARY_PARTICIPATION_UNAVAILABLE"
+    )
+  );
+});
+
+test("high-quality failed auction plus aligned participation confirms trap", () => {
+  const result = resolveEngine29TrapState({
+    auctionEvent: {
+      trapSide: ENGINE29_TRAP_SIDES.BULL,
+      state: ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE,
+      failedAcceptance: true,
+      reasonCodes: [],
+    },
+    macroLiquidityMap: {
+      locationQuality: "VERY_HIGH",
+      reasonCodes: [],
+    },
+    momentumRepair: {
+      state: "STRONG_CONFIRMATION",
+      reasonCodes: [],
+    },
+    primaryParticipation: {
+      available: true,
+      primaryParticipationSupportsTrap: true,
+      primaryParticipationOpposesTrap: false,
+      reasonCodes: [],
+    },
+    secondaryConfirmation: {
+      secondarySupportsTrap: true,
+      secondaryOpposesTrap: false,
+      reasonCodes: [],
+    },
+  });
+
+  assert.equal(result.state, ENGINE29_TRAP_STATES.TRAP_CONFIRMED);
+  assert.equal(result.confirmationQuality, "FULL_CONFIRMATION");
+  assert.deepEqual(result.confirmationBlockedBy, []);
+});
+
+test("low-quality location cannot confirm even with participation", () => {
+  const result = resolveEngine29TrapState({
+    auctionEvent: {
+      trapSide: ENGINE29_TRAP_SIDES.BEAR,
+      state: ENGINE29_TRAP_STATES.FAILED_ACCEPTANCE,
+      failedAcceptance: true,
+      reasonCodes: [],
+    },
+    macroLiquidityMap: {
+      locationQuality: "LOW",
+      reasonCodes: [],
+    },
+    momentumRepair: {
+      state: "STRONG_CONFIRMATION",
+      reasonCodes: [],
+    },
+    primaryParticipation: {
+      available: true,
+      primaryParticipationSupportsTrap: true,
+      primaryParticipationOpposesTrap: false,
+      reasonCodes: [],
+    },
+    secondaryConfirmation: {
+      secondarySupportsTrap: true,
+      secondaryOpposesTrap: false,
+      reasonCodes: [],
+    },
+  });
+
+  assert.equal(result.state, ENGINE29_TRAP_STATES.TRAP_FORMING);
+  assert.ok(
+    result.confirmationBlockedBy.includes(
+      "MACRO_LOCATION_NOT_HIGH_QUALITY"
+    )
+  );
 });
