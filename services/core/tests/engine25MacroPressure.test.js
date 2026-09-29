@@ -7,7 +7,17 @@ import {
 } from "../logic/engine25/buildMacroPressure.js";
 
 function macro({ dgs10 = 4.4, dgs2 = 4.4, curve = 0.1 } = {}) {
-  return { DGS10: dgs10, DGS2: dgs2, T10Y2Y: curve };
+  return {
+    sources: {
+      fred: {
+        latest: {
+          DGS10: { value: dgs10 },
+          DGS2: { value: dgs2 },
+          T10Y2Y: { value: curve },
+        },
+      },
+    },
+  };
 }
 
 function symbol(overrides = {}) {
@@ -30,9 +40,9 @@ function market({
 } = {}) {
   const names = ["NVDA","MSFT","AVGO","AMD","META","GOOGL","AMZN","TSM","ARM","PLTR"];
   return {
-    macroProxies: { USO: uso, TLT: tlt, UUP: uup },
-    marketTrend: { SPY: spy, QQQ: qqq, IWM: iwm },
     quickRead: {
+      macroProxies: { USO: uso, TLT: tlt, UUP: uup },
+      marketTrend: { SPY: spy, QQQ: qqq, IWM: iwm },
       aiLeadership: Object.fromEntries(
         names.map((name) => [name, { aboveEma20: aiValue, aboveEma50: aiValue }])
       ),
@@ -124,6 +134,25 @@ run("5 inflationScore is not an input and cannot change macroPressure.score", ()
   }).score;
   assert.equal(baseline, withIgnoredInflation);
   assert.equal(baseline, withOppositeInflation);
+});
+
+run("missing DGS2 and T10Y2Y are neutral 50, never synthetic healthy values", () => {
+  const missing = {
+    sources: {
+      fred: {
+        latest: {
+          DGS10: { value: 4.4 },
+          DGS2: { value: null },
+          T10Y2Y: { value: null },
+        },
+      },
+    },
+  };
+  const result = score({ macroData: missing });
+  assert.equal(result.inputs.twoYear, null);
+  assert.equal(result.inputs.tenMinusTwo, null);
+  assert.equal(result.inputs.twoYearPressureScore, 50);
+  assert.equal(result.inputs.curvePressureScore, 50);
 });
 
 run("6 DGS2 changes DO change score", () => {
