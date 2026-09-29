@@ -216,7 +216,7 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
     nh = nl = up = dn = 0
     volume_observations = []
     if not symbols:
-        return {"sector": sector, "nh": 0, "nl": 0, "up": 0, "down": 0}
+        return {"sector": sector, "nh": 0, "nl": 0, "up": 0, "down": 0, **{"totalVolume":0.0,"advancingVolume":0.0,"decliningVolume":0.0,"unchangedVolume":0.0,"advancingVolumePct":None,"decliningVolumePct":None,"stocksScanned":0,"stocksWithVolume":0}}
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
         futs = {ex.submit(process_symbol_daily, s, days, L): s for s in symbols}
