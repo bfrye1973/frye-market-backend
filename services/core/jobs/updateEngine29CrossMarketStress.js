@@ -49,6 +49,14 @@ function compactLog(output) {
       output?.trapDetection?.state ?? "NO_ACTIVE_TRAP",
     trapCampaignId:
       output?.trapCampaign?.campaign?.campaignId ?? null,
+    trapCampaignSide:
+      output?.trapCampaign?.campaign?.side ?? null,
+    trapCampaignState:
+      output?.trapCampaign?.campaign?.state ?? null,
+    competingTrapSide:
+      output?.trapCampaign?.campaign?.competingDetection?.trapSide ?? null,
+    competingTrapState:
+      output?.trapCampaign?.campaign?.competingDetection?.state ?? null,
   };
 }
 
@@ -118,7 +126,8 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
       `1h=${result.summary.tacticalState} ` +
       `30m=${result.summary.fastTacticalState} ` +
       `move=${result.summary.moveCharacter} ` +
-      `trap=${result.summary.trapSide}/${result.summary.trapState}`
+      `trap=${result.summary.trapSide}/${result.summary.trapState} ` +
+      `campaign=${result.summary.trapCampaignSide || "NONE"}/${result.summary.trapCampaignState || "NONE"}`
   );
 
   return result;
