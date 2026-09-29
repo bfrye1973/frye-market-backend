@@ -4,7 +4,8 @@ import { ENGINE29_VERSION } from "../constants.js";
 import { buildEngine29MarketDataBundle } from "../data/buildMarketDataBundle.js";
 import { buildEngine29StructureBundle } from "../structure/buildStructureBundle.js";
 import { buildEngine29GroupStateBundle } from "../groups/buildGroupStateBundle.js";
-import { buildEngine29TacticalCharacterWithEs } from "../tacticalCharacter/buildTacticalCharacter.js";
+import { buildEngine29TacticalCharacter } from "../tacticalCharacter/buildTacticalCharacter.js";
+import { buildEngine29EsFuturesAnchor } from "../tacticalCharacter/buildEsFuturesAnchor.js";
 import { buildEngine29SqueezeTransitionMonitor } from "../tacticalCharacter/buildSqueezeTransitionMonitor.js";
 import { buildEngine29TrapDetection } from "../trapDetection/buildTrapDetection.js";
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
@@ -240,12 +241,23 @@ export async function buildEngine29CrossMarketStress({
       }
     );
 
+  const esAnchor =
+    moveCharacter
+      ? null
+      : await buildEngine29EsFuturesAnchor({
+          now,
+          symbol: "ES",
+        });
+
   const move =
     moveCharacter ||
-    await buildEngine29TacticalCharacterWithEs(
+    buildEngine29TacticalCharacter(
       structure,
       groups,
-      { now }
+      {
+        now,
+        esAnchor,
+      }
     );
 
   const structural =
@@ -277,6 +289,7 @@ export async function buildEngine29CrossMarketStress({
   const trapDetection =
     await buildEngine29TrapDetection({
       now,
+      esAnchor,
       moveCharacter: move,
       liveMonitor,
     });
