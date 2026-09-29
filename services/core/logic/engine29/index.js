@@ -49,6 +49,8 @@ export * from "./trapDetection/resolveTrapState.js";
 export * from "./trapDetection/readEngine25TrapParticipation.js";
 export * from "./trapDetection/buildTrapCrossMarketConfirmation.js";
 export * from "./trapDetection/buildTrapDetection.js";
+export * from "./trapDetection/buildTrapCampaign.js";
+export * from "./trapDetection/trapCampaignStore.js";
 
 export * from "./aggregate/overallStateConstants.js";
 export * from "./aggregate/resolveStructuralState.js";
