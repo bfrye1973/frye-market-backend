@@ -40,6 +40,18 @@ export * from "./tacticalCharacter/resolveMoveCharacter.js";
 export * from "./tacticalCharacter/buildTacticalCharacter.js";
 export * from "./tacticalCharacter/buildSqueezeTransitionMonitor.js";
 
+export * from "./trapDetection/trapConstants.js";
+export * from "./trapDetection/readInstitutionalLiquidity.js";
+export * from "./trapDetection/buildMacroLiquidityMap.js";
+export * from "./trapDetection/detectTrapAuctionEvent.js";
+export * from "./trapDetection/buildTrapMomentumRepair.js";
+export * from "./trapDetection/resolveTrapState.js";
+export * from "./trapDetection/readEngine25TrapParticipation.js";
+export * from "./trapDetection/buildTrapCrossMarketConfirmation.js";
+export * from "./trapDetection/buildTrapDetection.js";
+export * from "./trapDetection/buildTrapCampaign.js";
+export * from "./trapDetection/trapCampaignStore.js";
+
 export * from "./aggregate/overallStateConstants.js";
 export * from "./aggregate/resolveStructuralState.js";
 export * from "./aggregate/resolveTacticalState.js";

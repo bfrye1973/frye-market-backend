@@ -4,8 +4,10 @@ import { ENGINE29_VERSION } from "../constants.js";
 import { buildEngine29MarketDataBundle } from "../data/buildMarketDataBundle.js";
 import { buildEngine29StructureBundle } from "../structure/buildStructureBundle.js";
 import { buildEngine29GroupStateBundle } from "../groups/buildGroupStateBundle.js";
-import { buildEngine29TacticalCharacterWithEs } from "../tacticalCharacter/buildTacticalCharacter.js";
+import { buildEngine29TacticalCharacter } from "../tacticalCharacter/buildTacticalCharacter.js";
+import { buildEngine29EsFuturesAnchor } from "../tacticalCharacter/buildEsFuturesAnchor.js";
 import { buildEngine29SqueezeTransitionMonitor } from "../tacticalCharacter/buildSqueezeTransitionMonitor.js";
+import { buildEngine29TrapDetection } from "../trapDetection/buildTrapDetection.js";
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
 import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
@@ -239,12 +241,23 @@ export async function buildEngine29CrossMarketStress({
       }
     );
 
+  const esAnchor =
+    moveCharacter
+      ? null
+      : await buildEngine29EsFuturesAnchor({
+          now,
+          symbol: "ES",
+        });
+
   const move =
     moveCharacter ||
-    await buildEngine29TacticalCharacterWithEs(
+    buildEngine29TacticalCharacter(
       structure,
       groups,
-      { now }
+      {
+        now,
+        esAnchor,
+      }
     );
 
   const structural =
@@ -272,6 +285,14 @@ export async function buildEngine29CrossMarketStress({
           move?.esLiveMonitor || null,
       }
     );
+
+  const trapDetection =
+    await buildEngine29TrapDetection({
+      now,
+      esAnchor,
+      moveCharacter: move,
+      liveMonitor,
+    });
 
   const missingConfirmations =
     buildMissingConfirmations(
@@ -329,6 +350,16 @@ export async function buildEngine29CrossMarketStress({
     fastTactical,
     moveCharacter: move,
     liveMonitor,
+    trapDetection,
+
+    marketCharacter: {
+      liquidity:
+        trapDetection?.liquidity || null,
+      move:
+        trapDetection?.moveCharacterLane || null,
+      trap:
+        trapDetection?.trap || null,
+    },
 
     groups:
       groups?.groups || {},
@@ -391,6 +422,12 @@ export async function buildEngine29CrossMarketStress({
       liveMonitorAvailableSymbols:
         market?.summary
           ?.liveMonitorAvailableSymbols || [],
+
+      trapDetectionAvailable:
+        Boolean(trapDetection),
+      trapPrimaryParticipationAvailable:
+        trapDetection?.dataQuality
+          ?.engine25PrimaryParticipationAvailable === true,
     },
 
     display: {
@@ -495,6 +532,82 @@ export async function buildEngine29CrossMarketStress({
           liveMonitor
             ?.display
             ?.why ?? [],
+      },
+
+      marketCharacter: {
+        liquidity: {
+          state:
+            trapDetection?.liquidity?.state ??
+            "NO_LIQUIDITY_EVENT",
+          side:
+            trapDetection?.liquidity?.side ?? null,
+          level:
+            trapDetection?.liquidity?.level ?? null,
+          auctionResult:
+            trapDetection?.liquidity?.auctionResult ??
+            "NO_ACTIVE_AUCTION",
+          reclaimObserved:
+            trapDetection?.liquidity?.reclaimObserved === true,
+        },
+
+        move: {
+          moveCharacter:
+            trapDetection?.moveCharacterLane?.moveCharacter ??
+            move?.moveCharacter ??
+            "NO_ACTIVE_MOVE",
+          direction:
+            trapDetection?.moveCharacterLane?.direction ??
+            move?.direction ??
+            null,
+          fastState:
+            trapDetection?.moveCharacterLane?.fastState ??
+            liveMonitor?.state ??
+            null,
+          liveDirection:
+            trapDetection?.moveCharacterLane?.liveDirection ??
+            liveMonitor?.direction ??
+            null,
+          participation:
+            trapDetection?.moveCharacterLane?.participation ??
+            liveMonitor?.participation ??
+            null,
+        },
+
+        trap: {
+          side:
+            trapDetection?.trap?.side ??
+            trapDetection?.trapSide ??
+            "NONE",
+          state:
+            trapDetection?.trap?.state ??
+            trapDetection?.state ??
+            "NO_ACTIVE_TRAP",
+          locationQuality:
+            trapDetection?.trap?.locationQuality ??
+            trapDetection?.locationQuality ??
+            null,
+          confirmationQuality:
+            trapDetection?.trap?.confirmationQuality ??
+            trapDetection?.confirmationQuality ??
+            null,
+          confirmationBlockedBy:
+            trapDetection?.trap?.confirmationBlockedBy ??
+            trapDetection?.confirmationBlockedBy ??
+            [],
+        },
+      },
+
+      trap: {
+        side:
+          trapDetection?.trapSide ?? "NONE",
+        state:
+          trapDetection?.state ?? "NO_ACTIVE_TRAP",
+        locationQuality:
+          trapDetection?.locationQuality ?? null,
+        confirmationQuality:
+          trapDetection?.confirmationQuality ?? null,
+        confirmationBlockedBy:
+          trapDetection?.confirmationBlockedBy || [],
       },
 
       underTheHood: {

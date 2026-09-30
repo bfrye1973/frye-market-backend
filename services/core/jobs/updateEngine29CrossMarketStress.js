@@ -5,7 +5,12 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { buildEngine29CrossMarketStress } from "../logic/engine29/index.js";
+import {
+  buildEngine29CrossMarketStress,
+  buildEngine29TrapCampaign,
+  readEngine29TrapCampaign,
+  writeEngine29TrapCampaign,
+} from "../logic/engine29/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,6 +43,44 @@ function compactLog(output) {
       null,
     dataDegraded: Boolean(output?.dataDegraded),
     missingConfirmations: output?.missingConfirmations || [],
+    liquidityState:
+      output?.marketCharacter?.liquidity?.state ??
+      output?.trapDetection?.liquidity?.state ??
+      "NO_LIQUIDITY_EVENT",
+    moveLane:
+      output?.marketCharacter?.move?.moveCharacter ??
+      output?.moveCharacter?.moveCharacter ??
+      "NO_ACTIVE_MOVE",
+    trapSide:
+      output?.marketCharacter?.trap?.side ??
+      output?.trapDetection?.trapSide ??
+      "NONE",
+    trapState:
+      output?.marketCharacter?.trap?.state ??
+      output?.trapDetection?.state ??
+      "NO_ACTIVE_TRAP",
+    trapCampaignActive:
+      output?.trapCampaign?.active === true,
+    trapCampaignId:
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.campaignId ?? null
+        : null,
+    trapCampaignSide:
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.side ?? null
+        : null,
+    trapCampaignState:
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.state ?? null
+        : null,
+    competingTrapSide:
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.competingDetection?.trapSide ?? null
+        : null,
+    competingTrapState:
+      output?.trapCampaign?.active === true
+        ? output?.trapCampaign?.campaign?.competingDetection?.state ?? null
+        : null,
   };
 }
 
@@ -50,6 +93,28 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   console.log(`[engine29] BUILD START @ ${startedAt}`);
 
   const output = await buildEngine29CrossMarketStress({ now });
+
+  const priorTrapCampaign =
+    readEngine29TrapCampaign();
+
+  const trapCampaign =
+    buildEngine29TrapCampaign({
+      priorCampaign: priorTrapCampaign,
+      trapDetection: output?.trapDetection || null,
+      now,
+    });
+
+  output.trapCampaign = trapCampaign;
+
+  if (output?.trapDetection) {
+    // Canonical live pointer exposes only an active campaign.
+    // Historical/inactive campaign memory remains preserved under
+    // output.trapCampaign for audit and replay.
+    output.trapDetection.campaign =
+      trapCampaign?.active === true
+        ? trapCampaign?.campaign || null
+        : null;
+  }
 
   if (!output || typeof output !== "object") {
     throw new Error("Engine 29 build returned no canonical output");
@@ -66,6 +131,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   }
 
   writeJsonAtomic(OUTPUT_FILE, output);
+  writeEngine29TrapCampaign(trapCampaign);
 
   const stat = fs.statSync(OUTPUT_FILE);
   const finishedAt = new Date().toISOString();
@@ -88,7 +154,10 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
       `overall=${result.summary.overallState} ` +
       `1h=${result.summary.tacticalState} ` +
       `30m=${result.summary.fastTacticalState} ` +
-      `move=${result.summary.moveCharacter}`
+      `move=${result.summary.moveCharacter} ` +
+      `liquidity=${result.summary.liquidityState} ` +
+      `trap=${result.summary.trapSide}/${result.summary.trapState} ` +
+      `campaign=${result.summary.trapCampaignSide || "NONE"}/${result.summary.trapCampaignState || "NONE"}`
   );
 
   return result;

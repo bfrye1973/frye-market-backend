@@ -17,6 +17,8 @@ const DATA_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 const UPDATE_JOB = path.join(CORE_DIR, "jobs", "updateEngine29CrossMarketStress.js");
 
 let ENGINE29_UPDATE_RUNNING = false;
+let ENGINE29_LAST_DASHBOARD_REFRESH_MS = 0;
+const ENGINE29_DASHBOARD_REFRESH_COOLDOWN_MS = 60_000;
 
 function readJsonSafe(filePath) {
   if (!fs.existsSync(filePath)) {
@@ -189,6 +191,78 @@ router.get("/engine29/cross-market-stress/summary", (_req, res) => {
     sizeBytes: result.sizeBytes,
     data: summaryFrom(result.data),
   });
+});
+
+// Browser-safe dashboard refresh.
+// No secret is exposed to the frontend. The route is globally coalesced and
+// throttled so an open dashboard cannot create overlapping provider rebuilds.
+router.post("/engine29/dashboard-refresh", async (_req, res) => {
+  const nowMs = Date.now();
+
+  if (ENGINE29_UPDATE_RUNNING) {
+    return res.status(202).json({
+      ok: true,
+      engine: "engine29.dashboardRefresh.route.v1",
+      status: "ALREADY_RUNNING",
+      updateRunning: true,
+    });
+  }
+
+  const ageMs =
+    nowMs - ENGINE29_LAST_DASHBOARD_REFRESH_MS;
+
+  if (
+    ENGINE29_LAST_DASHBOARD_REFRESH_MS > 0 &&
+    ageMs < ENGINE29_DASHBOARD_REFRESH_COOLDOWN_MS
+  ) {
+    return res.json({
+      ok: true,
+      engine: "engine29.dashboardRefresh.route.v1",
+      status: "COOLDOWN",
+      updateRunning: false,
+      retryAfterMs:
+        ENGINE29_DASHBOARD_REFRESH_COOLDOWN_MS - ageMs,
+    });
+  }
+
+  ENGINE29_LAST_DASHBOARD_REFRESH_MS = nowMs;
+  const startedAt = new Date(nowMs).toISOString();
+
+  try {
+    const logs = await runUpdateJob();
+    const result = readJsonSafe(DATA_FILE);
+
+    if (!result.ok) {
+      throw new Error(
+        result.error ||
+        "Engine 29 dashboard refresh completed but output file is unavailable"
+      );
+    }
+
+    return res.json({
+      ok: true,
+      engine: "engine29.dashboardRefresh.route.v1",
+      status: "UPDATED",
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      updateRunning: ENGINE29_UPDATE_RUNNING,
+      fileModifiedAt: result.modifiedAt,
+      data: summaryFrom(result.data),
+      logs: {
+        stdoutTail: logs.stdout.slice(-2000),
+        stderrTail: logs.stderr.slice(-1000),
+      },
+    });
+  } catch (error) {
+    ENGINE29_LAST_DASHBOARD_REFRESH_MS = 0;
+
+    return res.status(500).json({
+      ok: false,
+      engine: "engine29.dashboardRefresh.route.v1",
+      error: "engine29_dashboard_refresh_failed",
+      detail: error?.message || String(error),
+    });
+  }
 });
 
 // Manual/cron-safe refresh. This is intentionally separate from GET routes so
