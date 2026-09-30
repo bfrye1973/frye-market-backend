@@ -23,7 +23,10 @@ jobs:
           node --check services/core/logic/engine29/tacticalCharacter/tacticalCharacterUtils.js
           node --check services/core/logic/engine29/tacticalCharacter/buildTacticalCharacter.js
           node --check services/core/logic/engine29/tacticalCharacter/resolveMoveCharacter.js
+          node --check services/core/logic/engine29/tacticalCharacter/resolveDirectionalMoveParent.js
           node --check services/core/logic/engine29/aggregate/resolveFastTacticalShift.js
+          node --check services/core/logic/engine29/aggregate/buildCrossMarketStress.js
+          node --check services/core/jobs/updateEngine29CrossMarketStress.js
 
       - name: Adaptive move regressions
         run: node --test services/core/tests/engine29MoveLaneActive.test.js
