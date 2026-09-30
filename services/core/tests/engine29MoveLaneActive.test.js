@@ -120,7 +120,7 @@ test("stale 30m authority fails closed instead of preserving an old active move"
   }));
 
   assert.equal(result.available, false);
-  assert.equal(result.active, undefined);
+  assert.equal(result.active, false);
   assert.equal(result.stale, true);
   assert.equal(result.direction, ENGINE29_MOVE_DIRECTIONS.FLAT);
 });
