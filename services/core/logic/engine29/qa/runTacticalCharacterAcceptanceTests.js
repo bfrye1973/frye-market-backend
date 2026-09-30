@@ -36,6 +36,7 @@ function entry(symbol, direction = "FLAT", start = 100) {
       bars: bars({ start, direction }),
       levels: { recentSupport: start * 0.995, recentResistance: start * 1.005 },
       classification: { state: "WARNING", stage: "TEST" },
+      freshness: { stale: false, reason: "FRESH" },
     },
   };
 }
@@ -45,6 +46,7 @@ function esAnchor(direction = "FLAT", { sweep = null } = {}) {
   es.tactical = {
     bars: bars({ start: 7600, direction: "FLAT", impulsePct: 0.06 }),
     classification: { state: "WARNING", stage: "TESTING_STRESS_LEVEL" },
+    freshness: { stale: false, reason: "FRESH" },
   };
 
   if (sweep === "HIGH") {
@@ -108,42 +110,44 @@ const scenarios = [
     es: esAnchor("UP"),
     structure: structure("FLAT"),
     groups: groupBundle(true),
-    expected: ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE,
   },
   {
     name: "DOWNSIDE_SQUEEZE",
     es: esAnchor("DOWN"),
     structure: structure("FLAT"),
     groups: groupBundle(false),
-    expected: ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE,
   },
   {
     name: "BROAD_RALLY",
     es: esAnchor("UP"),
     structure: structure("UP"),
     groups: groupBundle(false),
-    expected: ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED,
   },
   {
     name: "BROAD_SELLOFF",
     es: esAnchor("DOWN"),
     structure: structure("DOWN"),
     groups: groupBundle(true),
-    expected: ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED,
   },
   {
-    name: "LIQUIDITY_SWEEP_HIGH",
+    name: "LIQUIDITY_SWEEP_HIGH_IS_INDEPENDENT",
     es: esAnchor("FLAT", { sweep: "HIGH" }),
     structure: structure("FLAT"),
     groups: groupBundle(true),
-    expected: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.NO_ACTIVE_MOVE,
+    expectedLiquidity: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH,
   },
   {
-    name: "LIQUIDITY_SWEEP_LOW",
+    name: "LIQUIDITY_SWEEP_LOW_IS_INDEPENDENT",
     es: esAnchor("FLAT", { sweep: "LOW" }),
     structure: structure("FLAT"),
     groups: groupBundle(true),
-    expected: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW,
+    expectedMove: ENGINE29_MOVE_CHARACTERS.NO_ACTIVE_MOVE,
+    expectedLiquidity: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW,
   },
 ];
 
@@ -153,9 +157,22 @@ for (const scenario of scenarios) {
     now: Date.now(),
     esAnchor: scenario.es,
   });
-  const pass = result.moveCharacter === scenario.expected;
+
+  const movePass = result.moveCharacter === scenario.expectedMove;
+  const liquidityActual = result.liquiditySweeps?.find((x) => x?.detected)?.character ?? null;
+  const liquidityPass = scenario.expectedLiquidity
+    ? liquidityActual === scenario.expectedLiquidity
+    : true;
+
+  const pass = movePass && liquidityPass;
   if (!pass) failed += 1;
-  console.log(`${pass ? "PASS" : "FAIL"} ${scenario.name}: expected=${scenario.expected} actual=${result.moveCharacter}`);
+
+  console.log(
+    `${pass ? "PASS" : "FAIL"} ${scenario.name}: move expected=${scenario.expectedMove} actual=${result.moveCharacter}` +
+    (scenario.expectedLiquidity
+      ? ` liquidity expected=${scenario.expectedLiquidity} actual=${liquidityActual}`
+      : "")
+  );
 }
 
 if (failed) {
