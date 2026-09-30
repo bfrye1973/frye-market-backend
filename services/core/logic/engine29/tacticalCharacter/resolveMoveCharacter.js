@@ -6,14 +6,14 @@ import {
   ENGINE29_MOVE_DIRECTIONS,
 } from "./moveCharacterConstants.js";
 
-function confidenceFrom({ liquiditySweep, failedMove, squeeze, broadConfirmation, directionalMove }) {
+function confidenceFrom({ liquiditySweep, failedMove, squeeze, broadConfirmation, directionalMoveParent }) {
   if (liquiditySweep?.detected || failedMove?.detected) return ENGINE29_CONFIDENCE.HIGH;
   if (squeeze?.squeezeLike) {
     const blockCount = squeeze?.broadConfirmationMissing ? broadConfirmation?.independentBlocksConfirmed ?? 0 : 3;
     return blockCount <= 1 ? ENGINE29_CONFIDENCE.HIGH : ENGINE29_CONFIDENCE.MEDIUM;
   }
   if (squeeze?.headline?.impulse && broadConfirmation?.broadConfirmed) return ENGINE29_CONFIDENCE.HIGH;
-  if (directionalMove?.active) return ENGINE29_CONFIDENCE.MEDIUM;
+  if (directionalMoveParent?.active) return ENGINE29_CONFIDENCE.MEDIUM;
   if (squeeze?.headline?.direction === ENGINE29_MOVE_DIRECTIONS.MIXED) return ENGINE29_CONFIDENCE.LOW;
   return ENGINE29_CONFIDENCE.MEDIUM;
 }
@@ -24,6 +24,7 @@ export function resolveMoveCharacter({
   squeeze,
   broadConfirmation,
   directionalMove,
+  directionalMoveParent,
 } = {}) {
   const liquiditySweep = liquiditySweeps.find((x) => x?.detected) || null;
   const failedMove = failedMoves.find((x) => x?.detected) || null;
@@ -38,13 +39,13 @@ export function resolveMoveCharacter({
   } else if (squeeze?.headline?.impulse && broadConfirmation?.broadConfirmed) {
     moveCharacter = ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED;
   } else if (
-    directionalMove?.active &&
-    directionalMove?.direction === ENGINE29_MOVE_DIRECTIONS.UP
+    directionalMoveParent?.active &&
+    directionalMoveParent?.direction === ENGINE29_MOVE_DIRECTIONS.UP
   ) {
     moveCharacter = ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE;
   } else if (
-    directionalMove?.active &&
-    directionalMove?.direction === ENGINE29_MOVE_DIRECTIONS.DOWN
+    directionalMoveParent?.active &&
+    directionalMoveParent?.direction === ENGINE29_MOVE_DIRECTIONS.DOWN
   ) {
     moveCharacter = ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE;
   } else if (squeeze?.headline?.direction === ENGINE29_MOVE_DIRECTIONS.MIXED) {
@@ -54,17 +55,23 @@ export function resolveMoveCharacter({
   return {
     moveCharacter,
     direction:
-      directionalMove?.active
-        ? directionalMove.direction
-        : squeeze?.headline?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT,
+      moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE ||
+      moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE ||
+      moveCharacter === ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED ||
+      moveCharacter === ENGINE29_MOVE_CHARACTERS.MIXED
+        ? squeeze?.headline?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT
+        : directionalMoveParent?.active
+          ? directionalMoveParent.direction
+          : ENGINE29_MOVE_DIRECTIONS.FLAT,
     confidence: confidenceFrom({
       liquiditySweep,
       failedMove,
       squeeze,
       broadConfirmation,
-      directionalMove,
+      directionalMoveParent,
     }),
     directionalMove,
+    directionalMoveParent,
     liquiditySweep,
     failedMove,
   };
