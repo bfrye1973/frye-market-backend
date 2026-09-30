@@ -1,88 +1,55 @@
 // services/core/logic/engine29/trapDetection/readEngine25TrapParticipation.js
-// Engine 29 — read-only Engine 25 scanner participation handoff for trap detection.
+// Engine 29 — read-only Engine 25 participation handoff for trap confirmation.
 //
-// Reads only the already-built Engine 25 sector-health artifact.
-// Does NOT run another stock scanner and does NOT change Engine 25 authority.
+// Reads the shared normalized Engine 25 participation adapter.
+// Does NOT run Engine 25, another stock scanner, or any participation calculation.
+// Engine 25 owns participation truth and whether current evidence is usable.
 
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import { ENGINE29_TRAP_SIDES } from "./trapConstants.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const DEFAULT_SECTOR_HEALTH_FILE = path.resolve(
-  __dirname,
-  "../../../data/engine25-sector-health-test.json"
-);
+import {
+  DEFAULT_ENGINE25_PARTICIPATION_FILE,
+  readEngine25Participation,
+} from "../participation/readEngine25Participation.js";
 
 function finite(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
 
-function readJson(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8"));
-  } catch {
-    return null;
-  }
-}
-
-function sourceTimestampMs(data) {
-  const values = [
-    data?.updatedAt,
-    data?.sources?.intraday?.updatedAt,
-    data?.sources?.eod?.updatedAt,
-  ];
-
-  for (const value of values) {
-    const ms = Date.parse(String(value || ""));
-    if (Number.isFinite(ms)) return ms;
-  }
-
-  return null;
-}
-
-function breadthRead(data) {
-  const breadth = data?.breadthParticipation || null;
+function breadthRead(adapter) {
+  const breadth = adapter?.participation?.breadth || null;
   const score = finite(breadth?.score);
   const label = breadth?.label || null;
 
   return {
     available:
-      data?.ok === true &&
+      adapter?.contractValid === true &&
+      adapter?.currentTrapConfirmationUsable === true &&
       Number.isFinite(score) &&
-      Boolean(label) &&
-      data?.sources?.intraday?.ok === true &&
-      data?.sources?.eod?.ok === true,
+      Boolean(label),
     score,
     label,
-    intraday:
-      breadth?.inputs?.intraday || null,
-    eod:
-      breadth?.inputs?.eod || null,
+    intraday: breadth?.inputs?.intraday || null,
+    eod: breadth?.inputs?.eod || null,
   };
 }
 
-function volumeRead(data) {
+function volumeRead(adapter) {
   const distribution =
-    data?.distributionPressure || null;
-
+    adapter?.participation?.distributionPressure || null;
   const evidence =
-    distribution?.inputs?.volumeEvidence || null;
+    adapter?.participation?.stockVolume || null;
 
-  const intraday =
-    evidence?.intraday || null;
-
-  const eod =
-    evidence?.eod || null;
+  const intraday = evidence?.intraday || null;
+  const eod = evidence?.eod || null;
 
   return {
-    available: evidence?.available === true,
+    available:
+      adapter?.contractValid === true &&
+      adapter?.currentTrapConfirmationUsable === true &&
+      evidence?.available === true,
+
     distributionScore:
       finite(distribution?.score),
     distributionLabel:
@@ -209,61 +176,26 @@ function classifyVolumeForTrap(volume, trapSide) {
 
 export function readEngine25TrapParticipation({
   trapSide = ENGINE29_TRAP_SIDES.NONE,
-  filePath = DEFAULT_SECTOR_HEALTH_FILE,
+  filePath = DEFAULT_ENGINE25_PARTICIPATION_FILE,
   now = Date.now(),
 } = {}) {
-  const data = readJson(filePath);
+  // Keep `now` in the public call shape for downstream compatibility.
+  // Freshness itself is canonical Engine 25 truth and is not recomputed here.
+  void now;
 
-  if (!data) {
-    return {
-      version: "engine29.engine25TrapParticipation.v1",
-      authority:
-        "ENGINE25_SCANNER_PRIMARY_READ_ONLY",
-      available: false,
-      filePath,
-      sourceUpdatedAt: null,
-      sourceAgeMinutes: null,
-      trapSide,
-      breadth: null,
-      stockVolume: null,
-      breadthAlignment: "UNAVAILABLE",
-      volumeAlignment: "UNAVAILABLE",
-      primaryParticipationSupportsTrap: false,
-      primaryParticipationOpposesTrap: false,
-      reasonCodes: [
-        "ENGINE25_SECTOR_HEALTH_UNAVAILABLE",
-      ],
-    };
-  }
-
-  const breadth = breadthRead(data);
-  const stockVolume = volumeRead(data);
+  const adapter = readEngine25Participation({ filePath });
+  const breadth = breadthRead(adapter);
+  const stockVolume = volumeRead(adapter);
 
   const breadthAlignment =
-    classifyBreadthForTrap(
-      breadth,
-      trapSide
-    );
+    classifyBreadthForTrap(breadth, trapSide);
 
   const volumeAlignment =
-    classifyVolumeForTrap(
-      stockVolume,
-      trapSide
-    );
-
-  const sourceMs = sourceTimestampMs(data);
-
-  const sourceAgeMinutes =
-    Number.isFinite(sourceMs)
-      ? Math.max(
-          0,
-          Math.round(
-            (Number(now) - sourceMs) / 60000
-          )
-        )
-      : null;
+    classifyVolumeForTrap(stockVolume, trapSide);
 
   const available =
+    adapter?.contractValid === true &&
+    adapter?.currentTrapConfirmationUsable === true &&
     breadth.available &&
     stockVolume.available;
 
@@ -280,15 +212,23 @@ export function readEngine25TrapParticipation({
     );
 
   return {
-    version: "engine29.engine25TrapParticipation.v1",
+    version: "engine29.engine25TrapParticipation.v2",
     authority:
       "ENGINE25_SCANNER_PRIMARY_READ_ONLY",
 
     available,
     filePath,
+
     sourceUpdatedAt:
-      data?.updatedAt || null,
-    sourceAgeMinutes,
+      adapter?.sources?.intraday?.sourceTimestamp ||
+      adapter?.freshness?.intraday?.sourceTimestamp ||
+      null,
+
+    sourceAgeMinutes:
+      adapter?.sourceAgeMinutes ?? null,
+
+    artifactGeneratedAt:
+      adapter?.generatedAt || null,
 
     trapSide,
 
@@ -301,7 +241,17 @@ export function readEngine25TrapParticipation({
     primaryParticipationSupportsTrap,
     primaryParticipationOpposesTrap,
 
+    freshness: adapter?.freshness || null,
+    source: {
+      schema: adapter?.schema || null,
+      contractValid: adapter?.contractValid === true,
+      currentTrapConfirmationUsable:
+        adapter?.currentTrapConfirmationUsable === true,
+      diagnostics: adapter?.diagnostics || null,
+    },
+
     reasonCodes: [
+      ...(adapter?.reasonCodes || []),
       breadthAlignment === "SUPPORTS_TRAP"
         ? "ENGINE25_SCANNER_BREADTH_SUPPORTS_TRAP"
         : null,
