@@ -9,6 +9,8 @@ export const ENGINE29_MOVE_DIRECTIONS = Object.freeze({
 
 export const ENGINE29_MOVE_CHARACTERS = Object.freeze({
   NO_ACTIVE_MOVE: "NO_ACTIVE_MOVE",
+  UPSIDE_MOVE_ACTIVE: "UPSIDE_MOVE_ACTIVE",
+  DOWNSIDE_MOVE_ACTIVE: "DOWNSIDE_MOVE_ACTIVE",
   BROAD_MOVE_CONFIRMED: "BROAD_MOVE_CONFIRMED",
   POSSIBLE_UPSIDE_SQUEEZE: "POSSIBLE_UPSIDE_SQUEEZE",
   POSSIBLE_DOWNSIDE_SQUEEZE: "POSSIBLE_DOWNSIDE_SQUEEZE",
@@ -71,6 +73,13 @@ export const ENGINE29_MOVE_REASON_CODES = Object.freeze({
 export const ENGINE29_MOVE_CHARACTER_DEFAULTS = Object.freeze({
   headlineBarsBack: 2,
   baselineBars: 40,
+
+  // Ordinary directional move lane:
+  // 30m authority observes a broader multi-bar move without requiring
+  // squeeze-level impulse or broad cross-market confirmation.
+  directionalMoveBarsBack: 4,
+  minDirectionalMoveAbsPct: 0.10,
+  directionalMoveBaselineFraction: 1.0,
 
   // ES is the primary fast-move trigger. At ~7600, 0.12% is roughly 9 points.
   // The baseline-multiple requirement prevents normal noise from becoming a squeeze alert.
