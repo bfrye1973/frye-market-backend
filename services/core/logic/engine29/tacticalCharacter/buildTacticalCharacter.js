@@ -14,6 +14,7 @@ import { detectBroadConfirmation } from "./detectBroadConfirmation.js";
 import { detectSqueezeCharacter } from "./detectSqueezeCharacter.js";
 import { detectUnderlyingPressure } from "./detectUnderlyingPressure.js";
 import { resolveMoveCharacter } from "./resolveMoveCharacter.js";
+import { resolveDirectionalMoveParent } from "./resolveDirectionalMoveParent.js";
 import { deriveAdaptiveDirectionalMove } from "./tacticalCharacterUtils.js";
 
 function unique(values = []) {
@@ -213,6 +214,13 @@ export function buildEngine29TacticalCharacter(
       detectorOptions
     );
 
+  const directionalMoveParent =
+    resolveDirectionalMoveParent({
+      candidate: directionalMove,
+      priorParent: options.priorMoveParent || null,
+      now,
+    });
+
   const sweepCandidates = esEntry?.fastTactical
     ? [detectLiquiditySweep(esEntry, detectorOptions)]
     : [];
@@ -227,6 +235,7 @@ export function buildEngine29TacticalCharacter(
     squeeze,
     broadConfirmation,
     directionalMove,
+    directionalMoveParent,
   });
 
   const reasonCodes = unique([
@@ -257,7 +266,7 @@ export function buildEngine29TacticalCharacter(
   }
 
   return {
-    version: "engine29.tacticalCharacter.v2.3.adaptiveMove",
+    version: "engine29.tacticalCharacter.v2.4.moveParent",
     timestamp: new Date(now).toISOString(),
     timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
     anchor: "ES",
@@ -283,6 +292,7 @@ export function buildEngine29TacticalCharacter(
     esImpulse: squeeze?.headline || null,
     headlineImpulse: squeeze?.headline || null,
     directionalMove,
+    directionalMoveParent,
     broadConfirmation,
     underlyingPressure,
     oneHourContext: squeeze?.oneHour || null,
