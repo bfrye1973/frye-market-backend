@@ -631,3 +631,30 @@ test("25 no scanner or Engine25 participation calculation is triggered", () => {
     /buildEngine25SectorHealth|buildSectorHealth|scanUniverse|runScanner/
   );
 });
+
+
+test("26 contract-invalid schema fails closed", () => {
+  withArtifact({}, ({ dir, value }) => {
+    const invalid = {
+      ...value,
+      schema: "engine25.participation@999",
+    };
+    const filePath = writeArtifact(dir, invalid, "invalid-schema.json");
+
+    const adapter = readEngine25Participation({ filePath });
+    const result = readEngine25TrapParticipation({
+      trapSide: ENGINE29_TRAP_SIDES.BULL,
+      filePath,
+    });
+
+    assert.equal(adapter.contractValid, false);
+    assert.ok(
+      adapter.reasonCodes.includes(
+        "ENGINE25_PARTICIPATION_SCHEMA_INVALID"
+      )
+    );
+    assert.equal(result.available, false);
+    assert.equal(result.primaryParticipationSupportsTrap, false);
+    assert.equal(result.primaryParticipationOpposesTrap, false);
+  });
+});
