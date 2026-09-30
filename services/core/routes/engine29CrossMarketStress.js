@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
+import { isEsGlobexSessionOpen } from "../logic/engine29/isEsGlobexSessionOpen.js";
 
 const router = express.Router();
 
@@ -246,6 +247,7 @@ router.post("/engine29/dashboard-refresh", async (_req, res) => {
       startedAt,
       finishedAt: new Date().toISOString(),
       updateRunning: ENGINE29_UPDATE_RUNNING,
+      session,
       fileModifiedAt: result.modifiedAt,
       data: summaryFrom(result.data),
       logs: {
@@ -277,11 +279,29 @@ router.post("/engine29/update", async (req, res) => {
     });
   }
 
-  if (ENGINE29_UPDATE_RUNNING) {
-    return res.status(409).json({
-      ok: false,
+  const force =
+    String(req.query.force || "").toLowerCase() === "1" ||
+    String(req.query.force || "").toLowerCase() === "true";
+
+  const session = isEsGlobexSessionOpen(Date.now());
+
+  if (!force && !session.open) {
+    return res.json({
+      ok: true,
       engine: "engine29.update.route.v1",
-      error: "engine29_update_already_running",
+      status: "SKIPPED_OUTSIDE_ES_GLOBEX_SESSION",
+      updateRunning: ENGINE29_UPDATE_RUNNING,
+      session,
+    });
+  }
+
+  if (ENGINE29_UPDATE_RUNNING) {
+    return res.status(202).json({
+      ok: true,
+      engine: "engine29.update.route.v1",
+      status: "ALREADY_RUNNING",
+      updateRunning: true,
+      session,
     });
   }
 
