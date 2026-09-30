@@ -216,6 +216,7 @@ export async function buildEngine29CrossMarketStress({
   structureBundle = null,
   groupBundle = null,
   moveCharacter = null,
+  priorMoveParent = null,
   financialConditions = {},
 } = {}) {
   const market =
@@ -257,6 +258,7 @@ export async function buildEngine29CrossMarketStress({
       {
         now,
         esAnchor,
+        priorMoveParent,
       }
     );
 
