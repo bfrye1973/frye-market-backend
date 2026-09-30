@@ -37,6 +37,7 @@ export * from "./tacticalCharacter/detectBroadConfirmation.js";
 export * from "./tacticalCharacter/detectUnderlyingPressure.js";
 export * from "./tacticalCharacter/detectSqueezeCharacter.js";
 export * from "./tacticalCharacter/resolveMoveCharacter.js";
+export * from "./tacticalCharacter/resolveDirectionalMoveParent.js";
 export * from "./tacticalCharacter/buildTacticalCharacter.js";
 export * from "./tacticalCharacter/buildSqueezeTransitionMonitor.js";
 

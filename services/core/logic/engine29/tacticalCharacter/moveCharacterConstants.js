@@ -9,6 +9,8 @@ export const ENGINE29_MOVE_DIRECTIONS = Object.freeze({
 
 export const ENGINE29_MOVE_CHARACTERS = Object.freeze({
   NO_ACTIVE_MOVE: "NO_ACTIVE_MOVE",
+  UPSIDE_MOVE_ACTIVE: "UPSIDE_MOVE_ACTIVE",
+  DOWNSIDE_MOVE_ACTIVE: "DOWNSIDE_MOVE_ACTIVE",
   BROAD_MOVE_CONFIRMED: "BROAD_MOVE_CONFIRMED",
   POSSIBLE_UPSIDE_SQUEEZE: "POSSIBLE_UPSIDE_SQUEEZE",
   POSSIBLE_DOWNSIDE_SQUEEZE: "POSSIBLE_DOWNSIDE_SQUEEZE",
@@ -32,6 +34,9 @@ export const ENGINE29_MOVE_REASON_CODES = Object.freeze({
   ES_DOWN_IMPULSE: "ES_DOWN_IMPULSE",
   ES_ANCHOR_MISSING: "ES_ANCHOR_MISSING",
   ES_ONE_HOUR_OPPOSES_FAST_MOVE: "ES_ONE_HOUR_OPPOSES_FAST_MOVE",
+  ES_30M_DIRECTIONAL_MOVE_ACTIVE: "ES_30M_DIRECTIONAL_MOVE_ACTIVE",
+  ES_30M_DIRECTIONAL_MOVE_NOT_ACTIVE: "ES_30M_DIRECTIONAL_MOVE_NOT_ACTIVE",
+  ES_30M_DIRECTIONAL_MOVE_STALE: "ES_30M_DIRECTIONAL_MOVE_STALE",
 
   // Kept for compatibility with earlier Phase 4.75 output.
   HEADLINE_UP_IMPULSE: "HEADLINE_UP_IMPULSE",
@@ -71,6 +76,16 @@ export const ENGINE29_MOVE_REASON_CODES = Object.freeze({
 export const ENGINE29_MOVE_CHARACTER_DEFAULTS = Object.freeze({
   headlineBarsBack: 2,
   baselineBars: 40,
+
+  // Ordinary 30m directional MOVE lane.
+  // Compare the current multi-bar displacement to historical displacements
+  // over the SAME number of completed 30m bars. This avoids comparing a
+  // four-bar move to a one-bar baseline.
+  directionalMoveBarsBack: 4,
+  directionalMoveBaselineWindows: 40,
+  directionalMoveMinAbsPct: 0.03,
+  directionalMoveMinAlignedFraction: 0.75,
+  directionalMoveMinEfficiency: 0.55,
 
   // ES is the primary fast-move trigger. At ~7600, 0.12% is roughly 9 points.
   // The baseline-multiple requirement prevents normal noise from becoming a squeeze alert.
