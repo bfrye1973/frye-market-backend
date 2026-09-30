@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalContext.js";
+import { buildEngine25ParticipationArtifact } from "../logic/engine25/buildParticipationArtifact.js";
 
 import {
   fetchEngine25FredBundle,
@@ -23,6 +24,7 @@ const MACRO_FILE = path.join(DATA_DIR, "engine25-data-test.json");
 const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
 const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
+const PARTICIPATION_FILE = path.join(DATA_DIR, "engine25-participation.json");
 const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
 
 const FMP_BASE_URL = "https://financialmodelingprep.com/stable";
@@ -466,6 +468,20 @@ async function writeSectorHealthFile() {
 
   fs.writeFileSync(SECTOR_FILE, JSON.stringify(sectorHealth, null, 2));
 
+  const participation = buildEngine25ParticipationArtifact({
+    sectorHealth,
+    now: Date.now(),
+  });
+
+  fs.writeFileSync(
+    PARTICIPATION_FILE,
+    JSON.stringify(participation, null, 2)
+  );
+
+  console.log(
+    `[Engine25Full] Participation ${participation.freshness.state} | usableForTrapConfirmation=${participation.freshness.usableForTrapConfirmation}`
+  );
+
   console.log(
     `[Engine25Full] SectorHealth OK=${sectorHealth.ok} | Distribution ${sectorHealth.distributionPressure.score}/${sectorHealth.distributionPressure.label} | Breadth ${sectorHealth.breadthParticipation.score}/${sectorHealth.breadthParticipation.label}`
   );
@@ -534,6 +550,7 @@ async function main() {
   console.log("- data/engine25-market-feeds-test.json");
   console.log("- data/engine25-fmp-feeds-test.json");
   console.log("- data/engine25-sector-health-test.json");
+  console.log("- data/engine25-participation.json");
   console.log("- data/engine25-es-technical-context.json");  
   console.log("- data/engine25-feed-validation.json");
   console.log("- data/engine25-market-health.json");
