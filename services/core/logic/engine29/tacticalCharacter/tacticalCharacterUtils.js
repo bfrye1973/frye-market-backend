@@ -180,6 +180,7 @@ export function deriveAdaptiveDirectionalMove(view, {
   if (view?.freshness?.stale === true) {
     return {
       direction: ENGINE29_MOVE_DIRECTIONS.FLAT,
+      active: false,
       returnPct: null,
       pointMove: null,
       thresholdPct: null,
