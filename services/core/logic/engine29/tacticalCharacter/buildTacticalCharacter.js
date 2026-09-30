@@ -14,7 +14,7 @@ import { detectBroadConfirmation } from "./detectBroadConfirmation.js";
 import { detectSqueezeCharacter } from "./detectSqueezeCharacter.js";
 import { detectUnderlyingPressure } from "./detectUnderlyingPressure.js";
 import { resolveMoveCharacter } from "./resolveMoveCharacter.js";
-import { deriveDirectionalMove } from "./tacticalCharacterUtils.js";
+import { deriveAdaptiveDirectionalMove } from "./tacticalCharacterUtils.js";
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
@@ -43,35 +43,25 @@ function detectDirectionalMove(esEntry, options = {}) {
       active: false,
       direction: ENGINE29_MOVE_DIRECTIONS.FLAT,
       available: false,
+      stale: false,
+      reason: "NO_30M_AUTHORITY",
       returnPct: null,
       pointMove: null,
       thresholdPct: null,
-      impulseMultiple: null,
     };
   }
 
-  const move = deriveDirectionalMove(view, {
-    barsBack:
-      options.directionalMoveBarsBack ??
-      4,
-    minAbsMovePct:
-      options.minDirectionalMoveAbsPct ??
-      0.10,
-    baselineFraction:
-      options.directionalMoveBaselineFraction ??
-      1.0,
+  const move = deriveAdaptiveDirectionalMove(view, {
+    barsBack: options.directionalMoveBarsBack,
+    baselineWindows: options.directionalMoveBaselineWindows,
+    minAbsMovePct: options.minDirectionalMoveAbsPct,
+    minAlignedFraction: options.directionalMoveMinAlignedFraction,
+    minEfficiency: options.directionalMoveMinEfficiency,
   });
-
-  const active =
-    move.available === true &&
-    (
-      move.direction === ENGINE29_MOVE_DIRECTIONS.UP ||
-      move.direction === ENGINE29_MOVE_DIRECTIONS.DOWN
-    );
 
   return {
     ...move,
-    active,
+    active: move.active === true,
     authority: "30M_MULTI_BAR_DIRECTIONAL_MOVE",
   };
 }
@@ -88,8 +78,8 @@ function plainEnglish(
   const leadership = memberLabel(broadConfirmation?.blocks?.leadership);
   const credit = memberLabel(broadConfirmation?.blocks?.credit);
 
-  let summary = "No unusual ES 30-minute move is active.";
-  let status = "NO ACTIVE SQUEEZE";
+  let summary = "No qualified ES 30-minute directional move is active.";
+  let status = "NO ACTIVE MOVE";
 
   if (moveCharacter === ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE) {
     summary =
@@ -118,27 +108,12 @@ function plainEnglish(
       direction === "UP"
         ? "The ES rally is broadening across independent market internals."
         : "The ES selloff is broadening across independent market internals.";
-    status = "ES BROAD MOVE CONFIRMED";
-  } else if (
-    moveCharacter === ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH
-  ) {
-    summary =
-      "ES traded above a recent 30-minute resistance/swing area but failed to hold it on a completed bar.";
-    status = "ES LIQUIDITY SWEEP HIGH";
-  } else if (
-    moveCharacter === ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW
-  ) {
-    summary =
-      "ES traded below a recent 30-minute support/swing area but reclaimed it on a completed bar.";
-    status = "ES LIQUIDITY SWEEP LOW";
-  } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.FAILED_BREAKOUT) {
-    summary =
-      "An ES 30-minute breakout was followed by a close back below resistance.";
-    status = "ES FAILED BREAKOUT";
-  } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.FAILED_BREAKDOWN) {
-    summary =
-      "An ES 30-minute breakdown was followed by a close back above support.";
-    status = "ES FAILED BREAKDOWN";
+    status =
+      direction === "UP"
+        ? "ES BROAD RALLY CONFIRMED"
+        : direction === "DOWN"
+          ? "ES BROAD SELLOFF CONFIRMED"
+          : "ES BROAD MOVE CONFIRMED";
   } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.MIXED) {
     summary = "ES has an active move, but the confirmation picture is mixed.";
     status = "ES MOVE MIXED";
@@ -146,13 +121,13 @@ function plainEnglish(
     underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.NEGATIVE
   ) {
     summary = underlyingPressure.headlineHoldingBetter
-      ? "ES is not in an active squeeze, but selling pressure is visible underneath the headline market."
-      : "ES is not in an active squeeze, but cross-market internals are leaning negative.";
+      ? "No qualified ES 30-minute move is active, but selling pressure is visible underneath the headline market."
+      : "No qualified ES 30-minute move is active, but cross-market internals are leaning negative.";
   } else if (
     underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.POSITIVE
   ) {
     summary =
-      "ES is not in an active squeeze, but cross-market internals are leaning positive.";
+      "No qualified ES 30-minute move is active, but cross-market internals are leaning positive.";
   }
 
   return {
@@ -260,6 +235,11 @@ export function buildEngine29TacticalCharacter(
     ...(underlyingPressure?.reasonCodes || []),
     ...sweepCandidates.map((x) => x?.reasonCode),
     ...failedMoveCandidates.map((x) => x?.reasonCode),
+    directionalMove?.stale
+      ? ENGINE29_MOVE_REASON_CODES.ES_30M_DIRECTIONAL_MOVE_STALE
+      : directionalMove?.active
+        ? ENGINE29_MOVE_REASON_CODES.ES_30M_DIRECTIONAL_MOVE_ACTIVE
+        : ENGINE29_MOVE_REASON_CODES.ES_30M_DIRECTIONAL_MOVE_NOT_ACTIVE,
   ]);
 
   const directVixAvailable = Boolean(
@@ -277,7 +257,7 @@ export function buildEngine29TacticalCharacter(
   }
 
   return {
-    version: "engine29.tacticalCharacter.v2.2.esAnchor10m",
+    version: "engine29.tacticalCharacter.v2.3.adaptiveMove",
     timestamp: new Date(now).toISOString(),
     timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
     anchor: "ES",
@@ -287,8 +267,6 @@ export function buildEngine29TacticalCharacter(
       esEntry?.sourceSymbol ||
       null,
 
-    // New: diagnostic 10m ES feed is carried forward with the canonical
-    // 30m move object so the live monitor can use ES as its primary anchor.
     esLiveMonitor:
       esAnchor?.liveMonitor || null,
 
@@ -315,7 +293,8 @@ export function buildEngine29TacticalCharacter(
     dataDegraded:
       Boolean(structureBundle?.dataDegraded) ||
       !directVixAvailable ||
-      !esEntry?.fastTactical,
+      !esEntry?.fastTactical ||
+      directionalMove?.stale === true,
 
     reasonCodes: unique(reasonCodes),
 
