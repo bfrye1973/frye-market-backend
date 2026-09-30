@@ -23,6 +23,17 @@ function ensureDataDir() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
+function readPriorMoveParent() {
+  if (!fs.existsSync(OUTPUT_FILE)) return null;
+
+  try {
+    const prior = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+    return prior?.moveCharacter?.directionalMoveParent || null;
+  } catch {
+    return null;
+  }
+}
+
 function writeJsonAtomic(filePath, value) {
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -92,7 +103,12 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
 
   console.log(`[engine29] BUILD START @ ${startedAt}`);
 
-  const output = await buildEngine29CrossMarketStress({ now });
+  const priorMoveParent = readPriorMoveParent();
+
+  const output = await buildEngine29CrossMarketStress({
+    now,
+    priorMoveParent,
+  });
 
   const priorTrapCampaign =
     readEngine29TrapCampaign();
