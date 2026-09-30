@@ -1,0 +1,38 @@
+name: Engine29 move lane branch tests
+
+on:
+  push:
+    branches:
+      - engine29-move-lane-active
+  workflow_dispatch:
+
+jobs:
+  engine29-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine29/tacticalCharacter/tacticalCharacterUtils.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildTacticalCharacter.js
+          node --check services/core/logic/engine29/tacticalCharacter/resolveMoveCharacter.js
+          node --check services/core/logic/engine29/aggregate/resolveFastTacticalShift.js
+
+      - name: Adaptive move regressions
+        run: node --test services/core/tests/engine29MoveLaneActive.test.js
+
+      - name: Tactical character acceptance
+        run: node services/core/logic/engine29/qa/runTacticalCharacterAcceptanceTests.js
+
+      - name: Existing trap detection regressions
+        run: node --test services/core/tests/engine29TrapDetectionPhaseB.test.js
+
+      - name: Existing trap campaign regressions
+        run: node --test services/core/tests/engine29TrapCampaign.test.js
