@@ -247,7 +247,6 @@ router.post("/engine29/dashboard-refresh", async (_req, res) => {
       startedAt,
       finishedAt: new Date().toISOString(),
       updateRunning: ENGINE29_UPDATE_RUNNING,
-      session,
       fileModifiedAt: result.modifiedAt,
       data: summaryFrom(result.data),
       logs: {
@@ -321,6 +320,7 @@ router.post("/engine29/update", async (req, res) => {
       startedAt,
       finishedAt: new Date().toISOString(),
       updateRunning: ENGINE29_UPDATE_RUNNING,
+      session,
       fileModifiedAt: result.modifiedAt,
       data: summaryFrom(result.data),
       logs: {
