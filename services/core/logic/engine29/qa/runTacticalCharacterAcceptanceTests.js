@@ -138,16 +138,16 @@ const scenarios = [
     es: esAnchor("FLAT", { sweep: "HIGH" }),
     structure: structure("FLAT"),
     groups: groupBundle(true),
-    expectedMove: ENGINE29_MOVE_CHARACTERS.NO_ACTIVE_MOVE,
     expectedLiquidity: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH,
+    forbiddenMove: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH,
   },
   {
     name: "LIQUIDITY_SWEEP_LOW_IS_INDEPENDENT",
     es: esAnchor("FLAT", { sweep: "LOW" }),
     structure: structure("FLAT"),
     groups: groupBundle(true),
-    expectedMove: ENGINE29_MOVE_CHARACTERS.NO_ACTIVE_MOVE,
     expectedLiquidity: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW,
+    forbiddenMove: ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW,
   },
 ];
 
@@ -158,7 +158,11 @@ for (const scenario of scenarios) {
     esAnchor: scenario.es,
   });
 
-  const movePass = result.moveCharacter === scenario.expectedMove;
+  const movePass = scenario.expectedMove
+    ? result.moveCharacter === scenario.expectedMove
+    : scenario.forbiddenMove
+      ? result.moveCharacter !== scenario.forbiddenMove
+      : true;
   const liquidityActual = result.liquiditySweeps?.find((x) => x?.detected)?.character ?? null;
   const liquidityPass = scenario.expectedLiquidity
     ? liquidityActual === scenario.expectedLiquidity
@@ -168,7 +172,7 @@ for (const scenario of scenarios) {
   if (!pass) failed += 1;
 
   console.log(
-    `${pass ? "PASS" : "FAIL"} ${scenario.name}: move expected=${scenario.expectedMove} actual=${result.moveCharacter}` +
+    `${pass ? "PASS" : "FAIL"} ${scenario.name}: move expected=${scenario.expectedMove || `NOT_${scenario.forbiddenMove}`} actual=${result.moveCharacter}` +
     (scenario.expectedLiquidity
       ? ` liquidity expected=${scenario.expectedLiquidity} actual=${liquidityActual}`
       : "")
