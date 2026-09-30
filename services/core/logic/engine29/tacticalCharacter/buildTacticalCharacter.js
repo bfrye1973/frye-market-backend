@@ -14,6 +14,7 @@ import { detectBroadConfirmation } from "./detectBroadConfirmation.js";
 import { detectSqueezeCharacter } from "./detectSqueezeCharacter.js";
 import { detectUnderlyingPressure } from "./detectUnderlyingPressure.js";
 import { resolveMoveCharacter } from "./resolveMoveCharacter.js";
+import { deriveDirectionalMove } from "./tacticalCharacterUtils.js";
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
@@ -34,6 +35,47 @@ function pressureLabel(block) {
   return "FLAT";
 }
 
+function detectDirectionalMove(esEntry, options = {}) {
+  const view = esEntry?.fastTactical;
+
+  if (!view) {
+    return {
+      active: false,
+      direction: ENGINE29_MOVE_DIRECTIONS.FLAT,
+      available: false,
+      returnPct: null,
+      pointMove: null,
+      thresholdPct: null,
+      impulseMultiple: null,
+    };
+  }
+
+  const move = deriveDirectionalMove(view, {
+    barsBack:
+      options.directionalMoveBarsBack ??
+      4,
+    minAbsMovePct:
+      options.minDirectionalMoveAbsPct ??
+      0.10,
+    baselineFraction:
+      options.directionalMoveBaselineFraction ??
+      1.0,
+  });
+
+  const active =
+    move.available === true &&
+    (
+      move.direction === ENGINE29_MOVE_DIRECTIONS.UP ||
+      move.direction === ENGINE29_MOVE_DIRECTIONS.DOWN
+    );
+
+  return {
+    ...move,
+    active,
+    authority: "30M_MULTI_BAR_DIRECTIONAL_MOVE",
+  };
+}
+
 function plainEnglish(
   moveCharacter,
   direction,
@@ -49,7 +91,17 @@ function plainEnglish(
   let summary = "No unusual ES 30-minute move is active.";
   let status = "NO ACTIVE SQUEEZE";
 
-  if (moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE) {
+  if (moveCharacter === ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE) {
+    summary =
+      "ES has an active multi-bar 30-minute upside move. Squeeze confirmation is not required for this state.";
+    status = "ES UPSIDE MOVE ACTIVE";
+  } else if (
+    moveCharacter === ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE
+  ) {
+    summary =
+      "ES has an active multi-bar 30-minute downside move. Squeeze confirmation is not required for this state.";
+    status = "ES DOWNSIDE MOVE ACTIVE";
+  } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE) {
     summary =
       "ES is moving sharply higher, but the broader market underneath it is not yet confirming the move.";
     status = "POSSIBLE ES UPSIDE SQUEEZE";
@@ -180,6 +232,12 @@ export function buildEngine29TacticalCharacter(
 
   const esEntry = esAnchor?.structure || esAnchor || null;
 
+  const directionalMove =
+    detectDirectionalMove(
+      esEntry,
+      detectorOptions
+    );
+
   const sweepCandidates = esEntry?.fastTactical
     ? [detectLiquiditySweep(esEntry, detectorOptions)]
     : [];
@@ -193,6 +251,7 @@ export function buildEngine29TacticalCharacter(
     failedMoves: failedMoveCandidates,
     squeeze,
     broadConfirmation,
+    directionalMove,
   });
 
   const reasonCodes = unique([
@@ -245,6 +304,7 @@ export function buildEngine29TacticalCharacter(
 
     esImpulse: squeeze?.headline || null,
     headlineImpulse: squeeze?.headline || null,
+    directionalMove,
     broadConfirmation,
     underlyingPressure,
     oneHourContext: squeeze?.oneHour || null,
