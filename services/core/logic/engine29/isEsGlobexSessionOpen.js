@@ -15,7 +15,7 @@ function easternParts(nowMs) {
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
-    hour12: false,
+    hourCycle: "h23",
   }).formatToParts(new Date(nowMs));
 
   const get = (type) => parts.find((p) => p.type === type)?.value ?? null;
