@@ -51,6 +51,11 @@ const ENGINE25_NEWS_EVENTS_FILE = path.join(
   "engine25-news-events.json"
 );
 
+const PARTICIPATION_FILE = path.join(
+  DATA_DIR,
+  "engine25-participation.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -875,6 +880,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
     const intradayMacro = readJsonFile(INTRADAY_MACRO_FILE);
     const newsEvents = readJsonFile(ENGINE25_NEWS_EVENTS_FILE);
+    const participationArtifact = readJsonFile(PARTICIPATION_FILE);
 
     const rows = Array.isArray(composite?.rows) ? composite.rows : [];
     const dailyCompositeAvailable = Boolean(composite && rows.length);
@@ -986,6 +992,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
         engine25ContextFile: "engine25-context.json",
         intradayMacroFile: "engine25-intraday-macro.json",
         newsEventsFile: "engine25-news-events.json",
+        participationFile: "engine25-participation.json",
       },
       headline,
       componentBreakdown,
@@ -1005,6 +1012,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       engine25Context: engine25Context || null,
       intradayMacro: intradayMacro || null,
       newsEvents: newsEvents || null,
+      participationArtifact: participationArtifact || null,
       marketInternals: engine25Context?.marketInternals || null,
 
       overlay: {
