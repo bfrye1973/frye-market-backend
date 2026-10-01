@@ -43,6 +43,8 @@ const STEPS = [
 ];
 
 const REQUIRED_FILES = [
+  "engine25-market-health.json",
+  "engine25-participation.json",
   "engine25-historical-replay-macro-distribution-breadth-6mo.json",
   "engine25-composite-overlay-6mo.json",
   "engine25-es-zone-aware-read.json",
