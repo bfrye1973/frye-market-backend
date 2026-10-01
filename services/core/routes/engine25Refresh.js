@@ -3,6 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
+import { resolveSystemOperatingSession } from "../logic/engine25/buildParticipationArtifact.js";
 
 const router = express.Router();
 
@@ -247,6 +248,24 @@ async function handle(req, res) {
   const mode = String(req.query.mode || "full").trim().toLowerCase();
   const requestStartedAt = nowIso();
   const requestStartedMs = Date.now();
+  const systemOperatingSession =
+    mode === "live" ? resolveSystemOperatingSession(requestStartedMs) : null;
+
+  if (mode === "live" && systemOperatingSession?.operating !== true) {
+    return res.json({
+      ok: true,
+      skipped: true,
+      reason:
+        systemOperatingSession?.session === "MAINTENANCE"
+          ? "ES_GLOBEX_MAINTENANCE"
+          : "ES_GLOBEX_CLOSED",
+      mode,
+      systemOperatingSession,
+      startedAt: requestStartedAt,
+      endedAt: nowIso(),
+      elapsedMs: Date.now() - requestStartedMs,
+    });
+  }
 
   if (IS_RUNNING && mode === "full") {
     while (
@@ -355,6 +374,7 @@ async function handle(req, res) {
       steps,
       warnings,
       files,
+      systemOperatingSession,
     });
   } catch (err) {
     return res.status(500).json({
