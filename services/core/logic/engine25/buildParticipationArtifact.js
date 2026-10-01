@@ -9,6 +9,7 @@
 export const ENGINE25_PARTICIPATION_SCHEMA = "engine25.participation@1";
 export const DEFAULT_INTRADAY_MAX_AGE_MS = 15 * 60 * 1000;
 export const EQUITY_TIME_ZONE = "America/New_York";
+export const CME_TIME_ZONE = "America/Chicago";
 
 function finite(value) {
   if (value === null || value === undefined || value === "") return null;
@@ -21,9 +22,9 @@ function parseMs(value) {
   return Number.isFinite(ms) ? ms : null;
 }
 
-function marketParts(now) {
+function marketParts(now, timeZone = EQUITY_TIME_ZONE) {
   const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: EQUITY_TIME_ZONE,
+    timeZone,
     weekday: "short",
     year: "numeric",
     month: "2-digit",
@@ -85,8 +86,44 @@ function previousWeekday(ymd, weekday) {
   return candidate;
 }
 
+export function resolveSystemOperatingSession(now = Date.now()) {
+  const p = marketParts(now, CME_TIME_ZONE);
+  const weekday = weekdayIndex(p.weekday);
+  const minutes = p.hour * 60 + p.minute;
+
+  let operating = false;
+  let session = "CLOSED";
+
+  if (weekday === 0) {
+    operating = minutes >= 17 * 60;
+    session = operating ? "ES_GLOBEX" : "CLOSED";
+  } else if (weekday >= 1 && weekday <= 4) {
+    if (minutes >= 16 * 60 && minutes < 17 * 60) {
+      operating = false;
+      session = "MAINTENANCE";
+    } else {
+      operating = true;
+      session = "ES_GLOBEX";
+    }
+  } else if (weekday === 5) {
+    operating = minutes < 16 * 60;
+    session = operating ? "ES_GLOBEX" : "CLOSED";
+  }
+
+  return {
+    operating,
+    active: operating,
+    timeZone: CME_TIME_ZONE,
+    weekday: p.weekday,
+    hour: p.hour,
+    minute: p.minute,
+    date: ymdFromMarketParts(p),
+    session,
+  };
+}
+
 export function resolveEquityScannerSession(now = Date.now()) {
-  const p = marketParts(now);
+  const p = marketParts(now, EQUITY_TIME_ZONE);
   const weekday = weekdayIndex(p.weekday);
   const minutes = p.hour * 60 + p.minute;
   const weekdayOpen = weekday >= 1 && weekday <= 5;
@@ -99,7 +136,7 @@ export function resolveEquityScannerSession(now = Date.now()) {
     hour: p.hour,
     minute: p.minute,
     date: ymdFromMarketParts(p),
-    session: active ? "REGULAR_EQUITY_SESSION" : "OUTSIDE_EQUITY_SCANNER_SESSION",
+    session: active ? "REGULAR_EQUITY_SESSION" : "EQUITY_SESSION_CLOSED",
   };
 }
 
@@ -121,14 +158,14 @@ export function expectedCompletedEquitySessionDate(now = Date.now()) {
 function sourceSessionDate(timestamp) {
   const ms = parseMs(timestamp);
   if (!Number.isFinite(ms)) return null;
-  return ymdFromMarketParts(marketParts(ms));
+  return ymdFromMarketParts(marketParts(ms, EQUITY_TIME_ZONE));
 }
 
 function buildIntradayFreshness({
   sectorHealth,
   now,
   intradayMaxAgeMs,
-  session,
+  equitySession,
 }) {
   const source = sectorHealth?.sources?.intraday || null;
   const sourceTimestamp = source?.updatedAt || null;
@@ -150,31 +187,49 @@ function buildIntradayFreshness({
   const sourceCurrent =
     Number.isFinite(ageMs) && ageMs <= Number(intradayMaxAgeMs);
 
+  const sourceDate = sourceSessionDate(sourceTimestamp);
+  const expectedLastValidSessionDate = expectedCompletedEquitySessionDate(now);
+  const validLastEquityObservation =
+    sourceHealthy === true &&
+    Boolean(sourceTimestamp) &&
+    Boolean(sourceDate) &&
+    Boolean(expectedLastValidSessionDate) &&
+    sourceDate === expectedLastValidSessionDate;
+
   let state = "FRESH";
   let reason = "ACTIVE_EQUITY_SESSION_CURRENT_VALID_SOURCE";
 
-  if (!session.active) {
-    state = "OUTSIDE_EQUITY_SCANNER_SESSION";
-    reason = "CURRENT_INTRADAY_CONFIRMATION_UNAVAILABLE_OUTSIDE_EQUITY_SESSION";
-  } else if (!sourcePresent || !sourceTimestamp) {
-    state = "MISSING_INTRADAY_SOURCE";
+  if (!sourcePresent || !sourceTimestamp) {
+    state = "UNAVAILABLE";
     reason = "INTRADAY_SOURCE_OR_TIMESTAMP_MISSING";
   } else if (!sourceHealthy) {
-    state = "INVALID_INTRADAY_SOURCE";
+    state = "UNAVAILABLE";
     reason = "INTRADAY_SOURCE_UNHEALTHY_OR_EMPTY";
-  } else if (!sourceCurrent) {
-    state = "STALE_INTRADAY_SOURCE";
-    reason = "INTRADAY_SOURCE_OLDER_THAN_MAX_AGE";
-  } else if (!volumeCoverageValid) {
-    state = "INSUFFICIENT_VOLUME_COVERAGE";
-    reason =
-      volume?.reason || "INTRADAY_VOLUME_EVIDENCE_DOES_NOT_MEET_VALIDITY_CONTRACT";
+  } else if (equitySession.active) {
+    if (!sourceCurrent) {
+      state = "STALE_INTRADAY_SOURCE";
+      reason = "INTRADAY_SOURCE_OLDER_THAN_MAX_AGE";
+    } else if (!volumeCoverageValid) {
+      state = "INSUFFICIENT_VOLUME_COVERAGE";
+      reason =
+        volume?.reason || "INTRADAY_VOLUME_EVIDENCE_DOES_NOT_MEET_VALIDITY_CONTRACT";
+    }
+  } else if (validLastEquityObservation) {
+    state = "LAST_VALID_EQUITY_READ";
+    reason = "EQUITY_SESSION_CLOSED";
+  } else {
+    state = "UNAVAILABLE";
+    reason = "NO_VALID_LAST_EQUITY_OBSERVATION";
   }
 
   return {
     sourceTimestamp,
+    sourceSessionDate: sourceDate,
+    expectedLastValidSessionDate,
     ageMs,
     fresh: state === "FRESH",
+    lastValidEquityRead: state === "LAST_VALID_EQUITY_READ",
+    currentForEquityConfirmation: state === "FRESH",
     sourceHealthy,
     sourceCurrent,
     volumeCoverageValid,
@@ -289,17 +344,18 @@ export function buildEngine25ParticipationArtifact({
   intradayMaxAgeMs = DEFAULT_INTRADAY_MAX_AGE_MS,
 } = {}) {
   const generatedAt = new Date(now).toISOString();
-  const session = resolveEquityScannerSession(now);
+  const systemOperatingSession = resolveSystemOperatingSession(now);
+  const equityScannerSession = resolveEquityScannerSession(now);
   const intraday = buildIntradayFreshness({
     sectorHealth,
     now,
     intradayMaxAgeMs,
-    session,
+    equitySession: equityScannerSession,
   });
   const eod = buildEodFreshness({ sectorHealth, now });
 
   const usableForTrapConfirmation =
-    session.active === true &&
+    equityScannerSession.active === true &&
     intraday.state === "FRESH";
 
   return {
@@ -332,10 +388,12 @@ export function buildEngine25ParticipationArtifact({
     },
 
     freshness: {
-      equityScannerSession: session,
+      systemOperatingSession,
+      equityScannerSession,
       intraday,
       eod,
       usableForTrapConfirmation,
+      lastValidEquityRead: intraday.state === "LAST_VALID_EQUITY_READ",
       state: intraday.state,
       reason: intraday.reason,
     },
