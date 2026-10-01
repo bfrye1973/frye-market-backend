@@ -13,6 +13,10 @@ const DATA_DIR = path.join(CORE_DIR, "data");
 
 const STEPS = [
   {
+    name: "engine25_full_market_health",
+    job: "updateEngine25Full.js",
+  },
+  {
     name: "engine25_historical_full_replay",
     job: "updateEngine25HistoricalReplayFull.js",
   },
@@ -64,11 +68,6 @@ const LIVE_STEPS = [
     required: true,
   },
   {
-    name: "engine25_market_health",
-    job: "updateEngine25MarketHealth.js",
-    required: true,
-  },
-  {
     name: "engine25_sector_card_proxy_breadth",
     job: "snapshotEngine25SectorCardBreadth.js",
     required: true,
@@ -94,7 +93,6 @@ const LIVE_REQUIRED_FILES = [
   "engine25-news-events.json",
   "engine25-intraday-macro.json",
   "engine25-participation.json",
-  "engine25-market-health.json",
   "engine25-sector-card-breadth-snapshots.json",
   "engine25-es-zone-aware-read.json",
   "engine25-zone-classification.json",
