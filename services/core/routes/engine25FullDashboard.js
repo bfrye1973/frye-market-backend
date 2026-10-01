@@ -1013,6 +1013,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       intradayMacro: intradayMacro || null,
       newsEvents: newsEvents || null,
       participationArtifact: participationArtifact || null,
+      macroPressure: marketHealth?.components?.macroPressure || null,
       marketInternals: engine25Context?.marketInternals || null,
 
       overlay: {
