@@ -236,6 +236,9 @@ function packageParticipationTruth(sectorHealth) {
         bearishCount: finite(intradaySummary?.bearishCount),
         bullishRatio: finite(intradaySummary?.bullishRatio),
         bearishRatio: finite(intradaySummary?.bearishRatio),
+        cards: Array.isArray(intradaySummary?.cards)
+          ? intradaySummary.cards
+          : [],
       },
       eod: {
         count: finite(eodSummary?.count),
@@ -244,6 +247,9 @@ function packageParticipationTruth(sectorHealth) {
         bearishCount: finite(eodSummary?.bearishCount),
         bullishRatio: finite(eodSummary?.bullishRatio),
         bearishRatio: finite(eodSummary?.bearishRatio),
+        cards: Array.isArray(eodSummary?.cards)
+          ? eodSummary.cards
+          : [],
       },
     },
     momentum: {
@@ -251,6 +257,18 @@ function packageParticipationTruth(sectorHealth) {
       eodAvgMomentum: finite(eodSummary?.avgMomentum),
     },
     newHighsNewLows: {
+      intradayTotalNh: Array.isArray(intradaySummary?.cards)
+        ? intradaySummary.cards.reduce((sum, card) => sum + Number(card?.nh || 0), 0)
+        : null,
+      intradayTotalNl: Array.isArray(intradaySummary?.cards)
+        ? intradaySummary.cards.reduce((sum, card) => sum + Number(card?.nl || 0), 0)
+        : null,
+      eodTotalNh: Array.isArray(eodSummary?.cards)
+        ? eodSummary.cards.reduce((sum, card) => sum + Number(card?.nh || 0), 0)
+        : null,
+      eodTotalNl: Array.isArray(eodSummary?.cards)
+        ? eodSummary.cards.reduce((sum, card) => sum + Number(card?.nl || 0), 0)
+        : null,
       intradayNetHighsLows: finite(intradaySummary?.totalNetHighsLows),
       eodNetHighsLows: finite(eodSummary?.totalNetHighsLows),
     },

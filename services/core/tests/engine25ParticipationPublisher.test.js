@@ -105,6 +105,10 @@ function canonicalSectorHealth(overrides = {}) {
       totalNetHighsLows: -200,
       totalUp: 1200,
       totalDown: 4200,
+      cards: [
+        { sector: "Information Technology", nh: 80, nl: 140, breadth_pct: 34, momentum_pct: 31 },
+        { sector: "Health Care", nh: 47, nl: 187, breadth_pct: 38, momentum_pct: 35 },
+      ],
     },
     eodSummary: {
       count: 11,
@@ -118,6 +122,10 @@ function canonicalSectorHealth(overrides = {}) {
       totalNetHighsLows: -250,
       totalUp: 1100,
       totalDown: 4300,
+      cards: [
+        { sector: "Information Technology", nh: 70, nl: 160, breadth_pct: 31, momentum_pct: 29 },
+        { sector: "Health Care", nh: 40, nl: 200, breadth_pct: 35, momentum_pct: 32 },
+      ],
     },
     breadthParticipation: {
       score: 22,
@@ -202,7 +210,28 @@ run("3 packages existing stock-volume values exactly", () => {
   );
 });
 
-run("4 generatedAt cannot make stale scanner evidence fresh", () => {
+run("4 exposes existing sector cards and NH NL totals without recalculation", () => {
+  const source = canonicalSectorHealth();
+  const artifact = buildEngine25ParticipationArtifact({
+    sectorHealth: source,
+    now: ACTIVE_NOW,
+  });
+
+  assert.deepEqual(
+    artifact.participation.sectorParticipation.intraday.cards,
+    source.intradaySummary.cards
+  );
+  assert.deepEqual(
+    artifact.participation.sectorParticipation.eod.cards,
+    source.eodSummary.cards
+  );
+  assert.equal(artifact.participation.newHighsNewLows.intradayTotalNh, 127);
+  assert.equal(artifact.participation.newHighsNewLows.intradayTotalNl, 327);
+  assert.equal(artifact.participation.newHighsNewLows.eodTotalNh, 110);
+  assert.equal(artifact.participation.newHighsNewLows.eodTotalNl, 360);
+});
+
+run("5 generatedAt cannot make stale scanner evidence fresh", () => {
   const source = canonicalSectorHealth({
     sources: {
       intraday: {
@@ -223,7 +252,7 @@ run("4 generatedAt cannot make stale scanner evidence fresh", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("5 active equity session + current healthy source -> usable", () => {
+run("6 active equity session + current healthy source -> usable", () => {
   const artifact = buildEngine25ParticipationArtifact({
     sectorHealth: canonicalSectorHealth(),
     now: ACTIVE_NOW,
@@ -232,7 +261,7 @@ run("5 active equity session + current healthy source -> usable", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, true);
 });
 
-run("6 stale intraday source -> unusable", () => {
+run("7 stale intraday source -> unusable", () => {
   const source = canonicalSectorHealth();
   source.sources.intraday.updatedAt = new Date(
     ACTIVE_NOW - DEFAULT_INTRADAY_MAX_AGE_MS - 1
@@ -245,7 +274,7 @@ run("6 stale intraday source -> unusable", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("7 missing intraday source -> unusable", () => {
+run("8 missing intraday source -> unusable", () => {
   const source = canonicalSectorHealth();
   source.sources.intraday = null;
   const artifact = buildEngine25ParticipationArtifact({
@@ -256,7 +285,7 @@ run("7 missing intraday source -> unusable", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("8 invalid intraday source -> unusable", () => {
+run("9 invalid intraday source -> unusable", () => {
   const source = canonicalSectorHealth();
   source.sources.intraday.ok = false;
   const artifact = buildEngine25ParticipationArtifact({
@@ -267,7 +296,7 @@ run("8 invalid intraday source -> unusable", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("9 below 70% volume coverage -> unusable", () => {
+run("10 below 70% volume coverage -> unusable", () => {
   const source = canonicalSectorHealth();
   source.distributionPressure.inputs.volumeEvidence.intraday.available = false;
   source.distributionPressure.inputs.volumeEvidence.intraday.coveragePct = 69.99;
@@ -284,7 +313,7 @@ run("9 below 70% volume coverage -> unusable", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("10 outside equity scanner session -> current participation unavailable", () => {
+run("11 outside equity scanner session -> current participation unavailable", () => {
   const artifact = buildEngine25ParticipationArtifact({
     sectorHealth: canonicalSectorHealth(),
     now: OVERNIGHT_NOW,
@@ -296,7 +325,7 @@ run("10 outside equity scanner session -> current participation unavailable", ()
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("11 overnight last observation is preserved diagnostically", () => {
+run("12 overnight last observation is preserved diagnostically", () => {
   const source = canonicalSectorHealth();
   const artifact = buildEngine25ParticipationArtifact({
     sectorHealth: source,
@@ -310,7 +339,7 @@ run("11 overnight last observation is preserved diagnostically", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("12 correct completed EOD session -> EOD valid", () => {
+run("13 correct completed EOD session -> EOD valid", () => {
   const source = canonicalSectorHealth();
   source.sources.eod.updatedAt = "2026-09-30T20:30:00.000Z";
   const artifact = buildEngine25ParticipationArtifact({
@@ -322,7 +351,7 @@ run("12 correct completed EOD session -> EOD valid", () => {
   assert.equal(artifact.freshness.eod.valid, true);
 });
 
-run("13 wrong EOD session -> EOD invalid", () => {
+run("14 wrong EOD session -> EOD invalid", () => {
   const source = canonicalSectorHealth();
   source.sources.eod.updatedAt = "2026-09-29T20:30:00.000Z";
   const artifact = buildEngine25ParticipationArtifact({
@@ -333,7 +362,7 @@ run("13 wrong EOD session -> EOD invalid", () => {
   assert.equal(artifact.freshness.eod.reason, "EOD_SESSION_DATE_MISMATCH");
 });
 
-run("14 valid EOD alone cannot manufacture fresh intraday", () => {
+run("15 valid EOD alone cannot manufacture fresh intraday", () => {
   const source = canonicalSectorHealth();
   source.sources.eod.updatedAt = "2026-09-30T20:30:00.000Z";
   const artifact = buildEngine25ParticipationArtifact({
@@ -344,7 +373,7 @@ run("14 valid EOD alone cannot manufacture fresh intraday", () => {
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
-run("15 compatibility artifact remains available", () => {
+run("16 compatibility artifact remains available", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
   const participationFile = path.join(dir, "engine25-participation.json");
   const legacyFile = path.join(dir, "engine25-sector-health-test.json");
@@ -358,7 +387,7 @@ run("15 compatibility artifact remains available", () => {
   assert.equal(fs.existsSync(legacyFile), true);
 });
 
-run("16 new and legacy artifacts contain equivalent underlying truth", () => {
+run("17 new and legacy artifacts contain equivalent underlying truth", () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
   const participationFile = path.join(dir, "engine25-participation.json");
   const legacyFile = path.join(dir, "engine25-sector-health-test.json");
@@ -385,7 +414,7 @@ run("16 new and legacy artifacts contain equivalent underlying truth", () => {
   );
 });
 
-await runAsync("17 no Engine29 refresh is triggered", async () => {
+await runAsync("18 no Engine29 refresh is triggered", async () => {
   let buildCount = 0;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
 
@@ -402,7 +431,7 @@ await runAsync("17 no Engine29 refresh is triggered", async () => {
   assert.equal(buildCount, 1);
 });
 
-await runAsync("18 no second scanner is invoked", async () => {
+await runAsync("19 no second scanner is invoked", async () => {
   let scannerDerivedBuildCount = 0;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
 
@@ -419,7 +448,7 @@ await runAsync("18 no second scanner is invoked", async () => {
   assert.equal(scannerDerivedBuildCount, 1);
 });
 
-run("19 no second Distribution calculation is introduced", () => {
+run("20 no second Distribution calculation is introduced", () => {
   const source = canonicalSectorHealth();
   const sentinel = 37.123456;
   source.distributionPressure.rawPressure = sentinel;

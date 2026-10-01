@@ -59,6 +59,16 @@ const LIVE_STEPS = [
     required: true,
   },
   {
+    name: "engine25_participation",
+    job: "updateEngine25Participation.js",
+    required: true,
+  },
+  {
+    name: "engine25_market_health",
+    job: "updateEngine25MarketHealth.js",
+    required: true,
+  },
+  {
     name: "engine25_sector_card_proxy_breadth",
     job: "snapshotEngine25SectorCardBreadth.js",
     required: true,
@@ -83,6 +93,8 @@ const LIVE_STEPS = [
 const LIVE_REQUIRED_FILES = [
   "engine25-news-events.json",
   "engine25-intraday-macro.json",
+  "engine25-participation.json",
+  "engine25-market-health.json",
   "engine25-sector-card-breadth-snapshots.json",
   "engine25-es-zone-aware-read.json",
   "engine25-zone-classification.json",
@@ -90,6 +102,13 @@ const LIVE_REQUIRED_FILES = [
 ];
 
 let IS_RUNNING = false;
+
+const FULL_REFRESH_WAIT_MS = 120000;
+const FULL_REFRESH_WAIT_POLL_MS = 1000;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -218,12 +237,35 @@ async function handle(req, res) {
     });
   }
 
-  if (IS_RUNNING) {
+  const mode = String(req.query.mode || "full").trim().toLowerCase();
+  const requestStartedAt = nowIso();
+  const requestStartedMs = Date.now();
+
+  if (IS_RUNNING && mode === "full") {
+    while (
+      IS_RUNNING &&
+      Date.now() - requestStartedMs < FULL_REFRESH_WAIT_MS
+    ) {
+      await sleep(FULL_REFRESH_WAIT_POLL_MS);
+    }
+
+    if (IS_RUNNING) {
+      return res.status(503).json({
+        ok: false,
+        skipped: false,
+        reason: "ENGINE25_FULL_REFRESH_WAIT_TIMEOUT",
+        mode,
+        startedAt: requestStartedAt,
+        waitedMs: Date.now() - requestStartedMs,
+      });
+    }
+  } else if (IS_RUNNING) {
     return res.json({
       ok: true,
       skipped: true,
       reason: "ENGINE25_REFRESH_ALREADY_RUNNING",
-      startedAt: nowIso(),
+      mode,
+      startedAt: requestStartedAt,
     });
   }
 
@@ -234,8 +276,6 @@ async function handle(req, res) {
 
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-
-    const mode = String(req.query.mode || "full").trim().toLowerCase();
     const selectedSteps = mode === "live" ? LIVE_STEPS : STEPS;
     const requiredFiles = mode === "live" ? LIVE_REQUIRED_FILES : REQUIRED_FILES;
     const steps = [];
