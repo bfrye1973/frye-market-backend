@@ -101,6 +101,13 @@ const LIVE_REQUIRED_FILES = [
   "engine25-context.json",
 ];
 
+const LIVE_BOOTSTRAP_REQUIRED_FILES = [
+  "engine25-data-test.json",
+  "engine25-market-feeds-test.json",
+  "engine25-es-technical-context.json",
+  "engine25-market-health.json",
+];
+
 let IS_RUNNING = false;
 
 const FULL_REFRESH_WAIT_MS = 120000;
@@ -276,10 +283,36 @@ async function handle(req, res) {
 
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    const selectedSteps = mode === "live" ? LIVE_STEPS : STEPS;
+    const missingLiveBootstrapFiles =
+      mode === "live"
+        ? LIVE_BOOTSTRAP_REQUIRED_FILES.filter(
+            (file) => !fs.existsSync(path.join(DATA_DIR, file))
+          )
+        : [];
+
+    const selectedSteps =
+      mode === "live" && missingLiveBootstrapFiles.length
+        ? [
+            {
+              name: "engine25_full_bootstrap",
+              job: "updateEngine25Full.js",
+              required: true,
+            },
+            ...LIVE_STEPS,
+          ]
+        : mode === "live"
+        ? LIVE_STEPS
+        : STEPS;
+
     const requiredFiles = mode === "live" ? LIVE_REQUIRED_FILES : REQUIRED_FILES;
     const steps = [];
     const warnings = [];
+
+    if (missingLiveBootstrapFiles.length) {
+      warnings.push(
+        `ENGINE25_LIVE_BOOTSTRAP_MISSING_FILES:${missingLiveBootstrapFiles.join(",")}`
+      );
+    }
 
     for (const step of selectedSteps) {
       const result = await runStep(step);
