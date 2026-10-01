@@ -56,6 +56,11 @@ const PARTICIPATION_FILE = path.join(
   "engine25-participation.json"
 );
 
+const PARTICIPATION_FILE = path.join(
+  DATA_DIR,
+  "engine25-participation.json"
+);
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) return null;
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -880,6 +885,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
     const intradayMacro = readJsonFile(INTRADAY_MACRO_FILE);
     const newsEvents = readJsonFile(ENGINE25_NEWS_EVENTS_FILE);
+    const participationArtifact = readJsonFile(PARTICIPATION_FILE);
     const participationArtifact = readJsonFile(PARTICIPATION_FILE);
 
     const rows = Array.isArray(composite?.rows) ? composite.rows : [];
