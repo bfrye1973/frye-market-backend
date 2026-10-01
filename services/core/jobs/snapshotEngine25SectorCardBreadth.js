@@ -31,6 +31,10 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import {
+  buildEngine25SectorGroups,
+  classifyEngine25SectorCard,
+} from "../logic/engine25/buildSectorCardGroups.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -244,11 +248,11 @@ function summarizeCards(cards) {
   const riskOnBreadthPct = riskOnDenom > 0 ? round2((riskOnHits / riskOnDenom) * 100) : null;
 
   const sectorsRising = clean.filter(
-    (c) => safeNumber(c.breadth_pct, 50) >= 55 && safeNumber(c.momentum_pct, 50) >= 55
+    (c) => classifyEngine25SectorCard(c) === "STRONG"
   ).length;
 
   const sectorsWeak = clean.filter(
-    (c) => safeNumber(c.breadth_pct, 50) <= 45 && safeNumber(c.momentum_pct, 50) <= 45
+    (c) => classifyEngine25SectorCard(c) === "WEAK"
   ).length;
 
   let riskOnState = "NEUTRAL";
@@ -374,6 +378,7 @@ function buildTimeframeSnapshot(timeframe, source) {
   const cards = source.cards.map(normalizeCard);
   const summary = summarizeCards(cards);
   const classification = classifyTimeframe(summary, timeframe);
+  const groups = buildEngine25SectorGroups(cards);
 
   return {
     available: source.available,
@@ -384,6 +389,7 @@ function buildTimeframeSnapshot(timeframe, source) {
     generatedAtUtc: source.generatedAtUtc,
     cardCount: cards.length,
     cards,
+    groups,
 
     summary,
     classification,
