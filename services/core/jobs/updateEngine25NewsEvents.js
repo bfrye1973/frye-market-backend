@@ -755,6 +755,7 @@ export async function buildAndWriteEngine25NewsEvents({
         (event) => event?.material === true
       ).length,
       activeMaterialCount: activeMaterialEvents.length,
+      activeMaterialEvents,
       latency: {
         publisherToFinlight,
         finlightToEngine,
