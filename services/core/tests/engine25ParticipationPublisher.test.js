@@ -231,7 +231,7 @@ run("4 exposes existing sector cards and NH NL totals without recalculation", ()
   assert.equal(artifact.participation.newHighsNewLows.eodTotalNl, 360);
 });
 
-run("6 generatedAt cannot make stale scanner evidence fresh", () => {
+run("5 generatedAt cannot make stale scanner evidence fresh", () => {
   const source = canonicalSectorHealth({
     sources: {
       intraday: {
