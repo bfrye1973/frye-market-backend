@@ -105,7 +105,7 @@ const LIVE_BOOTSTRAP_REQUIRED_FILES = [
   "engine25-data-test.json",
   "engine25-market-feeds-test.json",
   "engine25-es-technical-context.json",
-  "engine25-market-health.json",
+  ...REQUIRED_FILES,
 ];
 
 let IS_RUNNING = false;
@@ -292,14 +292,7 @@ async function handle(req, res) {
 
     const selectedSteps =
       mode === "live" && missingLiveBootstrapFiles.length
-        ? [
-            {
-              name: "engine25_full_bootstrap",
-              job: "updateEngine25Full.js",
-              required: true,
-            },
-            ...LIVE_STEPS,
-          ]
+        ? [...STEPS, ...LIVE_STEPS]
         : mode === "live"
         ? LIVE_STEPS
         : STEPS;
