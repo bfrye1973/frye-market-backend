@@ -1,0 +1,70 @@
+name: Force Live 10m Refresh
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
+      FD_LOOKBACK_DAYS: "20"
+      FD_MAX_WORKERS: "10"
+      FD_RETRY_MAX: "1"
+      POLY_KEY: ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build sectorCards source
+        run: |
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py --sectors-dir data/sectors --out data/outlook_source.json
+      - name: Build intraday payload
+        run: |
+          python -u scripts/make_dashboard.py --mode intraday --source data/outlook_source.json --out data/outlook_intraday.json
+      - name: Compute Lux strategy
+        run: python -u scripts/compute_trend10m.py
+      - name: Update pills
+        run: python -u scripts/update_pills_10m_state.py
+      - name: Validate and show timestamp
+        run: |
+          python - <<'PY'
+          import json
+          j=json.load(open("data/outlook_intraday.json"))
+          assert len(j.get("sectorCards") or []) > 0
+          print("updated_at_utc", j.get("updated_at_utc"))
+          print("sectorCards", len(j.get("sectorCards") or []))
+          print("up", sum((c.get("up") or 0) for c in j.get("sectorCards") or []))
+          print("down", sum((c.get("down") or 0) for c in j.get("sectorCards") or []))
+          PY
+      - name: Publish live branch
+        run: |
+          git config user.email "bot@ci.local"
+          git config user.name "CI Bot"
+          git fetch origin "$LIVE_BRANCH" --depth=1
+          mkdir -p /tmp/publish10m
+          cp data/outlook_source.json /tmp/publish10m/outlook_source.json
+          cp data/outlook_intraday.json /tmp/publish10m/outlook_intraday.json
+          git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH"
+          mkdir -p data
+          cp /tmp/publish10m/outlook_source.json data/outlook_source.json
+          cp /tmp/publish10m/outlook_intraday.json data/outlook_intraday.json
+          date -u +"%Y-%m-%d %H:%M:%S UTC" > data/heartbeat_10m.txt
+          git add data/outlook_source.json data/outlook_intraday.json data/heartbeat_10m.txt
+          git commit -m "10m forced publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git push --force-with-lease origin "$LIVE_BRANCH"
