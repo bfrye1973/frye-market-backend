@@ -1,0 +1,31 @@
+name: Live Macro Trend Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate live macro trend fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard -o /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.wti.changesPct["2h"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.wti.changesPct.session != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.wti.changesPct["1d"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.wti.changesPct["2d"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.wti.changesPct["5d"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.brent.changesPct["2h"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.dollarUup.changesPct["2h"] != null' /tmp/e25.json
+          jq -e '.intradayMacro.trendComparisons.tenYearYield.changesBps["1d"] != null' /tmp/e25.json
+          jq '{
+            tenYear: .intradayMacro.trendComparisons.tenYearYield,
+            thirtyYear: .intradayMacro.trendComparisons.thirtyYearYield,
+            dollar: .intradayMacro.trendComparisons.dollarUup,
+            wti: .intradayMacro.trendComparisons.wti,
+            brent: .intradayMacro.trendComparisons.brent
+          }' /tmp/e25.json
