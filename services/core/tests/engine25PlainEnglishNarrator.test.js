@@ -416,10 +416,25 @@ run("16 high distribution with mildly weak breadth does not invent prediction", 
   assert.equal(result.narratorEvidence.participation.direction, "MIXED");
   assert.equal(result.narratorEvidence.volumeDistribution.direction, "BEARISH");
   assert.equal(result.narratorEvidence.volumeDistribution.strength, "STRONG");
+  assert.match(result.text, /Distribution Pressure is high\./i);
   assert.doesNotMatch(
     result.text,
     /will fall|will rise|buy here|sell here|confirms a short/i
   );
+});
+
+
+run("16b canonical mixed sector wording stays plain English", () => {
+  const input = baseInput();
+  input.sectorBreadth.combinedRead.label = "SECTOR_CARD_BREADTH_MIXED";
+
+  const result = buildEngine25PlainEnglishNarrator(input);
+
+  assert.match(
+    result.text,
+    /Sector participation is mixed across the 1-hour and 4-hour views/i
+  );
+  assert.doesNotMatch(result.text, /sector card breadth mixed/i);
 });
 
 run("17 fewer than two usable families => INSUFFICIENT DATA", () => {
