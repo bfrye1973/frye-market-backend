@@ -124,7 +124,17 @@ export function buildRollingChanges(barsInput = [], nowSec = null, sessionStartS
       price: null,
       asOfUnix: null,
       asOfUtc: null,
-      changesPct: { "5m": null, "10m": null, "30m": null, "60m": null, session: null },
+      changesPct: {
+        "5m": null,
+        "10m": null,
+        "30m": null,
+        "60m": null,
+        "2h": null,
+        "1d": null,
+        "2d": null,
+        "5d": null,
+        session: null,
+      },
     };
   }
 
@@ -138,6 +148,10 @@ export function buildRollingChanges(barsInput = [], nowSec = null, sessionStartS
     "10m": 10 * 60,
     "30m": 30 * 60,
     "60m": 60 * 60,
+    "2h": 2 * 60 * 60,
+    "1d": 24 * 60 * 60,
+    "2d": 2 * 24 * 60 * 60,
+    "5d": 5 * 24 * 60 * 60,
   })) {
     changesPct[label] = pctChange(current, closeAtOrBefore(bars, refSec - seconds));
   }
