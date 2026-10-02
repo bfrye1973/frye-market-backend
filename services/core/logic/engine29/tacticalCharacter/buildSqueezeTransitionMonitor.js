@@ -545,7 +545,11 @@ function resolveState({
   context,
   consolidation,
 }) {
-  if (consolidation?.active && consolidation?.state) {
+  if (
+    consolidation?.active &&
+    consolidation?.state &&
+    !parent.squeezeActive
+  ) {
     return consolidation.state;
   }
 
