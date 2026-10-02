@@ -513,62 +513,87 @@ test("Engine25 scanner breadth + stock volume are consumed read-only for bull tr
   fs.writeFileSync(
     filePath,
     JSON.stringify({
-      ok: true,
-      updatedAt: "2026-09-29T17:00:00.000Z",
+      schema: "engine25.participation@1",
+      engine: "engine25.participation.v1",
+      generatedAt: "2026-09-29T17:00:00.000Z",
+      authority: {
+        owner: "ENGINE25",
+      },
       sources: {
         intraday: {
-          ok: true,
-          updatedAt: "2026-09-29T17:00:00.000Z",
+          sourceTimestamp: "2026-09-29T17:00:00.000Z",
         },
         eod: {
-          ok: true,
-          updatedAt: "2026-09-29T16:00:00.000Z",
+          sourceTimestamp: "2026-09-29T16:00:00.000Z",
+          sessionDate: "2026-09-29",
         },
       },
-      breadthParticipation: {
-        score: 32,
-        label: "BREADTH_PARTICIPATION_WEAK",
-        inputs: {
-          intraday: {
-            avgBreadth: 31,
-            avgMomentum: 34,
-          },
-          eod: {
-            avgBreadth: 38,
-            avgMomentum: 40,
-          },
+      freshness: {
+        state: "CURRENT",
+        reason: "TEST_FIXTURE_CURRENT",
+        usableForTrapConfirmation: true,
+        intraday: {
+          sourceTimestamp: "2026-09-29T17:00:00.000Z",
+          sourceHealthy: true,
+          sourceCurrent: true,
+          volumeCoverageValid: true,
+          state: "CURRENT",
+          reason: "TEST_FIXTURE_CURRENT",
+          ageMs: 300000,
+        },
+        eod: {
+          sourceTimestamp: "2026-09-29T16:00:00.000Z",
+          sessionDate: "2026-09-29",
+          expectedSessionDate: "2026-09-29",
+          valid: true,
+          sourceHealthy: true,
+          reason: "TEST_FIXTURE_VALID",
         },
       },
-      distributionPressure: {
-        score: 22,
-        label: "DISTRIBUTION_PRESSURE_HIGH",
-        rawPressure: 78,
-        inputs: {
-          volumeEvidence: {
-            available: true,
-            combinedVolumePressure: 86,
+      participation: {
+        breadth: {
+          score: 32,
+          label: "BREADTH_PARTICIPATION_WEAK",
+          inputs: {
             intraday: {
-              available: true,
-              stocksScanned: 5470,
-              stocksWithVolume: 4800,
-              coveragePct: 87.75,
-              advancingVolumeShare: 0.28,
-              decliningVolumeShare: 0.72,
-              volumeImbalance: 0.44,
-              volumePressure: 91,
-              reason: null,
+              avgBreadth: 31,
+              avgMomentum: 34,
             },
             eod: {
-              available: true,
-              stocksScanned: 5470,
-              stocksWithVolume: 5000,
-              coveragePct: 91.41,
-              advancingVolumeShare: 0.30,
-              decliningVolumeShare: 0.70,
-              volumeImbalance: 0.40,
-              volumePressure: 88,
-              reason: null,
+              avgBreadth: 38,
+              avgMomentum: 40,
             },
+          },
+        },
+        distributionPressure: {
+          score: 22,
+          label: "DISTRIBUTION_PRESSURE_HIGH",
+          rawPressure: 78,
+        },
+        stockVolume: {
+          available: true,
+          combinedVolumePressure: 86,
+          intraday: {
+            available: true,
+            stocksScanned: 5470,
+            stocksWithVolume: 4800,
+            coveragePct: 87.75,
+            advancingVolumeShare: 0.28,
+            decliningVolumeShare: 0.72,
+            volumeImbalance: 0.44,
+            volumePressure: 91,
+            reason: null,
+          },
+          eod: {
+            available: true,
+            stocksScanned: 5470,
+            stocksWithVolume: 5000,
+            coveragePct: 91.41,
+            advancingVolumeShare: 0.30,
+            decliningVolumeShare: 0.70,
+            volumeImbalance: 0.40,
+            volumePressure: 88,
+            reason: null,
           },
         },
       },
