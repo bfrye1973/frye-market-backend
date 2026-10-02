@@ -5,6 +5,10 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { buildEngine25PlainEnglishNarrator } from "../logic/engine25/buildPlainEnglishNarrator.js";
+import {
+  buildRedlineCurrentMarketBrief,
+  buildRedlineIntradayBrief,
+} from "../logic/engine25/buildRedlineMarketBrief.js";
 
 const router = express.Router();
 
@@ -55,6 +59,16 @@ const ENGINE25_NEWS_EVENTS_FILE = path.join(
 const PARTICIPATION_FILE = path.join(
   DATA_DIR,
   "engine25-participation.json"
+);
+
+const ENGINE29_FILE = path.join(
+  DATA_DIR,
+  "engine29-cross-market-stress.json"
+);
+
+const ES_STRATEGY_SNAPSHOT_FILE = path.join(
+  DATA_DIR,
+  "strategy-snapshot-es.json"
 );
 
 function readJsonFile(filePath) {
@@ -882,6 +896,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const intradayMacro = readJsonFile(INTRADAY_MACRO_FILE);
     const newsEvents = readJsonFile(ENGINE25_NEWS_EVENTS_FILE);
     const participationArtifact = readJsonFile(PARTICIPATION_FILE);
+    const engine29 = readJsonFile(ENGINE29_FILE);
+    const esStrategySnapshot = readJsonFile(ES_STRATEGY_SNAPSHOT_FILE);
 
     const rows = Array.isArray(composite?.rows) ? composite.rows : [];
     const dailyCompositeAvailable = Boolean(composite && rows.length);
@@ -978,6 +994,32 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       engine25Context,
     });
 
+    const redlineCurrentMarketBrief = buildRedlineCurrentMarketBrief({
+      participationArtifact,
+      sectorBreadth,
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      creditStressDetail,
+      intradayMacro,
+      macroPressure: marketHealth?.components?.macroPressure || null,
+      newsEvents,
+      engine25Context,
+      strategySnapshot: esStrategySnapshot,
+      engine29,
+    });
+
+    const redlineIntradayBrief = buildRedlineIntradayBrief({
+      participationArtifact,
+      sectorBreadth,
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      creditStressDetail,
+      intradayMacro,
+      macroPressure: marketHealth?.components?.macroPressure || null,
+      newsEvents,
+      engine25Context,
+      strategySnapshot: esStrategySnapshot,
+      engine29,
+    });
+
     return res.json({
       ok: true,
       engine: "engine25.fullDashboard.v0.5",
@@ -1002,6 +1044,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
         intradayMacroFile: "engine25-intraday-macro.json",
         newsEventsFile: "engine25-news-events.json",
         participationFile: "engine25-participation.json",
+        engine29File: "engine29-cross-market-stress.json",
+        esStrategySnapshotFile: "strategy-snapshot-es.json",
       },
       headline,
       componentBreakdown,
@@ -1027,6 +1071,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
       narratorEvidence: plainEnglishNarrator.narratorEvidence,
       plainEnglishNarrator,
+      redlineCurrentMarketBrief,
+      redlineIntradayBrief,
 
       overlay: {
         available: dailyCompositeAvailable,
