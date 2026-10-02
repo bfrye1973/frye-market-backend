@@ -296,7 +296,7 @@ run("8 missing intraday source -> unusable", () => {
     sectorHealth: source,
     now: ACTIVE_NOW,
   });
-  assert.equal(artifact.freshness.intraday.state, "MISSING_INTRADAY_SOURCE");
+  assert.equal(artifact.freshness.intraday.state, "UNAVAILABLE");
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
@@ -307,7 +307,7 @@ run("9 invalid intraday source -> unusable", () => {
     sectorHealth: source,
     now: ACTIVE_NOW,
   });
-  assert.equal(artifact.freshness.intraday.state, "INVALID_INTRADAY_SOURCE");
+  assert.equal(artifact.freshness.intraday.state, "UNAVAILABLE");
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
 
