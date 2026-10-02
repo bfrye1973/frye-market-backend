@@ -22,12 +22,18 @@ jobs:
           jq -e '.plainEnglishNarrator.predictive == false' /tmp/engine25.json
           jq -e '.plainEnglishNarrator.createsTradingSignal == false' /tmp/engine25.json
           jq -e '(.plainEnglishNarrator.sentences | type == "array")' /tmp/engine25.json
-          jq -e '(.plainEnglishNarrator.sentences | length) >= 4' /tmp/engine25.json
+          jq -e '(.plainEnglishNarrator.sentences | length) <= 5' /tmp/engine25.json
 
           jq '{
             confidence: .narratorEvidence.confidence,
             usableFamilyCount: .narratorEvidence.usableFamilyCount,
             contradictionCount: .narratorEvidence.contradictionCount,
             freshness: .narratorEvidence.freshness.state,
+            participation: .narratorEvidence.participation,
+            volumeDistribution: .narratorEvidence.volumeDistribution,
+            sectors: .narratorEvidence.sectors,
+            macro: .narratorEvidence.macro,
+            esVsBroader: .narratorEvidence.esVsBroader,
+            conflicts: .narratorEvidence.conflicts,
             sentences: .plainEnglishNarrator.sentences
           }' /tmp/engine25.json
