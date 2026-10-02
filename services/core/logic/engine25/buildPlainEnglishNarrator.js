@@ -571,7 +571,14 @@ function volumeSentence(volumeDistribution) {
     else if (imbalance < 0) lean = "toward buying";
   }
 
-  return `Directional stock volume is leaning ${lean}, while Distribution Pressure is ${cleanState(volumeDistribution.canonicalState || "unavailable")}.`;
+  const pressureLabel = {
+    DISTRIBUTION_PRESSURE_LOW: "low",
+    DISTRIBUTION_PRESSURE_WATCH: "on watch",
+    DISTRIBUTION_PRESSURE_ELEVATED: "elevated",
+    DISTRIBUTION_PRESSURE_HIGH: "high",
+  }[volumeDistribution.canonicalState] || "unavailable";
+
+  return `Directional stock volume is leaning ${lean}, while Distribution Pressure is ${pressureLabel}.`;
 }
 
 function sectorsEsSentence(sectors, esVsBroader) {
@@ -587,6 +594,14 @@ function sectorsEsSentence(sectors, esVsBroader) {
         "Sector participation is weak on both the 1-hour and 4-hour views",
       SECTOR_BREADTH_EXPANDING_TACTICAL_AND_REGIME:
         "Sector participation is expanding on both the 1-hour and 4-hour views",
+      SECTOR_CARD_BREADTH_MIXED:
+        "Sector participation is mixed across the 1-hour and 4-hour views",
+      SECTOR_BREADTH_MIXED:
+        "Sector participation is mixed across the 1-hour and 4-hour views",
+      SECTOR_BREADTH_SUPPORTIVE:
+        "Sector participation is supportive across the combined 1-hour and 4-hour read",
+      SECTOR_BREADTH_WEAK:
+        "Sector participation is weak across the combined 1-hour and 4-hour read",
     };
     parts.push(map[sectors.combinedState] || `Sector participation is ${cleanState(sectors.combinedState)}`);
   }
