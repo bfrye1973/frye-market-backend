@@ -1093,4 +1093,115 @@ router.get("/engine25/full-dashboard", (_req, res) => {
   }
 });
 
+router.get("/engine25/yield-symbol-discovery-temp", async (_req, res) => {
+  const apiKey =
+    process.env.POLYGON_API ||
+    process.env.POLYGON_API_KEY ||
+    process.env.POLY_API_KEY ||
+    "";
+
+  if (!apiKey) {
+    return res.status(500).json({ ok: false, error: "MISSING_MARKET_DATA_API_KEY" });
+  }
+
+  const candidates = [
+    "I:TNX",
+    "I:TYX",
+    "I:FVX",
+    "TNX",
+    "TYX",
+    "US10Y",
+    "US20Y",
+    "US30Y",
+    "I:US10Y",
+    "I:US20Y",
+    "I:US30Y",
+  ];
+
+  const base =
+    String(process.env.POLYGON_REST_BASE || process.env.POLYGON_BASE_URL || "https://api.polygon.io")
+      .replace(/\/+$/, "");
+
+  const now = new Date();
+  const to = now.toISOString().slice(0, 10);
+  const from = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  const results = [];
+
+  for (const ticker of candidates) {
+    let reference = null;
+    let aggregate = null;
+
+    try {
+      const refUrl =
+        `${base}/v3/reference/tickers/${encodeURIComponent(ticker)}?apiKey=${encodeURIComponent(apiKey)}`;
+      const refResp = await fetch(refUrl, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const refJson = await refResp.json().catch(() => null);
+      reference = {
+        httpStatus: refResp.status,
+        ok: refResp.ok,
+        ticker: refJson?.results?.ticker || null,
+        name: refJson?.results?.name || null,
+        market: refJson?.results?.market || null,
+        type: refJson?.results?.type || null,
+        currencyName: refJson?.results?.currency_name || null,
+        sourceFeed: refJson?.results?.source_feed || null,
+      };
+    } catch (error) {
+      reference = {
+        httpStatus: null,
+        ok: false,
+        error: error?.message || String(error),
+      };
+    }
+
+    try {
+      const aggUrl =
+        `${base}/v2/aggs/ticker/${encodeURIComponent(ticker)}/range/5/minute/${from}/${to}` +
+        `?adjusted=true&sort=asc&limit=5000&apiKey=${encodeURIComponent(apiKey)}`;
+      const aggResp = await fetch(aggUrl, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      const aggJson = await aggResp.json().catch(() => null);
+      const rows = Array.isArray(aggJson?.results) ? aggJson.results : [];
+      aggregate = {
+        httpStatus: aggResp.status,
+        ok: aggResp.ok,
+        resultCount: rows.length,
+        last:
+          rows.length
+            ? {
+                t: rows[rows.length - 1]?.t ?? null,
+                c: rows[rows.length - 1]?.c ?? null,
+              }
+            : null,
+        status: aggJson?.status || null,
+        error: aggJson?.error || null,
+      };
+    } catch (error) {
+      aggregate = {
+        httpStatus: null,
+        ok: false,
+        error: error?.message || String(error),
+      };
+    }
+
+    results.push({ ticker, reference, aggregate });
+  }
+
+  return res.json({
+    ok: true,
+    engine: "engine25.yieldSymbolDiscovery.temp.v1",
+    providerBase: base,
+    checkedAt: new Date().toISOString(),
+    results,
+  });
+});
+
 export default router;
