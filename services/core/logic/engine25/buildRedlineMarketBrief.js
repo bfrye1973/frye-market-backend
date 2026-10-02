@@ -267,12 +267,13 @@ function macroSection({ intradayMacro, creditStressDetail, macroPressure }) {
   const brent = oil?.brent || {};
   const slow = rates?.slowContext || {};
   const uup = macroPressure?.inputs?.UUP || null;
+  const trends = intradayMacro?.trendComparisons || {};
 
   const ten = finite(slow?.tenYearYield ?? macroPressure?.diagnostics?.DGS10);
   const thirty = finite(slow?.thirtyYearYield);
-  const uupValue = finite(uup?.close ?? uup?.value);
-  const wtiPrice = finite(wti?.price);
-  const brentPrice = finite(brent?.price);
+  const uupValue = finite(trends?.dollarUup?.current ?? uup?.close ?? uup?.value);
+  const wtiPrice = finite(trends?.wti?.current ?? wti?.price);
+  const brentPrice = finite(trends?.brent?.current ?? brent?.price);
 
   const macroWord = {
     MACRO_SUPPORTIVE: "supportive",
@@ -287,19 +288,50 @@ function macroSection({ intradayMacro, creditStressDetail, macroPressure }) {
       ? "Some macro inputs are not fresh enough to claim a current direction, so stale levels are treated as context only."
       : null;
 
+  const wti2h = finite(trends?.wti?.changesPct?.["2h"]);
+  const wtiSession = finite(trends?.wti?.changesPct?.session);
+  const wti5d = finite(trends?.wti?.changesPct?.["5d"]);
+
+  const oilTrendParts = [
+    wti2h !== null
+      ? `WTI is ${wti2h < 0 ? "easing" : wti2h > 0 ? "rising" : "flat"} over 2H (${wti2h > 0 ? "+" : ""}${wti2h.toFixed(2)}%)`
+      : null,
+    wtiSession !== null
+      ? `${wtiSession < 0 ? "easing" : wtiSession > 0 ? "rising" : "flat"} since the Globex session open (${wtiSession > 0 ? "+" : ""}${wtiSession.toFixed(2)}%)`
+      : null,
+    wti5d !== null
+      ? `and is ${wti5d > 0 ? "still above" : wti5d < 0 ? "below" : "unchanged from"} its 5-day comparison (${wti5d > 0 ? "+" : ""}${wti5d.toFixed(2)}%)`
+      : null,
+  ].filter(Boolean);
+
   const oilText =
     wtiPrice !== null || brentPrice !== null
-      ? `Oil remains important: WTI is ${wtiPrice !== null ? wtiPrice.toFixed(2) : "unavailable"} and Brent is ${brentPrice !== null ? brentPrice.toFixed(2) : "unavailable"}.`
+      ? `Oil remains important: WTI is ${wtiPrice !== null ? wtiPrice.toFixed(2) : "unavailable"} and Brent is ${brentPrice !== null ? brentPrice.toFixed(2) : "unavailable"}.${
+          oilTrendParts.length ? " " + oilTrendParts.join(", ") + "." : ""
+        }`
       : null;
+
+  const ten1d = finite(trends?.tenYearYield?.changesBps?.["1d"]);
+  const ten5d = finite(trends?.tenYearYield?.changesBps?.["5d"]);
 
   const rateText =
     ten !== null || thirty !== null
-      ? `The latest available Treasury yields are ${ten !== null ? ten.toFixed(2) + "% on the 10-year" : "10-year unavailable"} and ${thirty !== null ? thirty.toFixed(2) + "% on the 30-year" : "30-year unavailable"}.`
+      ? `The latest available Treasury yields are ${ten !== null ? ten.toFixed(2) + "% on the 10-year" : "10-year unavailable"} and ${thirty !== null ? thirty.toFixed(2) + "% on the 30-year" : "30-year unavailable"}.${
+          ten1d !== null || ten5d !== null
+            ? ` The 10-year is ${ten1d !== null ? (ten1d > 0 ? "+" : "") + ten1d.toFixed(1) + " bps over 1D" : "1D unavailable"} and ${ten5d !== null ? (ten5d > 0 ? "+" : "") + ten5d.toFixed(1) + " bps over 5D" : "5D unavailable"}.`
+            : ""
+        }`
       : null;
 
+  const uup2h = finite(trends?.dollarUup?.changesPct?.["2h"]);
+  const uup5d = finite(trends?.dollarUup?.changesPct?.["5d"]);
   const dollarText =
     uupValue !== null
-      ? `The U.S. dollar proxy UUP is ${uupValue.toFixed(2)}.`
+      ? `The U.S. dollar proxy UUP is ${uupValue.toFixed(2)}.${
+          uup2h !== null || uup5d !== null
+            ? ` It is ${uup2h !== null ? (uup2h > 0 ? "up " : uup2h < 0 ? "down " : "flat ") + Math.abs(uup2h).toFixed(2) + "% over 2H" : "2H unavailable"} and ${uup5d !== null ? (uup5d > 0 ? "up " : uup5d < 0 ? "down " : "flat ") + Math.abs(uup5d).toFixed(2) + "% over 5D" : "5D unavailable"}.`
+            : ""
+        }`
       : null;
 
   return {
