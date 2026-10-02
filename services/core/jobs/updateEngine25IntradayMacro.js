@@ -450,6 +450,109 @@ function buildCombinedRollingRead({
   };
 }
 
+function closeAtOrBeforeLocal(bars = [], targetSec) {
+  let found = null;
+  for (const bar of bars) {
+    if (!Number.isFinite(Number(bar?.time))) continue;
+    if (Number(bar.time) > targetSec) break;
+    if (Number.isFinite(Number(bar?.close))) {
+      found = Number(bar.close);
+    }
+  }
+  return found;
+}
+
+function firstOpenAtOrAfterLocal(bars = [], targetSec) {
+  for (const bar of bars) {
+    if (!Number.isFinite(Number(bar?.time))) continue;
+    if (Number(bar.time) < targetSec) continue;
+    const open = Number(bar?.open);
+    const close = Number(bar?.close);
+    if (Number.isFinite(open)) return open;
+    if (Number.isFinite(close)) return close;
+  }
+  return null;
+}
+
+function buildLiveYieldTrend({
+  bars = [],
+  ticker,
+  label,
+  sessionStartSec,
+} = {}) {
+  const valid = Array.isArray(bars)
+    ? bars
+        .filter((bar) =>
+          Number.isFinite(Number(bar?.time)) &&
+          Number.isFinite(Number(bar?.close))
+        )
+        .sort((a, b) => Number(a.time) - Number(b.time))
+    : [];
+
+  if (!valid.length) {
+    return {
+      available: false,
+      ticker,
+      label,
+      current: null,
+      rawIndexValue: null,
+      asOfUtc: null,
+      changesBps: {
+        "2h": null,
+        session: null,
+        "1d": null,
+        "2d": null,
+        "5d": null,
+      },
+    };
+  }
+
+  const latest = valid[valid.length - 1];
+  const latestSec = Number(latest.time);
+  const latestRaw = Number(latest.close);
+
+  const refRaw = {
+    "2h": closeAtOrBeforeLocal(valid, latestSec - 2 * 60 * 60),
+    "1d": closeAtOrBeforeLocal(valid, latestSec - 24 * 60 * 60),
+    "2d": closeAtOrBeforeLocal(valid, latestSec - 2 * 24 * 60 * 60),
+    "5d": closeAtOrBeforeLocal(valid, latestSec - 5 * 24 * 60 * 60),
+    session: Number.isFinite(Number(sessionStartSec))
+      ? firstOpenAtOrAfterLocal(valid, Number(sessionStartSec))
+      : null,
+  };
+
+  const toYieldPercent = (raw) =>
+    Number.isFinite(Number(raw))
+      ? Number((Number(raw) / 10).toFixed(3))
+      : null;
+
+  const bpsChange = (ref) =>
+    Number.isFinite(Number(ref))
+      ? Number(((latestRaw - Number(ref)) * 10).toFixed(1))
+      : null;
+
+  return {
+    available: true,
+    ticker,
+    label,
+    source: "POLYGON_CBOE_INDEX",
+    current: toYieldPercent(latestRaw),
+    rawIndexValue: latestRaw,
+    asOfUnix: latestSec,
+    asOfUtc: new Date(latestSec * 1000).toISOString(),
+    sessionStartUtc: Number.isFinite(Number(sessionStartSec))
+      ? new Date(Number(sessionStartSec) * 1000).toISOString()
+      : null,
+    changesBps: {
+      "2h": bpsChange(refRaw["2h"]),
+      session: bpsChange(refRaw.session),
+      "1d": bpsChange(refRaw["1d"]),
+      "2d": bpsChange(refRaw["2d"]),
+      "5d": bpsChange(refRaw["5d"]),
+    },
+  };
+}
+
 function latestObservation(seriesResult) {
   const latest = seriesResult?.latest || null;
 
@@ -1002,6 +1105,83 @@ export async function buildAndWriteEngine25IntradayMacro({
     };
   }
 
+  let tenYearLive = null;
+  let thirtyYearLive = null;
+
+  try {
+    const tnxFive = await fetchPolygonEtfBars({
+      symbol: "I:TNX",
+      multiplier: 5,
+      now,
+      lookbackDays: 7,
+    });
+
+    tenYearLive = buildLiveYieldTrend({
+      bars: tnxFive.bars,
+      ticker: "I:TNX",
+      label: "U.S. 10-Year Treasury Yield",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+
+    providerDiagnostics.TNX = {
+      ok: tenYearLive.available === true,
+      ticker: "I:TNX",
+      sourceFeed: "CboeGlobalIndicesCGI",
+      barCount: tnxFive.count,
+      lastBar: tnxFive.lastBar,
+    };
+  } catch (error) {
+    warnings.push(`TNX_UNAVAILABLE:${error?.message || String(error)}`);
+    tenYearLive = buildLiveYieldTrend({
+      bars: [],
+      ticker: "I:TNX",
+      label: "U.S. 10-Year Treasury Yield",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+    providerDiagnostics.TNX = {
+      ok: false,
+      ticker: "I:TNX",
+      error: error?.message || String(error),
+    };
+  }
+
+  try {
+    const tyxFive = await fetchPolygonEtfBars({
+      symbol: "I:TYX",
+      multiplier: 5,
+      now,
+      lookbackDays: 7,
+    });
+
+    thirtyYearLive = buildLiveYieldTrend({
+      bars: tyxFive.bars,
+      ticker: "I:TYX",
+      label: "U.S. 30-Year Treasury Yield",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+
+    providerDiagnostics.TYX = {
+      ok: thirtyYearLive.available === true,
+      ticker: "I:TYX",
+      sourceFeed: "CboeGlobalIndicesCGI",
+      barCount: tyxFive.count,
+      lastBar: tyxFive.lastBar,
+    };
+  } catch (error) {
+    warnings.push(`TYX_UNAVAILABLE:${error?.message || String(error)}`);
+    thirtyYearLive = buildLiveYieldTrend({
+      bars: [],
+      ticker: "I:TYX",
+      label: "U.S. 30-Year Treasury Yield",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+    providerDiagnostics.TYX = {
+      ok: false,
+      ticker: "I:TYX",
+      error: error?.message || String(error),
+    };
+  }
+
   const { slowContext, warnings: fredWarnings } =
     await fetchSlowYieldContext();
 
@@ -1051,6 +1231,8 @@ export async function buildAndWriteEngine25IntradayMacro({
     products.ZN.read.asOfUtc,
     products.ZB.read.asOfUtc,
     tltRead.asOfUtc,
+    tenYearLive?.asOfUtc,
+    thirtyYearLive?.asOfUtc,
   ]);
 
   const canonical = buildIntradayMacro({
@@ -1093,22 +1275,46 @@ export async function buildAndWriteEngine25IntradayMacro({
     },
     horizons: ["2h", "session", "1d", "2d", "5d"],
     tenYearYield: {
-      current: slowContext.tenYearYield ?? null,
+      current:
+        tenYearLive?.available === true
+          ? tenYearLive.current
+          : slowContext.tenYearYield ?? null,
+      ticker: "I:TNX",
+      source:
+        tenYearLive?.available === true
+          ? "POLYGON_CBOE_INDEX"
+          : "FRED_DGS10_FALLBACK",
+      asOfUtc: tenYearLive?.asOfUtc ?? null,
       observationDate: slowContext.tenYearObservationDate ?? null,
-      changesBps: {
-        "2h": null,
-        session: null,
-        ...(slowContext.tenYearChangesBps || {}),
-      },
+      changesBps:
+        tenYearLive?.available === true
+          ? tenYearLive.changesBps
+          : {
+              "2h": null,
+              session: null,
+              ...(slowContext.tenYearChangesBps || {}),
+            },
     },
     thirtyYearYield: {
-      current: slowContext.thirtyYearYield ?? null,
+      current:
+        thirtyYearLive?.available === true
+          ? thirtyYearLive.current
+          : slowContext.thirtyYearYield ?? null,
+      ticker: "I:TYX",
+      source:
+        thirtyYearLive?.available === true
+          ? "POLYGON_CBOE_INDEX"
+          : "FRED_DGS30_FALLBACK",
+      asOfUtc: thirtyYearLive?.asOfUtc ?? null,
       observationDate: slowContext.thirtyYearObservationDate ?? null,
-      changesBps: {
-        "2h": null,
-        session: null,
-        ...(slowContext.thirtyYearChangesBps || {}),
-      },
+      changesBps:
+        thirtyYearLive?.available === true
+          ? thirtyYearLive.changesBps
+          : {
+              "2h": null,
+              session: null,
+              ...(slowContext.thirtyYearChangesBps || {}),
+            },
     },
     dollarUup: {
       current: uupRead?.price ?? null,
