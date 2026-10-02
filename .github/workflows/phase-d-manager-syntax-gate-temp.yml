@@ -1,0 +1,21 @@
+name: Phase D Manager Syntax Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --check services/core/jobs/updateEngine25Full.js
+      - run: node --check services/core/jobs/updateEngine25Participation.js
+      - run: node --check services/core/routes/engine25FullDashboard.js
+      - run: node --test services/core/tests/engine25BlendedParticipation.test.js
+      - run: node --test services/core/tests/engine25ParticipationPublisher.test.js
+      - run: node --test services/core/tests/engine25BlendedParticipationPublishing.test.js
