@@ -1,0 +1,23 @@
+name: Inspect 10m Workflow Runs
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List dashboard-10min runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer $GH_TOKEN"             -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/$REPO/actions/workflows/dashboard-10min.yml/runs?per_page=30"             | jq '[.workflow_runs[] | {id, event, status, conclusion, created_at, run_started_at, head_branch, head_sha}]'
