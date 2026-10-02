@@ -255,6 +255,12 @@ function esVsBroaderSection(narratorEvidence) {
 function macroSection({ intradayMacro, creditStressDetail, macroPressure }) {
   const macroState = upper(intradayMacro?.state);
   const pressureLabel = upper(macroPressure?.label);
+  const pressureText = {
+    MACRO_PRESSURE_LOW: "low",
+    MACRO_PRESSURE_MANAGEABLE: "manageable",
+    MACRO_PRESSURE_ELEVATED: "elevated",
+    MACRO_PRESSURE_HIGH: "high",
+  }[pressureLabel] || null;
   const rates = intradayMacro?.components?.rates || {};
   const oil = intradayMacro?.components?.oil || {};
   const wti = oil?.wti || {};
@@ -302,7 +308,7 @@ function macroSection({ intradayMacro, creditStressDetail, macroPressure }) {
     canonicalState: macroState || pressureLabel || null,
     text: sentence([
       `Macro conditions are ${macroWord}.`,
-      pressureLabel ? `Engine25 Macro Pressure is ${clean(pressureLabel).toLowerCase()}.` : null,
+      pressureText ? `Macro Pressure is ${pressureText}.` : null,
       creditStressDetail?.interpretation || null,
       rateText,
       dollarText,
@@ -604,7 +610,15 @@ function bottomLine({
       ? `Engine29 is reading the active move as ${clean(engine29.canonicalState).toLowerCase()}.`
       : null,
     macro?.canonicalState
-      ? `The macro backdrop is ${clean(macro.canonicalState).toLowerCase()}.`
+      ? `The macro backdrop is ${
+          {
+            MACRO_SUPPORTIVE: "supportive",
+            MACRO_NEUTRAL: "neutral",
+            MACRO_HEADWIND: "a headwind",
+            MACRO_SHOCK: "a strong cross-market headwind",
+          }[upper(macro.canonicalState)] ||
+          clean(macro.canonicalState).toLowerCase()
+        }.`
       : null,
     location?.relation && location?.nearestZone
       ? `ES is ${location.relation} its nearest negotiated zone.`
@@ -653,7 +667,7 @@ export function buildRedlineCurrentMarketBrief({
     narratorEvidence,
     macro,
     location,
-    engine29: e29,
+    engine29: null,
     freshness: evidence.freshness,
   });
 
