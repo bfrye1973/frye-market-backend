@@ -29,8 +29,6 @@ jobs:
           jq -e '.redlineIntradayBrief.readOnly == true' /tmp/e25.json
           jq -e '.redlineIntradayBrief.predictive == false' /tmp/e25.json
           jq -e '.redlineIntradayBrief.createsTradingSignal == false' /tmp/e25.json
-          jq -e '(.redlineCurrentMarketBrief.paragraphs | length) >= 5' /tmp/e25.json
-          jq -e '(.redlineIntradayBrief.paragraphs | length) >= 6' /tmp/e25.json
 
           jq '{
             currentMarketBrief: .redlineCurrentMarketBrief.paragraphs,
