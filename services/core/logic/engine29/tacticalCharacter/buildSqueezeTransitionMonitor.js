@@ -1,6 +1,6 @@
 // services/core/logic/engine29/tacticalCharacter/buildSqueezeTransitionMonitor.js
 //
-// Engine 29 — 10m / 20m live transition monitor v1.4
+// Engine 29 — 10m / 20m live transition monitor v1.5
 //
 // Authority:
 // - diagnostic only
@@ -11,6 +11,8 @@
 // 2) SQUEEZE_* labels are reserved for an actual parent 30m squeeze.
 // 3) A confirmed 30m broad move can transition to BROAD_MOVE_NARROWING
 //    when the newest 10m participation deteriorates.
+// 4) Tight overlapping 10m price action can be labeled as consolidation
+//    without changing 30m MOVE authority.
 
 const EPS = 1e-9;
 
@@ -43,6 +45,10 @@ export const ENGINE29_SQUEEZE_MONITOR_STATES = Object.freeze({
   BROADENING_INTO_RALLY: "BROADENING_INTO_RALLY",
   BROADENING_INTO_SELLOFF: "BROADENING_INTO_SELLOFF",
   BROAD_MOVE_NARROWING: "BROAD_MOVE_NARROWING",
+
+  CONSOLIDATING_NEAR_HIGHS: "CONSOLIDATING_NEAR_HIGHS",
+  CONSOLIDATING_NEAR_LOWS: "CONSOLIDATING_NEAR_LOWS",
+  RANGE_COMPRESSION: "RANGE_COMPRESSION",
 });
 
 export const ENGINE29_PARTICIPATION_STATES = Object.freeze({
@@ -73,6 +79,18 @@ function closeOf(bar) {
   return bar?.close ?? bar?.c ?? null;
 }
 
+function openOf(bar) {
+  return bar?.open ?? bar?.o ?? null;
+}
+
+function highOf(bar) {
+  return bar?.high ?? bar?.h ?? null;
+}
+
+function lowOf(bar) {
+  return bar?.low ?? bar?.l ?? null;
+}
+
 function barTime(bar) {
   return bar?.time ?? bar?.t ?? null;
 }
@@ -100,6 +118,159 @@ function moveFromBars(bars) {
     prior10: pct(closeOf(b2), closeOf(b1)),
     latestClose: closeOf(b0),
     latestTime: barTime(b0),
+  };
+}
+
+function detectConsolidation(bars, parent, fast) {
+  const usable = (Array.isArray(bars) ? bars : [])
+    .filter((bar) =>
+      [openOf(bar), highOf(bar), lowOf(bar), closeOf(bar)].every(finite)
+    );
+
+  const windowSize = 6;
+  const contextSize = 12;
+
+  if (usable.length < windowSize) {
+    return {
+      active: false,
+      state: null,
+      reason: "INSUFFICIENT_10M_BARS",
+      windowSize,
+    };
+  }
+
+  const recent = usable.slice(-windowSize);
+  const contextBars = usable.slice(-Math.min(contextSize, usable.length));
+
+  const recentHigh = Math.max(...recent.map(highOf));
+  const recentLow = Math.min(...recent.map(lowOf));
+  const contextHigh = Math.max(...contextBars.map(highOf));
+  const contextLow = Math.min(...contextBars.map(lowOf));
+
+  const firstClose = closeOf(recent[0]);
+  const latestClose = closeOf(recent.at(-1));
+  const mid = (recentHigh + recentLow) / 2;
+
+  const rangePct =
+    finite(mid) && Math.abs(mid) > EPS
+      ? ((recentHigh - recentLow) / mid) * 100
+      : null;
+
+  const netMovePct =
+    finite(firstClose) && finite(latestClose)
+      ? Math.abs(pct(firstClose, latestClose) ?? 0)
+      : null;
+
+  let pathTravelPct = 0;
+  let pathSteps = 0;
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const step = pct(closeOf(recent[i - 1]), closeOf(recent[i]));
+    if (!finite(step)) continue;
+    pathTravelPct += Math.abs(step);
+    pathSteps += 1;
+  }
+
+  const efficiency =
+    pathSteps > 0 && pathTravelPct > EPS && finite(netMovePct)
+      ? netMovePct / pathTravelPct
+      : null;
+
+  let overlaps = 0;
+  let overlapPairs = 0;
+
+  for (let i = 1; i < recent.length; i += 1) {
+    const prevHigh = highOf(recent[i - 1]);
+    const prevLow = lowOf(recent[i - 1]);
+    const curHigh = highOf(recent[i]);
+    const curLow = lowOf(recent[i]);
+
+    if (![prevHigh, prevLow, curHigh, curLow].every(finite)) continue;
+
+    overlapPairs += 1;
+    if (Math.min(prevHigh, curHigh) >= Math.max(prevLow, curLow)) {
+      overlaps += 1;
+    }
+  }
+
+  const overlapFraction =
+    overlapPairs > 0 ? overlaps / overlapPairs : null;
+
+  const tightRange = finite(rangePct) && rangePct <= 0.22;
+  const lowNetDisplacement = finite(netMovePct) && netMovePct <= 0.10;
+  const lowEfficiency = finite(efficiency) && efficiency <= 0.45;
+  const repeatedOverlap =
+    finite(overlapFraction) && overlapFraction >= 0.60;
+
+  const active =
+    tightRange &&
+    lowNetDisplacement &&
+    lowEfficiency &&
+    repeatedOverlap;
+
+  const parentDirection =
+    parent?.direction === "UP" || parent?.direction === "DOWN"
+      ? parent.direction
+      : fast?.direction === "UP" || fast?.direction === "DOWN"
+        ? fast.direction
+        : "NEUTRAL";
+
+  const distanceFromContextHighPct =
+    finite(contextHigh) && finite(latestClose)
+      ? Math.max(0, ((contextHigh - latestClose) / contextHigh) * 100)
+      : null;
+
+  const distanceFromContextLowPct =
+    finite(contextLow) && finite(latestClose)
+      ? Math.max(0, ((latestClose - contextLow) / contextLow) * 100)
+      : null;
+
+  const nearHigh =
+    active &&
+    parentDirection === "UP" &&
+    finite(distanceFromContextHighPct) &&
+    distanceFromContextHighPct <= 0.18;
+
+  const nearLow =
+    active &&
+    parentDirection === "DOWN" &&
+    finite(distanceFromContextLowPct) &&
+    distanceFromContextLowPct <= 0.18;
+
+  const state = !active
+    ? null
+    : nearHigh
+      ? ENGINE29_SQUEEZE_MONITOR_STATES.CONSOLIDATING_NEAR_HIGHS
+      : nearLow
+        ? ENGINE29_SQUEEZE_MONITOR_STATES.CONSOLIDATING_NEAR_LOWS
+        : ENGINE29_SQUEEZE_MONITOR_STATES.RANGE_COMPRESSION;
+
+  return {
+    active,
+    state,
+    parentDirection,
+    windowSize,
+    recentHigh,
+    recentLow,
+    contextHigh,
+    contextLow,
+    latestClose,
+    rangePct,
+    netMovePct,
+    pathTravelPct,
+    efficiency,
+    overlapFraction,
+    tightRange,
+    lowNetDisplacement,
+    lowEfficiency,
+    repeatedOverlap,
+    nearHigh,
+    nearLow,
+    distanceFromContextHighPct,
+    distanceFromContextLowPct,
+    reason: active
+      ? "TIGHT_OVERLAPPING_10M_RANGE"
+      : "NO_QUALIFIED_10M_CONSOLIDATION",
   };
 }
 
@@ -372,7 +543,16 @@ function resolveState({
   parent,
   fast,
   context,
+  consolidation,
 }) {
+  if (
+    consolidation?.active &&
+    consolidation?.state &&
+    !parent.squeezeActive
+  ) {
+    return consolidation.state;
+  }
+
   if (direction === "FLAT") {
     return ENGINE29_SQUEEZE_MONITOR_STATES.MONITORING;
   }
@@ -521,10 +701,17 @@ function buildReasons({
   parent,
   fast,
   context,
+  consolidation,
 }) {
   const reasons = [];
 
   reasons.push("ES_10M_PRIMARY_ANCHOR");
+
+  if (consolidation?.active) {
+    reasons.push("ES_10M_CONSOLIDATION_ACTIVE");
+    if (consolidation.nearHigh) reasons.push("ES_10M_CONSOLIDATING_NEAR_HIGHS");
+    if (consolidation.nearLow) reasons.push("ES_10M_CONSOLIDATING_NEAR_LOWS");
+  }
 
   if (parent.squeezeActive) reasons.push("PARENT_30M_SQUEEZE_ACTIVE");
   if (parent.broadMoveActive) reasons.push("PARENT_30M_BROAD_MOVE_ACTIVE");
@@ -614,6 +801,7 @@ function displayFor({
   parent,
   fast,
   context,
+  consolidation,
 }) {
   const why = [];
 
@@ -623,6 +811,15 @@ function displayFor({
 
   if (fast.state) {
     why.push(`The 30-minute tactical state is ${fast.state}.`);
+  }
+
+  if (consolidation?.active) {
+    const rangeText = finite(consolidation.rangePct)
+      ? consolidation.rangePct.toFixed(3)
+      : "—";
+    why.push(
+      `Recent 10-minute bars are overlapping inside a compressed ${rangeText}% range.`
+    );
   }
 
   if (context === "COUNTERTREND_TO_30M") {
@@ -696,6 +893,13 @@ function displayFor({
     BROAD_MOVE_NARROWING:
       "The 30-minute broad move is losing fresh 10-minute participation.",
 
+    CONSOLIDATING_NEAR_HIGHS:
+      "ES is consolidating near the highs after the upside move.",
+    CONSOLIDATING_NEAR_LOWS:
+      "ES is consolidating near the lows after the downside move.",
+    RANGE_COMPRESSION:
+      "ES is consolidating in a compressed 10-minute range.",
+
     MONITORING:
       "The live monitor does not yet have a decisive transition.",
   }[state] || "The live monitor does not yet have a decisive transition.";
@@ -736,6 +940,11 @@ export function buildEngine29SqueezeTransitionMonitor(
 
   const parent = normalizeParentMove(parentMoveCharacter);
   const fast = normalizeFastTacticalState(fastTacticalState);
+  const consolidation = detectConsolidation(
+    esLiveMonitor?.bars,
+    parent,
+    fast
+  );
 
   const participation = participationFor({
     direction,
@@ -767,6 +976,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     parent,
     fast,
     context,
+    consolidation,
   });
 
   const reasonCodes = buildReasons({
@@ -779,6 +989,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     parent,
     fast,
     context,
+    consolidation,
   });
 
   const display = displayFor({
@@ -791,10 +1002,11 @@ export function buildEngine29SqueezeTransitionMonitor(
     parent,
     fast,
     context,
+    consolidation,
   });
 
   return {
-    version: "engine29.squeezeTransitionMonitor.v1.4",
+    version: "engine29.squeezeTransitionMonitor.v1.5.consolidation",
     generatedAt:
       marketDataBundle?.generatedAt ||
       new Date().toISOString(),
@@ -826,6 +1038,7 @@ export function buildEngine29SqueezeTransitionMonitor(
 
     metrics: {
       es: primary,
+      consolidation,
       headline,
       breadth,
       leadership,
