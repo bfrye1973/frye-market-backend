@@ -1066,6 +1066,9 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       intradayMacro: intradayMacro || null,
       newsEvents: newsEvents || null,
       participationArtifact: participationArtifact || null,
+      fastParticipation: participationArtifact?.fastParticipation || null,
+      blendedParticipation: participationArtifact?.blendedParticipation || null,
+      sourceDiagnostics: participationArtifact?.sourceDiagnostics || null,
       macroPressure: marketHealth?.components?.macroPressure || null,
       marketInternals: engine25Context?.marketInternals || null,
 
