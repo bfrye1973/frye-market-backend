@@ -4,6 +4,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { buildEngine25PlainEnglishNarrator } from "../logic/engine25/buildPlainEnglishNarrator.js";
 
 const router = express.Router();
 
@@ -969,6 +970,14 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       liveEsPermission,
     });
 
+    const plainEnglishNarrator = buildEngine25PlainEnglishNarrator({
+      participationArtifact,
+      sectorBreadth,
+      creditStressDetail,
+      intradayMacro,
+      engine25Context,
+    });
+
     return res.json({
       ok: true,
       engine: "engine25.fullDashboard.v0.5",
@@ -1015,6 +1024,9 @@ router.get("/engine25/full-dashboard", (_req, res) => {
       participationArtifact: participationArtifact || null,
       macroPressure: marketHealth?.components?.macroPressure || null,
       marketInternals: engine25Context?.marketInternals || null,
+
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      plainEnglishNarrator,
 
       overlay: {
         available: dailyCompositeAvailable,
