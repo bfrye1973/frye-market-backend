@@ -7,7 +7,7 @@ import {
   buildEngine25SectorGroups,
   CANONICAL_ENGINE25_SECTORS,
 } from "./buildSectorCardGroups.js";
-import { expectedCompletedEquitySessionDate } from "../buildParticipationArtifact.js";
+import { expectedCompletedEquitySessionDate } from "./buildParticipationArtifact.js";
 
 export const ENGINE25_BLENDED_PARTICIPATION_SCHEMA =
   "engine25.blendedParticipation@1";
