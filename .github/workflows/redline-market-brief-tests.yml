@@ -1,0 +1,21 @@
+name: Redline Market Brief Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  market-brief-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Redline market brief tests
+        run: node services/core/tests/redlineMarketBrief.test.js
+      - name: Existing narrator tests
+        run: node services/core/tests/engine25PlainEnglishNarrator.test.js
+      - name: Existing session split tests
+        run: node services/core/tests/engine25ParticipationSessionSplit.test.js
