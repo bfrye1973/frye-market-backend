@@ -37,6 +37,21 @@ const ACTIVE_NOW = Date.parse("2026-09-30T15:00:00.000Z"); // 11:00 ET
 const AFTER_CLOSE_NOW = Date.parse("2026-09-30T21:00:00.000Z"); // 17:00 ET
 const OVERNIGHT_NOW = Date.parse("2026-10-01T02:00:00.000Z"); // 22:00 ET
 
+function emptyCanonicalInputs() {
+  return {
+    routes: {
+      intraday: "/live/intraday",
+      hourly: "/live/hourly",
+      fourHour: "/live/4h",
+      eod: "/live/eod",
+    },
+    intraday: null,
+    hourly: null,
+    fourHour: null,
+    eod: null,
+  };
+}
+
 function timeframeVolume(overrides = {}) {
   return {
     timeframe: "intraday",
@@ -419,6 +434,7 @@ await runAsync("18 no Engine29 refresh is triggered", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
 
   await runEngine25ParticipationPublisher({
+    loadCanonicalInputs: async () => emptyCanonicalInputs(),
     buildSectorHealth: async () => {
       buildCount += 1;
       return canonicalSectorHealth();
@@ -436,6 +452,7 @@ await runAsync("19 no second scanner is invoked", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "e25-participation-"));
 
   await runEngine25ParticipationPublisher({
+    loadCanonicalInputs: async () => emptyCanonicalInputs(),
     buildSectorHealth: async () => {
       scannerDerivedBuildCount += 1;
       return canonicalSectorHealth();
