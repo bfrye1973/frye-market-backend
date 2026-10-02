@@ -6,7 +6,10 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalContext.js";
-import {\n  buildPublishedEngine25Participation,\n  fetchCanonicalParticipationInputs,\n} from "./updateEngine25Participation.js";
+import {
+  buildPublishedEngine25Participation,
+  fetchCanonicalParticipationInputs,
+} from "./updateEngine25Participation.js";
 
 import {
   fetchEngine25FredBundle,
