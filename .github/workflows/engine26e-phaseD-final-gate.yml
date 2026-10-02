@@ -1,0 +1,24 @@
+name: Engine26E Phase D Final Gate
+
+on:
+  push:
+    branches:
+      - engine26e-blended-participation-v1
+
+jobs:
+  final-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Run exact manager gate
+        run: |
+          node --check services/core/jobs/updateEngine25Full.js
+          node --check services/core/jobs/updateEngine25Participation.js
+          node --check services/core/routes/engine25FullDashboard.js
+
+          node --test services/core/tests/engine25BlendedParticipation.test.js
+          node --test services/core/tests/engine25ParticipationPublisher.test.js
+          node --test services/core/tests/engine25BlendedParticipationPublishing.test.js
