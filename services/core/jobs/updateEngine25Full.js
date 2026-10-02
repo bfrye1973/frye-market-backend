@@ -6,7 +6,10 @@ import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalContext.js";
-import { buildEngine25ParticipationArtifact } from "../logic/engine25/buildParticipationArtifact.js";
+import {
+  buildPublishedEngine25Participation,
+  fetchCanonicalParticipationInputs,
+} from "./updateEngine25Participation.js";
 
 import {
   fetchEngine25FredBundle,
@@ -468,8 +471,11 @@ async function writeSectorHealthFile() {
 
   fs.writeFileSync(SECTOR_FILE, JSON.stringify(sectorHealth, null, 2));
 
-  const participation = buildEngine25ParticipationArtifact({
+  const canonicalInputs = await fetchCanonicalParticipationInputs();
+
+  const participation = buildPublishedEngine25Participation({
     sectorHealth,
+    canonicalInputs,
     now: Date.now(),
   });
 
