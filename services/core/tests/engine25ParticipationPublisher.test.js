@@ -335,7 +335,7 @@ run("11 outside equity scanner session -> current participation unavailable", ()
   });
   assert.equal(
     artifact.freshness.intraday.state,
-    "OUTSIDE_EQUITY_SCANNER_SESSION"
+    "LAST_VALID_EQUITY_READ"
   );
   assert.equal(artifact.freshness.usableForTrapConfirmation, false);
 });
