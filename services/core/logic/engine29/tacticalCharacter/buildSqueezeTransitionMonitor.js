@@ -716,15 +716,6 @@ function buildReasons({
     reasons.push(`PARENT_30M_STATE_${String(fast.state).toUpperCase()}`);
   }
 
-  if (consolidation?.active) {
-    const rangeText = finite(consolidation.rangePct)
-      ? consolidation.rangePct.toFixed(3)
-      : "—";
-    why.push(
-      `Recent 10-minute bars are overlapping inside a compressed ${rangeText}% range.`
-    );
-  }
-
   if (context === "COUNTERTREND_TO_30M") {
     reasons.push("LIVE_10M_COUNTERTREND_TO_30M");
   }
@@ -816,6 +807,15 @@ function displayFor({
 
   if (fast.state) {
     why.push(`The 30-minute tactical state is ${fast.state}.`);
+  }
+
+  if (consolidation?.active) {
+    const rangeText = finite(consolidation.rangePct)
+      ? consolidation.rangePct.toFixed(3)
+      : "—";
+    why.push(
+      `Recent 10-minute bars are overlapping inside a compressed ${rangeText}% range.`
+    );
   }
 
   if (context === "COUNTERTREND_TO_30M") {
