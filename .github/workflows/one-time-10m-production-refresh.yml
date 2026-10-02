@@ -69,6 +69,7 @@ jobs:
           cp data/outlook_source.json /tmp/publish10m/outlook_source.json
           cp data/outlook_intraday.json /tmp/publish10m/outlook_intraday.json
           git fetch origin "$LIVE_BRANCH" --depth=1
+          rm -f data/outlook_source.json data/outlook_intraday.json
           git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH"
           mkdir -p data
           cp /tmp/publish10m/outlook_source.json data/outlook_source.json
