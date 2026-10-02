@@ -1,0 +1,22 @@
+name: Engine25 Narrator Branch Tests
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  narrator-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Engine25 session split tests
+        run: node services/core/tests/engine25ParticipationSessionSplit.test.js
+
+      - name: Engine25 narrator tests
+        run: node services/core/tests/engine25PlainEnglishNarrator.test.js
