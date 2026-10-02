@@ -441,7 +441,11 @@ function buildCombinedRollingRead({
       "10m": ten.changesPct?.["10m"] ?? five.changesPct?.["10m"] ?? null,
       "30m": five.changesPct?.["30m"] ?? ten.changesPct?.["30m"] ?? null,
       "60m": five.changesPct?.["60m"] ?? ten.changesPct?.["60m"] ?? null,
-      session: five.changesPct?.session ?? null,
+      "2h": ten.changesPct?.["2h"] ?? five.changesPct?.["2h"] ?? null,
+      "1d": ten.changesPct?.["1d"] ?? five.changesPct?.["1d"] ?? null,
+      "2d": ten.changesPct?.["2d"] ?? null,
+      "5d": ten.changesPct?.["5d"] ?? null,
+      session: five.changesPct?.session ?? ten.changesPct?.session ?? null,
     },
   };
 }
@@ -456,6 +460,20 @@ function latestObservation(seriesResult) {
         : null,
     date: latest?.date || null,
   };
+}
+
+function observationChangeBps(seriesResult, periodsBack) {
+  const rows = Array.isArray(seriesResult?.observations)
+    ? seriesResult.observations.filter((row) => Number.isFinite(Number(row?.value)))
+    : [];
+
+  if (!rows.length || rows.length <= periodsBack) return null;
+
+  const latest = Number(rows[rows.length - 1].value);
+  const prior = Number(rows[rows.length - 1 - periodsBack].value);
+
+  if (!Number.isFinite(latest) || !Number.isFinite(prior)) return null;
+  return Number(((latest - prior) * 100).toFixed(1));
 }
 
 async function fetchSlowYieldContext() {
@@ -513,6 +531,16 @@ async function fetchSlowYieldContext() {
       tenYearObservationDate: ten.date,
       thirtyYearYield: thirty.value,
       thirtyYearObservationDate: thirty.date,
+      tenYearChangesBps: {
+        "1d": observationChangeBps(dgs10, 1),
+        "2d": observationChangeBps(dgs10, 2),
+        "5d": observationChangeBps(dgs10, 5),
+      },
+      thirtyYearChangesBps: {
+        "1d": observationChangeBps(dgs30, 1),
+        "2d": observationChangeBps(dgs30, 2),
+        "5d": observationChangeBps(dgs30, 5),
+      },
     },
     warnings,
   };
@@ -920,6 +948,60 @@ export async function buildAndWriteEngine25IntradayMacro({
     };
   }
 
+  let uupRead = null;
+
+  try {
+    const uupFive = await fetchPolygonEtfBars({
+      symbol: "UUP",
+      multiplier: 5,
+      now,
+      lookbackDays: 7,
+    });
+
+    const uupTen = await fetchPolygonEtfBars({
+      symbol: "UUP",
+      multiplier: 10,
+      now,
+      lookbackDays: 7,
+    });
+
+    uupRead = buildCombinedRollingRead({
+      fiveMinuteBars: uupFive.bars,
+      tenMinuteBars: uupTen.bars,
+      symbol: "UUP",
+      sourceType: "ETF_PROXY",
+      sessionStartSec: tltCashSessionStartUnixSec(now),
+    });
+
+    providerDiagnostics.UUP = {
+      ok: true,
+      fiveMinuteCount: uupFive.count,
+      tenMinuteCount: uupTen.count,
+      lastFiveMinuteBar: uupFive.lastBar,
+      lastTenMinuteBar: uupTen.lastBar,
+    };
+  } catch (error) {
+    warnings.push(`UUP_UNAVAILABLE:${error?.message || String(error)}`);
+    uupRead = {
+      symbol: "UUP",
+      sourceType: "ETF_PROXY",
+      price: null,
+      asOfUnix: null,
+      asOfUtc: null,
+      changesPct: {
+        "2h": null,
+        session: null,
+        "1d": null,
+        "2d": null,
+        "5d": null,
+      },
+    };
+    providerDiagnostics.UUP = {
+      ok: false,
+      error: error?.message || String(error),
+    };
+  }
+
   const { slowContext, warnings: fredWarnings } =
     await fetchSlowYieldContext();
 
@@ -1002,6 +1084,66 @@ export async function buildAndWriteEngine25IntradayMacro({
     // Phase 7 persistence has not been proven yet.
     persistenceAvailable: false,
   });
+
+  canonical.trendComparisons = {
+    units: {
+      yields: "BASIS_POINTS",
+      oil: "PERCENT",
+      dollar: "PERCENT",
+    },
+    horizons: ["2h", "session", "1d", "2d", "5d"],
+    tenYearYield: {
+      current: slowContext.tenYearYield ?? null,
+      observationDate: slowContext.tenYearObservationDate ?? null,
+      changesBps: {
+        "2h": null,
+        session: null,
+        ...(slowContext.tenYearChangesBps || {}),
+      },
+    },
+    thirtyYearYield: {
+      current: slowContext.thirtyYearYield ?? null,
+      observationDate: slowContext.thirtyYearObservationDate ?? null,
+      changesBps: {
+        "2h": null,
+        session: null,
+        ...(slowContext.thirtyYearChangesBps || {}),
+      },
+    },
+    dollarUup: {
+      current: uupRead?.price ?? null,
+      asOfUtc: uupRead?.asOfUtc ?? null,
+      changesPct: {
+        "2h": uupRead?.changesPct?.["2h"] ?? null,
+        session: uupRead?.changesPct?.session ?? null,
+        "1d": uupRead?.changesPct?.["1d"] ?? null,
+        "2d": uupRead?.changesPct?.["2d"] ?? null,
+        "5d": uupRead?.changesPct?.["5d"] ?? null,
+      },
+    },
+    wti: {
+      current: products.CL.read?.price ?? null,
+      asOfUtc: products.CL.read?.asOfUtc ?? null,
+      changesPct: {
+        "2h": products.CL.read?.changesPct?.["2h"] ?? null,
+        session: products.CL.read?.changesPct?.session ?? null,
+        "1d": products.CL.read?.changesPct?.["1d"] ?? null,
+        "2d": products.CL.read?.changesPct?.["2d"] ?? null,
+        "5d": products.CL.read?.changesPct?.["5d"] ?? null,
+      },
+    },
+    brent: {
+      current: products.BZ.read?.price ?? null,
+      asOfUtc: products.BZ.read?.asOfUtc ?? null,
+      changesPct: {
+        "2h": products.BZ.read?.changesPct?.["2h"] ?? null,
+        session: products.BZ.read?.changesPct?.session ?? null,
+        "1d": products.BZ.read?.changesPct?.["1d"] ?? null,
+        "2d": products.BZ.read?.changesPct?.["2d"] ?? null,
+        "5d": products.BZ.read?.changesPct?.["5d"] ?? null,
+      },
+    },
+  };
 
   canonical.providerDiagnostics = providerDiagnostics;
   canonical.newsEvents = {
