@@ -5,11 +5,12 @@ on:
   schedule:
     # ES futures clock — America/Phoenix (MST, UTC-7 year-round)
     # Start Sunday 2:30 PM Phoenix, then every 4 hours.
-    # Friday cutoff is 2:00 PM Phoenix, so the final Friday run is 10:30 AM.
+    # Friday special cutoff: final run at 1:00 PM Phoenix.
     - cron: "30 21 * * 0"      # Sun 2:30 PM Phoenix
     - cron: "30 9,13,17 * * 1-5"  # Mon-Fri 2:30, 6:30, 10:30 AM Phoenix
     - cron: "30 21 * * 1-4"    # Mon-Thu 2:30 PM Phoenix
     - cron: "30 1,5 * * 2-5"   # Mon-Thu 6:30, 10:30 PM Phoenix (UTC next day)
+    - cron: "0 20 * * 5"       # Fri 1:00 PM Phoenix — final weekly run
 
 jobs:
   build_and_publish_4h:
