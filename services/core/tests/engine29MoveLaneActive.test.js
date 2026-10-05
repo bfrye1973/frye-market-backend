@@ -240,21 +240,43 @@ test("liquidity event does not replace the independent move lane", () => {
   );
 });
 
-test("active upside move maps to buying pressure fast state", () => {
+test("active upside parent with mixed internals maps to stabilizing fast pressure", () => {
   const result = resolveEngine29FastTacticalShift({
     moveCharacter: ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE,
     direction: ENGINE29_MOVE_DIRECTIONS.UP,
     underlyingPressure: { state: "MIXED" },
   });
 
-  assert.equal(result.state, "BUYING_PRESSURE_INCREASING");
+  assert.equal(result.state, "STABILIZING");
+  assert.equal(result.parentMoveState, ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE);
 });
 
-test("active downside move maps to selling pressure fast state", () => {
+test("active downside parent with mixed internals maps to stabilizing fast pressure", () => {
   const result = resolveEngine29FastTacticalShift({
     moveCharacter: ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE,
     direction: ENGINE29_MOVE_DIRECTIONS.DOWN,
     underlyingPressure: { state: "MIXED" },
+  });
+
+  assert.equal(result.state, "STABILIZING");
+  assert.equal(result.parentMoveState, ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE);
+});
+
+test("active upside parent plus positive pressure maps to buying pressure increasing", () => {
+  const result = resolveEngine29FastTacticalShift({
+    moveCharacter: ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE,
+    direction: ENGINE29_MOVE_DIRECTIONS.UP,
+    underlyingPressure: { state: "POSITIVE" },
+  });
+
+  assert.equal(result.state, "BUYING_PRESSURE_INCREASING");
+});
+
+test("active downside parent plus negative pressure maps to selling pressure increasing", () => {
+  const result = resolveEngine29FastTacticalShift({
+    moveCharacter: ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE,
+    direction: ENGINE29_MOVE_DIRECTIONS.DOWN,
+    underlyingPressure: { state: "NEGATIVE" },
   });
 
   assert.equal(result.state, "SELLING_PRESSURE_INCREASING");
