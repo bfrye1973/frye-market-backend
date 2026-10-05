@@ -16,10 +16,11 @@ function polygon(symbol) {
   });
 }
 
-function fred(seriesId) {
+function fred(seriesId, intradaySymbol = null) {
   return Object.freeze({
     provider: "FRED",
     seriesId,
+    intradaySymbol,
     evidenceQuality: ENGINE29_EVIDENCE_QUALITY.DIRECT,
     isProxy: false,
     proxyFor: null,
@@ -245,7 +246,7 @@ export const ENGINE29_SYMBOL_REGISTRY = Object.freeze({
     subgroup: "YIELD_BLOCK",
     stressDirection: ENGINE29_STRESS_DIRECTIONS.HIGHER,
     required: true,
-    primary: fred("DGS10"),
+    primary: fred("DGS10", "I:TNX"),
     fallback: null,
   },
   US30Y: {
@@ -255,7 +256,7 @@ export const ENGINE29_SYMBOL_REGISTRY = Object.freeze({
     subgroup: "YIELD_BLOCK",
     stressDirection: ENGINE29_STRESS_DIRECTIONS.HIGHER,
     required: true,
-    primary: fred("DGS30"),
+    primary: fred("DGS30", "I:TYX"),
     fallback: null,
   },
   TLT: {
