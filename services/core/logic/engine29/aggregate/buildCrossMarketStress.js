@@ -357,8 +357,59 @@ export async function buildEngine29CrossMarketStress({
     marketCharacter: {
       liquidity:
         trapDetection?.liquidity || null,
-      move:
-        trapDetection?.moveCharacterLane || null,
+
+      move: {
+        // Canonical MOVE v2 authority.
+        parent:
+          move?.parent ||
+          move?.directionalMoveParent ||
+          null,
+
+        // Companion evidence only; may never overwrite parent.
+        character:
+          move?.character || null,
+
+        // Diagnostic-only 10m / 20m condition measured against parent.
+        liveCondition: {
+          timeframe:
+            liveMonitor?.timeframe ?? "10m",
+          persistenceWindow:
+            liveMonitor?.persistenceWindow ?? "20m",
+          authority:
+            liveMonitor?.authority ?? "DIAGNOSTIC_ONLY",
+          direction:
+            liveMonitor?.direction ?? null,
+          state:
+            liveMonitor?.state ?? null,
+          contextVsParent:
+            liveMonitor?.contextVsParent ?? null,
+          persistence20m:
+            liveMonitor?.guardrails?.es20Material === true,
+          participation:
+            liveMonitor?.participation ?? null,
+          metrics:
+            liveMonitor?.metrics ?? null,
+          guardrails:
+            liveMonitor?.guardrails ?? null,
+          reasonCodes:
+            liveMonitor?.reasonCodes || [],
+        },
+
+        // One-way compatibility projection FROM parent only.
+        moveCharacter:
+          move?.moveCharacter ?? "NO_ACTIVE_MOVE",
+        direction:
+          move?.direction ?? "FLAT",
+        fastState:
+          fastTactical?.state ?? null,
+        liveDirection:
+          liveMonitor?.direction ?? null,
+        participation:
+          liveMonitor?.participation ?? null,
+        context:
+          liveMonitor?.context ?? null,
+      },
+
       trap:
         trapDetection?.trap || null,
     },
@@ -510,6 +561,9 @@ export async function buildEngine29CrossMarketStress({
         context:
           liveMonitor?.context ?? null,
 
+        contextVsParent:
+          liveMonitor?.contextVsParent ?? null,
+
         parent30mState:
           liveMonitor
             ?.fastTacticalContext
@@ -553,24 +607,39 @@ export async function buildEngine29CrossMarketStress({
         },
 
         move: {
+          parent:
+            move?.parent ||
+            move?.directionalMoveParent ||
+            null,
+          character:
+            move?.character || null,
+          liveCondition: {
+            state:
+              liveMonitor?.state ?? null,
+            direction:
+              liveMonitor?.direction ?? null,
+            contextVsParent:
+              liveMonitor?.contextVsParent ?? null,
+            persistence20m:
+              liveMonitor?.guardrails?.es20Material === true,
+            participation:
+              liveMonitor?.participation ?? null,
+          },
+
+          // Compatibility fields remain parent-derived only.
           moveCharacter:
-            trapDetection?.moveCharacterLane?.moveCharacter ??
             move?.moveCharacter ??
             "NO_ACTIVE_MOVE",
           direction:
-            trapDetection?.moveCharacterLane?.direction ??
             move?.direction ??
-            null,
+            "FLAT",
           fastState:
-            trapDetection?.moveCharacterLane?.fastState ??
-            liveMonitor?.state ??
+            fastTactical?.state ??
             null,
           liveDirection:
-            trapDetection?.moveCharacterLane?.liveDirection ??
             liveMonitor?.direction ??
             null,
           participation:
-            trapDetection?.moveCharacterLane?.participation ??
             liveMonitor?.participation ??
             null,
         },
