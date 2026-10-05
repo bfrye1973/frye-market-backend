@@ -147,8 +147,8 @@ test("stale 10m loses all influence after 15 minutes", () => {
   assert.ok(out.blendedParticipation.reasonCodes.includes("SOURCE_10M_STALE"));
 });
 
-test("stale 1H loses all influence after 75 minutes", () => {
-  const out = build({ oneAge: 76 });
+test("stale 1H loses all influence after 90 minutes", () => {
+  const out = build({ oneAge: 91 });
   assert.equal(out.sourceDiagnostics["1h"].effectiveWeight, 0);
   assert.ok(out.blendedParticipation.reasonCodes.includes("SOURCE_1H_STALE"));
 });
