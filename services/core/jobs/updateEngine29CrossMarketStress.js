@@ -28,7 +28,11 @@ function readPriorMoveParent() {
 
   try {
     const prior = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
-    return prior?.moveCharacter?.directionalMoveParent || null;
+    return (
+      prior?.marketCharacter?.move?.parent ||
+      prior?.moveCharacter?.directionalMoveParent ||
+      null
+    );
   } catch {
     return null;
   }
