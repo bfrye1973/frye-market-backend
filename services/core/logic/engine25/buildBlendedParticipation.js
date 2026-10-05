@@ -21,7 +21,7 @@ export const BLENDED_PARTICIPATION_CONFIG = Object.freeze({
   }),
   freshness: Object.freeze({
     "10m": Object.freeze({ fullMs: 10 * 60 * 1000, zeroMs: 15 * 60 * 1000 }),
-    "1h": Object.freeze({ fullMs: 15 * 60 * 1000, zeroMs: 75 * 60 * 1000 }),
+    "1h": Object.freeze({ fullMs: 60 * 60 * 1000, zeroMs: 90 * 60 * 1000 }),
     "4h": Object.freeze({ fullMs: 60 * 60 * 1000, zeroMs: 300 * 60 * 1000 }),
     eod: Object.freeze({ sessionDateValidated: true }),
   }),
