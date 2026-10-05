@@ -1,8 +1,10 @@
 // services/core/logic/engine29/alerts/detectStateTransition.js
+//
+// MOVE v2 alert separation:
+// parent MOVE, MOVE character, LIQUIDITY, and TRAP are independent events.
 
 import { ENGINE29_OVERALL_STATES } from "../constants.js";
 import { ENGINE29_ALERT_TYPES } from "../aggregate/overallStateConstants.js";
-import { ENGINE29_MOVE_CHARACTERS } from "../tacticalCharacter/moveCharacterConstants.js";
 
 const OVERALL_RANK = Object.freeze({
   [ENGINE29_OVERALL_STATES.NORMAL]: 0,
@@ -12,14 +14,44 @@ const OVERALL_RANK = Object.freeze({
   [ENGINE29_OVERALL_STATES.SYSTEMIC_STRESS]: 4,
 });
 
-const LIQUIDITY_CHARACTERS = new Set([
-  ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE,
-  ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE,
-  ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_HIGH,
-  ENGINE29_MOVE_CHARACTERS.LIQUIDITY_SWEEP_LOW,
-  ENGINE29_MOVE_CHARACTERS.FAILED_BREAKOUT,
-  ENGINE29_MOVE_CHARACTERS.FAILED_BREAKDOWN,
-]);
+function parentState(snapshot) {
+  return (
+    snapshot?.marketCharacter?.move?.parent?.state ??
+    snapshot?.moveCharacter?.moveCharacter ??
+    null
+  );
+}
+
+function parentDirection(snapshot) {
+  return (
+    snapshot?.marketCharacter?.move?.parent?.direction ??
+    snapshot?.moveCharacter?.direction ??
+    null
+  );
+}
+
+function characterType(snapshot) {
+  return (
+    snapshot?.marketCharacter?.move?.character?.type ??
+    null
+  );
+}
+
+function liquidityState(snapshot) {
+  return (
+    snapshot?.marketCharacter?.liquidity?.state ??
+    snapshot?.trapDetection?.liquidity?.state ??
+    null
+  );
+}
+
+function trapState(snapshot) {
+  return (
+    snapshot?.marketCharacter?.trap?.state ??
+    snapshot?.trapDetection?.state ??
+    null
+  );
+}
 
 export function detectEngine29StateTransition(previous, current) {
   if (!current) return [];
@@ -27,17 +59,26 @@ export function detectEngine29StateTransition(previous, current) {
 
   const prevOverall = previous?.overallState ?? null;
   const currOverall = current?.overallState ?? null;
+
   if (prevOverall && currOverall && prevOverall !== currOverall) {
     const prevRank = OVERALL_RANK[prevOverall] ?? -1;
     const currRank = OVERALL_RANK[currOverall] ?? -1;
+
     events.push({
-      type: currRank > prevRank ? ENGINE29_ALERT_TYPES.STATE_UPGRADE : ENGINE29_ALERT_TYPES.STATE_DOWNGRADE,
+      type:
+        currRank > prevRank
+          ? ENGINE29_ALERT_TYPES.STATE_UPGRADE
+          : ENGINE29_ALERT_TYPES.STATE_DOWNGRADE,
       previous: prevOverall,
       current: currOverall,
     });
   }
 
-  if (previous?.tacticalState && current?.tacticalState && previous.tacticalState !== current.tacticalState) {
+  if (
+    previous?.tacticalState &&
+    current?.tacticalState &&
+    previous.tacticalState !== current.tacticalState
+  ) {
     events.push({
       type: ENGINE29_ALERT_TYPES.TACTICAL_CHANGE,
       previous: previous.tacticalState,
@@ -45,20 +86,61 @@ export function detectEngine29StateTransition(previous, current) {
     });
   }
 
-  const prevMove = previous?.moveCharacter?.moveCharacter ?? null;
-  const currMove = current?.moveCharacter?.moveCharacter ?? null;
-  if (currMove && currMove !== prevMove) {
+  const prevParent = parentState(previous);
+  const currParent = parentState(current);
+
+  if (currParent && currParent !== prevParent) {
     events.push({
-      type: LIQUIDITY_CHARACTERS.has(currMove)
-        ? ENGINE29_ALERT_TYPES.LIQUIDITY_EVENT
-        : ENGINE29_ALERT_TYPES.MOVE_CHARACTER_CHANGE,
-      previous: prevMove,
-      current: currMove,
-      direction: current?.moveCharacter?.direction ?? null,
+      type: ENGINE29_ALERT_TYPES.PARENT_MOVE_CHANGE,
+      previous: prevParent,
+      current: currParent,
+      direction: parentDirection(current),
     });
   }
 
-  if (previous && Boolean(previous.dataDegraded) !== Boolean(current.dataDegraded)) {
+  const prevCharacter = characterType(previous);
+  const currCharacter = characterType(current);
+
+  if (currCharacter !== prevCharacter) {
+    events.push({
+      type: ENGINE29_ALERT_TYPES.MOVE_CHARACTER_CHANGE,
+      previous: prevCharacter,
+      current: currCharacter,
+      parent: currParent,
+      parentDirection: parentDirection(current),
+    });
+  }
+
+  const prevLiquidity = liquidityState(previous);
+  const currLiquidity = liquidityState(current);
+
+  if (
+    currLiquidity &&
+    currLiquidity !== prevLiquidity &&
+    currLiquidity !== "NO_LIQUIDITY_EVENT"
+  ) {
+    events.push({
+      type: ENGINE29_ALERT_TYPES.LIQUIDITY_EVENT,
+      previous: prevLiquidity,
+      current: currLiquidity,
+    });
+  }
+
+  const prevTrap = trapState(previous);
+  const currTrap = trapState(current);
+
+  if (currTrap && currTrap !== prevTrap) {
+    events.push({
+      type: ENGINE29_ALERT_TYPES.TRAP_STATE_CHANGE,
+      previous: prevTrap,
+      current: currTrap,
+    });
+  }
+
+  if (
+    previous &&
+    Boolean(previous.dataDegraded) !== Boolean(current.dataDegraded)
+  ) {
     events.push({
       type: ENGINE29_ALERT_TYPES.DATA_QUALITY_CHANGE,
       previous: Boolean(previous.dataDegraded),
@@ -68,3 +150,5 @@ export function detectEngine29StateTransition(previous, current) {
 
   return events;
 }
+
+export default detectEngine29StateTransition;
