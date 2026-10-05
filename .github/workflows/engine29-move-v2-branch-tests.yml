@@ -33,9 +33,13 @@ jobs:
           node --check services/core/logic/engine29/alerts/detectStateTransition.js
           node --check services/core/jobs/updateEngine29CrossMarketStress.js
           node --check services/core/tests/engine29MoveV2Authority.test.js
+          node --check services/core/tests/engine29MoveV2ReplayAcceptance.test.js
 
       - name: MOVE v2 authority invariants
         run: node --test services/core/tests/engine29MoveV2Authority.test.js
+
+      - name: Historical and replay acceptance
+        run: node --test services/core/tests/engine29MoveV2ReplayAcceptance.test.js
 
       - name: Existing adaptive MOVE and parent persistence
         run: node --test services/core/tests/engine29MoveLaneActive.test.js
