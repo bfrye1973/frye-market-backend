@@ -387,26 +387,71 @@ function contraryVix(vix10, direction) {
 }
 
 function normalizeParentMove(parentMoveCharacter) {
-  const moveCharacter =
+  const parent =
+    typeof parentMoveCharacter === "object"
+      ? parentMoveCharacter?.parent ||
+        parentMoveCharacter?.directionalMoveParent ||
+        null
+      : null;
+
+  const legacyMoveCharacter =
     typeof parentMoveCharacter === "string"
       ? parentMoveCharacter
       : parentMoveCharacter?.moveCharacter ?? null;
 
-  const direction =
-    typeof parentMoveCharacter === "object"
+  const parentActive =
+    parent?.active === true &&
+    (parent?.direction === "UP" || parent?.direction === "DOWN");
+
+  const direction = parentActive
+    ? parent.direction
+    : typeof parentMoveCharacter === "object"
       ? parentMoveCharacter?.direction ?? null
       : null;
 
-  const upside = moveCharacter === "POSSIBLE_UPSIDE_SQUEEZE";
-  const downside = moveCharacter === "POSSIBLE_DOWNSIDE_SQUEEZE";
-  const broadConfirmed = moveCharacter === "BROAD_MOVE_CONFIRMED";
+  const state = parentActive
+    ? direction === "UP"
+      ? "UPSIDE_MOVE_ACTIVE"
+      : "DOWNSIDE_MOVE_ACTIVE"
+    : legacyMoveCharacter === "UPSIDE_MOVE_ACTIVE" ||
+        legacyMoveCharacter === "DOWNSIDE_MOVE_ACTIVE"
+      ? legacyMoveCharacter
+      : "NO_ACTIVE_MOVE";
+
+  const squeeze =
+    typeof parentMoveCharacter === "object"
+      ? parentMoveCharacter?.character?.squeeze || null
+      : null;
+
+  const broadConfirmation =
+    typeof parentMoveCharacter === "object"
+      ? parentMoveCharacter?.character?.broadConfirmation || null
+      : null;
 
   return {
-    moveCharacter,
-    direction,
-    squeezeActive: upside || downside,
-    squeezeDirection: upside ? "UP" : downside ? "DOWN" : null,
-    broadMoveActive: broadConfirmed,
+    moveCharacter: state,
+    direction:
+      parentActive
+        ? direction
+        : state === "UPSIDE_MOVE_ACTIVE"
+          ? "UP"
+          : state === "DOWNSIDE_MOVE_ACTIVE"
+            ? "DOWN"
+            : "FLAT",
+    active:
+      parentActive ||
+      state === "UPSIDE_MOVE_ACTIVE" ||
+      state === "DOWNSIDE_MOVE_ACTIVE",
+
+    squeezeActive: squeeze?.active === true,
+    squeezeDirection: squeeze?.active === true
+      ? squeeze?.direction ?? null
+      : null,
+
+    broadMoveActive:
+      broadConfirmation?.confirmed === true,
+
+    source: parent ? "CANONICAL_PARENT" : "LEGACY_PARENT_COMPATIBILITY",
   };
 }
 
@@ -525,11 +570,18 @@ function buildGuardrails({
   };
 }
 
-function resolveContext(direction, fast) {
+function resolveContext(direction, parent) {
   if (direction === "FLAT") return "NO_LIVE_DIRECTION";
-  if (fast.direction === "NEUTRAL") return "FAST_NEUTRAL";
-  if (fast.direction === direction) return "ALIGNED_WITH_30M";
-  return "COUNTERTREND_TO_30M";
+  if (parent?.active !== true) return "NO_ACTIVE_PARENT";
+  if (parent?.direction === direction) return "ALIGNED_WITH_PARENT";
+  return "COUNTERTREND_TO_PARENT";
+}
+
+function legacyContextFromParent(contextVsParent) {
+  if (contextVsParent === "ALIGNED_WITH_PARENT") return "ALIGNED_WITH_30M";
+  if (contextVsParent === "COUNTERTREND_TO_PARENT") return "COUNTERTREND_TO_30M";
+  if (contextVsParent === "NO_ACTIVE_PARENT") return "FAST_NEUTRAL";
+  return "NO_LIVE_DIRECTION";
 }
 
 function resolveState({
@@ -542,7 +594,7 @@ function resolveState({
   guardrails,
   parent,
   fast,
-  context,
+  contextVsParent,
   consolidation,
 }) {
   if (
@@ -615,7 +667,7 @@ function resolveState({
   // 2) Broad-move narrowing.
   if (
     (parent.broadMoveActive || fast.broadMove) &&
-    context === "ALIGNED_WITH_30M" &&
+    contextVsParent === "ALIGNED_WITH_PARENT" &&
     (
       participation === ENGINE29_PARTICIPATION_STATES.NARROW ||
       participation === ENGINE29_PARTICIPATION_STATES.PARTIAL ||
@@ -629,7 +681,7 @@ function resolveState({
 
   // 3) Countertrend broadening / fading.
   if (
-    context === "COUNTERTREND_TO_30M" &&
+    contextVsParent === "COUNTERTREND_TO_PARENT" &&
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
     guardrails.broadeningEligible
   ) {
@@ -639,7 +691,7 @@ function resolveState({
   }
 
   if (
-    context === "COUNTERTREND_TO_30M" &&
+    contextVsParent === "COUNTERTREND_TO_PARENT" &&
     (
       !guardrails.es10Material ||
       !guardrails.es20Material ||
@@ -653,7 +705,7 @@ function resolveState({
 
   // 4) Broadening when 10m agrees with 30m/neutral context.
   if (
-    context !== "COUNTERTREND_TO_30M" &&
+    contextVsParent !== "COUNTERTREND_TO_PARENT" &&
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
     guardrails.broadeningEligible
   ) {
@@ -700,7 +752,7 @@ function buildReasons({
   guardrails,
   parent,
   fast,
-  context,
+  contextVsParent,
   consolidation,
 }) {
   const reasons = [];
@@ -720,11 +772,13 @@ function buildReasons({
     reasons.push(`PARENT_30M_STATE_${String(fast.state).toUpperCase()}`);
   }
 
-  if (context === "COUNTERTREND_TO_30M") {
+  if (contextVsParent === "COUNTERTREND_TO_PARENT") {
+    reasons.push("LIVE_10M_COUNTERTREND_TO_PARENT");
     reasons.push("LIVE_10M_COUNTERTREND_TO_30M");
   }
 
-  if (context === "ALIGNED_WITH_30M") {
+  if (contextVsParent === "ALIGNED_WITH_PARENT") {
+    reasons.push("LIVE_10M_ALIGNED_WITH_PARENT");
     reasons.push("LIVE_10M_ALIGNED_WITH_30M");
   }
 
@@ -800,7 +854,7 @@ function displayFor({
   guardrails,
   parent,
   fast,
-  context,
+  contextVsParent,
   consolidation,
 }) {
   const why = [];
@@ -822,9 +876,9 @@ function displayFor({
     );
   }
 
-  if (context === "COUNTERTREND_TO_30M") {
+  if (contextVsParent === "COUNTERTREND_TO_PARENT") {
     why.push(
-      `The live ES ${direction === "UP" ? "upside" : "downside"} move is running against the current 30-minute direction.`
+      `The live ES ${direction === "UP" ? "upside" : "downside"} move is running against the canonical 30-minute parent direction.`
     );
   }
 
@@ -963,7 +1017,8 @@ export function buildEngine29SqueezeTransitionMonitor(
     vix,
   });
 
-  const context = resolveContext(direction, fast);
+  const contextVsParent = resolveContext(direction, parent);
+  const context = legacyContextFromParent(contextVsParent);
 
   const state = resolveState({
     direction,
@@ -975,7 +1030,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     guardrails,
     parent,
     fast,
-    context,
+    contextVsParent,
     consolidation,
   });
 
@@ -988,7 +1043,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     guardrails,
     parent,
     fast,
-    context,
+    contextVsParent,
     consolidation,
   });
 
@@ -1001,7 +1056,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     guardrails,
     parent,
     fast,
-    context,
+    contextVsParent,
     consolidation,
   });
 
@@ -1019,7 +1074,10 @@ export function buildEngine29SqueezeTransitionMonitor(
     state,
     direction,
     participation,
+    // Legacy compatibility label retained for current frontend consumers.
     context,
+    // Canonical MOVE v2 relationship is always measured against parent direction.
+    contextVsParent,
 
     parentMove: parent,
     fastTacticalContext: fast,
