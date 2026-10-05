@@ -67,6 +67,91 @@ function detectDirectionalMove(esEntry, options = {}) {
   };
 }
 
+function broadConfirmationState(broadConfirmation) {
+  if (!broadConfirmation?.usable) return "NOT_APPLICABLE";
+  if (broadConfirmation?.broadConfirmed === true) return "BROAD_CONFIRMED";
+  if ((broadConfirmation?.independentBlocksConfirmed ?? 0) === 0) return "NARROW";
+  return "MIXED_CONFIRMATION";
+}
+
+function buildMoveCharacterLayer({
+  parent,
+  squeeze,
+  broadConfirmation,
+} = {}) {
+  const parentActive = parent?.active === true;
+  const parentDirection = parentActive
+    ? parent?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT
+    : ENGINE29_MOVE_DIRECTIONS.FLAT;
+
+  const squeezeDirection =
+    squeeze?.headline?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT;
+
+  const squeezeActive =
+    squeeze?.squeezeLike === true &&
+    (
+      squeezeDirection === ENGINE29_MOVE_DIRECTIONS.UP ||
+      squeezeDirection === ENGINE29_MOVE_DIRECTIONS.DOWN
+    );
+
+  const broadState = broadConfirmationState(broadConfirmation);
+
+  let type = null;
+  if (squeezeActive) {
+    type = "POSSIBLE_SQUEEZE";
+  } else if (parentActive && broadState === "BROAD_CONFIRMED") {
+    type = "BROAD_CONFIRMED";
+  } else if (parentActive && broadState === "NARROW") {
+    type = "NARROW";
+  } else if (parentActive && broadState === "MIXED_CONFIRMATION") {
+    type = "MIXED_CONFIRMATION";
+  } else if (parentActive) {
+    type = "ORDINARY";
+  }
+
+  return {
+    // Summary/presentation only. Nested evidence below is canonical and may coexist.
+    type,
+
+    squeeze: {
+      active: squeezeActive,
+      direction: squeezeActive ? squeezeDirection : ENGINE29_MOVE_DIRECTIONS.FLAT,
+      state: squeezeActive ? "POSSIBLE_SQUEEZE" : "NONE",
+      counterToParent:
+        parentActive &&
+        squeezeActive &&
+        squeezeDirection !== parentDirection,
+      impulsePct: squeeze?.headline?.averageReturnPct ?? null,
+      pointMove: squeeze?.headline?.averagePointMove ?? null,
+      impulseMultiple: squeeze?.headline?.averageImpulseMultiple ?? null,
+      broadConfirmationMissing:
+        squeeze?.broadConfirmationMissing === true,
+      reasonCodes: squeeze?.reasonCodes || [],
+    },
+
+    broadConfirmation: {
+      state: broadState,
+      // Manager-approved semantic name: this is the parent direction being evaluated.
+      targetDirection:
+        broadConfirmation?.targetDirection ??
+        parentDirection,
+      confirmed: broadConfirmation?.broadConfirmed === true,
+      headlineEtfsConfirmed:
+        broadConfirmation?.headlineEtfsConfirmed === true,
+      independentBlocksConfirmed:
+        broadConfirmation?.independentBlocksConfirmed ?? 0,
+      blocks: broadConfirmation?.blocks || null,
+      reasonCodes: broadConfirmation?.reasonCodes || [],
+    },
+
+    participationQuality: broadState,
+    reasonCodes: unique([
+      ...(squeeze?.reasonCodes || []),
+      ...(broadConfirmation?.reasonCodes || []),
+    ]),
+  };
+}
+
 function plainEnglish(
   moveCharacter,
   direction,
@@ -79,56 +164,37 @@ function plainEnglish(
   const leadership = memberLabel(broadConfirmation?.blocks?.leadership);
   const credit = memberLabel(broadConfirmation?.blocks?.credit);
 
-  let summary = "No qualified ES 30-minute directional move is active.";
+  let summary = "No qualified ES 30-minute parent move is active.";
   let status = "NO ACTIVE MOVE";
 
   if (moveCharacter === ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE) {
-    summary =
-      "ES has an active multi-bar 30-minute upside move. Squeeze confirmation is not required for this state.";
+    summary = "ES has an active canonical 30-minute upside parent move.";
     status = "ES UPSIDE MOVE ACTIVE";
   } else if (
     moveCharacter === ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE
   ) {
-    summary =
-      "ES has an active multi-bar 30-minute downside move. Squeeze confirmation is not required for this state.";
+    summary = "ES has an active canonical 30-minute downside parent move.";
     status = "ES DOWNSIDE MOVE ACTIVE";
-  } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_UPSIDE_SQUEEZE) {
-    summary =
-      "ES is moving sharply higher, but the broader market underneath it is not yet confirming the move.";
-    status = "POSSIBLE ES UPSIDE SQUEEZE";
-  } else if (
-    moveCharacter === ENGINE29_MOVE_CHARACTERS.POSSIBLE_DOWNSIDE_SQUEEZE
-  ) {
-    summary =
-      "ES is moving sharply lower, but the broader market underneath it is not yet confirming the selloff.";
-    status = "POSSIBLE ES DOWNSIDE SQUEEZE";
-  } else if (
-    moveCharacter === ENGINE29_MOVE_CHARACTERS.BROAD_MOVE_CONFIRMED
-  ) {
-    summary =
-      direction === "UP"
-        ? "The ES rally is broadening across independent market internals."
-        : "The ES selloff is broadening across independent market internals.";
-    status =
-      direction === "UP"
-        ? "ES BROAD RALLY CONFIRMED"
-        : direction === "DOWN"
-          ? "ES BROAD SELLOFF CONFIRMED"
-          : "ES BROAD MOVE CONFIRMED";
-  } else if (moveCharacter === ENGINE29_MOVE_CHARACTERS.MIXED) {
-    summary = "ES has an active move, but the confirmation picture is mixed.";
-    status = "ES MOVE MIXED";
   } else if (
     underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.NEGATIVE
   ) {
     summary = underlyingPressure.headlineHoldingBetter
-      ? "No qualified ES 30-minute move is active, but selling pressure is visible underneath the headline market."
-      : "No qualified ES 30-minute move is active, but cross-market internals are leaning negative.";
+      ? "No qualified ES 30-minute parent move is active, but selling pressure is visible underneath the headline market."
+      : "No qualified ES 30-minute parent move is active, but cross-market internals are leaning negative.";
   } else if (
     underlyingPressure?.state === ENGINE29_UNDERLYING_PRESSURE.POSITIVE
   ) {
     summary =
-      "No qualified ES 30-minute move is active, but cross-market internals are leaning positive.";
+      "No qualified ES 30-minute parent move is active, but cross-market internals are leaning positive.";
+  }
+
+  if (squeeze?.squeezeLike === true) {
+    const squeezeDirection = squeeze?.headline?.direction;
+    summary += ` A possible ${String(squeezeDirection || "counter").toLowerCase()} squeeze is present as MOVE character evidence only.`;
+  }
+
+  if (broadConfirmation?.broadConfirmed === true) {
+    summary += " Broad internals confirm the canonical parent direction.";
   }
 
   return {
@@ -172,42 +238,12 @@ export function buildEngine29TacticalCharacter(
 ) {
   const symbols = structureBundle?.symbols || {};
   const detectorOptions = { ...options, esAnchor };
-
-  const directionProbe = detectSqueezeCharacter(
-    structureBundle,
-    groupBundle,
-    detectBroadConfirmation(
-      structureBundle,
-      ENGINE29_MOVE_DIRECTIONS.FLAT,
-      detectorOptions
-    ),
-    detectorOptions
-  );
-
-  const direction =
-    directionProbe?.headline?.direction ??
-    ENGINE29_MOVE_DIRECTIONS.FLAT;
-
-  const broadConfirmation = detectBroadConfirmation(
-    structureBundle,
-    direction,
-    detectorOptions
-  );
-
-  const squeeze = detectSqueezeCharacter(
-    structureBundle,
-    groupBundle,
-    broadConfirmation,
-    detectorOptions
-  );
-
-  const underlyingPressure = detectUnderlyingPressure(
-    structureBundle,
-    detectorOptions
-  );
-
   const esEntry = esAnchor?.structure || esAnchor || null;
 
+  // MOVE v2 authority order:
+  // 1) completed-30m adaptive candidate
+  // 2) persistent canonical parent
+  // 3) companion character/confirmation evidence
   const directionalMove =
     detectDirectionalMove(
       esEntry,
@@ -220,6 +256,59 @@ export function buildEngine29TacticalCharacter(
       priorParent: options.priorMoveParent || null,
       now,
     });
+
+  const parentDirection =
+    directionalMoveParent?.active === true
+      ? directionalMoveParent?.direction ?? ENGINE29_MOVE_DIRECTIONS.FLAT
+      : ENGINE29_MOVE_DIRECTIONS.FLAT;
+
+  // Canonical broad confirmation evaluates ONLY the parent direction.
+  const broadConfirmation = detectBroadConfirmation(
+    structureBundle,
+    parentDirection,
+    detectorOptions
+  );
+
+  // Squeeze remains independent character evidence. It may point opposite
+  // the parent, but it cannot change parent identity.
+  const squeezeDirectionProbe = detectSqueezeCharacter(
+    structureBundle,
+    groupBundle,
+    detectBroadConfirmation(
+      structureBundle,
+      ENGINE29_MOVE_DIRECTIONS.FLAT,
+      detectorOptions
+    ),
+    detectorOptions
+  );
+
+  const squeezeDirection =
+    squeezeDirectionProbe?.headline?.direction ??
+    ENGINE29_MOVE_DIRECTIONS.FLAT;
+
+  const squeezeBroadConfirmation = detectBroadConfirmation(
+    structureBundle,
+    squeezeDirection,
+    detectorOptions
+  );
+
+  const squeeze = detectSqueezeCharacter(
+    structureBundle,
+    groupBundle,
+    squeezeBroadConfirmation,
+    detectorOptions
+  );
+
+  const character = buildMoveCharacterLayer({
+    parent: directionalMoveParent,
+    squeeze,
+    broadConfirmation,
+  });
+
+  const underlyingPressure = detectUnderlyingPressure(
+    structureBundle,
+    detectorOptions
+  );
 
   const sweepCandidates = esEntry?.fastTactical
     ? [detectLiquiditySweep(esEntry, detectorOptions)]
@@ -266,10 +355,11 @@ export function buildEngine29TacticalCharacter(
   }
 
   return {
-    version: "engine29.tacticalCharacter.v2.4.moveParent",
+    version: "engine29.tacticalCharacter.v3.moveV2",
     timestamp: new Date(now).toISOString(),
     timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
     anchor: "ES",
+    authority: "CANONICAL_PARENT_MOVE_V2",
 
     esResolvedSymbol:
       esAnchor?.resolvedSymbol ||
@@ -285,15 +375,27 @@ export function buildEngine29TacticalCharacter(
     esLiveMonitorFreshness:
       esAnchor?.liveMonitorFreshness || null,
 
+    // Legacy compatibility projection FROM parent only.
     moveCharacter: resolved.moveCharacter,
     direction: resolved.direction,
     confidence: resolved.confidence,
+
+    // Canonical MOVE v2 layers.
+    parent: directionalMoveParent,
+    character,
 
     esImpulse: squeeze?.headline || null,
     headlineImpulse: squeeze?.headline || null,
     directionalMove,
     directionalMoveParent,
+
+    // Canonical confirmation is parent-targeted.
     broadConfirmation,
+
+    // Short-impulse confirmation remains squeeze-local diagnostic evidence.
+    squeezeBroadConfirmation,
+    squeeze,
+
     underlyingPressure,
     oneHourContext: squeeze?.oneHour || null,
     liquiditySweeps: sweepCandidates,

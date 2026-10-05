@@ -83,6 +83,10 @@ export function detectBroadConfirmation(structureBundle, direction, options = {}
   }
 
   return {
+    // MOVE v2 semantic clarification:
+    // targetDirection is the canonical parent direction being evaluated.
+    // direction is retained temporarily for backward compatibility only.
+    targetDirection: directional ? direction : ENGINE29_MOVE_DIRECTIONS.FLAT,
     direction: directional ? direction : ENGINE29_MOVE_DIRECTIONS.FLAT,
     broadConfirmed,
     headlineEtfsConfirmed,
