@@ -129,9 +129,81 @@ test("Engine7 planId must still correlate exactly to Engine9 planId", () => {
   assert.ok(result.identityMismatches.some((m) => m.field === "planId"));
 });
 
-test("geometry protection remains unchanged", () => {
+test("copied Engine7 geometry is not treated as a second geometry authority", () => {
   const f = fixtures();
-  const result = run({ engine7: { ...f.engine7, officialStopPrice: 7611 } });
+  const result = run({
+    engine7: {
+      ...f.engine7,
+      officialEntryPrice: 9999,
+      officialStopPrice: 9998,
+      officialStopDistancePoints: 1,
+    },
+  });
+  assert.equal(result.status, "READY_TO_CREATE_PAPER_ORDER");
+  assert.equal(result.geometryMatched, true);
+  assert.deepEqual(result.geometryMismatches, []);
+});
+
+test("invalid Engine9 entry blocks", () => {
+  const f = fixtures();
+  const result = run({ engine9: { ...f.engine9, officialEntryPrice: null } });
   assert.equal(result.status, "GEOMETRY_SIZE_MISMATCH");
-  assert.ok(result.geometryMismatches.some((m) => m.field === "officialStopPrice"));
+  assert.ok(result.blockers.includes("ENGINE9_OFFICIAL_ENTRY_INVALID"));
+});
+
+test("invalid Engine9 stop blocks", () => {
+  const f = fixtures();
+  const result = run({ engine9: { ...f.engine9, officialStopPrice: null } });
+  assert.equal(result.status, "GEOMETRY_SIZE_MISMATCH");
+  assert.ok(result.blockers.includes("ENGINE9_OFFICIAL_STOP_INVALID"));
+});
+
+test("directionally invalid Engine9 stop blocks", () => {
+  const f = fixtures();
+  const result = run({ engine9: { ...f.engine9, officialStopPrice: 7590 } });
+  assert.equal(result.status, "GEOMETRY_SIZE_MISMATCH");
+  assert.ok(result.blockers.includes("ENGINE9_SHORT_STOP_NOT_ABOVE_ENTRY"));
+});
+
+test("missing Engine9 targets blocks", () => {
+  const f = fixtures();
+  const result = run({ engine9: { ...f.engine9, officialTargets: [] } });
+  assert.equal(result.status, "GEOMETRY_SIZE_MISMATCH");
+  assert.ok(result.blockers.includes("ENGINE9_OFFICIAL_TARGETS_MISSING"));
+});
+
+test("directionally invalid Engine9 target blocks", () => {
+  const f = fixtures();
+  const result = run({
+    engine9: {
+      ...f.engine9,
+      officialTargets: [{ targetId: "T1", price: 7620 }],
+    },
+  });
+  assert.equal(result.status, "GEOMETRY_SIZE_MISMATCH");
+  assert.ok(result.blockers.includes("ENGINE9_SHORT_TARGET_NOT_BELOW_ENTRY_T1"));
+});
+
+test("Engine7 finalContracts zero remains blocked", () => {
+  const f = fixtures();
+  const result = run({
+    engine7: {
+      ...f.engine7,
+      finalContracts: 0,
+      status: "FINAL_SIZE_READY",
+      allowed: true,
+      executableSizing: true,
+    },
+  });
+  assert.equal(result.status, "WAITING_FOR_ENGINE7_FINAL_SIZE");
+  assert.ok(result.blockers.includes("ENGINE7_FINAL_SIZE_NOT_READY"));
+});
+
+test("canonical identity mismatch still blocks", () => {
+  const f = fixtures();
+  const result = run({
+    engine9: { ...f.engine9, candidateId: "E26C-WRONG" },
+  });
+  assert.equal(result.status, "IDENTITY_MISMATCH");
+  assert.ok(result.blockers.includes("UPSTREAM_IDENTITY_MISMATCH"));
 });

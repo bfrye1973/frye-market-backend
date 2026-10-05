@@ -62,12 +62,6 @@ const ENGINE9_ENGINE7_CORRELATION_FIELDS = [
   "snapshotTime",
 ];
 
-const GEOMETRY_FIELDS = [
-  "officialEntryPrice",
-  "officialStopPrice",
-  "officialStopDistancePoints",
-];
-
 function nowIso() {
   return new Date().toISOString();
 }
@@ -1027,43 +1021,26 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 9 ↔ Engine 7B official geometry.
+   * Engine 9 owns official geometry. Validate that canonical official
+   * geometry directly; Engine 7 owns sizing, not a second geometry truth.
    */
-  const geometryMismatches = compareFields({
-    left: engine9,
-    right: engine7,
-    fields: GEOMETRY_FIELDS,
-    leftName: "ENGINE9",
-    rightName: "ENGINE7B",
-  });
-
   const geometryErrors =
     validateEngine9Geometry(engine9);
 
   output = {
     ...output,
     geometryMatched:
-      geometryMismatches.length === 0 &&
       geometryErrors.length === 0,
 
-    geometryMismatches,
+    geometryMismatches: [],
   };
 
-  if (
-    geometryMismatches.length > 0 ||
-    geometryErrors.length > 0
-  ) {
+  if (geometryErrors.length > 0) {
     return finish(output, {
       status: "GEOMETRY_SIZE_MISMATCH",
-      blockers: [
-        ...geometryErrors,
-        ...geometryMismatches.map(
-          (mismatch) =>
-            `GEOMETRY_MISMATCH_${mismatch.field.toUpperCase()}`
-        ),
-      ],
+      blockers: geometryErrors,
       reasonCodes: [
-        "ENGINE9_ENGINE7B_GEOMETRY_NOT_EQUAL",
+        "ENGINE9_OFFICIAL_GEOMETRY_INVALID",
         "NO_ORDER_CREATED",
       ],
     });
