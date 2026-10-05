@@ -232,8 +232,15 @@ async function loadFredSymbol({
   definition,
   source,
   fredApiKey,
+  polygonApiKey,
   structuralFrom,
+  tacticalFrom,
+  tacticalTo,
+  fastTacticalFrom,
+  fastTacticalTo,
   now,
+  includeTactical,
+  includeFastTactical,
 }) {
   const errors = [];
   let structural = null;
@@ -264,6 +271,68 @@ async function loadFredSymbol({
     errors.push(`STRUCTURAL: ${err.message}`);
   }
 
+  let tactical = null;
+  if (includeTactical && source?.intradaySymbol) {
+    try {
+      const hourly = await fetchEngine29PolygonHourly({
+        symbol: source.intradaySymbol,
+        apiKey: polygonApiKey,
+        from: tacticalFrom,
+        to: tacticalTo,
+      });
+      const bars = normalizePolygonBars(hourly.bars);
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+        now,
+      });
+
+      tactical = {
+        timeframe: ENGINE29_TIMEFRAMES.TACTICAL,
+        sourceTimeframe: "1H",
+        sourceSymbol: source.intradaySymbol,
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+      };
+    } catch (err) {
+      errors.push(`TACTICAL: ${err.message}`);
+    }
+  }
+
+  let fastTactical = null;
+  if (includeFastTactical && source?.intradaySymbol) {
+    try {
+      const thirtyMinute = await fetchEngine29PolygonThirtyMinute({
+        symbol: source.intradaySymbol,
+        apiKey: polygonApiKey,
+        from: fastTacticalFrom,
+        to: fastTacticalTo,
+      });
+      const bars = normalizePolygonBars(thirtyMinute.bars);
+      const latest = getLatestNormalizedBar(bars);
+      const freshness = evaluateFreshness({
+        latestTime: latest?.time,
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        now,
+      });
+
+      fastTactical = {
+        timeframe: ENGINE29_TIMEFRAMES.FAST_TACTICAL,
+        sourceTimeframe: "30m",
+        sourceSymbol: source.intradaySymbol,
+        count: bars.length,
+        latest,
+        bars,
+        freshness,
+      };
+    } catch (err) {
+      errors.push(`FAST_TACTICAL: ${err.message}`);
+    }
+  }
+
   const meta = sourceMetadata(source);
 
   return {
@@ -274,17 +343,20 @@ async function loadFredSymbol({
     stressDirection: definition.stressDirection,
     required: Boolean(definition.required),
     ...meta,
+    intradaySourceSymbol: source?.intradaySymbol || null,
     available: Boolean(structural?.latest),
     structural,
-    tactical: null,
-    tacticalAvailable: false,
-    tacticalUnavailableReason: "FRED_DAILY_ONLY",
-    fastTactical: null,
-    fastTacticalAvailable: false,
-    fastTacticalUnavailableReason: "FRED_DAILY_ONLY",
+    tactical,
+    tacticalAvailable: Boolean(tactical?.latest),
+    tacticalUnavailableReason:
+      source?.intradaySymbol ? null : "FRED_DAILY_ONLY",
+    fastTactical,
+    fastTacticalAvailable: Boolean(fastTactical?.latest),
+    fastTacticalUnavailableReason:
+      source?.intradaySymbol ? null : "FRED_DAILY_ONLY",
     liveMonitor: null,
     liveMonitorAvailable: false,
-    liveMonitorUnavailableReason: "FRED_DAILY_ONLY",
+    liveMonitorUnavailableReason: "NOT_WIRED",
     errors,
   };
 }
@@ -486,8 +558,15 @@ async function loadSource({
       definition,
       source,
       fredApiKey,
+      polygonApiKey,
       structuralFrom,
+      tacticalFrom,
+      tacticalTo,
+      fastTacticalFrom,
+      fastTacticalTo,
       now,
+      includeTactical,
+      includeFastTactical,
     });
   }
 
