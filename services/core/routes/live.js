@@ -26,6 +26,8 @@ const liveRouter = express.Router();
 
 const GH_OWNER = process.env.LIVE_GH_OWNER || "bfrye1973";
 const GH_REPO = process.env.LIVE_GH_REPO || "frye-market-backend";
+const GH_API_TOKEN =
+  process.env.LIVE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || "";
 
 const INTRA_BRANCH = process.env.LIVE_INTRADAY_BRANCH || "data-live-10min";
 const HOURLY_BRANCH = process.env.LIVE_HOURLY_BRANCH || "data-live-hourly";
@@ -86,6 +88,39 @@ const cacheBust = () => `t=${Date.now()}`;
 const rawUrl = (owner, repo, branch, path) =>
   `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}?${cacheBust()}`;
 
+const apiContentUrl = (owner, repo, branch, path) =>
+  `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(
+    branch
+  )}&${cacheBust()}`;
+
+export function extractLiveSourceTimestampMs(json) {
+  const value =
+    json?.updated_at_utc ||
+    json?.generated_at_utc ||
+    json?.sectorsUpdatedAt ||
+    json?.meta?.ts_utc ||
+    json?.meta?.last_full_run_utc ||
+    json?.meta?.last_run_utc ||
+    json?.updated_at ||
+    null;
+
+  const ms = Date.parse(String(value || ""));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+export function newerLiveJson(left, right) {
+  if (!left) return right || null;
+  if (!right) return left;
+
+  const leftMs = extractLiveSourceTimestampMs(left);
+  const rightMs = extractLiveSourceTimestampMs(right);
+
+  if (leftMs == null && rightMs == null) return left;
+  if (leftMs == null) return right;
+  if (rightMs == null) return left;
+  return leftMs >= rightMs ? left : right;
+}
+
 function setNoStore(res) {
   res.setHeader(
     "Cache-Control",
@@ -96,14 +131,53 @@ function setNoStore(res) {
   res.setHeader("Content-Type", "application/json; charset=utf-8");
 }
 
-async function fetchText(url) {
-  const r = await fetch(url, { cache: "no-store" });
+async function fetchText(url, headers = {}) {
+  const r = await fetch(url, {
+    cache: "no-store",
+    headers,
+  });
   const text = await r.text();
 
   return {
     ok: r.ok,
     status: r.status,
     text,
+  };
+}
+
+async function fetchLiveSource({ owner, repo, branch, path }) {
+  const apiUrl = apiContentUrl(owner, repo, branch, path);
+  const apiHeaders = {
+    Accept: "application/vnd.github.raw+json",
+    "User-Agent": "frye-market-live-proxy/1.0",
+    "Cache-Control": "no-cache",
+  };
+
+  if (GH_API_TOKEN) {
+    apiHeaders.Authorization = `Bearer ${GH_API_TOKEN}`;
+  }
+
+  const apiResult = await fetchText(apiUrl, apiHeaders);
+
+  if (apiResult.ok) {
+    return {
+      ...apiResult,
+      source: "GITHUB_API",
+      sourceUrl: apiUrl,
+    };
+  }
+
+  const fallbackUrl = rawUrl(owner, repo, branch, path);
+  const rawResult = await fetchText(fallbackUrl, {
+    "Cache-Control": "no-cache",
+    "User-Agent": "frye-market-live-proxy/1.0",
+  });
+
+  return {
+    ...rawResult,
+    source: "GITHUB_RAW",
+    sourceUrl: fallbackUrl,
+    apiStatus: apiResult.status,
   };
 }
 
@@ -176,10 +250,13 @@ async function serveLiveJsonWithLastGood({
   req,
   res,
 }) {
-  const url = rawUrl(GH_OWNER, GH_REPO, branch, path);
-
   try {
-    const r = await fetchText(url);
+    const r = await fetchLiveSource({
+      owner: GH_OWNER,
+      repo: GH_REPO,
+      branch,
+      path,
+    });
 
     if (!r.ok) {
       throw new Error(`HTTP ${r.status}: ${r.text?.slice(0, 160)}`);
@@ -191,18 +268,40 @@ async function serveLiveJsonWithLastGood({
       throw new Error(`INVALID_JSON: ${parsed.error || "parse failed"}`);
     }
 
-    setLastGood(key, parsed.json, {
-      sourceUrl: url,
+    const existing = getLastGood(key);
+    const newest = newerLiveJson(parsed.json, existing?.json || null);
+    const fetchedIsNewest = newest === parsed.json;
+
+    if (!fetchedIsNewest && existing?.json) {
+      const out = addLiveMeta(existing.json, {
+        source: "LAST_GOOD_NEWER_THAN_GITHUB",
+        upstreamSource: r.source,
+        routeName,
+        usingLastGood: true,
+        lastGoodAvailable: true,
+        lastGoodSavedAt: existing.savedAt,
+        fetchedAt: new Date().toISOString(),
+        sourceUrl: r.sourceUrl,
+        key,
+      });
+
+      setNoStore(res);
+      return res.status(200).send(JSON.stringify(out));
+    }
+
+    const saved = setLastGood(key, parsed.json, {
+      sourceUrl: r.sourceUrl,
       routeName,
     });
 
     const out = addLiveMeta(parsed.json, {
-      source: "GITHUB_RAW",
+      source: r.source,
       routeName,
       usingLastGood: false,
       lastGoodAvailable: true,
-      lastGoodSavedAt: new Date().toISOString(),
+      lastGoodSavedAt: saved.savedAt,
       fetchedAt: new Date().toISOString(),
+      sourceUrl: r.sourceUrl,
       key,
     });
 
