@@ -1,0 +1,20 @@
+name: Live Proxy Production Validation
+
+on:
+  push:
+    branches:
+      - live-proxy-freshness-api-first-v1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check 10m 1H 4H live routes
+        run: |
+          set -euo pipefail
+          for route in intraday hourly 4h; do
+            curl -fsS --retry 5 --retry-delay 2               "https://frye-market-backend-1.onrender.com/live/$route"               -o "/tmp/$route.json"
+            echo "=== $route ==="
+            jq '{updated_at_utc, updated_at, liveMeta}' "/tmp/$route.json"
+            jq -e '.liveMeta.source == "GITHUB_API" or .liveMeta.source == "LAST_GOOD_NEWER_THAN_GITHUB"' "/tmp/$route.json"
+          done
