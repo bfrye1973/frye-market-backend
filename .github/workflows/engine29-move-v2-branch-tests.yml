@@ -1,0 +1,56 @@
+name: Engine29 MOVE v2 branch tests
+
+on:
+  push:
+    branches:
+      - engine29-move-v2-authority
+  workflow_dispatch:
+
+jobs:
+  engine29-move-v2-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine29/tacticalCharacter/tacticalCharacterUtils.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildTacticalCharacter.js
+          node --check services/core/logic/engine29/tacticalCharacter/resolveMoveCharacter.js
+          node --check services/core/logic/engine29/tacticalCharacter/resolveDirectionalMoveParent.js
+          node --check services/core/logic/engine29/tacticalCharacter/detectBroadConfirmation.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeTransitionMonitor.js
+          node --check services/core/logic/engine29/aggregate/resolveTacticalState.js
+          node --check services/core/logic/engine29/aggregate/resolveFastTacticalShift.js
+          node --check services/core/logic/engine29/aggregate/buildCrossMarketStress.js
+          node --check services/core/logic/engine29/alerts/detectStateTransition.js
+          node --check services/core/jobs/updateEngine29CrossMarketStress.js
+          node --check services/core/tests/engine29MoveV2Authority.test.js
+
+      - name: MOVE v2 authority invariants
+        run: node --test services/core/tests/engine29MoveV2Authority.test.js
+
+      - name: Existing adaptive MOVE and parent persistence
+        run: node --test services/core/tests/engine29MoveLaneActive.test.js
+
+      - name: Existing live consolidation diagnostics
+        run: node --test services/core/tests/engine29LiveConsolidation.test.js
+
+      - name: Tactical character acceptance
+        run: node services/core/logic/engine29/qa/runTacticalCharacterAcceptanceTests.js
+
+      - name: Existing trap detection regressions
+        run: node --test services/core/tests/engine29TrapDetectionPhaseB.test.js
+
+      - name: Existing trap campaign regressions
+        run: node --test services/core/tests/engine29TrapCampaign.test.js
+
+      - name: Engine25 participation isolation regressions
+        run: node --test services/core/tests/engine29Engine25ParticipationAdapter.test.js
