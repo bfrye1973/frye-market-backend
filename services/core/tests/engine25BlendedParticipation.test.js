@@ -256,11 +256,27 @@ test("freshness decay boundaries are exact", () => {
   );
   assert.equal(
     computeLinearFreshnessMultiplier(
-      45 * 60_000,
-      15 * 60_000,
-      75 * 60_000
+      60 * 60_000,
+      60 * 60_000,
+      90 * 60_000
+    ),
+    1
+  );
+  assert.equal(
+    computeLinearFreshnessMultiplier(
+      75 * 60_000,
+      60 * 60_000,
+      90 * 60_000
     ),
     0.5
+  );
+  assert.equal(
+    computeLinearFreshnessMultiplier(
+      90 * 60_000,
+      60 * 60_000,
+      90 * 60_000
+    ),
+    0
   );
   assert.equal(
     computeLinearFreshnessMultiplier(
