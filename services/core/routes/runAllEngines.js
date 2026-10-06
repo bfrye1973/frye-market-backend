@@ -12,6 +12,14 @@ const __dirname = path.dirname(__filename);
 // We run everything from services/core
 const CORE_DIR = path.resolve(__dirname, "..");
 
+// Step 0: Manage any already-open canonical Strategy 1 PAPER trade.
+// This runs before new signal construction so protective exits remain independent
+// of whether the current engine build later succeeds.
+const ENGINE8_AUTO_PAPER_LIFECYCLE_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/autoManageCanonicalPaperLifecycle.js"
+);
+
 // Step 1
 const ENGINE1_RUNNER = path.resolve(CORE_DIR, "jobs/runEngine1AndShelves.js");
 
@@ -175,6 +183,22 @@ async function handle(req, res) {
 
   try {
     // ---------------------------------
+    // STEP 0: Manage existing open PAPER lifecycle
+    //
+    // The lifecycle job is separately opt-in and fail-closed.
+    // It consumes only the frozen Engine 9 plan already stored by Engine 10,
+    // and routes all REDUCE / EXIT actions through Engine 8.
+    // A lifecycle error is recorded in the final run result, but it does not
+    // prevent the market engines from refreshing their next decision state.
+    // ---------------------------------
+    const step0 = await runStep({
+      name: "engine8_auto_paper_lifecycle",
+      cmd: "node",
+      args: [ENGINE8_AUTO_PAPER_LIFECYCLE_JOB],
+      cwd: CORE_DIR,
+    });
+
+    // ---------------------------------
     // STEP 1: Engine 1 + Shelves
     // ---------------------------------
     const step1 = await runStep({
@@ -201,7 +225,22 @@ async function handle(req, res) {
         failedStep: "engine1_and_shelves",
         timings: {
           totalElapsedMs,
+          engine8_auto_paper_lifecycle: step0.elapsedMs,
           engine1_and_shelves: step1.elapsedMs,
+        },
+        steps: {
+          engine8_auto_paper_lifecycle: {
+            code: step0.code,
+            startedAt: step0.startedAt,
+            endedAt: step0.endedAt,
+            elapsedMs: step0.elapsedMs,
+          },
+          engine1_and_shelves: {
+            code: step1.code,
+            startedAt: step1.startedAt,
+            endedAt: step1.endedAt,
+            elapsedMs: step1.elapsedMs,
+          },
         },
         stdout: tail(step1.stdout),
         stderr: tail(step1.stderr),
@@ -283,6 +322,9 @@ async function handle(req, res) {
     const totalElapsedMs = elapsedMs(routeStartedMs);
 
     const combinedStdout = [
+      "== STEP 0: node jobs/autoManageCanonicalPaperLifecycle.js ==",
+      step0.stdout,
+      "",
       "== STEP 1: node jobs/runEngine1AndShelves.js ==",
       step1.stdout,
       "",
@@ -300,6 +342,9 @@ async function handle(req, res) {
     ].join("\n");
 
     const combinedStderr = [
+      "== STEP 0 STDERR ==",
+      step0.stderr,
+      "",
       "== STEP 1 STDERR ==",
       step1.stderr,
       "",
@@ -317,13 +362,16 @@ async function handle(req, res) {
     ].join("\n");
 
     const ok =
+      step0.code === 0 &&
       step2.code === 0 &&
       step3a.code === 0 &&
       step3b.code === 0 &&
       step4.code === 0;
 
     const code =
-      step2.code !== 0
+      step0.code !== 0
+        ? step0.code
+        : step2.code !== 0
         ? step2.code
         : step3a.code !== 0
         ? step3a.code
@@ -343,6 +391,7 @@ async function handle(req, res) {
       totalElapsedMs,
       timings: {
         totalElapsedMs,
+        engine8_auto_paper_lifecycle: step0.elapsedMs,
         engine1_and_shelves: step1.elapsedMs,
         runAllEngines_sh: step2.elapsedMs,
         build_es_strategy_snapshot: step3a.elapsedMs,
@@ -350,6 +399,12 @@ async function handle(req, res) {
         engine8_auto_paper_execution: step4.elapsedMs,
       },
       steps: {
+        engine8_auto_paper_lifecycle: {
+          code: step0.code,
+          startedAt: step0.startedAt,
+          endedAt: step0.endedAt,
+          elapsedMs: step0.elapsedMs,
+        },
         engine1_and_shelves: {
           code: step1.code,
           startedAt: step1.startedAt,
