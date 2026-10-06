@@ -1,0 +1,394 @@
+// services/core/server.js
+// Backend-1 (Core API) — Express entry (ESM)
+
+import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+import { spawn } from "child_process";
+import { startEngine25FinlightStream } from "./logic/engine25FinlightStream.js";
+
+import { ohlcRouter } from "./routes/ohlc.js";
+import liveRouter from "./routes/live.js";
+import sectorcards10mRouter from "./routes/sectorcards-10m.js";
+
+import smzLevels from "./routes/smzLevels.js";
+import smzShelves from "./routes/smzShelves.js";
+import esSmzShelves from "./routes/esSmzShelves.js";
+import smzHierarchy from "./routes/smzHierarchy.js";
+
+import { engine5ContextRouter } from "./routes/engine5Context.js";
+import { reactionScoreRouter } from "./routes/reactionScore.js";
+import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
+import { spyVolumeBehaviorRouter } from "./routes/spyVolumeBehavior.js";
+import { confluenceScoreRouter } from "./routes/confluenceScore.js";
+import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
+import replayRouter from "./routes/replay.js";
+import { scalpStatusRouter } from "./routes/scalpStatus.js";
+import { alertsRouter } from "./routes/alerts.js";
+import marketNarratorRouter from "./routes/marketNarrator.js";
+import marketNarratorAIRouter from "./routes/marketNarratorAI.js";
+import drawingsRouter from "./routes/drawings.js";
+import optionsScalpRouter from "./routes/optionsScalp.js";
+import tradingRouter from "./routes/trading.js";
+import schwabAuthRouter from "./routes/schwabAuth.js";
+import { momentumContextRouter } from "./routes/momentumContext.js";
+import scalpLabRouter from "./routes/scalpLab.js";
+
+import runAllEnginesRouter from "./routes/runAllEngines.js";
+import engine12StorageMaintenanceRouter from "./routes/engine12StorageMaintenance.js";
+import { fibLevelsRouter } from "./routes/fibLevels.js";
+import { activeWaveStateRouter } from "./routes/activeWaveState.js";
+import { tradePermissionRouter } from "./routes/tradePermission.js";
+import { morningFibRouter } from "./routes/morningFib.js";
+import chartOverlayRouter from "./routes/chartOverlay.js";
+import tradeJournalRouter from "./routes/tradeJournal.js";
+import { engine15AlertsRouter } from "./routes/engine15Alerts.js";
+import runShelvesJobRouter from "./routes/runShelvesJob.js";
+import engine21AlignmentRoute from "./routes/engine21Alignment.js";
+import engine25MarketHealthRouter from "./routes/engine25MarketHealth.js";
+import engine25EsOverlayRouter from "./routes/engine25EsOverlay.js";
+import engine25CompositeOverlayRouter from "./routes/engine25CompositeOverlay.js";
+import engine25FullDashboardRouter from "./routes/engine25FullDashboard.js";
+import engine25RefreshRouter from "./routes/engine25Refresh.js";
+import engine25ContextRouter from "./routes/engine25Context.js";
+import engine25IntradayMacroRouter from "./routes/engine25IntradayMacro.js";
+import engine29CrossMarketStressRouter from "./routes/engine29CrossMarketStress.js";
+import executionStateRouter from "./routes/executionState.js";
+import engine26ManualHardSignalRouter from "./routes/engine26ManualHardSignal.js";
+import futuresOhlcRouter from "./routes/futuresOhlc.js";
+import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
+import esReactionScore from "./routes/esReactionScore.js";
+import { esVolumeBehaviorRouter } from "./routes/esVolumeBehavior.js";
+import spyReactionQuality from "./routes/spyReactionQuality.js";
+import esSmzLevels from "./routes/esSmzLevels.js";
+
+// --- App setup ---
+const app = express();
+
+// --- Paths ---
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// WHO AM I TEST ROUTE
+app.get("/__whoami", (_req, res) => {
+  res.json({
+    backend: "BACKEND-CORE-R12.8",
+    ts: new Date().toISOString(),
+  });
+});
+
+app.set("trust proxy", true);
+app.disable("x-powered-by");
+app.set("etag", false);
+app.use(express.json({ limit: "1mb" }));
+
+// --- CORS ---
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+
+  res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS,POST,PUT,DELETE");
+
+  const reqHdrs = req.headers["access-control-request-headers"];
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    reqHdrs ||
+      [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-Idempotency-Key",
+        "X-ENGINE-CRON-TOKEN",
+        "X-Engine8-Admin-Secret",
+      ].join(", ")
+  );
+
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
+  next();
+});
+
+// --- Static (optional) ---
+app.use(express.static(path.join(__dirname, "public")));
+
+// --- Health endpoints ---
+app.get("/healthz", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "core",
+    ts: new Date().toISOString(),
+  });
+});
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    ok: true,
+    service: "core",
+    ts: new Date().toISOString(),
+  });
+});
+
+// --- Root splash ---
+app.get("/", (_req, res) => {
+  res.type("text/plain").send("Frye Core API — see /api/v1/ohlc and /live");
+});
+
+// --- API routes ---
+app.use("/api/v1/ohlc", ohlcRouter);
+app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
+app.use("/api/sectorcards-10m", sectorcards10mRouter);
+app.use("/live", liveRouter);
+app.use("/api/v1/smz-levels", smzLevels);
+app.use("/api/v1/smz-shelves", smzShelves);
+app.use("/api/v1/es-smz-shelves", esSmzShelves);
+app.use("/api/v1/es-smz-levels", esSmzLevels);
+
+app.use("/api/v1/es-reaction-score", esReactionScore);
+app.use("/api/v1/smz-hierarchy", smzHierarchy);
+
+app.use("/api/trading", tradingRouter);
+app.use("/api/auth/schwab", schwabAuthRouter);
+
+app.use("/api/v1", engine5ContextRouter);
+app.use("/api/v1", fibLevelsRouter);
+app.use("/api/v1", activeWaveStateRouter);
+app.use("/api/v1", reactionScoreRouter);
+app.use("/api/v1", volumeBehaviorRouter);
+app.use("/api/v1", spyVolumeBehaviorRouter);
+app.use("/api/v1", esVolumeBehaviorRouter);
+app.use("/api/v1", confluenceScoreRouter);
+app.use("/api/v1", momentumContextRouter);
+app.use("/api/v1", dashboardSnapshotRouter);
+app.use("/api/v1", replayRouter);
+app.use("/api/v1", scalpStatusRouter);
+app.use("/api/v1/alerts", alertsRouter);
+app.use("/api/v1", marketNarratorRouter);
+app.use("/api/v1", marketNarratorAIRouter);
+app.use("/api/v1", drawingsRouter);
+app.use("/api/v1/options", optionsScalpRouter);
+app.use("/api/v1", scalpLabRouter);
+app.use("/api/v1", morningFibRouter);
+app.use("/api/v1", chartOverlayRouter);
+app.use("/api/v1", tradeJournalRouter);
+app.use("/api/v1", runShelvesJobRouter);
+app.use("/api/v1", runAllEnginesRouter);
+app.use("/api/v1", engine12StorageMaintenanceRouter);
+app.use("/api/v1", tradePermissionRouter);
+app.use("/api/v1", engine15AlertsRouter);
+app.use("/api/v1", engine21AlignmentRoute);
+app.use("/api/v1", engine25MarketHealthRouter);
+app.use("/api/v1", engine25EsOverlayRouter);
+app.use("/api/v1", engine25CompositeOverlayRouter);
+app.use("/api/v1", engine25FullDashboardRouter);
+app.use("/api/v1", engine25RefreshRouter);
+app.use("/api/v1", engine25ContextRouter);
+app.use("/api/v1", engine25IntradayMacroRouter);
+app.use("/api/v1", engine29CrossMarketStressRouter);
+app.use("/api/v1/execution-state", executionStateRouter);
+app.use("/api/v1", engine26ManualHardSignalRouter);
+app.use("/api/v1/futures/market-meter", futuresMarketMeterRouter);
+app.use("/api/v1/spy-reaction-quality", spyReactionQuality);
+
+// --- 404 / errors ---
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "Not Found",
+    path: req.path,
+  });
+});
+
+app.use((err, _req, res, _next) => {
+  console.error("[server] unhandled:", err?.stack || err);
+  res.status(500).json({
+    ok: false,
+    error: "internal_error",
+    detail: String(err?.message || err),
+  });
+});
+
+// --- Startup snapshot helper ---
+let STARTUP_SNAPSHOT_RUNNING = false;
+
+function runStartupSnapshotBuild() {
+  if (STARTUP_SNAPSHOT_RUNNING) {
+    console.log("[startup-snapshot] skipped: already running");
+    return;
+  }
+
+  STARTUP_SNAPSHOT_RUNNING = true;
+  const startedAt = new Date().toISOString();
+  console.log(`[startup-snapshot] START @ ${startedAt}`);
+
+  const child = spawn("node", ["./jobs/buildStrategySnapshot.js"], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.on("data", (d) => {
+    stdout += d.toString();
+  });
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    if (code === 0) {
+      console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
+      if (stdout.trim()) {
+        console.log(stdout.trim());
+      }
+    } else {
+      console.error(
+        `[startup-snapshot] FAIL @ ${new Date().toISOString()} | code=${code}`
+      );
+      if (stdout.trim()) {
+        console.log(stdout.trim());
+      }
+      if (stderr.trim()) {
+        console.error(stderr.trim());
+      }
+    }
+
+    STARTUP_SNAPSHOT_RUNNING = false;
+  });
+
+  child.on("error", (err) => {
+    console.error(
+      `[startup-snapshot] SPAWN ERROR @ ${new Date().toISOString()} |`,
+      err?.stack || err?.message || String(err)
+    );
+    STARTUP_SNAPSHOT_RUNNING = false;
+  });
+}
+
+// --- Engine 25 startup news recovery ---
+// WebSocket delivery begins only after the connection is admitted.
+// Restore recent Reuters history first so a restart does not erase the
+// active event stack used by Engine 25 Event Pressure.
+let ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+function startEngine25FinlightStreamSafe() {
+  try {
+    startEngine25FinlightStream();
+  } catch (error) {
+    console.error(
+      "[engine25-finlight-stream] startup error:",
+      error?.stack || error?.message || String(error)
+    );
+  }
+}
+
+function runEngine25NewsStartupRecovery() {
+  if (ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING) {
+    console.log("[engine25-news-startup] skipped: recovery already running");
+    return;
+  }
+
+  ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = true;
+
+  console.log(
+    `[engine25-news-startup] REST RECOVERY START @ ${new Date().toISOString()}`
+  );
+
+  const child = spawn("node", ["./jobs/updateEngine25NewsEvents.js"], {
+    cwd: __dirname,
+    env: process.env,
+
+    // updateEngine25NewsEvents.js prints the full canonical JSON when run
+    // directly. Suppress stdout here so Render startup logs stay readable.
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  let stderr = "";
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+    if (code === 0) {
+      console.log(
+        `[engine25-news-startup] REST RECOVERY SUCCESS @ ${new Date().toISOString()}`
+      );
+    } else {
+      console.error(
+        `[engine25-news-startup] REST RECOVERY FAIL @ ${new Date().toISOString()} | code=${code}`
+      );
+
+      if (stderr.trim()) {
+        console.error(stderr.trim());
+      }
+    }
+
+    // The WebSocket becomes PRIMARY for all newly arriving articles.
+    // Start it even if REST recovery failed so live delivery is never lost.
+    console.log("[engine25-news-startup] starting Finlight WebSocket");
+    startEngine25FinlightStreamSafe();
+  });
+
+  child.on("error", (err) => {
+    ENGINE25_NEWS_STARTUP_RECOVERY_RUNNING = false;
+
+    console.error(
+      `[engine25-news-startup] REST RECOVERY SPAWN ERROR @ ${new Date().toISOString()} |`,
+      err?.stack || err?.message || String(err)
+    );
+
+    // If recovery cannot launch, fail open to the live WebSocket.
+    console.log(
+      "[engine25-news-startup] starting Finlight WebSocket after recovery spawn error"
+    );
+    startEngine25FinlightStreamSafe();
+  });
+}
+
+// --- Start ---
+const PORT = Number(process.env.PORT) || 8080;
+const HOST = "0.0.0.0";
+
+app.listen(PORT, HOST, () => {
+  console.log(`[OK] core listening on :${PORT}`);
+  console.log("- /api/health  (Render healthcheck)");
+  console.log("- /healthz");
+  console.log("- /api/v1/ohlc");
+  console.log("- /api/sectorcards-10m");
+  console.log("- /api/v1/smz-levels");
+  console.log("- /api/v1/smz-shelves");
+  console.log("- /api/v1/smz-hierarchy");
+  console.log("- /api/v1/fib-levels");
+  console.log("- /api/v1/waves/active  ✅ Engine 2B active wave state");
+  console.log("- /api/v1/confluence-score");
+  console.log("- /api/v1/dashboard-snapshot");
+  console.log("- /api/v1/run-all-engines   ✅ cron trigger");
+  console.log("- /api/v1/trade-permission  ✅ Engine 6");
+  console.log("- /api/v1/engine21-alignment  ✅ Engine 21");
+  console.log("- /api/v1/engine29/cross-market-stress  ✅ Engine 29");
+  console.log("- /live  (GitHub JSON proxies)");
+
+  // Build snapshot after server is already listening.
+  setTimeout(() => {
+    runStartupSnapshotBuild();
+  }, 1500);
+
+  // Engine 25 news startup contract:
+  // REST recovery/backfill first -> persistent WebSocket second.
+  // This prevents empty active-event / Event Pressure state after restart.
+  setTimeout(() => {
+    runEngine25NewsStartupRecovery();
+  }, 2500);
+});
+
+export default app;

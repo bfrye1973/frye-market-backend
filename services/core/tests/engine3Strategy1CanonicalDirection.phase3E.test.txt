@@ -1,0 +1,417 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  attachPaperScalpReactionToConfluence,
+} from "../logic/engine3/paperScalpReaction.js";
+
+const identity = {
+  symbol: "ES",
+  laneId: "minute",
+  strategyId: "intraday_scalp@10m",
+  candidateId: "candidate-1",
+  zoneId: "zone-1",
+  setupClass: "NEGOTIATED_ZONE_ROTATION",
+  setupGrade: "A+++",
+  identitySetupKey: "NEGOTIATED_ZONE_ROTATION",
+  candidateIdentityVersion: "engine26.strategy1.v2",
+  contactState: "NEGOTIATED_LINE_CONTACT",
+  chainArmed: true,
+  authorizeEngine3Evaluation: true,
+};
+
+function handoff({
+  bias = "SHORT",
+  zone = { lo: 99, hi: 101, mid: 100, relation: "INSIDE_ZONE" },
+  expectedReactions = [],
+} = {}) {
+  return {
+    ...identity,
+    active: true,
+    status: "ACTIVE",
+    armed: true,
+    tradeDirectionBias: bias,
+    expectedReactionDirection: bias,
+    expectedReactions,
+    zone,
+  };
+}
+
+function candle({
+  status = "COMPLETED",
+  open = 100,
+  high = 101,
+  low = 99,
+  close = 100,
+} = {}) {
+  return {
+    time: 1_700_000_000,
+    open,
+    high,
+    low,
+    close,
+    volume: 1000,
+    completionState: status,
+    candleClosed: status === "COMPLETED",
+  };
+}
+
+function observation1m({
+  state = "REJECTING_VALUE",
+  direction = "SHORT",
+  quality = "STRONG",
+  price = 100,
+  stale = false,
+  active = true,
+  status = "COMPLETED",
+  currentCandle = null,
+} = {}) {
+  return {
+    ...identity,
+    active,
+    diagnosticOnly: true,
+    noPermissionCreated: true,
+    noExecution: true,
+    sourceTimeframe: "1m",
+    state,
+    direction,
+    quality,
+    stale,
+    currentPrice: price,
+    currentCandleStatus: status,
+    candleState: status,
+    priorCandleStatus: "COMPLETED",
+    currentCandle:
+      currentCandle ||
+      candle({ status, close: price }),
+    priorCandle: candle({
+      status: "COMPLETED",
+      open: 100.5,
+      high: 101.5,
+      low: 99.5,
+      close: 100.5,
+    }),
+    supportingBarTime: 1_700_000_000,
+    evaluationTimeMs: 1_700_000_060_000,
+  };
+}
+
+function validation5m({
+  validationState = "UNRESOLVED",
+  direction = "NEUTRAL",
+  quality = "WEAK",
+  stale = false,
+} = {}) {
+  return {
+    ...identity,
+    active: true,
+    diagnosticOnly: true,
+    noPermissionCreated: true,
+    noExecution: true,
+    sourceTimeframe: "5m",
+    validationState,
+    direction,
+    quality,
+    stale,
+    supports1mDirection: validationState === "SUPPORT",
+    conflictsWith1mDirection: validationState === "CONFLICT",
+    maturityResolved:
+      validationState === "SUPPORT" || validationState === "CONFLICT",
+  };
+}
+
+function build({
+  oneMinute = observation1m(),
+  fiveMinute = validation5m(),
+  engine26 = handoff(),
+  previousCanonicalDirection = "NEUTRAL",
+  previousReactionConfirmed = false,
+  tenMinuteCompletedClose = null,
+  tenMinuteEma10 = null,
+  activePaperTradeDirection = null,
+} = {}) {
+  const patchedConfluence = {
+    context: {
+      reaction: {
+        currentLevelAction: null,
+        engine3FastImbalanceReaction: null,
+        engine3ReactionObservation1m: oneMinute,
+        engine3ReactionValidation5m: fiveMinute,
+      },
+    },
+  };
+
+  attachPaperScalpReactionToConfluence({
+    patchedConfluence,
+    engine22WaveStrategy: null,
+    engine26ReactionHandoff: engine26,
+    engine26StructuralContext: null,
+    paperShortResearchEnabled: true,
+    previousCanonicalDirection,
+    previousReactionConfirmed,
+    tenMinuteCompletedClose,
+    tenMinuteEma10,
+    activePaperTradeDirection,
+  });
+
+  return patchedConfluence.context.reaction.paperScalpReaction;
+}
+
+test("SHORT establishes inside negotiated zone from completed qualified 1m", () => {
+  const result = build();
+
+  assert.equal(result.insideNegotiatedZone, true);
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.directionEstablishedByFresh1m, true);
+  assert.equal(result.engine26ReactionVerified, true);
+  assert.equal(result.engine3Strategy1QualifiedForEngine6, true);
+});
+
+test("LONG establishes inside negotiated zone from completed qualified 1m", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "RECLAIMED_LEVEL",
+      direction: "LONG",
+    }),
+    engine26: handoff({ bias: "LONG" }),
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.engine26ReactionVerified, true);
+  assert.equal(result.engine3Strategy1QualifiedForEngine6, true);
+});
+
+test("5m UNRESOLVED does not delay valid inside-zone SHORT", () => {
+  const result = build({
+    fiveMinute: validation5m({
+      validationState: "UNRESOLVED",
+      direction: "NEUTRAL",
+    }),
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.fiveMinuteValidationRequired, false);
+});
+
+test("legacy WICK_BELOW_AND_RECLAIM label cannot veto valid SHORT", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "WICK_BELOW_AND_RECLAIM",
+      direction: "SHORT",
+      quality: "STRONG",
+      // Intentionally bullish body: the approved two-bar direction model,
+      // not a second close-vs-open body gate, owns direction.
+      currentCandle: candle({
+        status: "COMPLETED",
+        open: 99.5,
+        high: 100.5,
+        low: 98.5,
+        close: 100,
+      }),
+    }),
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "SHORT",
+      quality: "STRONG",
+    }),
+  });
+
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.engine26ReactionVerified, true);
+  assert.equal(result.engine3Strategy1QualifiedForEngine6, true);
+  assert.equal(
+    result.blockers.includes(
+      "ONE_MINUTE_REACTION_EXPLICITLY_CONTRADICTS_DIRECTION"
+    ),
+    false
+  );
+  assert.equal(
+    result.blockers.includes(
+      "ONE_MINUTE_CANDLE_NOT_ALIGNED_WITH_DIRECTION"
+    ),
+    false
+  );
+});
+
+test("legacy REJECTING_VALUE label cannot veto valid LONG", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "REJECTING_VALUE",
+      direction: "LONG",
+      quality: "STRONG",
+      currentCandle: candle({
+        status: "COMPLETED",
+        open: 100.5,
+        high: 101.5,
+        low: 99.5,
+        close: 100,
+      }),
+    }),
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "LONG",
+      quality: "STRONG",
+    }),
+    engine26: handoff({ bias: "LONG" }),
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.engine26ReactionVerified, true);
+  assert.equal(result.engine3Strategy1QualifiedForEngine6, true);
+  assert.equal(
+    result.blockers.includes(
+      "ONE_MINUTE_REACTION_EXPLICITLY_CONTRADICTS_DIRECTION"
+    ),
+    false
+  );
+});
+
+test("SHORT persists outside zone despite 1m/5m LONG flips", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "RECLAIMED_LEVEL",
+      direction: "LONG",
+      price: 98,
+    }),
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "LONG",
+      quality: "STRONG",
+    }),
+    engine26: handoff({
+      bias: "SHORT",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "BELOW_ZONE" },
+    }),
+    previousCanonicalDirection: "SHORT",
+    previousReactionConfirmed: true,
+    tenMinuteCompletedClose: 98.5,
+    tenMinuteEma10: 99,
+  });
+
+  assert.equal(result.insideNegotiatedZone, false);
+  assert.equal(result.direction, "SHORT");
+  assert.equal(result.directionPersistenceActive, true);
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.ema10ResetTriggered, false);
+});
+
+test("LONG persists outside zone despite 1m/5m SHORT flips", () => {
+  const result = build({
+    oneMinute: observation1m({
+      state: "REJECTING_VALUE",
+      direction: "SHORT",
+      price: 102,
+    }),
+    fiveMinute: validation5m({
+      validationState: "SUPPORT",
+      direction: "SHORT",
+      quality: "STRONG",
+    }),
+    engine26: handoff({
+      bias: "LONG",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "ABOVE_ZONE" },
+    }),
+    previousCanonicalDirection: "LONG",
+    previousReactionConfirmed: true,
+    tenMinuteCompletedClose: 101.5,
+    tenMinuteEma10: 101,
+  });
+
+  assert.equal(result.direction, "LONG");
+  assert.equal(result.directionPersistenceActive, true);
+  assert.equal(result.reactionConfirmed, true);
+  assert.equal(result.ema10ResetTriggered, false);
+});
+
+test("completed 10m close above EMA10 resets persisted SHORT", () => {
+  const result = build({
+    oneMinute: observation1m({ direction: "LONG", price: 98 }),
+    engine26: handoff({
+      bias: "SHORT",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "BELOW_ZONE" },
+    }),
+    previousCanonicalDirection: "SHORT",
+    previousReactionConfirmed: true,
+    tenMinuteCompletedClose: 100.25,
+    tenMinuteEma10: 100,
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.ema10ResetTriggered, true);
+  assert.equal(result.reactionConfirmed, false);
+});
+
+test("completed 10m close below EMA10 resets persisted LONG", () => {
+  const result = build({
+    oneMinute: observation1m({ direction: "SHORT", price: 102 }),
+    engine26: handoff({
+      bias: "LONG",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "ABOVE_ZONE" },
+    }),
+    previousCanonicalDirection: "LONG",
+    previousReactionConfirmed: true,
+    tenMinuteCompletedClose: 99.75,
+    tenMinuteEma10: 100,
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.ema10ResetTriggered, true);
+  assert.equal(result.reactionConfirmed, false);
+});
+
+test("EMA10 cannot create initial SHORT outside negotiated zone", () => {
+  const result = build({
+    oneMinute: observation1m({ direction: "SHORT", price: 98 }),
+    engine26: handoff({
+      bias: "SHORT",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "BELOW_ZONE" },
+    }),
+    previousCanonicalDirection: "NEUTRAL",
+    tenMinuteCompletedClose: 98.5,
+    tenMinuteEma10: 99,
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.canonicalResolutionReason, "EMA10_CANNOT_CREATE_INITIAL_DIRECTION");
+});
+
+test("EMA10 cannot create initial LONG outside negotiated zone", () => {
+  const result = build({
+    oneMinute: observation1m({ direction: "LONG", price: 102 }),
+    engine26: handoff({
+      bias: "LONG",
+      zone: { lo: 99, hi: 101, mid: 100, relation: "ABOVE_ZONE" },
+    }),
+    previousCanonicalDirection: "NEUTRAL",
+    tenMinuteCompletedClose: 101.5,
+    tenMinuteEma10: 101,
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.canonicalResolutionReason, "EMA10_CANNOT_CREATE_INITIAL_DIRECTION");
+});
+
+test("forming 1m cannot establish direction inside negotiated zone", () => {
+  const result = build({
+    oneMinute: observation1m({
+      direction: "SHORT",
+      status: "FORMING",
+      currentCandle: candle({
+        status: "FORMING",
+        open: 100.5,
+        high: 101,
+        low: 99,
+        close: 99.5,
+      }),
+    }),
+  });
+
+  assert.equal(result.direction, "NEUTRAL");
+  assert.equal(result.reactionConfirmed, false);
+  assert.equal(result.directionEstablishedByFresh1m, false);
+});

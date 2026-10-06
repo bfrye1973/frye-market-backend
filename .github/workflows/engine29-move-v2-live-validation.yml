@@ -1,0 +1,43 @@
+name: Engine29 MOVE v2 live validation
+
+on:
+  push:
+    branches:
+      - engine29-move-v2-authority
+    paths:
+      - services/core/qa/runEngine29MoveV2LiveValidation.js
+      - .github/workflows/engine29-move-v2-live-validation.yml
+  workflow_dispatch:
+
+jobs:
+  live-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax check live harness
+        run: node --check services/core/qa/runEngine29MoveV2LiveValidation.js
+
+      - name: Run three consecutive live builds
+        env:
+          ENGINE29_LIVE_VALIDATION_BUILDS: "3"
+          ENGINE29_LIVE_VALIDATION_WAIT_MS: "120000"
+          ENGINE29_LIVE_VALIDATION_BASE: "https://frye-market-backend-1.onrender.com"
+        run: node services/core/qa/runEngine29MoveV2LiveValidation.js
+
+      - name: Show saved canonical validation JSON
+        if: always()
+        run: |
+          if [ -f services/core/data/engine29-move-v2-live-validation.json ]; then
+            cat services/core/data/engine29-move-v2-live-validation.json
+          else
+            echo "validation output file missing"
+          fi

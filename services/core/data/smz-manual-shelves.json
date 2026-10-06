@@ -1,0 +1,23 @@
+{
+  "ok": true,
+  "meta": {
+    "schema": "smz-manual-shelves@1",
+    "updatedUtc": "2026-01-18T00:00:00Z",
+    "symbol": "SPY",
+    "notes": "Manual shelves (accumulation=blue, distribution=red). Source-of-truth. Never overwritten."
+  },
+  "levels": [
+    {
+      "shelfKey": "MANUAL_SHELF|SPY|ACC|692.00-688.80",
+      "symbol": "SPY",
+      "type": "accumulation",
+      "manualRange": [691.08, 689.81],
+      "priceRange": [691.08, 689.81],
+      "locked": true,
+      "rangeSource": "manual",
+      "status": "active",
+      "scoreOverride": 84,
+      "comment": "Accum shelf under resistance"
+    }
+  ]
+}
