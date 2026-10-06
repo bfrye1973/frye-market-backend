@@ -1,0 +1,75 @@
+name: Engine25 30m Internals Gate
+
+on:
+  push:
+    branches:
+      - engine25-30m-internals-v1
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      POLY_KEY: ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      FD_30M_LOOKBACK: "3"
+      FD_30M_DAYS: "5"
+      FD_30M_MAX_WORKERS: "10"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Python unit tests
+        run: python services/core/tests/engine25ThirtyMinuteInternals.test.py
+
+      - name: Route syntax
+        run: node --check services/core/routes/live.js
+
+      - name: Workflow identity checks
+        run: |
+          grep -q 'data-live-30m-internals' .github/workflows/dashboard-30min-internals.yml
+          grep -q 'data-archive-30m-internals' .github/workflows/dashboard-archive-30min-internals.yml
+          grep -q '/30m-internals' services/core/routes/live.js
+
+      - name: Run real full-market 30m scan
+        run: |
+          set -euo pipefail
+          python -u scripts/build_engine25_30m_internals.py             --sectors-dir data/sectors             --out /tmp/outlook_30m_internals.json
+
+      - name: Validate real scan
+        run: |
+          python - << 'PY'
+          import json
+          j=json.load(open("/tmp/outlook_30m_internals.json"))
+          assert j["schema"] == "engine25.marketInternals30m@1"
+          assert j["timeframe"] == "30m"
+          assert len(j["sectorCards"]) == 11
+          assert j["stocksScanned"] >= 5000, j["stocksScanned"]
+          assert j["stocksWithVolume"] > 0
+          assert j["coveragePct"] >= 70, j["coveragePct"]
+          assert j["strongSectorCount"] + j["neutralSectorCount"] + j["weakSectorCount"] == 11
+          assert j["newHighs"] is not None and j["newLows"] is not None
+          assert j["advancingVolume"] is not None and j["decliningVolume"] is not None
+          print(json.dumps({
+            "sourceTimestamp": j["sourceTimestamp"],
+            "stocksScanned": j["stocksScanned"],
+            "stocksWithVolume": j["stocksWithVolume"],
+            "coveragePct": j["coveragePct"],
+            "advancingStocks": j["advancingStocks"],
+            "decliningStocks": j["decliningStocks"],
+            "newHighs": j["newHighs"],
+            "newLows": j["newLows"],
+            "strong": j["strongSectorCount"],
+            "neutral": j["neutralSectorCount"],
+            "weak": j["weakSectorCount"],
+          }, indent=2))
+          PY
+
+      - name: Validate archive transformation
+        run: |
+          RESULT=$(python scripts/archive_engine25_30m.py build             --input /tmp/outlook_30m_internals.json             --stage-dir /tmp/engine25-30m-archive-stage             --history-root data/engine25-30m-history)
+          echo "$RESULT"
+          test -s /tmp/engine25-30m-archive-stage/engine25_30m_snapshot.json
+          test -s /tmp/engine25-30m-archive-stage/outlook_30m_internals.json
