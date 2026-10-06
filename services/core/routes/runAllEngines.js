@@ -30,6 +30,13 @@ const ES_REPLAY_ARCHIVE_JOB = path.resolve(
   "jobs/archiveEsReplaySnapshot.js"
 );
 
+// Step 4: Auto-execute a frozen canonical Engine 8 PAPER order when ready.
+// This is a separate job so snapshot construction remains read-only.
+const ENGINE8_AUTO_PAPER_EXECUTOR_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/autoExecuteCanonicalPaperTrade.js"
+);
+
 // Prevent overlapping cron/manual runs
 let IS_RUNNING = false;
 
@@ -236,6 +243,42 @@ async function handle(req, res) {
       cwd: CORE_DIR,
     });
 
+    // ---------------------------------
+    // STEP 4: Controlled canonical PAPER execution bridge
+    //
+    // Safety:
+    // - never runs against a failed/stale upstream build
+    // - the child job itself requires explicit PAPER-only env gates
+    // - execution still flows through the existing protected
+    //   /api/trading/paper/execute-canonical route
+    // - Engine 8 remains the only order creator
+    // ---------------------------------
+    let step4 = {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: "UPSTREAM_PIPELINE_NOT_COMPLETE",
+      }),
+      stderr: "",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: 0,
+    };
+
+    if (
+      step2.code === 0 &&
+      step3a.code === 0 &&
+      step3b.code === 0
+    ) {
+      step4 = await runStep({
+        name: "engine8_auto_paper_execution",
+        cmd: "node",
+        args: [ENGINE8_AUTO_PAPER_EXECUTOR_JOB],
+        cwd: CORE_DIR,
+      });
+    }
+
     const endedAt = nowIso();
     const totalElapsedMs = elapsedMs(routeStartedMs);
 
@@ -251,6 +294,9 @@ async function handle(req, res) {
       "",
       "== STEP 3B: node jobs/archiveEsReplaySnapshot.js ==",
       step3b.stdout,
+      "",
+      "== STEP 4: node jobs/autoExecuteCanonicalPaperTrade.js ==",
+      step4.stdout,
     ].join("\n");
 
     const combinedStderr = [
@@ -265,15 +311,25 @@ async function handle(req, res) {
       "",
       "== STEP 3B STDERR ==",
       step3b.stderr,
+      "",
+      "== STEP 4 STDERR ==",
+      step4.stderr,
     ].join("\n");
 
-    const ok = step2.code === 0 && step3a.code === 0 && step3b.code === 0;
+    const ok =
+      step2.code === 0 &&
+      step3a.code === 0 &&
+      step3b.code === 0 &&
+      step4.code === 0;
+
     const code =
       step2.code !== 0
         ? step2.code
         : step3a.code !== 0
         ? step3a.code
-        : step3b.code;
+        : step3b.code !== 0
+        ? step3b.code
+        : step4.code;
 
     console.log(
       `[run-all-engines] REQUEST END @ ${endedAt} | ok=${ok} | totalElapsedMs=${totalElapsedMs}`
@@ -291,6 +347,7 @@ async function handle(req, res) {
         runAllEngines_sh: step2.elapsedMs,
         build_es_strategy_snapshot: step3a.elapsedMs,
         archive_es_replay_snapshot: step3b.elapsedMs,
+        engine8_auto_paper_execution: step4.elapsedMs,
       },
       steps: {
         engine1_and_shelves: {
@@ -316,6 +373,12 @@ async function handle(req, res) {
           startedAt: step3b.startedAt,
           endedAt: step3b.endedAt,
           elapsedMs: step3b.elapsedMs,
+        },
+        engine8_auto_paper_execution: {
+          code: step4.code,
+          startedAt: step4.startedAt,
+          endedAt: step4.endedAt,
+          elapsedMs: step4.elapsedMs,
         },
       },
       stdout: tail(combinedStdout),
