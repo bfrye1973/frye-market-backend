@@ -136,6 +136,15 @@ function round(value, digits = 2) {
 }
 
 async function main() {
+  let production = null;
+  try {
+    production = await getJson(
+      new URL("/api/v1/engine29/cross-market-stress", BACKEND_BASE).toString()
+    );
+  } catch (error) {
+    production = { shadowComparisonUnavailable: true, error: error?.message || String(error) };
+  }
+
   const snapshots = loadSnapshotsFrom(ARCHIVE_ROOT, "engine25_10m_snapshot.json");
   const snapshots30 = fs.existsSync(path.join(ARCHIVE_30M_ROOT, REPLAY_DATE))
     ? loadSnapshotsFrom(ARCHIVE_30M_ROOT, "engine25_30m_snapshot.json")
@@ -255,6 +264,29 @@ async function main() {
     row.participationConfirmation >= 70 &&
     row.squeezePressure < 30
   );
+
+  const productionData = production?.data || production || {};
+  const oldSqueeze =
+    productionData?.moveCharacter?.squeeze ||
+    productionData?.marketCharacter?.move?.character?.squeeze ||
+    null;
+  const oldLiveCondition =
+    productionData?.marketCharacter?.move?.liveCondition ||
+    productionData?.liveMonitor ||
+    null;
+
+  console.log("SQUEEZE_V2_SHADOW_COMPARE " + JSON.stringify({
+    productionTimestamp: productionData?.timestamp ?? null,
+    oldDetector: {
+      active: oldSqueeze?.active === true || oldSqueeze?.squeezeLike === true,
+      direction: oldSqueeze?.direction ?? null,
+      state: oldSqueeze?.state ?? oldSqueeze?.character ?? null,
+      liveConditionState: oldLiveCondition?.state ?? null,
+      liveConditionDirection: oldLiveCondition?.direction ?? null,
+    },
+    newShadowLatest: rows.at(-1) || null,
+    authority: "READ_ONLY_SHADOW_COMPARE",
+  }));
 
   console.log("SQUEEZE_V2_REPLAY_SUMMARY " + JSON.stringify({
     highPressureCount: highPressure.length,
