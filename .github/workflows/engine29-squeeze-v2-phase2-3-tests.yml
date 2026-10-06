@@ -25,6 +25,10 @@ jobs:
           node --check services/core/tests/engine29SqueezeV2Scoring.test.js
           node --check services/core/tests/engine29SqueezeV2Synthetic.test.js
           node --check services/core/tests/engine29SqueezeV2FalsePositive.test.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeV2Observation.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeV2Campaign.js
+          node --check services/core/logic/engine29/tacticalCharacter/squeezeV2CampaignStore.js
+          node --check services/core/tests/engine29SqueezeV2Campaign.test.js
 
       - name: Deterministic scoring unit tests
         run: node --test services/core/tests/engine29SqueezeV2Scoring.test.js
@@ -34,3 +38,6 @@ jobs:
 
       - name: False-positive broad-move matrix
         run: node --test services/core/tests/engine29SqueezeV2FalsePositive.test.js
+
+      - name: Squeeze campaign contract tests
+        run: node --test services/core/tests/engine29SqueezeV2Campaign.test.js
