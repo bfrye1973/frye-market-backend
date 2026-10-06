@@ -194,3 +194,45 @@ export async function runAlertEngine29Squeeze({
 }
 
 export default runAlertEngine29Squeeze;
+
+
+export async function runAlertEngine29SqueezeFromBackend({
+  baseUrl,
+  now = Date.now(),
+} = {}) {
+  const base = String(baseUrl || "").replace(/\/+$/, "");
+  if (!base) {
+    return { ok: false, sent: false, error: "missing_base_url" };
+  }
+
+  try {
+    const response = await fetch(
+      `${base}/api/v1/engine29/cross-market-stress`,
+      {
+        cache: "no-store",
+        headers: { accept: "application/json", "cache-control": "no-store" },
+      }
+    );
+
+    const text = await response.text();
+    if (!response.ok) {
+      return {
+        ok: false,
+        sent: false,
+        error: `engine29_http_${response.status}: ${text.slice(0, 200)}`,
+      };
+    }
+
+    const payload = JSON.parse(text);
+    const campaign =
+      payload?.data?.marketCharacter?.squeezeCampaign || null;
+
+    return runAlertEngine29Squeeze({ campaign, now });
+  } catch (error) {
+    return {
+      ok: false,
+      sent: false,
+      error: String(error?.message || error),
+    };
+  }
+}
