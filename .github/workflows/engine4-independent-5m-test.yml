@@ -29,4 +29,9 @@ jobs:
           node tests/engine4Participation5m.independentAuthority.test.js
           node tests/engine4ParticipationAuthority.phaseE.test.js
           node tests/engine4AuthorizedReactionParticipation.phaseD3.observationLayer.test.js
-          node tests/engine3Engine4CandleHandoff.phaseD3.test.js
+
+      - name: Oct 6 replay inventory
+        run: |
+          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/times?date=2026-10-06" | tee /tmp/oct6-times.json
+          echo
+          cat /tmp/oct6-times.json
