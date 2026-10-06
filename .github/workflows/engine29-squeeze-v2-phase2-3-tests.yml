@@ -29,6 +29,11 @@ jobs:
           node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeV2Campaign.js
           node --check services/core/logic/engine29/tacticalCharacter/squeezeV2CampaignStore.js
           node --check services/core/tests/engine29SqueezeV2Campaign.test.js
+          node --check services/core/tests/engine13SqueezeAlert.test.js
+          node --check services/core/jobs/updateEngine29CrossMarketStress.js
+          node --check services/core/routes/engine29CrossMarketStress.js
+          node --check services/core/logic/alerts/squeezeLedger.js
+          node --check services/core/jobs/alertEngine29Squeeze.js
 
       - name: Deterministic scoring unit tests
         run: node --test services/core/tests/engine29SqueezeV2Scoring.test.js
@@ -41,3 +46,6 @@ jobs:
 
       - name: Squeeze campaign contract tests
         run: node --test services/core/tests/engine29SqueezeV2Campaign.test.js
+
+      - name: Engine 13 squeeze alert tests
+        run: node --test services/core/tests/engine13SqueezeAlert.test.js
