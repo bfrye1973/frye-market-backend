@@ -334,6 +334,11 @@ async function handle(req, res) {
         args: [ENGINE28A_REPLAY_AUDIT_JOB],
         cwd: CORE_DIR,
       });
+
+      console.log(
+        "[engine28a-replay-audit] " +
+        tail(step3audit.stdout, 30000)
+      );
     }
 
     // ---------------------------------
