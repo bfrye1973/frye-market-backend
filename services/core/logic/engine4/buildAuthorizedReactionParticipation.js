@@ -130,27 +130,7 @@ function isConstructiveParticipation({ direction, volumeMeta }) {
   );
 }
 
-function completedZoneLossAgainstLong({ reaction, volumeMeta }) {
-  const entryZone = reaction?.entryZone || reaction?.engine26LocationContext?.entryZone || null;
-  const zoneLow = toNum(entryZone?.lo ?? entryZone?.low);
-  const close = volumeMeta.currentCandle?.close;
-
-  return (
-    volumeMeta.currentCandleClosed === true &&
-    zoneLow != null &&
-    close != null &&
-    close < zoneLow
-  );
-}
-
-function completedAdverseEvidence({ reaction, direction, volumeMeta }) {
-  if (
-    direction === "LONG" &&
-    completedZoneLossAgainstLong({ reaction, volumeMeta })
-  ) {
-    return true;
-  }
-
+function completedAdverseEvidence({ direction, volumeMeta }) {
   const participationAuthority = resolve5mParticipationAuthority({
     direction,
     volumeMeta,
@@ -306,7 +286,7 @@ export function buildEngine4AuthorizedReactionParticipation({
     });
   }
 
-  const adverseCompleted = completedAdverseEvidence({ reaction, direction: participationEvaluationDirection, volumeMeta });
+  const adverseCompleted = completedAdverseEvidence({ direction: participationEvaluationDirection, volumeMeta });
 
   const qualifiedParticipationEvaluation =
     result.qualifiedParticipationEvaluation === true;
