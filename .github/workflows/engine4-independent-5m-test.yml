@@ -40,3 +40,8 @@ jobs:
         working-directory: services/core
         run: |
           node jobs/auditEngine4Independent5mOct6.js
+
+      - name: Oct 6 focused zone-loss and 10m audit
+        working-directory: services/core
+        run: |
+          node jobs/auditEngine4ZoneLossAnd10mOct6.js
