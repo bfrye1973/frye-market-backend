@@ -426,7 +426,16 @@ runTest("D3 does not mutate reaction or tactical inputs", () => {
 runTest("plain-English output separates 1m 5m and 10m", () => {
   const out = build();
   assert.ok(out.plainEnglishLines.includes("1m: volume lighter right now."));
-  assert.ok(out.plainEnglishLines.includes("5m: validation still unresolved."));
+  assert.ok(
+    out.plainEnglishLines.some((line) =>
+      line.startsWith("5m: participation ")
+    )
+  );
+  assert.ok(
+    out.plainEnglishLines.includes(
+      "Engine 3 5m price validation (diagnostic): UNRESOLVED."
+    )
+  );
   assert.ok(out.plainEnglishLines.includes("10m: broader participation is fading."));
   assert.ok(out.plainEnglishLines.includes("Engine 4 confirmation is waiting for Engine 3 qualification."));
   assert.ok(out.plainEnglishLines.includes("No permission. No execution."));
