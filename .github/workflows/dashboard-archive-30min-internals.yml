@@ -65,12 +65,12 @@ jobs:
           set -euo pipefail
           ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
           if [ -e "$ARCH_PATH" ]; then
-            EXISTING="$ARCH_PATH/engine25_30m_snapshot.json"
-            if [ -s "$EXISTING" ]; then
-              echo "snapshot already exists: $ARCH_PATH"
+            EXISTING_RAW="$ARCH_PATH/outlook_30m_internals.json"
+            if [ -s "$EXISTING_RAW" ] && cmp -s "$EXISTING_RAW" /tmp/engine25-30m-archive-stage/outlook_30m_internals.json; then
+              echo "identical snapshot already exists: $ARCH_PATH"
               exit 0
             fi
-            echo "::error::archive collision at $ARCH_PATH"
+            echo "::error::archive collision: same canonical timestamp has different data at $ARCH_PATH"
             exit 1
           fi
 
