@@ -275,6 +275,12 @@ async function main() {
     productionData?.liveMonitor ||
     null;
 
+  console.log("SQUEEZE_V2_PRODUCTION_SHAPE " + JSON.stringify({
+    topLevelKeys: Object.keys(productionData || {}),
+    moveCharacterKeys: Object.keys(productionData?.moveCharacter || {}),
+    marketCharacterMoveKeys: Object.keys(productionData?.marketCharacter?.move || {}),
+  }));
+
   console.log("SQUEEZE_V2_SHADOW_COMPARE " + JSON.stringify({
     productionTimestamp: productionData?.timestamp ?? null,
     oldDetector: {
