@@ -35,3 +35,8 @@ jobs:
           curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/es/times?date=2026-10-06" | tee /tmp/oct6-times.json
           echo
           cat /tmp/oct6-times.json
+
+      - name: Oct 6 Engine 4 old-vs-new audit
+        working-directory: services/core
+        run: |
+          node jobs/auditEngine4Independent5mOct6.js
