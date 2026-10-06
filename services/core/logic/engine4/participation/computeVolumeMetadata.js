@@ -2,6 +2,7 @@ import { resolveCandles } from "../candles/resolveCandles.js";
 import { toNum, round } from "../contracts/valueUtils.js";
 import { buildObservation1m } from "../observation/buildObservation1m.js";
 import { buildValidation5m } from "../validation/buildValidation5m.js";
+import { buildParticipation5m } from "./buildParticipation5m.js";
 import { buildBroader10mContext } from "../context/buildBroader10mContext.js";
 
 export function computeVolumeMetadata({ reaction, tacticalParticipation }) {
@@ -28,6 +29,7 @@ export function computeVolumeMetadata({ reaction, tacticalParticipation }) {
 
   const observation1m = buildObservation1m(reaction);
   const validation5m = buildValidation5m(reaction);
+  const participation5m = buildParticipation5m(reaction);
   const broader10m = buildBroader10mContext(tacticalParticipation);
 
   return {
@@ -60,6 +62,31 @@ export function computeVolumeMetadata({ reaction, tacticalParticipation }) {
 
     ...observation1m,
     ...validation5m,
+    participation5m,
+    participation5mActive: participation5m.active,
+    participation5mState: participation5m.state,
+    participation5mQuality: participation5m.quality,
+    participation5mSourceTimeframe: participation5m.sourceTimeframe,
+    participation5mFresh: participation5m.fresh,
+    participation5mStale: participation5m.stale,
+    participation5mSourceValid: participation5m.sourceValid,
+    participation5mCompleted: participation5m.completed,
+    participation5mCurrentVolume: participation5m.currentVolume,
+    participation5mPriorVolume: participation5m.priorVolume,
+    participation5mVolumeRatio: participation5m.currentVsPriorVolumeRatio,
+    participation5mCandleDirection: participation5m.candleDirection,
+    participation5mPriceProgressDirection: participation5m.priceProgressDirection,
+    participation5mSupportsCanonicalDirection: participation5m.supportsCanonicalDirection,
+    participation5mAdverseToCanonicalDirection: participation5m.adverseToCanonicalDirection,
+    participation5mVolumeWeak: participation5m.volumeWeak,
+    participation5mVolumeExpansion: participation5m.volumeExpansion,
+    participation5mStrongVolumeExpansion: participation5m.strongVolumeExpansion,
+    participation5mParticipationImproving: participation5m.participationImproving,
+    participation5mParticipationFading: participation5m.participationFading,
+    participation5mHighVolumeNoProgress: participation5m.highVolumeNoProgress,
+    participation5mAbsorptionRisk: participation5m.absorptionRisk,
+    participation5mClimacticRisk: participation5m.climacticRisk,
+    participation5mReasonCodes: participation5m.reasonCodes,
     ...broader10m,
   };
 }
