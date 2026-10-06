@@ -3,8 +3,10 @@ import tempfile
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(ROOT / "scripts"))
 
 def load(name, path):
     spec = importlib.util.spec_from_file_location(name, ROOT / path)
