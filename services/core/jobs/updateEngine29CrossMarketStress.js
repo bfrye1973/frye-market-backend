@@ -10,6 +10,9 @@ import {
   buildEngine29TrapCampaign,
   readEngine29TrapCampaign,
   writeEngine29TrapCampaign,
+  buildEngine29SqueezeV2Campaign,
+  readEngine29SqueezeV2Campaign,
+  writeEngine29SqueezeV2Campaign,
 } from "../logic/engine29/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -96,6 +99,14 @@ function compactLog(output) {
       output?.trapCampaign?.active === true
         ? output?.trapCampaign?.campaign?.competingDetection?.state ?? null
         : null,
+    squeezeCampaignId:
+      output?.marketCharacter?.squeezeCampaign?.campaignId ?? null,
+    squeezeDirection:
+      output?.marketCharacter?.squeezeCampaign?.direction ?? null,
+    squeezeState:
+      output?.marketCharacter?.squeezeCampaign?.state ?? "NO_ACTIVE_SQUEEZE",
+    squeezePressure:
+      output?.marketCharacter?.squeezeCampaign?.squeezePressure ?? null,
   };
 }
 
@@ -113,6 +124,27 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
     now,
     priorMoveParent,
   });
+
+  const priorSqueezeCampaign =
+    readEngine29SqueezeV2Campaign();
+
+  const squeezeCampaign =
+    buildEngine29SqueezeV2Campaign({
+      priorCampaign: priorSqueezeCampaign,
+      observation: output?.squeezeV2Observation || null,
+      parentMove:
+        output?.marketCharacter?.move?.parent ||
+        output?.moveCharacter?.directionalMoveParent ||
+        null,
+      now,
+    });
+
+  if (!output.marketCharacter || typeof output.marketCharacter !== "object") {
+    output.marketCharacter = {};
+  }
+
+  output.marketCharacter.squeezeCampaign =
+    squeezeCampaign?.public || null;
 
   const priorTrapCampaign =
     readEngine29TrapCampaign();
@@ -151,6 +183,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   }
 
   writeJsonAtomic(OUTPUT_FILE, output);
+  writeEngine29SqueezeV2Campaign(squeezeCampaign);
   writeEngine29TrapCampaign(trapCampaign);
 
   const stat = fs.statSync(OUTPUT_FILE);
@@ -177,7 +210,8 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
       `move=${result.summary.moveCharacter} ` +
       `liquidity=${result.summary.liquidityState} ` +
       `trap=${result.summary.trapSide}/${result.summary.trapState} ` +
-      `campaign=${result.summary.trapCampaignSide || "NONE"}/${result.summary.trapCampaignState || "NONE"}`
+      `campaign=${result.summary.trapCampaignSide || "NONE"}/${result.summary.trapCampaignState || "NONE"} ` +
+      `squeeze=${result.summary.squeezeDirection || "NONE"}/${result.summary.squeezeState}`
   );
 
   return result;
