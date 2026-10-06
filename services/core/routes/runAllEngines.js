@@ -32,7 +32,13 @@ const ES_STRATEGY_SNAPSHOT_JOB = path.resolve(
   "jobs/buildStrategySnapshot.js"
 );
 
-// Step 3B: Archive slim ES replay snapshot
+// Step 3B: Build and attach Engine 28A Pipeline Doctor.
+const ENGINE28A_PIPELINE_DOCTOR_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/updateEngine28APipelineDoctor.js"
+);
+
+// Step 3C: Archive slim ES replay snapshot.
 const ES_REPLAY_ARCHIVE_JOB = path.resolve(
   CORE_DIR,
   "jobs/archiveEsReplaySnapshot.js"
@@ -272,7 +278,19 @@ async function handle(req, res) {
     });
 
     // ---------------------------------
-    // STEP 3B: Archive slim ES replay snapshot
+    // STEP 3B: Engine 28A Pipeline Doctor
+    // Reads the completed ES snapshot, writes only Engine 28A output,
+    // and attaches the diagnosis before Replay is archived.
+    // ---------------------------------
+    const step3doctor = await runStep({
+      name: "engine28a_pipeline_doctor",
+      cmd: "node",
+      args: [ENGINE28A_PIPELINE_DOCTOR_JOB],
+      cwd: CORE_DIR,
+    });
+
+    // ---------------------------------
+    // STEP 3C: Archive slim ES replay snapshot
     // Writes /var/data/replay/es/YYYY-MM-DD/HHMM.json
     // ---------------------------------
     const step3b = await runStep({
@@ -308,6 +326,7 @@ async function handle(req, res) {
     if (
       step2.code === 0 &&
       step3a.code === 0 &&
+      step3doctor.code === 0 &&
       step3b.code === 0
     ) {
       step4 = await runStep({
@@ -334,7 +353,10 @@ async function handle(req, res) {
       "== STEP 3A: SYMBOL=ES node jobs/buildStrategySnapshot.js ==",
       step3a.stdout,
       "",
-      "== STEP 3B: node jobs/archiveEsReplaySnapshot.js ==",
+      "== STEP 3B: node jobs/updateEngine28APipelineDoctor.js ==",
+      step3doctor.stdout,
+      "",
+      "== STEP 3C: node jobs/archiveEsReplaySnapshot.js ==",
       step3b.stdout,
       "",
       "== STEP 4: node jobs/autoExecuteCanonicalPaperTrade.js ==",
@@ -355,6 +377,9 @@ async function handle(req, res) {
       step3a.stderr,
       "",
       "== STEP 3B STDERR ==",
+      step3doctor.stderr,
+      "",
+      "== STEP 3C STDERR ==",
       step3b.stderr,
       "",
       "== STEP 4 STDERR ==",
@@ -365,6 +390,7 @@ async function handle(req, res) {
       step0.code === 0 &&
       step2.code === 0 &&
       step3a.code === 0 &&
+      step3doctor.code === 0 &&
       step3b.code === 0 &&
       step4.code === 0;
 
@@ -375,6 +401,8 @@ async function handle(req, res) {
         ? step2.code
         : step3a.code !== 0
         ? step3a.code
+        : step3doctor.code !== 0
+        ? step3doctor.code
         : step3b.code !== 0
         ? step3b.code
         : step4.code;
@@ -395,6 +423,7 @@ async function handle(req, res) {
         engine1_and_shelves: step1.elapsedMs,
         runAllEngines_sh: step2.elapsedMs,
         build_es_strategy_snapshot: step3a.elapsedMs,
+        engine28a_pipeline_doctor: step3doctor.elapsedMs,
         archive_es_replay_snapshot: step3b.elapsedMs,
         engine8_auto_paper_execution: step4.elapsedMs,
       },
@@ -422,6 +451,12 @@ async function handle(req, res) {
           startedAt: step3a.startedAt,
           endedAt: step3a.endedAt,
           elapsedMs: step3a.elapsedMs,
+        },
+        engine28a_pipeline_doctor: {
+          code: step3doctor.code,
+          startedAt: step3doctor.startedAt,
+          endedAt: step3doctor.endedAt,
+          elapsedMs: step3doctor.elapsedMs,
         },
         archive_es_replay_snapshot: {
           code: step3b.code,
