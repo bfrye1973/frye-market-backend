@@ -21,6 +21,10 @@ import {
   listTrades,
 } from "../logic/journal/tradeJournalStore.js";
 
+import {
+  evaluateEsFuturesSession,
+} from "./archiveEsReplaySnapshot.js";
+
 const STRATEGY_ID = "intraday_scalp@10m";
 const SYMBOL = "ES";
 const BAR_LIMIT = 720;
@@ -1385,6 +1389,40 @@ async function manageTrade({
 const {
   adminSecret,
 } = validateEnvironment();
+
+const session =
+  evaluateEsFuturesSession(
+    new Date()
+  );
+
+if (
+  session?.sessionState !==
+  "OPEN"
+) {
+  skip(
+    "ES_FUTURES_SESSION_NOT_OPEN",
+    {
+      sessionState:
+        session?.sessionState ??
+        null,
+      exchangeTimezone:
+        session?.exchangeTimezone ??
+        null,
+      exchangeDate:
+        session?.exchangeDate ??
+        null,
+      exchangeTime:
+        session?.exchangeTime ??
+        null,
+      arizonaDate:
+        session?.arizonaDate ??
+        null,
+      arizonaTime:
+        session?.arizonaTime ??
+        null,
+    }
+  );
+}
 
 const tradesResult =
   await listTrades({
