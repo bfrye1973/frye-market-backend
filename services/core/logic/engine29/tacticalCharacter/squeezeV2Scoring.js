@@ -19,6 +19,7 @@ const MAD_SCALE = 1.4826;
 const EPSILON_PCT = 0.000001;
 
 function finite(value) {
+  if (value === null || value === undefined || value === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
