@@ -9,6 +9,7 @@ on:
 jobs:
   archive:
     name: Archive Engine25 canonical 10m snapshot
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -23,12 +24,6 @@ jobs:
       RETENTION_DAYS: "30"
 
     steps:
-      - name: Skip if live job failed
-        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' }}
-        run: |
-          echo "Live job conclusion=${{ github.event.workflow_run.conclusion }} — skipping archive."
-          exit 0
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
