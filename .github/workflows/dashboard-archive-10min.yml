@@ -1,12 +1,9 @@
 name: dashboard-archive-10min
 
 on:
-  # Auto-run only after the current canonical 10-minute producer completes.
   workflow_run:
     workflows: ["dashboard-10min (github-runner, debug-publish)"]
     types: [completed]
-
-  # Manual trigger for validation/recovery.
   workflow_dispatch: {}
 
 jobs:
@@ -49,204 +46,12 @@ jobs:
         id: snapshot
         run: |
           set -euo pipefail
-          python - << 'PY'
-          import json
-          import math
-          import os
-          from datetime import datetime, timezone
-          from pathlib import Path
-          from zoneinfo import ZoneInfo
-
-          src = Path("/tmp/engine25-live/outlook_intraday.json")
-          j = json.loads(src.read_text(encoding="utf-8"))
-
-          source_ts = (
-              j.get("updated_at_utc")
-              or (j.get("meta") or {}).get("last_full_run_utc")
-              or j.get("generated_at_utc")
-          )
-          if not source_ts:
-              raise SystemExit("archive rejected: canonical source timestamp missing")
-
-          try:
-              dt = datetime.fromisoformat(source_ts.replace("Z", "+00:00"))
-          except Exception as exc:
-              raise SystemExit(f"archive rejected: invalid source timestamp {source_ts}: {exc}")
-
-          if dt.tzinfo is None:
-              dt = dt.replace(tzinfo=timezone.utc)
-          dt_utc = dt.astimezone(timezone.utc)
-          dt_az = dt_utc.astimezone(ZoneInfo("America/Phoenix"))
-
-          cards = j.get("sectorCards")
-          if not isinstance(cards, list):
-              raise SystemExit("archive rejected: sectorCards missing")
-
-          def num(v):
-              if v is None or v == "":
-                  return None
-              try:
-                  x = float(v)
-                  return x if math.isfinite(x) else None
-              except Exception:
-                  return None
-
-          def sum_field(name):
-              vals = [num(c.get(name)) for c in cards if isinstance(c, dict)]
-              vals = [v for v in vals if v is not None]
-              return sum(vals) if vals else None
-
-          archived_cards = []
-          strong = neutral = weak = 0
-          complete_card_count = 0
-
-          for card in cards:
-              if not isinstance(card, dict):
-                  continue
-
-              breadth = num(card.get("breadth_pct"))
-              momentum = num(card.get("momentum_pct"))
-              if breadth is not None and momentum is not None:
-                  if breadth >= 55 and momentum >= 55:
-                      state = "STRONG"
-                      strong += 1
-                  elif breadth <= 45 and momentum <= 45:
-                      state = "WEAK"
-                      weak += 1
-                  else:
-                      state = "NEUTRAL"
-                      neutral += 1
-                  complete_card_count += 1
-              else:
-                  state = "UNAVAILABLE"
-
-              archived_cards.append({
-                  "sector": card.get("sector"),
-                  "state": state,
-                  "up": num(card.get("up")),
-                  "down": num(card.get("down")),
-                  "nh": num(card.get("nh")),
-                  "nl": num(card.get("nl")),
-                  "breadth_pct": breadth,
-                  "momentum_pct": momentum,
-                  "advancingVolume": num(card.get("advancingVolume")),
-                  "decliningVolume": num(card.get("decliningVolume")),
-                  "unchangedVolume": num(card.get("unchangedVolume")),
-                  "stocksScanned": num(card.get("stocksScanned")),
-                  "stocksWithVolume": num(card.get("stocksWithVolume")),
-              })
-
-          advancing = sum_field("up")
-          declining = sum_field("down")
-          breadth_den = (advancing or 0) + (declining or 0)
-
-          new_highs = sum_field("nh")
-          new_lows = sum_field("nl")
-
-          adv_vol = sum_field("advancingVolume")
-          dec_vol = sum_field("decliningVolume")
-          unchanged_vol = sum_field("unchangedVolume")
-          directional_vol = (adv_vol or 0) + (dec_vol or 0)
-
-          stocks_scanned = sum_field("stocksScanned")
-          stocks_with_volume = sum_field("stocksWithVolume")
-
-          complete = (
-              len(cards) == 11
-              and complete_card_count == 11
-              and advancing is not None
-              and declining is not None
-              and new_highs is not None
-              and new_lows is not None
-              and adv_vol is not None
-              and dec_vol is not None
-              and stocks_scanned is not None
-              and stocks_with_volume is not None
-          )
-
-          record = {
-              "schema": "engine25.marketInternals10mArchive@1",
-              "timeframe": "10m",
-              "sourceTimestamp": dt_utc.isoformat().replace("+00:00", "Z"),
-              "generatedAt": j.get("updated_at_utc") or j.get("updated_at") or source_ts,
-              "archivedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-              "freshnessState": "FRESH_AT_SOURCE" if complete else "INCOMPLETE_AT_SOURCE",
-              "completeCanonicalSet": complete,
-              "stocksScanned": stocks_scanned,
-              "stocksWithVolume": stocks_with_volume,
-              "coveragePct": (
-                  stocks_with_volume / stocks_scanned * 100
-                  if stocks_scanned and stocks_with_volume is not None
-                  else None
-              ),
-              "advancingStocks": advancing,
-              "decliningStocks": declining,
-              "advancingBreadthPct": (
-                  advancing / breadth_den * 100 if breadth_den else None
-              ),
-              "decliningBreadthPct": (
-                  declining / breadth_den * 100 if breadth_den else None
-              ),
-              "strongSectorCount": strong,
-              "neutralSectorCount": neutral,
-              "weakSectorCount": weak,
-              "newHighs": new_highs,
-              "newLows": new_lows,
-              "netNewHighsLows": (
-                  new_highs - new_lows
-                  if new_highs is not None and new_lows is not None
-                  else None
-              ),
-              "advancingVolume": adv_vol,
-              "decliningVolume": dec_vol,
-              "unchangedVolume": unchanged_vol,
-              "advancingVolumeShare": (
-                  adv_vol / directional_vol * 100 if directional_vol else None
-              ),
-              "decliningVolumeShare": (
-                  dec_vol / directional_vol * 100 if directional_vol else None
-              ),
-              "volumeImbalance": (
-                  (adv_vol - dec_vol) / directional_vol * 100
-                  if directional_vol
-                  else None
-              ),
-              "sectorCards": archived_cards,
-              "source": {
-                  "branch": os.environ["LIVE_BRANCH"],
-                  "file": "data/outlook_intraday.json",
-              },
-          }
-
-          date_dir = dt_az.strftime("%Y-%m-%d")
-          time_key = dt_az.strftime("%H%M%S")
-          archive_rel = f"{os.environ['HISTORY_ROOT']}/{date_dir}/{time_key}"
-
-          stage = Path("/tmp/engine25-archive-stage")
-          stage.mkdir(parents=True, exist_ok=True)
-          (stage / "engine25_10m_snapshot.json").write_text(
-              json.dumps(record, indent=2, sort_keys=False) + "\n",
-              encoding="utf-8",
-          )
-          (stage / "outlook_intraday.json").write_text(
-              json.dumps(j, separators=(",", ":")) + "\n",
-              encoding="utf-8",
-          )
-
-          out = Path(os.environ["GITHUB_OUTPUT"])
-          with out.open("a", encoding="utf-8") as fh:
-              fh.write(f"date_dir={date_dir}\n")
-              fh.write(f"time_key={time_key}\n")
-              fh.write(f"archive_rel={archive_rel}\n")
-              fh.write(f"source_ts={record['sourceTimestamp']}\n")
-
-          print("archive_rel:", archive_rel)
-          print("sourceTimestamp:", record["sourceTimestamp"])
-          print("completeCanonicalSet:", complete)
-          print("sectorCount:", len(cards))
-          print("breadth:", record["advancingStocks"], record["decliningStocks"], record["advancingBreadthPct"])
-          print("NH/NL:", record["newHighs"], record["newLows"], record["netNewHighsLows"])
-          PY
+          RESULT=$(python scripts/archive_engine25_10m.py build             --input /tmp/engine25-live/outlook_intraday.json             --stage-dir /tmp/engine25-archive-stage             --history-root "${HISTORY_ROOT}"             --live-branch "${LIVE_BRANCH}")
+          echo "${RESULT}"
+          ARCH_PATH=$(python -c 'import json,sys; print(json.load(sys.stdin)["archive_rel"])' <<< "${RESULT}")
+          SOURCE_TS=$(python -c 'import json,sys; print(json.load(sys.stdin)["source_ts"])' <<< "${RESULT}")
+          echo "archive_rel=${ARCH_PATH}" >> "${GITHUB_OUTPUT}"
+          echo "source_ts=${SOURCE_TS}" >> "${GITHUB_OUTPUT}"
 
       - name: Checkout archive branch
         run: |
@@ -269,35 +74,7 @@ jobs:
       - name: Enforce rolling 30-day retention
         run: |
           set -euo pipefail
-          python - << 'PY'
-          import os
-          import shutil
-          from datetime import datetime, timedelta
-          from pathlib import Path
-          from zoneinfo import ZoneInfo
-
-          root = Path(os.environ["HISTORY_ROOT"])
-          if not root.exists():
-              raise SystemExit(0)
-
-          now_az = datetime.now(ZoneInfo("America/Phoenix")).date()
-          cutoff = now_az - timedelta(days=int(os.environ["RETENTION_DAYS"]))
-
-          removed = []
-          for child in sorted(root.iterdir()):
-              if not child.is_dir():
-                  continue
-              try:
-                  day = datetime.strptime(child.name, "%Y-%m-%d").date()
-              except ValueError:
-                  continue
-              if day < cutoff:
-                  shutil.rmtree(child)
-                  removed.append(child.name)
-
-          print("retention cutoff:", cutoff.isoformat())
-          print("removed:", removed if removed else "none")
-          PY
+          python scripts/archive_engine25_10m.py prune             --history-root "${HISTORY_ROOT}"             --retention-days "${RETENTION_DAYS}"
 
       - name: Validate staged archive
         run: |
@@ -307,7 +84,6 @@ jobs:
           test -s "${ARCH_PATH}/outlook_intraday.json"
           python - << 'PY'
           import json
-          import os
           from pathlib import Path
 
           p = Path("${{ steps.snapshot.outputs.archive_rel }}") / "engine25_10m_snapshot.json"
