@@ -64,3 +64,8 @@ jobs:
           ENGINE25_30M_ARCHIVE_ROOT: "/tmp/engine25-30m-archive/data/engine25-30m-history"
           ENGINE29_REPLAY_BACKEND: "https://frye-market-backend-1.onrender.com"
         run: node services/core/qa/runEngine29SqueezeV2Replay.js
+
+      - name: Oct 5 reconstructed acceptance
+        env:
+          ENGINE29_REPLAY_BACKEND: "https://frye-market-backend-1.onrender.com"
+        run: node services/core/qa/runEngine29SqueezeV2Oct5Reconstruction.js
