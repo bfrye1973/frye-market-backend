@@ -76,6 +76,7 @@ export function scoreBreadthDiv({
 }
 
 export function scoreSectorDiv({
+  direction,
   strongSectorCount,
   weakSectorCount,
   sectorCount = 11,
@@ -93,13 +94,30 @@ export function scoreSectorDiv({
     return { available: false, score: null, sectorBalance: null };
   }
 
-  const sectorBalance = (strong - weak) / count;
-  const score = clamp(((0.20 - sectorBalance) / 0.80) * 100);
+  const rawSectorBalance = (strong - weak) / count;
+  const directionalSectorBalance =
+    direction === "UP"
+      ? rawSectorBalance
+      : direction === "DOWN"
+        ? -rawSectorBalance
+        : null;
+
+  if (!Number.isFinite(directionalSectorBalance)) {
+    return {
+      available: false,
+      score: null,
+      sectorBalance: rawSectorBalance,
+      directionalSectorBalance: null,
+    };
+  }
+
+  const score = clamp(((0.20 - directionalSectorBalance) / 0.80) * 100);
 
   return {
     available: true,
     score,
-    sectorBalance,
+    sectorBalance: rawSectorBalance,
+    directionalSectorBalance,
   };
 }
 
@@ -347,6 +365,7 @@ export function scoreSqueezeV2Internals(snapshot = {}, direction) {
   });
 
   const sectors = scoreSectorDiv({
+    direction,
     strongSectorCount: snapshot.strongSectorCount,
     weakSectorCount: snapshot.weakSectorCount,
     sectorCount: 11,
