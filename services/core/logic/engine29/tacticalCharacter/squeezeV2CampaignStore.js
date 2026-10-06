@@ -8,12 +8,16 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+const PERSISTENT_DIR = "/var/data/replay";
+
 export const ENGINE29_SQUEEZE_V2_CAMPAIGN_FILE =
   process.env.ENGINE29_SQUEEZE_V2_CAMPAIGN_FILE ||
-  path.resolve(
-    __dirname,
-    "../../../data/engine29-squeeze-v2-campaign.json"
-  );
+  (fs.existsSync(PERSISTENT_DIR)
+    ? path.join(PERSISTENT_DIR, "engine29-squeeze-v2-campaign.json")
+    : path.resolve(
+        __dirname,
+        "../../../data/engine29-squeeze-v2-campaign.json"
+      ));
 
 export function readEngine29SqueezeV2Campaign(
   filePath = ENGINE29_SQUEEZE_V2_CAMPAIGN_FILE
