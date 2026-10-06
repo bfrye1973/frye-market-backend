@@ -124,6 +124,39 @@ export function baseResult({
     validation5mPriorCandleStatus: volumeMeta.validation5mPriorCandleStatus,
     validation5mStale: volumeMeta.validation5mStale,
 
+    participation5m: clonePlain(volumeMeta.participation5m),
+    participation5mActive: volumeMeta.participation5mActive,
+    participation5mState: volumeMeta.participation5mState,
+    participation5mQuality: volumeMeta.participation5mQuality,
+    participation5mSourceTimeframe: volumeMeta.participation5mSourceTimeframe,
+    participation5mFresh: volumeMeta.participation5mFresh,
+    participation5mStale: volumeMeta.participation5mStale,
+    participation5mSourceValid: volumeMeta.participation5mSourceValid,
+    participation5mCompleted: volumeMeta.participation5mCompleted,
+    participation5mCurrentVolume: volumeMeta.participation5mCurrentVolume,
+    participation5mPriorVolume: volumeMeta.participation5mPriorVolume,
+    participation5mVolumeRatio: volumeMeta.participation5mVolumeRatio,
+    participation5mCandleDirection: volumeMeta.participation5mCandleDirection,
+    participation5mPriceProgressDirection:
+      volumeMeta.participation5mPriceProgressDirection,
+    participation5mSupportsCanonicalDirection:
+      volumeMeta.participation5mSupportsCanonicalDirection,
+    participation5mAdverseToCanonicalDirection:
+      volumeMeta.participation5mAdverseToCanonicalDirection,
+    participation5mVolumeWeak: volumeMeta.participation5mVolumeWeak,
+    participation5mVolumeExpansion: volumeMeta.participation5mVolumeExpansion,
+    participation5mStrongVolumeExpansion:
+      volumeMeta.participation5mStrongVolumeExpansion,
+    participation5mParticipationImproving:
+      volumeMeta.participation5mParticipationImproving,
+    participation5mParticipationFading:
+      volumeMeta.participation5mParticipationFading,
+    participation5mHighVolumeNoProgress:
+      volumeMeta.participation5mHighVolumeNoProgress,
+    participation5mAbsorptionRisk: volumeMeta.participation5mAbsorptionRisk,
+    participation5mClimacticRisk: volumeMeta.participation5mClimacticRisk,
+    participation5mReasonCodes: clonePlain(volumeMeta.participation5mReasonCodes),
+
     broader10mActive: volumeMeta.broader10mActive,
     broader10mTimeframe: volumeMeta.broader10mTimeframe,
     broader10mRelativeVolume: volumeMeta.broader10mRelativeVolume,
