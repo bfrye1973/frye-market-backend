@@ -1,0 +1,32 @@
+name: engine4-independent-5m-test
+
+on:
+  push:
+    branches:
+      - engine4-independent-5m-participation-v1
+  workflow_dispatch: {}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine4/participation/buildParticipation5m.js
+          node --check services/core/logic/engine4/participation/computeVolumeMetadata.js
+          node --check services/core/logic/engine4/contracts/buildEngine4BaseResult.js
+          node --check services/core/logic/engine4/buildAuthorizedReactionParticipation.js
+          node --check services/core/tests/engine4Participation5m.independentAuthority.test.js
+          node --check services/core/tests/engine4ParticipationAuthority.phaseE.test.js
+      - name: Engine 4 focused tests
+        working-directory: services/core
+        run: |
+          node tests/engine4Participation5m.independentAuthority.test.js
+          node tests/engine4ParticipationAuthority.phaseE.test.js
+          node tests/engine4AuthorizedReactionParticipation.phaseD3.observationLayer.test.js
+          node tests/engine3Engine4CandleHandoff.phaseD3.test.js
