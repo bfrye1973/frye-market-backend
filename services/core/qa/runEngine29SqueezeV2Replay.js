@@ -26,6 +26,10 @@ const ARCHIVE_ROOT =
   process.env.ENGINE25_10M_ARCHIVE_ROOT ||
   "/tmp/engine25-10m-archive/data/engine25-10m-history";
 
+const ARCHIVE_30M_ROOT =
+  process.env.ENGINE25_30M_ARCHIVE_ROOT ||
+  "/tmp/engine25-30m-archive/data/engine25-30m-history";
+
 const REPLAY_DATE =
   process.env.ENGINE29_REPLAY_DATE ||
   new Date().toISOString().slice(0, 10);
@@ -80,8 +84,8 @@ function normalizeEsBars(payload) {
     .sort((a,b) => a.time - b.time);
 }
 
-function loadSnapshots() {
-  const dateDir = path.join(ARCHIVE_ROOT, REPLAY_DATE);
+function loadSnapshotsFrom(root, filename) {
+  const dateDir = path.join(root, REPLAY_DATE);
   if (!fs.existsSync(dateDir)) {
     throw new Error(`No Engine25 10m archive date: ${dateDir}`);
   }
@@ -89,7 +93,7 @@ function loadSnapshots() {
   return fs.readdirSync(dateDir)
     .sort()
     .map((folder) => {
-      const file = path.join(dateDir, folder, "engine25_10m_snapshot.json");
+      const file = path.join(dateDir, folder, filename);
       if (!fs.existsSync(file)) return null;
       return JSON.parse(fs.readFileSync(file, "utf8"));
     })
@@ -132,7 +136,10 @@ function round(value, digits = 2) {
 }
 
 async function main() {
-  const snapshots = loadSnapshots();
+  const snapshots = loadSnapshotsFrom(ARCHIVE_ROOT, "engine25_10m_snapshot.json");
+  const snapshots30 = fs.existsSync(path.join(ARCHIVE_30M_ROOT, REPLAY_DATE))
+    ? loadSnapshotsFrom(ARCHIVE_30M_ROOT, "engine25_30m_snapshot.json")
+    : [];
 
   const url = new URL("/api/v1/futures/ohlc", BACKEND_BASE);
   url.searchParams.set("symbol", "ES");
@@ -189,6 +196,13 @@ async function main() {
       internalDivergence: internals.internalDivergence.score,
     });
 
+    const matched30 = snapshots30
+      .filter((item) => toMs(item.sourceTimestamp) <= ts)
+      .at(-1) || null;
+    const internals30 = matched30
+      ? scoreSqueezeV2Internals(matched30, direction)
+      : null;
+
     rows.push({
       sourceTimestamp: snapshot.sourceTimestamp,
       direction,
@@ -216,6 +230,11 @@ async function main() {
       broadeningVelocity10: round(bv10.value, 1),
       broadeningVelocity20: round(bv20.value, 1),
       squeezePressure: round(pressure.score, 1),
+      thirtyMinute: matched30 ? {
+        sourceTimestamp: matched30.sourceTimestamp,
+        internalDivergence: round(internals30?.internalDivergence?.score, 1),
+        participationConfirmation: round(internals30?.participationConfirmation?.score, 1),
+      } : null,
     });
 
     priorParticipation.push(participation);
@@ -225,6 +244,7 @@ async function main() {
   console.log("SQUEEZE_V2_REPLAY " + JSON.stringify({
     date: REPLAY_DATE,
     snapshotCount: snapshots.length,
+    thirtyMinuteSnapshotCount: snapshots30.length,
     evaluatedCount: rows.length,
     rows,
   }));
