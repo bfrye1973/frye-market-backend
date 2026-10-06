@@ -1,0 +1,53 @@
+name: Engine25 10m Archive Gate
+
+on:
+  push:
+    branches:
+      - engine25-10m-archive-30day-v1
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Unit tests
+        run: python -m unittest services/core/tests/engine25TenMinuteArchive.test.py
+      - name: Workflow contract checks
+        run: |
+          grep -q 'dashboard-10min (github-runner, debug-publish)' .github/workflows/dashboard-archive-10min.yml
+          grep -q 'RETENTION_DAYS: "30"' .github/workflows/dashboard-archive-10min.yml
+          grep -q 'archive_engine25_10m.py build' .github/workflows/dashboard-archive-10min.yml
+          grep -q 'archive_engine25_10m.py prune' .github/workflows/dashboard-archive-10min.yml
+      - name: Build current canonical snapshot
+        run: |
+          git fetch --no-tags --depth=1 origin data-live-10min
+          git show origin/data-live-10min:data/outlook_intraday.json > /tmp/outlook_intraday.json
+          RESULT=$(python scripts/archive_engine25_10m.py build             --input /tmp/outlook_intraday.json             --stage-dir /tmp/archive-stage             --history-root data/engine25-10m-history)
+          echo "$RESULT"
+          test -s /tmp/archive-stage/engine25_10m_snapshot.json
+          python - << 'PY'
+          import json
+          j=json.load(open("/tmp/archive-stage/engine25_10m_snapshot.json"))
+          assert j["timeframe"]=="10m"
+          assert len(j["sectorCards"])==11
+          assert j["advancingStocks"] is not None
+          assert j["decliningStocks"] is not None
+          assert j["newHighs"] is not None
+          assert j["newLows"] is not None
+          assert j["stocksScanned"] is not None
+          assert j["stocksWithVolume"] is not None
+          print(json.dumps({
+            "sourceTimestamp":j["sourceTimestamp"],
+            "advancingStocks":j["advancingStocks"],
+            "decliningStocks":j["decliningStocks"],
+            "newHighs":j["newHighs"],
+            "newLows":j["newLows"],
+            "strong":j["strongSectorCount"],
+            "neutral":j["neutralSectorCount"],
+            "weak":j["weakSectorCount"],
+            "coveragePct":j["coveragePct"],
+          }, indent=2))
+          PY
