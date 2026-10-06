@@ -254,7 +254,7 @@ def process_symbol(ticker: str, lookback: int, days: int):
             return 0, 0, 0, 0, None, None
         nh, nl, up, down = compute_flags(bars, lookback)
         last = bars[-1]
-        return nh, nl, up, down, last.get("v"), int(last["t"])
+        return nh, nl, up, down, last.get("v"), int(last["t"] / 1000)
     except SystemExit:
         raise
     except Exception:
