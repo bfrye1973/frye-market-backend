@@ -41,7 +41,8 @@ jobs:
         id: snapshot
         run: |
           set -euo pipefail
-          RESULT=$(python scripts/archive_engine25_10m.py build             --input /tmp/engine25-live/outlook_intraday.json             --stage-dir /tmp/engine25-archive-stage             --history-root "${HISTORY_ROOT}"             --live-branch "${LIVE_BRANCH}")
+          cp scripts/archive_engine25_10m.py /tmp/archive_engine25_10m.py
+          RESULT=$(python /tmp/archive_engine25_10m.py build             --input /tmp/engine25-live/outlook_intraday.json             --stage-dir /tmp/engine25-archive-stage             --history-root "${HISTORY_ROOT}"             --live-branch "${LIVE_BRANCH}")
           echo "${RESULT}"
           ARCH_PATH=$(python -c 'import json,sys; print(json.load(sys.stdin)["archive_rel"])' <<< "${RESULT}")
           SOURCE_TS=$(python -c 'import json,sys; print(json.load(sys.stdin)["source_ts"])' <<< "${RESULT}")
@@ -69,7 +70,7 @@ jobs:
       - name: Enforce rolling 30-day retention
         run: |
           set -euo pipefail
-          python scripts/archive_engine25_10m.py prune             --history-root "${HISTORY_ROOT}"             --retention-days "${RETENTION_DAYS}"
+          python /tmp/archive_engine25_10m.py prune             --history-root "${HISTORY_ROOT}"             --retention-days "${RETENTION_DAYS}"
 
       - name: Validate staged archive
         run: |
