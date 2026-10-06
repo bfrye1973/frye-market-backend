@@ -1,0 +1,19 @@
+name: Engine25 Archive Path Fix Gate
+
+on:
+  push:
+    branches:
+      - engine25-10m-archive-pathfix-v1
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prove helper survives archive branch checkout
+        run: |
+          set -euo pipefail
+          cp scripts/archive_engine25_10m.py /tmp/archive_engine25_10m.py
+          git fetch --no-tags origin data-archive-10min
+          git checkout -B data-archive-10min origin/data-archive-10min
+          python /tmp/archive_engine25_10m.py prune --history-root data/engine25-10m-history --retention-days 30
