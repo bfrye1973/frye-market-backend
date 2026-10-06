@@ -31,6 +31,32 @@ jobs:
           git fetch --no-tags origin data-archive-30m-internals
           git worktree add /tmp/engine25-30m-archive origin/data-archive-30m-internals
 
+      - name: Oct 5 ES extraction
+        run: |
+          node --input-type=module - <<'NODE'
+          const url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&tf=10m&limit=5000";
+          const res = await fetch(url, { headers: { accept: "application/json", "cache-control": "no-store" } });
+          if (!res.ok) throw new Error("ES OHLC HTTP " + res.status);
+          const payload = await res.json();
+          const rows = Array.isArray(payload) ? payload : (payload.bars || []);
+          const toMs = (v) => {
+            const n = Number(v);
+            if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+            return Date.parse(v);
+          };
+          const start = Date.parse("2026-10-05T13:20:00Z");
+          const end = Date.parse("2026-10-05T20:40:00Z");
+          const bars = rows.map(b => ({
+            t: toMs(b.time ?? b.t),
+            o: Number(b.open ?? b.o),
+            h: Number(b.high ?? b.h),
+            l: Number(b.low ?? b.l),
+            c: Number(b.close ?? b.c)
+          })).filter(b => Number.isFinite(b.t) && b.t >= start && b.t <= end)
+             .sort((a,b)=>a.t-b.t);
+          console.log("OCT5_ES_10M " + JSON.stringify(bars));
+          NODE
+
       - name: Run Squeeze v2 real-data replay
         env:
           ENGINE29_REPLAY_DATE: "2026-10-06"
