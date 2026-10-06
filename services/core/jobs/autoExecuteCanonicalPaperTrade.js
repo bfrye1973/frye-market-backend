@@ -105,17 +105,9 @@ if (!engine8PaperOrder) {
   reject("ENGINE8_CANONICAL_ADAPTER_NOT_FOUND");
 }
 
-if (
-  upper(engine8PaperOrder.status) !== READY_STATUS ||
-  engine8PaperOrder.executable !== true
-) {
-  skip(
-    "ENGINE8_ADAPTER_NOT_READY",
-    engine8PaperOrder
-  );
-}
-
-// Fail closed before making any HTTP execution request.
+// Validate the execution environment on every enabled cycle,
+// even when no trade is currently ready. This prevents a valid
+// future GO from discovering a missing safety/admin setting too late.
 if (process.env.ENGINE8_PAPER_ONLY !== "1") {
   reject("ENGINE8_PAPER_ONLY_NOT_SET");
 }
@@ -150,6 +142,16 @@ const adminSecret = String(
 
 if (!adminSecret) {
   reject("ENGINE8_ADMIN_SECRET_NOT_CONFIGURED");
+}
+
+if (
+  upper(engine8PaperOrder.status) !== READY_STATUS ||
+  engine8PaperOrder.executable !== true
+) {
+  skip(
+    "ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED",
+    engine8PaperOrder
+  );
 }
 
 const port = Number(process.env.PORT) || 10000;
