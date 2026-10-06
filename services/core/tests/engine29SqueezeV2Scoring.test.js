@@ -43,9 +43,28 @@ test("BreadthDiv orients correctly for downside squeeze", () => {
 });
 
 test("SectorDiv uses Engine25-owned strong/weak counts without reclassification", () => {
-  close(scoreSectorDiv({ strongSectorCount: 6, weakSectorCount: 2 }).score, 0);
-  close(scoreSectorDiv({ strongSectorCount: 3, weakSectorCount: 3 }).score, 25);
-  close(scoreSectorDiv({ strongSectorCount: 0, weakSectorCount: 7 }).score, 100);
+  close(scoreSectorDiv({ direction: "UP", strongSectorCount: 6, weakSectorCount: 2 }).score, 0);
+  close(scoreSectorDiv({ direction: "UP", strongSectorCount: 3, weakSectorCount: 3 }).score, 25);
+  close(scoreSectorDiv({ direction: "UP", strongSectorCount: 0, weakSectorCount: 7 }).score, 100);
+});
+
+test("SectorDiv reverses orientation for downside squeeze", () => {
+  close(
+    scoreSectorDiv({
+      direction: "DOWN",
+      strongSectorCount: 8,
+      weakSectorCount: 1,
+    }).score,
+    100,
+  );
+  close(
+    scoreSectorDiv({
+      direction: "DOWN",
+      strongSectorCount: 1,
+      weakSectorCount: 8,
+    }).score,
+    0,
+  );
 });
 
 test("NHNLDiv normalizes by total highs+lows and orients by direction", () => {
