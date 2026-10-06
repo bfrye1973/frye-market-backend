@@ -5,7 +5,7 @@
 // - 1m is diagnostic only and cannot independently confirm or hard-block.
 // - 5m is primary Engine 4 participation authority.
 // - 10m is broader confirmation/weakening context and does not independently hard-block.
-// - structural completed zone loss remains an immediate hard block.
+// - structural invalidation is owned upstream; Engine 4 consumes confirmed invalidation only.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -306,7 +306,7 @@ test("10m fading cannot independently hard-block when 5m is unresolved", () => {
   assert.equal(out.hardBlocked, false);
 });
 
-test("completed structural zone loss remains an immediate hard block", () => {
+test("1m close below zone does not let Engine 4 invent structural invalidation", () => {
   const engine3 = reaction({
     currentCandle: {
       open: 5003,
@@ -333,7 +333,17 @@ test("completed structural zone loss remains an immediate hard block", () => {
     }),
   });
   const out = build({ engine3 });
-  assert.equal(out.participationState, "ADVERSE_PARTICIPATION_BLOCKED");
+  assert.equal(out.participation5mState, "UNRESOLVED");
+  assert.equal(out.participationState, "PARTICIPATION_WAITING");
+  assert.equal(out.hardBlocked, false);
+});
+
+test("confirmed upstream candidate invalidation still hard-blocks", () => {
+  const engine3 = reaction({
+    candidateInvalidated: true,
+  });
+  const out = build({ engine3 });
+  assert.equal(out.participationState, "CANDIDATE_INVALIDATED");
   assert.equal(out.hardBlocked, true);
 });
 
