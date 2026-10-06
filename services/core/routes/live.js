@@ -32,6 +32,8 @@ const GH_API_TOKEN =
 const INTRA_BRANCH = process.env.LIVE_INTRADAY_BRANCH || "data-live-10min";
 const HOURLY_BRANCH = process.env.LIVE_HOURLY_BRANCH || "data-live-hourly";
 const M30_BRANCH = process.env.LIVE_30M_BRANCH || "data-live-30m";
+const M30_INTERNALS_BRANCH =
+  process.env.LIVE_30M_INTERNALS_BRANCH || "data-live-30m-internals";
 const H4_BRANCH = process.env.LIVE_4H_BRANCH || "data-live-4h";
 const EOD_BRANCH = process.env.LIVE_EOD_BRANCH || "data-live-eod";
 const SANDBOX_BRANCH =
@@ -42,6 +44,8 @@ const INTRA_PATH =
 const HOURLY_PATH =
   process.env.LIVE_HOURLY_PATH || "data/outlook_hourly.json";
 const M30_PATH = process.env.LIVE_30M_PATH || "data/outlook_30m.json";
+const M30_INTERNALS_PATH =
+  process.env.LIVE_30M_INTERNALS_PATH || "data/outlook_30m_internals.json";
 const H4_PATH = process.env.LIVE_4H_PATH || "data/outlook_4h.json";
 const EOD_PATH = process.env.LIVE_EOD_PATH || "data/outlook.json";
 const SANDBOX_PATH =
@@ -396,6 +400,19 @@ liveRouter.get("/30m", async (req, res) => {
     routeName: "30m",
     branch: M30_BRANCH,
     path: M30_PATH,
+    req,
+    res,
+  });
+});
+
+// Engine25 full-market 30-minute internals.
+// Kept separate from /live/30m, which is the existing SPY/sector-ETF bridge.
+liveRouter.get("/30m-internals", async (req, res) => {
+  return serveLiveJsonWithLastGood({
+    key: "30m-internals",
+    routeName: "30m-internals",
+    branch: M30_INTERNALS_BRANCH,
+    path: M30_INTERNALS_PATH,
     req,
     res,
   });
