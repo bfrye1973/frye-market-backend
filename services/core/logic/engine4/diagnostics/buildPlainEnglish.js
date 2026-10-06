@@ -95,19 +95,28 @@ export function buildPlainEnglishLines(result) {
     lines.push("1m: live volume data is available, but the immediate read is unresolved.");
   }
 
+  if (result?.participation5mActive === true) {
+    const participation5mState = safeUpper(
+      result?.participation5mState,
+      "UNRESOLVED"
+    );
+
+    if (participation5mState === "SUPPORTIVE") {
+      lines.push("5m: participation is supportive.");
+    } else if (participation5mState === "ADVERSE") {
+      lines.push("5m: completed participation is adverse.");
+    } else {
+      lines.push("5m: participation is unresolved.");
+    }
+  } else if (result?.participation5mStale === true) {
+    lines.push("5m: participation source is stale.");
+  } else {
+    lines.push("5m: participation is unavailable or not completed.");
+  }
+
   if (result?.validation5mActive === true) {
     const validationState = safeUpper(result?.validation5mState, "UNRESOLVED");
-    if (validationState === "UNRESOLVED") {
-      lines.push("5m: validation still unresolved.");
-    } else if (validationState === "SUPPORTIVE") {
-      lines.push("5m: validation remains supportive.");
-    } else if (validationState === "CONFLICTING") {
-      lines.push("5m: validation is conflicting.");
-    } else {
-      lines.push(`5m: validation state is ${validationState}.`);
-    }
-  } else {
-    lines.push("5m: validation is unavailable.");
+    lines.push(`Engine 3 5m price validation (diagnostic): ${validationState}.`);
   }
 
   if (result?.broader10mActive === true) {
