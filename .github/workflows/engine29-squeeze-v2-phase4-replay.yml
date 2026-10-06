@@ -26,9 +26,15 @@ jobs:
           git fetch --no-tags origin data-archive-10min
           git worktree add /tmp/engine25-10m-archive origin/data-archive-10min
 
+      - name: Fetch Engine25 immutable 30m archive
+        run: |
+          git fetch --no-tags origin data-archive-30m-internals
+          git worktree add /tmp/engine25-30m-archive origin/data-archive-30m-internals
+
       - name: Run Squeeze v2 real-data replay
         env:
           ENGINE29_REPLAY_DATE: "2026-10-06"
           ENGINE25_10M_ARCHIVE_ROOT: "/tmp/engine25-10m-archive/data/engine25-10m-history"
+          ENGINE25_30M_ARCHIVE_ROOT: "/tmp/engine25-30m-archive/data/engine25-30m-history"
           ENGINE29_REPLAY_BACKEND: "https://frye-market-backend-1.onrender.com"
         run: node services/core/qa/runEngine29SqueezeV2Replay.js
