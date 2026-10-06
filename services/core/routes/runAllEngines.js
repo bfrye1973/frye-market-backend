@@ -44,6 +44,12 @@ const ES_REPLAY_ARCHIVE_JOB = path.resolve(
   "jobs/archiveEsReplaySnapshot.js"
 );
 
+// Optional historical Engine 28A Replay audit.
+const ENGINE28A_REPLAY_AUDIT_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/auditEngine28AReplayWindow.js"
+);
+
 // Step 4: Auto-execute a frozen canonical Engine 8 PAPER order when ready.
 // This is a separate job so snapshot construction remains read-only.
 const ENGINE8_AUTO_PAPER_EXECUTOR_JOB = path.resolve(
@@ -301,6 +307,36 @@ async function handle(req, res) {
     });
 
     // ---------------------------------
+    // OPTIONAL STEP 3D: Read-only historical Replay audit.
+    // Runs only when ENGINE28A_REPLAY_AUDIT_DATE is explicitly set.
+    // ---------------------------------
+    let step3audit = {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: "ENGINE28A_REPLAY_AUDIT_DISABLED",
+      }),
+      stderr: "",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: 0,
+    };
+
+    if (
+      String(
+        process.env.ENGINE28A_REPLAY_AUDIT_DATE || ""
+      ).trim()
+    ) {
+      step3audit = await runStep({
+        name: "engine28a_replay_window_audit",
+        cmd: "node",
+        args: [ENGINE28A_REPLAY_AUDIT_JOB],
+        cwd: CORE_DIR,
+      });
+    }
+
+    // ---------------------------------
     // STEP 4: Controlled canonical PAPER execution bridge
     //
     // Safety:
@@ -359,6 +395,9 @@ async function handle(req, res) {
       "== STEP 3C: node jobs/archiveEsReplaySnapshot.js ==",
       step3b.stdout,
       "",
+      "== OPTIONAL STEP 3D: node jobs/auditEngine28AReplayWindow.js ==",
+      step3audit.stdout,
+      "",
       "== STEP 4: node jobs/autoExecuteCanonicalPaperTrade.js ==",
       step4.stdout,
     ].join("\n");
@@ -382,6 +421,9 @@ async function handle(req, res) {
       "== STEP 3C STDERR ==",
       step3b.stderr,
       "",
+      "== OPTIONAL STEP 3D STDERR ==",
+      step3audit.stderr,
+      "",
       "== STEP 4 STDERR ==",
       step4.stderr,
     ].join("\n");
@@ -392,6 +434,7 @@ async function handle(req, res) {
       step3a.code === 0 &&
       step3doctor.code === 0 &&
       step3b.code === 0 &&
+      step3audit.code === 0 &&
       step4.code === 0;
 
     const code =
@@ -405,6 +448,8 @@ async function handle(req, res) {
         ? step3doctor.code
         : step3b.code !== 0
         ? step3b.code
+        : step3audit.code !== 0
+        ? step3audit.code
         : step4.code;
 
     console.log(
@@ -425,6 +470,7 @@ async function handle(req, res) {
         build_es_strategy_snapshot: step3a.elapsedMs,
         engine28a_pipeline_doctor: step3doctor.elapsedMs,
         archive_es_replay_snapshot: step3b.elapsedMs,
+        engine28a_replay_window_audit: step3audit.elapsedMs,
         engine8_auto_paper_execution: step4.elapsedMs,
       },
       steps: {
@@ -463,6 +509,12 @@ async function handle(req, res) {
           startedAt: step3b.startedAt,
           endedAt: step3b.endedAt,
           elapsedMs: step3b.elapsedMs,
+        },
+        engine28a_replay_window_audit: {
+          code: step3audit.code,
+          startedAt: step3audit.startedAt,
+          endedAt: step3audit.endedAt,
+          elapsedMs: step3audit.elapsedMs,
         },
         engine8_auto_paper_execution: {
           code: step4.code,
