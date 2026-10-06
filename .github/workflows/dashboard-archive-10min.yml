@@ -1,92 +1,119 @@
 name: dashboard-archive-10min
 
 on:
-  # Auto-run after the live 10-minute workflow completes
   workflow_run:
-    workflows: ["dashboard-10min (self-hosted, full)"]
+    workflows: ["dashboard-10min (github-runner, debug-publish)"]
     types: [completed]
-
-  # Manual trigger if needed
   workflow_dispatch: {}
 
 jobs:
   archive:
-    name: Archive 10m snapshot to data-archive-10min
+    name: Archive Engine25 canonical 10m snapshot
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    concurrency:
+      group: engine25-10m-archive
+      cancel-in-progress: false
+
     env:
       LIVE_BRANCH: data-live-10min
       ARCHIVE_BRANCH: data-archive-10min
+      HISTORY_ROOT: data/engine25-10m-history
+      RETENTION_DAYS: "30"
 
     steps:
-      - name: Skip if live job failed
-        if: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' }}
-        run: |
-          echo "Live job conclusion=${{ github.event.workflow_run.conclusion }} — skipping archive."
-          exit 0
-
-      - name: Checkout (shallow)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Resolve timestamp (Arizona)
-        id: ts
-        run: |
-          TS_LOCAL=$(TZ=America/Phoenix date +"%Y-%m-%d %H:%M:%S")
-          DATE_DIR=$(TZ=America/Phoenix date +"%Y-%m-%d")
-          TIME_DIR=$(TZ=America/Phoenix date +"%H%M")
-          echo "ts_local=${TS_LOCAL}" >> "$GITHUB_OUTPUT"
-          echo "date_dir=${DATE_DIR}" >> "$GITHUB_OUTPUT"
-          echo "time_dir=${TIME_DIR}" >> "$GITHUB_OUTPUT"
-
-      - name: Fetch live branch
+      - name: Fetch canonical live snapshot
         run: |
           set -euo pipefail
           git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+          mkdir -p /tmp/engine25-live
+          git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/engine25-live/outlook_intraday.json
+          test -s /tmp/engine25-live/outlook_intraday.json
 
-      - name: Extract latest live files
+      - name: Build immutable Engine25 archive record
+        id: snapshot
         run: |
           set -euo pipefail
-          mkdir -p /tmp/live
-          git show "origin/${LIVE_BRANCH}:data/outlook_intraday.json" > /tmp/live/outlook_intraday.json
-          git show "origin/${LIVE_BRANCH}:data/outlook_source.json"   > /tmp/live/outlook_source.json  || true
-          git show "origin/${LIVE_BRANCH}:data/heartbeat_10m.txt"    > /tmp/live/heartbeat_10m.txt    || true
-          test -s /tmp/live/outlook_intraday.json
+          RESULT=$(python scripts/archive_engine25_10m.py build             --input /tmp/engine25-live/outlook_intraday.json             --stage-dir /tmp/engine25-archive-stage             --history-root "${HISTORY_ROOT}"             --live-branch "${LIVE_BRANCH}")
+          echo "${RESULT}"
+          ARCH_PATH=$(python -c 'import json,sys; print(json.load(sys.stdin)["archive_rel"])' <<< "${RESULT}")
+          SOURCE_TS=$(python -c 'import json,sys; print(json.load(sys.stdin)["source_ts"])' <<< "${RESULT}")
+          echo "archive_rel=${ARCH_PATH}" >> "${GITHUB_OUTPUT}"
+          echo "source_ts=${SOURCE_TS}" >> "${GITHUB_OUTPUT}"
 
-      - name: Stage archive snapshot
-        id: stage
+      - name: Checkout archive branch
         run: |
           set -euo pipefail
-          ARCH_PATH="data/archives/10min/${{ steps.ts.outputs.date_dir }}/${{ steps.ts.outputs.time_dir }}"
+          git fetch --no-tags origin "${ARCHIVE_BRANCH}"
+          git checkout -B "${ARCHIVE_BRANCH}" "origin/${ARCHIVE_BRANCH}"
+
+      - name: Install immutable snapshot
+        run: |
+          set -euo pipefail
+          ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
+          if [ -e "${ARCH_PATH}" ]; then
+            echo "::error::archive collision at ${ARCH_PATH}; refusing to overwrite historical data"
+            exit 1
+          fi
           mkdir -p "${ARCH_PATH}"
-          cp -f /tmp/live/outlook_intraday.json "${ARCH_PATH}/outlook_intraday.json"
-          if [ -s /tmp/live/outlook_source.json ]; then cp -f /tmp/live/outlook_source.json "${ARCH_PATH}/outlook_source.json"; fi
-          if [ -s /tmp/live/heartbeat_10m.txt ];  then cp -f /tmp/live/heartbeat_10m.txt  "${ARCH_PATH}/heartbeat_10m.txt";  fi
-          echo "arch_path=${ARCH_PATH}" >> "$GITHUB_OUTPUT"
+          cp /tmp/engine25-archive-stage/engine25_10m_snapshot.json "${ARCH_PATH}/engine25_10m_snapshot.json"
+          cp /tmp/engine25-archive-stage/outlook_intraday.json "${ARCH_PATH}/outlook_intraday.json"
 
-      - name: Commit to archive branch
+      - name: Enforce rolling 30-day retention
         run: |
           set -euo pipefail
-          # Switch/create archive branch
-          git fetch --depth=1 origin "${ARCHIVE_BRANCH}" || true
-          git checkout -B "${ARCHIVE_BRANCH}" "origin/${ARCHIVE_BRANCH}" || git checkout -B "${ARCHIVE_BRANCH}"
+          python scripts/archive_engine25_10m.py prune             --history-root "${HISTORY_ROOT}"             --retention-days "${RETENTION_DAYS}"
 
-          # Add only the new snapshot folder
-          git add -f "${{ steps.stage.outputs.arch_path }}"
-          git status --porcelain
+      - name: Validate staged archive
+        run: |
+          set -euo pipefail
+          ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
+          test -s "${ARCH_PATH}/engine25_10m_snapshot.json"
+          test -s "${ARCH_PATH}/outlook_intraday.json"
+          python - << 'PY'
+          import json
+          from pathlib import Path
 
+          p = Path("${{ steps.snapshot.outputs.archive_rel }}") / "engine25_10m_snapshot.json"
+          j = json.loads(p.read_text(encoding="utf-8"))
+
+          assert j["schema"] == "engine25.marketInternals10mArchive@1"
+          assert j["timeframe"] == "10m"
+          assert j["sourceTimestamp"] == "${{ steps.snapshot.outputs.source_ts }}"
+          assert isinstance(j["sectorCards"], list)
+          assert len(j["sectorCards"]) == 11
+          assert j["strongSectorCount"] + j["neutralSectorCount"] + j["weakSectorCount"] == 11
+          assert j["advancingStocks"] is not None
+          assert j["decliningStocks"] is not None
+          assert j["newHighs"] is not None
+          assert j["newLows"] is not None
+          print("archive validation PASS:", p)
+          PY
+
+      - name: Commit archive and retention changes
+        run: |
+          set -euo pipefail
+          git config user.email "user@local"
+          git config user.name "CI Bot"
+
+          git add -A "${HISTORY_ROOT}"
           if git diff --cached --quiet; then
             echo "Nothing new to archive."
             exit 0
           fi
 
-          git config user.email "user@local"
-          git config user.name  "CI Bot"
-          git commit -m "archive 10m @ ${{ steps.ts.outputs.ts_local }} (AZ)"
-          git push -f origin "${ARCHIVE_BRANCH}"
+          git commit -m "Engine25 10m archive ${{ steps.snapshot.outputs.source_ts }}"
+          git push origin "${ARCHIVE_BRANCH}"
 
       - name: Done
         run: |
-          echo "::notice:: archived 10m snapshot to ${ARCHIVE_BRANCH}/${{ steps.stage.outputs.arch_path }}"
+          echo "::notice::Engine25 10m snapshot archived with rolling 30-day retention"
+          echo "sourceTimestamp=${{ steps.snapshot.outputs.source_ts }}"
+          echo "archivePath=${{ steps.snapshot.outputs.archive_rel }}"
