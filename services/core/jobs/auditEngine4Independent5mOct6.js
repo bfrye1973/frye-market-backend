@@ -173,10 +173,34 @@ for (const time of TIMES) {
   });
 }
 
+const compactRows = rows.map((row) => ({
+  time: row.time,
+  price: row.price ?? null,
+  e3Direction: row.engine3?.direction ?? null,
+  e3Quality: row.engine3?.quality ?? null,
+  e3Qualified: row.engine3?.engine3Strategy1QualifiedForEngine6 === true,
+  e3Validation5mDirection: row.engine3?.validation5m?.direction ?? null,
+  e3Validation5mState: row.engine3?.validation5m?.validationState ?? null,
+  e3Validation5mStatus: row.engine3?.validation5m?.currentCandleStatus ?? null,
+  new5mState: row.newEngine4?.participation5mState ?? null,
+  new5mCompleted: row.newEngine4?.participation5mCompleted ?? null,
+  new5mRatio: row.newEngine4?.participation5mVolumeRatio ?? null,
+  oldE4State: row.oldEngine4?.state ?? null,
+  oldE4HardBlocked: row.oldEngine4?.hardBlocked === true,
+  newE4State: row.newEngine4?.state ?? null,
+  newE4HardBlocked: row.newEngine4?.hardBlocked === true,
+  newE4Blockers: row.newEngine4?.blockers ?? [],
+  oldE6Decision: row.oldEngine6?.decision ?? null,
+  oldE6Allowed: row.oldEngine6?.allowed === true,
+  newE6Decision: row.newEngine6?.decision ?? null,
+  newE6Allowed: row.newEngine6?.allowed === true,
+  newE6Blockers: row.newEngine6?.blockers ?? [],
+}));
+
 console.log(JSON.stringify({
   ok: true,
   date: DATE,
   strategyId: STRATEGY_ID,
   times: TIMES,
-  rows,
+  compactRows,
 }, null, 2));
