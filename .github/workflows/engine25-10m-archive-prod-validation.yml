@@ -1,0 +1,83 @@
+name: Engine25 10m Archive Production Validation
+
+on:
+  push:
+    branches:
+      - engine25-10m-archive-prod-validation-v1
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      LIVE_BRANCH: data-live-10min
+      ARCHIVE_BRANCH: data-archive-10min
+      HISTORY_ROOT: data/engine25-10m-history
+      RETENTION_DAYS: "30"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Fetch live snapshot
+        run: |
+          set -euo pipefail
+          cp scripts/archive_engine25_10m.py /tmp/archive_engine25_10m.py
+          git fetch --no-tags --depth=1 origin "$LIVE_BRANCH"
+          mkdir -p /tmp/engine25-live
+          git show "origin/$LIVE_BRANCH:data/outlook_intraday.json" > /tmp/engine25-live/outlook_intraday.json
+      - name: Build archive record
+        id: snapshot
+        run: |
+          set -euo pipefail
+          RESULT=$(python /tmp/archive_engine25_10m.py build             --input /tmp/engine25-live/outlook_intraday.json             --stage-dir /tmp/engine25-archive-stage             --history-root "$HISTORY_ROOT"             --live-branch "$LIVE_BRANCH")
+          echo "$RESULT"
+          ARCH_PATH=$(python -c 'import json,sys; print(json.load(sys.stdin)["archive_rel"])' <<< "$RESULT")
+          SOURCE_TS=$(python -c 'import json,sys; print(json.load(sys.stdin)["source_ts"])' <<< "$RESULT")
+          echo "archive_rel=$ARCH_PATH" >> "$GITHUB_OUTPUT"
+          echo "source_ts=$SOURCE_TS" >> "$GITHUB_OUTPUT"
+      - name: Write archive branch
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "$ARCHIVE_BRANCH"
+          git checkout -B "$ARCHIVE_BRANCH" "origin/$ARCHIVE_BRANCH"
+          ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
+          if [ -e "$ARCH_PATH" ]; then
+            echo "snapshot already exists: $ARCH_PATH"
+          else
+            mkdir -p "$ARCH_PATH"
+            cp /tmp/engine25-archive-stage/engine25_10m_snapshot.json "$ARCH_PATH/engine25_10m_snapshot.json"
+            cp /tmp/engine25-archive-stage/outlook_intraday.json "$ARCH_PATH/outlook_intraday.json"
+          fi
+          python /tmp/archive_engine25_10m.py prune --history-root "$HISTORY_ROOT" --retention-days "$RETENTION_DAYS"
+          git add -A "$HISTORY_ROOT"
+          if ! git diff --cached --quiet; then
+            git config user.email "user@local"
+            git config user.name "CI Bot"
+            git commit -m "Engine25 10m archive validation ${{ steps.snapshot.outputs.source_ts }}"
+            git push origin "$ARCHIVE_BRANCH"
+          fi
+      - name: Verify remote archive
+        run: |
+          set -euo pipefail
+          ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
+          git fetch --no-tags origin "$ARCHIVE_BRANCH"
+          git show "origin/$ARCHIVE_BRANCH:$ARCH_PATH/engine25_10m_snapshot.json" > /tmp/verify.json
+          python - << 'PY'
+          import json
+          j=json.load(open("/tmp/verify.json"))
+          assert j["schema"]=="engine25.marketInternals10mArchive@1"
+          assert j["sourceTimestamp"]=="${{ steps.snapshot.outputs.source_ts }}"
+          assert len(j["sectorCards"])==11
+          print(json.dumps({
+            "sourceTimestamp": j["sourceTimestamp"],
+            "advancingStocks": j["advancingStocks"],
+            "decliningStocks": j["decliningStocks"],
+            "newHighs": j["newHighs"],
+            "newLows": j["newLows"],
+            "strongSectorCount": j["strongSectorCount"],
+            "neutralSectorCount": j["neutralSectorCount"],
+            "weakSectorCount": j["weakSectorCount"],
+            "coveragePct": j["coveragePct"]
+          }, indent=2))
+          PY
