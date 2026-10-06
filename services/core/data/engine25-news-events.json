@@ -1,0 +1,14 @@
+{
+  "ok": true,
+  "engine": "engine25.massiveBenzingaNews.v0.1",
+  "source": "MASSIVE_BENZINGA_LICENSED_FEED",
+  "generatedAtUtc": null,
+  "feedAsOfUtc": null,
+  "sourceEndpoint": "/benzinga/v2/news",
+  "httpStatus": null,
+  "itemsFetched": 0,
+  "itemsRelevant": 0,
+  "itemsMaterial": 0,
+  "events": [],
+  "warnings": []
+}
