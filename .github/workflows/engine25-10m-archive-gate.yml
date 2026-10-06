@@ -14,7 +14,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Unit tests
-        run: python -m unittest services/core/tests/engine25TenMinuteArchive.test.py
+        run: python services/core/tests/engine25TenMinuteArchive.test.py
       - name: Workflow contract checks
         run: |
           grep -q 'dashboard-10min (github-runner, debug-publish)' .github/workflows/dashboard-archive-10min.yml
