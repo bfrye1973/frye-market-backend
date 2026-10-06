@@ -32,6 +32,6 @@ jobs:
 
       - name: Oct 6 replay inventory
         run: |
-          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/times?date=2026-10-06" | tee /tmp/oct6-times.json
+          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/es/times?date=2026-10-06" | tee /tmp/oct6-times.json
           echo
           cat /tmp/oct6-times.json
