@@ -266,9 +266,16 @@ async function main() {
   );
 
   const productionData = production?.data || production || {};
-  const oldSqueeze =
-    productionData?.moveCharacter?.squeeze ||
+  const canonicalCharacterSqueeze =
     productionData?.marketCharacter?.move?.character?.squeeze ||
+    productionData?.display?.marketCharacter?.move?.character?.squeeze ||
+    null;
+  const compatibilitySqueeze =
+    productionData?.moveCharacter?.squeeze ||
+    null;
+  const oldSqueeze =
+    canonicalCharacterSqueeze ||
+    compatibilitySqueeze ||
     null;
   const oldLiveCondition =
     productionData?.marketCharacter?.move?.liveCondition ||
@@ -287,7 +294,10 @@ async function main() {
     oldDetector: {
       active: oldSqueeze?.active === true || oldSqueeze?.squeezeLike === true,
       direction: oldSqueeze?.direction ?? null,
-      state: oldSqueeze?.state ?? oldSqueeze?.character ?? null,
+      state: oldSqueeze?.state ?? oldSqueeze?.character ?? (oldSqueeze?.active === false ? "NONE" : null),
+      impulsePct: oldSqueeze?.impulsePct ?? null,
+      impulseMultiple: oldSqueeze?.impulseMultiple ?? null,
+      broadConfirmationMissing: oldSqueeze?.broadConfirmationMissing ?? null,
       liveConditionState: oldLiveCondition?.state ?? null,
       liveConditionDirection: oldLiveCondition?.direction ?? null,
     },
