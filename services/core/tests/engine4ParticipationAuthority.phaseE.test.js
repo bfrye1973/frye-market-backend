@@ -5,7 +5,7 @@
 // - 1m is diagnostic only and cannot independently confirm or hard-block.
 // - 5m is primary Engine 4 participation authority.
 // - 10m is broader confirmation/weakening context and does not independently hard-block.
-// - structural completed zone loss remains an immediate hard block.
+// - structural invalidation is owned upstream; Engine 4 consumes confirmed invalidation only.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -31,9 +31,22 @@ function validation5m({
   validationState = "UNRESOLVED",
   stale = false,
   active = true,
-  currentCandleStatus = "FORMING",
+  currentCandleStatus = "COMPLETED",
 } = {}) {
+  const currentCandle =
+    direction === "LONG"
+      ? { open: 5004, high: 5009, low: 5003, close: 5008, volume: 1200, time: 200 }
+      : direction === "SHORT"
+        ? { open: 5008, high: 5009, low: 5001, close: 5003, volume: 1500, time: 200 }
+        : { open: 5006, high: 5008, low: 5004, close: 5006, volume: 800, time: 200 };
+
+  const priorCandle =
+    direction === "SHORT"
+      ? { open: 5005, high: 5009, low: 5004, close: 5007, volume: 1000, time: 195 }
+      : { open: 5002, high: 5007, low: 5001, close: 5006, volume: 1000, time: 195 };
+
   return {
+    ...IDENTITY,
     active,
     sourceTimeframe: "5m",
     state:
@@ -49,11 +62,13 @@ function validation5m({
     supportingBarTime: 200,
     currentCandleStatus,
     priorCandleStatus: "COMPLETED",
-    currentCandle: { volume: 7300 },
-    priorCandle: { volume: 9000 },
+    currentCandle: {
+      ...currentCandle,
+      candleClosed: currentCandleStatus === "COMPLETED",
+    },
+    priorCandle: { ...priorCandle, candleClosed: true },
   };
 }
-
 function reaction(overrides = {}) {
   return {
     active: true,
@@ -235,7 +250,7 @@ test("1m adverse counter-pressure cannot prevent confirmation when 5m supports h
   assert.equal(out.hardBlocked, false);
 });
 
-test("5m supportive plus fading 10m context waits rather than confirms or blocks", () => {
+test("5m supportive plus materially weak fading 10m waits rather than confirms or blocks", () => {
   const engine3 = reaction({
     reactionValidation5m: validation5m({
       direction: "LONG",
@@ -245,7 +260,7 @@ test("5m supportive plus fading 10m context waits rather than confirms or blocks
   });
   const out = build({
     engine3,
-    fast: tactical({ volumeTrend: "FADING" }),
+    fast: tactical({ volumeTrend: "FADING", relativeVolume: 0.8, volumeExpansion: false, volumeConfirmed: false, highVolumeCandles: 0 }),
   });
   assert.equal(out.participationState, "PARTICIPATION_WAITING");
   assert.equal(out.participationConfirmed, false);
@@ -267,7 +282,7 @@ test("5m adverse against held LONG is a hard-block candidate when 10m is not wea
   assert.equal(out.allowed, false);
 });
 
-test("5m adverse plus fading 10m context weakens to WAIT rather than hard-block", () => {
+test("genuine completed adverse 5m remains a hard block even when 10m is fading", () => {
   const engine3 = reaction({
     reactionValidation5m: validation5m({
       direction: "SHORT",
@@ -277,10 +292,11 @@ test("5m adverse plus fading 10m context weakens to WAIT rather than hard-block"
   });
   const out = build({
     engine3,
-    fast: tactical({ volumeTrend: "FADING" }),
+    fast: tactical({ volumeTrend: "FADING", relativeVolume: 0.8, volumeExpansion: false, volumeConfirmed: false, highVolumeCandles: 0 }),
   });
-  assert.equal(out.participationState, "PARTICIPATION_WAITING");
-  assert.equal(out.hardBlocked, false);
+  assert.equal(out.participation5mState, "ADVERSE");
+  assert.equal(out.participationState, "ADVERSE_PARTICIPATION_BLOCKED");
+  assert.equal(out.hardBlocked, true);
 });
 
 test("10m fading cannot independently hard-block when 5m is unresolved", () => {
@@ -290,7 +306,7 @@ test("10m fading cannot independently hard-block when 5m is unresolved", () => {
   assert.equal(out.hardBlocked, false);
 });
 
-test("completed structural zone loss remains an immediate hard block", () => {
+test("1m close below zone does not let Engine 4 invent structural invalidation", () => {
   const engine3 = reaction({
     currentCandle: {
       open: 5003,
@@ -317,7 +333,17 @@ test("completed structural zone loss remains an immediate hard block", () => {
     }),
   });
   const out = build({ engine3 });
-  assert.equal(out.participationState, "ADVERSE_PARTICIPATION_BLOCKED");
+  assert.equal(out.participation5mState, "UNRESOLVED");
+  assert.equal(out.participationState, "PARTICIPATION_WAITING");
+  assert.equal(out.hardBlocked, false);
+});
+
+test("confirmed upstream candidate invalidation still hard-blocks", () => {
+  const engine3 = reaction({
+    candidateInvalidated: true,
+  });
+  const out = build({ engine3 });
+  assert.equal(out.participationState, "CANDIDATE_INVALIDATED");
   assert.equal(out.hardBlocked, true);
 });
 

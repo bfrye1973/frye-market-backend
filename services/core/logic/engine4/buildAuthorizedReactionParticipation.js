@@ -73,30 +73,49 @@ function isCandidateInvalidated(reaction) {
 
 function resolve5mParticipationAuthority({ direction, volumeMeta }) {
   const canonicalDirection = safeUpper(direction, "NEUTRAL");
-  const validationDirection = safeUpper(volumeMeta?.validation5mDirection, "NEUTRAL");
+  const participationState = safeUpper(
+    volumeMeta?.participation5mState,
+    "UNRESOLVED"
+  );
 
-  const validationUsable =
-    volumeMeta?.validation5mActive === true &&
-    volumeMeta?.validation5mStale !== true;
+  const participationUsable =
+    volumeMeta?.participation5mActive === true &&
+    volumeMeta?.participation5mSourceValid === true &&
+    volumeMeta?.participation5mFresh === true &&
+    volumeMeta?.participation5mCompleted === true &&
+    ["LONG", "SHORT"].includes(canonicalDirection);
 
-  if (
-    validationUsable !== true ||
-    !["LONG", "SHORT"].includes(canonicalDirection) ||
-    !["LONG", "SHORT"].includes(validationDirection)
-  ) {
+  if (participationUsable !== true) {
     return "UNRESOLVED";
   }
 
-  return validationDirection === canonicalDirection
-    ? "SUPPORTIVE"
-    : "ADVERSE";
+  return ["SUPPORTIVE", "ADVERSE"].includes(participationState)
+    ? participationState
+    : "UNRESOLVED";
 }
 
 function broader10mWeakensParticipation(volumeMeta) {
-  return (
-    volumeMeta?.broader10mActive === true &&
-    safeUpper(volumeMeta?.broader10mVolumeTrend) === "FADING"
-  );
+  if (volumeMeta?.broader10mActive !== true) {
+    return false;
+  }
+
+  const trend = safeUpper(volumeMeta?.broader10mVolumeTrend, "");
+  if (trend !== "FADING") {
+    return false;
+  }
+
+  const relativeVolume = toNum(volumeMeta?.broader10mRelativeVolume);
+  const expansion = volumeMeta?.broader10mVolumeExpansion === true;
+  const confirmed = volumeMeta?.broader10mVolumeConfirmed === true;
+  const highVolumeCandles = toNum(volumeMeta?.broader10mHighVolumeCandles);
+
+  const stillStrong =
+    expansion === true ||
+    confirmed === true ||
+    (relativeVolume != null && relativeVolume >= 1.35) ||
+    (highVolumeCandles != null && highVolumeCandles >= 2);
+
+  return stillStrong !== true;
 }
 
 function isConstructiveParticipation({ direction, volumeMeta }) {
@@ -111,36 +130,13 @@ function isConstructiveParticipation({ direction, volumeMeta }) {
   );
 }
 
-function completedZoneLossAgainstLong({ reaction, volumeMeta }) {
-  const entryZone = reaction?.entryZone || reaction?.engine26LocationContext?.entryZone || null;
-  const zoneLow = toNum(entryZone?.lo ?? entryZone?.low);
-  const close = volumeMeta.currentCandle?.close;
-
-  return (
-    volumeMeta.currentCandleClosed === true &&
-    zoneLow != null &&
-    close != null &&
-    close < zoneLow
-  );
-}
-
-function completedAdverseEvidence({ reaction, direction, volumeMeta }) {
-  if (
-    direction === "LONG" &&
-    completedZoneLossAgainstLong({ reaction, volumeMeta })
-  ) {
-    return true;
-  }
-
+function completedAdverseEvidence({ direction, volumeMeta }) {
   const participationAuthority = resolve5mParticipationAuthority({
     direction,
     volumeMeta,
   });
 
-  return (
-    participationAuthority === "ADVERSE" &&
-    broader10mWeakensParticipation(volumeMeta) !== true
-  );
+  return participationAuthority === "ADVERSE";
 }
 
 export function buildEngine4AuthorizedReactionParticipation({
@@ -290,7 +286,7 @@ export function buildEngine4AuthorizedReactionParticipation({
     });
   }
 
-  const adverseCompleted = completedAdverseEvidence({ reaction, direction: participationEvaluationDirection, volumeMeta });
+  const adverseCompleted = completedAdverseEvidence({ direction: participationEvaluationDirection, volumeMeta });
 
   const qualifiedParticipationEvaluation =
     result.qualifiedParticipationEvaluation === true;

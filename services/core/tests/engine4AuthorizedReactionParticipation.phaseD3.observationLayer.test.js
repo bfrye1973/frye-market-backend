@@ -342,7 +342,7 @@ runTest("explicit Engine 3 ineligibility cannot be rescued by strong 1m/10m volu
   assert.equal(out.direction, "NEUTRAL");
 });
 
-runTest("existing completed adverse participation still hard-blocks when Engine 3 gate is satisfied", () => {
+runTest("completed adverse 5m participation still hard-blocks when Engine 3 gate is satisfied", () => {
   const reaction = baseReaction({
     participationEvaluationEligible: true,
     reactionConfirmed: true,
@@ -350,35 +350,36 @@ runTest("existing completed adverse participation still hard-blocks when Engine 
     reactionState: "REACTION_CONFIRMED",
     authorizedReactionState: "REACTION_CONFIRMED",
     direction: "LONG",
-    currentCandle: {
-      time: 1786117080,
-      open: 7524,
-      high: 7524.25,
-      low: 7500,
-      close: 7502,
-      volume: 9000,
-      candleClosed: true,
+    reactionValidation5m: {
+      ...baseReaction().reactionValidation5m,
+      validationState: "UNRESOLVED",
+      direction: "SHORT",
+      quality: "GOOD",
+      candleState: "COMPLETED",
+      currentCandleStatus: "COMPLETED",
+      priorCandleStatus: "COMPLETED",
+      currentCandle: {
+        time: 1786116900,
+        open: 7524,
+        high: 7524.25,
+        low: 7500,
+        close: 7502,
+        volume: 9000,
+        candleClosed: true,
+      },
+      priorCandle: {
+        time: 1786116600,
+        open: 7520,
+        high: 7524,
+        low: 7517,
+        close: 7524,
+        volume: 5000,
+        candleClosed: true,
+      },
     },
-    priorCandle: {
-      time: 1786117020,
-      open: 7520,
-      high: 7524,
-      low: 7517,
-      close: 7524,
-      volume: 5000,
-      candleClosed: true,
-    },
-    entryZone: { lo: 7504, hi: 7518.25 },
   });
-  const out = build({
-    reaction,
-    fast: baseFast({
-      intendedDirection: "LONG",
-      volumeExpansion: true,
-      absorptionRisk: true,
-      supportsDirection: false,
-    }),
-  });
+  const out = build({ reaction });
+  assert.equal(out.participation5mState, "ADVERSE");
   assert.equal(out.participationState, "ADVERSE_PARTICIPATION_BLOCKED");
   assert.equal(out.hardBlocked, true);
   assert.equal(out.allowed, false);
@@ -426,7 +427,16 @@ runTest("D3 does not mutate reaction or tactical inputs", () => {
 runTest("plain-English output separates 1m 5m and 10m", () => {
   const out = build();
   assert.ok(out.plainEnglishLines.includes("1m: volume lighter right now."));
-  assert.ok(out.plainEnglishLines.includes("5m: validation still unresolved."));
+  assert.ok(
+    out.plainEnglishLines.some((line) =>
+      line.startsWith("5m: participation ")
+    )
+  );
+  assert.ok(
+    out.plainEnglishLines.includes(
+      "Engine 3 5m price validation (diagnostic): UNRESOLVED."
+    )
+  );
   assert.ok(out.plainEnglishLines.includes("10m: broader participation is fading."));
   assert.ok(out.plainEnglishLines.includes("Engine 4 confirmation is waiting for Engine 3 qualification."));
   assert.ok(out.plainEnglishLines.includes("No permission. No execution."));
