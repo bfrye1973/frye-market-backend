@@ -277,6 +277,7 @@ async function main() {
 
   console.log("SQUEEZE_V2_PRODUCTION_SHAPE " + JSON.stringify({
     topLevelKeys: Object.keys(productionData || {}),
+    error: productionData?.error ?? null,
     moveCharacterKeys: Object.keys(productionData?.moveCharacter || {}),
     marketCharacterMoveKeys: Object.keys(productionData?.marketCharacter?.move || {}),
   }));
