@@ -1,0 +1,33 @@
+name: Distribution v2 Production Validation
+
+on:
+  push:
+    branches:
+      - engine25-distribution-v2-prod-validation
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate live Engine25 Distribution v2
+        run: |
+          set -euo pipefail
+          URL="https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard"
+          curl -fsS --retry 8 --retry-delay 5 "$URL" -o /tmp/e25.json
+
+          jq '{
+            schema: .participationArtifact.participation.distributionPressure.schema,
+            rawPressure: .participationArtifact.participation.distributionPressure.rawPressure,
+            pressureLabel: .participationArtifact.participation.distributionPressure.pressureLabel,
+            integratedState: .participationArtifact.participation.distributionPressure.integratedState,
+            authority: .participationArtifact.participation.distributionPressure.authority,
+            structural4h: .participationArtifact.participation.distributionPressure.structural4h,
+            tactical1h: .participationArtifact.participation.distributionPressure.tactical1h.trend,
+            confirmation30m: .participationArtifact.participation.distributionPressure.confirmation30m.confirmation,
+            acceleration10m: .participationArtifact.participation.distributionPressure.acceleration10m.acceleration,
+            legacyPresent: (.participationArtifact.participation.legacyDistributionPressure != null)
+          }' /tmp/e25.json
+
+          jq -e '.participationArtifact.participation.distributionPressure.schema == "engine25.distributionPressure.v2"' /tmp/e25.json
+          jq -e '.participationArtifact.participation.distributionPressure.authority.canonicalScoreTimeframe == "4h"' /tmp/e25.json
+          jq -e '.participationArtifact.participation.legacyDistributionPressure != null' /tmp/e25.json
