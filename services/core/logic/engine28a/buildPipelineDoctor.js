@@ -455,7 +455,7 @@ export function buildEngine28APipelineDoctor(strategy = {}) {
         : e4HardBlock
         ? {
             pipelineStatus: "BLOCKED",
-            failureType: "SAFETY_REJECTION",
+            failureType: "ENGINE_LOGIC",
             rootCause: "ENGINE4_ADVERSE_PARTICIPATION_BLOCKED",
           }
         : {
