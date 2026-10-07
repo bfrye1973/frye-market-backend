@@ -321,17 +321,42 @@ export function buildEngine3V5Shadow({
   /*
    * Engine 26 FULL_TARGET_COMPLETION ends the old trip.
    */
-  const engine26TripReset =
-    engine26ReactionHandoff
-      ?.priorRotationFullyComplete === true &&
-    engine26ReactionHandoff
-      ?.priorRotationCompletionState ===
-        "FULL_TARGET_COMPLETION" &&
-    (
-      isDirectional(prior.direction) ||
-      prior.travelModeActive === true ||
-      tradeDirectionLockActive === true
-    );
+const currentCandidateId =
+  normalizedZoneInput?.candidateId ??
+  engine26ReactionHandoff?.candidateId ??
+  engine26LocationCandidate?.candidateId ??
+  null;
+
+const priorCandidateId =
+  prior?.candidateId ??
+  null;
+
+const candidateChanged =
+  currentCandidateId != null &&
+  priorCandidateId != null &&
+  currentCandidateId !== priorCandidateId;
+
+/*
+ * FULL_TARGET_COMPLETION belongs to the PRIOR trip.
+ *
+ * Consume it only once when Engine 26 has actually moved to a
+ * different candidate.
+ *
+ * A historical priorRotationFullyComplete flag must never repeatedly
+ * reset fresh price action on the same active candidate.
+ */
+const engine26TripReset =
+  candidateChanged === true &&
+  engine26ReactionHandoff
+    ?.priorRotationFullyComplete === true &&
+  engine26ReactionHandoff
+    ?.priorRotationCompletionState ===
+      "FULL_TARGET_COMPLETION" &&
+  (
+    isDirectional(prior.direction) ||
+    prior.travelModeActive === true ||
+    tradeDirectionLockActive === true
+  );
 
   /*
    * First establish the prior state that is allowed to participate in
