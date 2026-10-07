@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { isEsGlobexSessionOpen } from "../logic/engine29/isEsGlobexSessionOpen.js";
+import { runAlertEngine29Squeeze } from "../jobs/alertEngine29Squeeze.js";
 
 const router = express.Router();
 
@@ -113,6 +114,20 @@ function runUpdateJob() {
       resolve({ stdout, stderr });
     });
   });
+}
+
+async function runSqueezeAlertSafe(data) {
+  try {
+    return await runAlertEngine29Squeeze({
+      campaign: data?.marketCharacter?.squeezeCampaign || null,
+    });
+  } catch (error) {
+    return {
+      ok: false,
+      sent: false,
+      error: String(error?.message || error),
+    };
+  }
 }
 
 function summaryFrom(data) {
@@ -240,6 +255,8 @@ router.post("/engine29/dashboard-refresh", async (_req, res) => {
       );
     }
 
+    const squeezeAlert = await runSqueezeAlertSafe(result.data);
+
     return res.json({
       ok: true,
       engine: "engine29.dashboardRefresh.route.v1",
@@ -249,6 +266,7 @@ router.post("/engine29/dashboard-refresh", async (_req, res) => {
       updateRunning: ENGINE29_UPDATE_RUNNING,
       fileModifiedAt: result.modifiedAt,
       data: summaryFrom(result.data),
+      squeezeAlert,
       logs: {
         stdoutTail: logs.stdout.slice(-2000),
         stderrTail: logs.stderr.slice(-1000),
@@ -314,6 +332,8 @@ router.post("/engine29/update", async (req, res) => {
       throw new Error(result.error || "Engine 29 update completed but output file is unavailable");
     }
 
+    const squeezeAlert = await runSqueezeAlertSafe(result.data);
+
     return res.json({
       ok: true,
       engine: "engine29.update.route.v1",
@@ -323,6 +343,7 @@ router.post("/engine29/update", async (req, res) => {
       session,
       fileModifiedAt: result.modifiedAt,
       data: summaryFrom(result.data),
+      squeezeAlert,
       logs: {
         stdoutTail: logs.stdout.slice(-4000),
         stderrTail: logs.stderr.slice(-2000),
