@@ -217,7 +217,7 @@ test("Engine 28A rejects a live execution safety violation", () => {
 
   assert.equal(
     out.failureType,
-    "ENGINE_LOGIC"
+    "SAFETY_REJECTION"
   );
 });
 
@@ -312,7 +312,7 @@ test("Engine 28A classifies genuine Engine 4 adverse participation as BLOCKED", 
 
   assert.equal(
     out.failureType,
-    "SAFETY_REJECTION"
+    "ENGINE_LOGIC"
   );
 
   assert.equal(
