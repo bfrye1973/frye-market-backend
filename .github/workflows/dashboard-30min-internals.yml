@@ -2,9 +2,10 @@ name: dashboard-30min-internals
 
 on:
   workflow_dispatch: {}
-  workflow_run:
-    workflows: ["dashboard-10min (github-runner, debug-publish)"]
-    types: [completed]
+  schedule:
+    # Broad UTC clock. The job itself gates in America/New_York so DST is safe.
+    # :05/:35 means we evaluate completed :00/:30 30m bars.
+    - cron: "5,35 * * * 0-5"
 
 jobs:
   thirtymin_internals:
@@ -27,12 +28,10 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      - name: Gate to completed regular-session 30m checkpoints
+      - name: Gate to ES/CME Globex 30m checkpoints
         id: session
         env:
           EVENT_NAME: ${{ github.event_name }}
-          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion || '' }}
-          UPSTREAM_CREATED_AT: ${{ github.event.workflow_run.created_at || '' }}
         run: |
           python - << 'PY'
           import os
@@ -40,43 +39,38 @@ jobs:
           from zoneinfo import ZoneInfo
 
           event_name = os.environ.get("EVENT_NAME", "")
-          conclusion = os.environ.get("UPSTREAM_CONCLUSION", "")
-          created_at = os.environ.get("UPSTREAM_CREATED_AT", "")
+          now = datetime.now(ZoneInfo("America/New_York"))
 
           if event_name == "workflow_dispatch":
               valid = True
-              reason = "MANUAL_VALIDATION"
-              checkpoint = None
-          elif conclusion != "success" or not created_at:
-              valid = False
-              reason = "UPSTREAM_10M_NOT_SUCCESSFUL"
-              checkpoint = None
+              reason = "MANUAL_RUN"
           else:
-              source = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
-              ny = source.astimezone(ZoneInfo("America/New_York"))
+              # ES/CME Globex master clock:
+              # Sunday 18:00 ET -> Friday 17:00 ET,
+              # with the daily 17:00-18:00 ET maintenance break.
+              wd = now.weekday()  # Mon=0 ... Sun=6
+              if wd == 6:  # Sunday
+                  valid = now.hour >= 18
+              elif 0 <= wd <= 3:  # Monday-Thursday
+                  valid = now.hour != 17
+              elif wd == 4:  # Friday
+                  valid = now.hour < 17
+              else:  # Saturday
+                  valid = False
 
-              # The proven 10m workflow is the operating clock. Only its
-              # :00/:30 scheduled observations may launch a 30m internals scan.
-              # Allow a small GitHub scheduler-delay window around those slots.
-              top_half = 0 <= ny.minute <= 9
-              bottom_half = 30 <= ny.minute <= 39
-              regular_checkpoint = (
-                  (ny.hour == 10 and top_half)
-                  or (10 <= ny.hour <= 15 and (top_half or bottom_half))
-                  or (ny.hour == 16 and top_half)
-              )
-              valid = ny.weekday() < 5 and regular_checkpoint
-              reason = "COMPLETED_30M_CHECKPOINT" if valid else "NOT_30M_CHECKPOINT"
-              checkpoint = ny.isoformat()
+              # Do not run the 18:05 ET slot immediately after reopen because
+              # a new full 30m bar has not completed yet. First post-reopen run
+              # is 18:35 ET.
+              if wd in [0, 1, 2, 3, 6] and now.hour == 18 and now.minute < 30:
+                  valid = False
+
+              reason = "ES_GLOBEX_30M_CHECKPOINT" if valid else "OUTSIDE_ES_GLOBEX_30M_WINDOW"
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"run={'true' if valid else 'false'}\n")
               f.write(f"reason={reason}\n")
 
-          print("event:", event_name)
-          print("upstream conclusion:", conclusion or "n/a")
-          print("upstream created_at:", created_at or "n/a")
-          print("checkpoint NY:", checkpoint or "n/a")
+          print("NY time:", now.isoformat())
           print("run:", valid, "reason:", reason)
           PY
 
