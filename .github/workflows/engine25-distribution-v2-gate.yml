@@ -1,0 +1,79 @@
+name: Engine25 Distribution v2 Gate
+
+on:
+  push:
+    branches:
+      - engine25-distribution-v2-4h-hierarchy
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine25/buildDistributionPressureV2.js
+          node --check services/core/jobs/updateEngine25Participation.js
+          node --check services/core/jobs/updateEngine25Full.js
+
+      - name: Distribution v2 tests
+        run: node --test services/core/tests/engine25DistributionPressureV2.test.js
+
+      - name: Publishing regression tests
+        run: |
+          node --test services/core/tests/engine25BlendedParticipationPublishing.test.js
+          node services/core/tests/engine25ParticipationPublisher.test.js
+
+      - name: Live canonical 4H proof
+        run: |
+          node --input-type=module <<'NODE'
+          import { buildEngine25DistributionPressureV2 } from "./services/core/logic/engine25/buildDistributionPressureV2.js";
+
+          const base = "https://frye-market-backend-1.onrender.com";
+          const get = async (path) => {
+            const r = await fetch(base + path, { cache: "no-store" });
+            if (!r.ok) throw new Error(path + " HTTP " + r.status);
+            return r.json();
+          };
+
+          const [intraday, thirtyMinute, hourly, fourHour] = await Promise.all([
+            get("/live/intraday"),
+            get("/live/30m-internals"),
+            get("/live/hourly"),
+            get("/live/4h"),
+          ]);
+
+          const now = Math.max(
+            Date.now(),
+            Date.parse(fourHour.updated_at_utc || fourHour.sourceTimestamp || 0)
+          );
+
+          const out = buildEngine25DistributionPressureV2({
+            intraday,
+            thirtyMinute,
+            hourly,
+            fourHour,
+            now,
+          });
+
+          if (!out.structural4h.available) {
+            throw new Error("4H canonical evidence unavailable: " + JSON.stringify(out.structural4h));
+          }
+          if (out.authority.canonicalScoreTimeframe !== "4h") {
+            throw new Error("4H is not canonical owner");
+          }
+
+          console.log(JSON.stringify({
+            rawPressure: out.rawPressure,
+            pressureLabel: out.pressureLabel,
+            structural4h: out.structural4h,
+            tactical1h: out.tactical1h.trend,
+            confirmation30m: out.confirmation30m.confirmation,
+            acceleration10m: out.acceleration10m.acceleration,
+          }, null, 2));
+          NODE
