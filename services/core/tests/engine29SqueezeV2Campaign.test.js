@@ -111,7 +111,6 @@ test("broadening transitions campaign to broad move terminal state", () => {
       sourceTimestamp: "2026-10-05T14:10:00.000Z",
       participationConfirmation: 15,
       squeezePressure: 65,
-      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       esAbnormalityQuality: 75,
       internalDivergence: 85,
       activeQualified: true,
@@ -348,6 +347,7 @@ test("ACTIVE weakens then terminates after persistent core evidence collapse", (
   const active = buildEngine29SqueezeV2Campaign({
     priorCampaign: watch.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       esAbnormalityQuality: 75,
       internalDivergence: 85,
       participationConfirmation: 15,
@@ -379,7 +379,6 @@ test("ACTIVE weakens then terminates after persistent core evidence collapse", (
   const collapse2 = buildEngine29SqueezeV2Campaign({
     priorCampaign: collapse1.campaign,
     observation: obs({
-      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       sourceTimestamp: "2026-10-05T14:30:00.000Z",
       es10mQuality: 10,
       esAbnormalityQuality: 15,
@@ -430,4 +429,189 @@ test("DATA GAP preserves identity and does not increment evidence-loss persisten
   assert.equal(gap.public.campaignId, watch.public.campaignId);
   assert.equal(gap.campaign.evidenceLossCount, 1);
   assert.equal(gap.public.dataDegraded, true);
+});
+
+
+test("WATCH evidence-loss count advances only on a new canonical 10m sourceTimestamp", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  const weakObservation = obs({
+    sourceTimestamp: "2026-10-05T14:20:00.000Z",
+    es10mQuality: 10,
+    esAbnormalityQuality: 15,
+    internalDivergence: 80,
+    participationConfirmation: 20,
+    squeezePressure: 12,
+    watchQualified: false,
+    activeQualified: false,
+  });
+
+  const weak1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: weakObservation,
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  assert.equal(weak1.campaign.evidenceLossCount, 1);
+  assert.equal(weak1.campaign.history.length, 2);
+
+  const repeat1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: weak1.campaign,
+    observation: weakObservation,
+    now: Date.parse("2026-10-05T14:23:00Z"),
+  });
+
+  const repeat2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: repeat1.campaign,
+    observation: weakObservation,
+    now: Date.parse("2026-10-05T14:26:00Z"),
+  });
+
+  assert.equal(repeat1.active, true);
+  assert.equal(repeat1.public.state, "SQUEEZE_WATCH");
+  assert.equal(repeat1.campaign.evidenceLossCount, 1);
+  assert.equal(repeat1.campaign.history.length, 2);
+
+  assert.equal(repeat2.active, true);
+  assert.equal(repeat2.public.state, "SQUEEZE_WATCH");
+  assert.equal(repeat2.campaign.evidenceLossCount, 1);
+  assert.equal(repeat2.campaign.history.length, 2);
+
+  const weak2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: repeat2.campaign,
+    observation: obs({
+      ...weakObservation,
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
+      esAbnormalityQuality: 10,
+      squeezePressure: 8,
+    }),
+    now: Date.parse("2026-10-05T14:30:00Z"),
+  });
+
+  assert.equal(weak2.active, false);
+  assert.equal(weak2.public.state, "SQUEEZE_FAILED");
+  assert.equal(weak2.campaign.evidenceLossCount, 2);
+  assert.equal(weak2.campaign.history.length, 3);
+});
+
+test("ACTIVE collapse persistence ignores repeated 3m builds of the same 10m observation", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:00:00.000Z",
+    }),
+    now: Date.parse("2026-10-05T14:00:00Z"),
+  });
+
+  const active = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
+      esAbnormalityQuality: 75,
+      internalDivergence: 85,
+      participationConfirmation: 15,
+      squeezePressure: 64,
+      activeQualified: true,
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  const collapseObservation = obs({
+    sourceTimestamp: "2026-10-05T14:20:00.000Z",
+    es10mQuality: 15,
+    esAbnormalityQuality: 20,
+    internalDivergence: 35,
+    participationConfirmation: 40,
+    squeezePressure: 7,
+    watchQualified: false,
+    activeQualified: false,
+  });
+
+  const collapse1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: active.campaign,
+    observation: collapseObservation,
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  assert.equal(collapse1.public.state, "SQUEEZE_WEAKENING");
+  assert.equal(collapse1.campaign.evidenceLossCount, 1);
+
+  const repeat1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: collapse1.campaign,
+    observation: collapseObservation,
+    now: Date.parse("2026-10-05T14:23:00Z"),
+  });
+
+  const repeat2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: repeat1.campaign,
+    observation: collapseObservation,
+    now: Date.parse("2026-10-05T14:26:00Z"),
+  });
+
+  assert.equal(repeat1.public.state, "SQUEEZE_WEAKENING");
+  assert.equal(repeat1.campaign.evidenceLossCount, 1);
+  assert.equal(repeat2.public.state, "SQUEEZE_WEAKENING");
+  assert.equal(repeat2.campaign.evidenceLossCount, 1);
+
+  const collapse2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: repeat2.campaign,
+    observation: obs({
+      ...collapseObservation,
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
+      esAbnormalityQuality: 15,
+      internalDivergence: 30,
+      squeezePressure: 5,
+    }),
+    now: Date.parse("2026-10-05T14:30:00Z"),
+  });
+
+  assert.equal(collapse2.active, false);
+  assert.equal(collapse2.public.state, "SQUEEZE_FAILED");
+  assert.equal(collapse2.campaign.evidenceLossCount, 2);
+});
+
+test("duplicate sourceTimestamp cannot advance broadening velocity or 10m/20m history", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:00:00.000Z",
+      participationConfirmation: 20,
+    }),
+    now: Date.parse("2026-10-05T14:00:00Z"),
+  });
+
+  const next = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
+      participationConfirmation: 30,
+      watchQualified: true,
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  assert.equal(next.campaign.history.length, 2);
+  assert.equal(next.campaign.broadeningVelocity10, 10);
+  assert.equal(next.campaign.broadeningVelocity20, null);
+
+  const duplicate = buildEngine29SqueezeV2Campaign({
+    priorCampaign: next.campaign,
+    observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
+      participationConfirmation: 95,
+      internalDivergence: 5,
+      squeezePressure: 2,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:13:00Z"),
+  });
+
+  assert.equal(duplicate.campaign.history.length, 2);
+  assert.equal(duplicate.campaign.broadeningVelocity10, 10);
+  assert.equal(duplicate.campaign.broadeningVelocity20, null);
+  assert.equal(duplicate.public.state, next.public.state);
 });
