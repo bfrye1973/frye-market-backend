@@ -48,6 +48,7 @@ test("same campaign stays same identity and can promote WATCH to ACTIVE", () => 
   const second = buildEngine29SqueezeV2Campaign({
     priorCampaign: first.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       esAbnormalityQuality: 75,
       internalDivergence: 88,
       participationConfirmation: 12,
@@ -71,6 +72,7 @@ test("same ACTIVE campaign does not manufacture a new campaignId", () => {
   const active = buildEngine29SqueezeV2Campaign({
     priorCampaign: first.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       squeezePressure: 66,
       esAbnormalityQuality: 75,
       internalDivergence: 88,
@@ -81,6 +83,7 @@ test("same ACTIVE campaign does not manufacture a new campaignId", () => {
   const next = buildEngine29SqueezeV2Campaign({
     priorCampaign: active.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       squeezePressure: 60,
       esAbnormalityQuality: 70,
       internalDivergence: 86,
@@ -105,8 +108,10 @@ test("broadening transitions campaign to broad move terminal state", () => {
   const active = buildEngine29SqueezeV2Campaign({
     priorCampaign: first.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       participationConfirmation: 15,
       squeezePressure: 65,
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       esAbnormalityQuality: 75,
       internalDivergence: 85,
       activeQualified: true,
@@ -116,6 +121,7 @@ test("broadening transitions campaign to broad move terminal state", () => {
   const broad = buildEngine29SqueezeV2Campaign({
     priorCampaign: active.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T15:08:17.000Z",
       participationConfirmation: 94,
       internalDivergence: 6,
       squeezePressure: 1,
@@ -172,6 +178,7 @@ test("opposite meaningful ES direction terminates old campaign", () => {
   const failed = buildEngine29SqueezeV2Campaign({
     priorCampaign: first.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       direction: "DOWN",
       es10mQuality: 70,
       esAbnormalityQuality: 75,
@@ -194,12 +201,13 @@ test("after terminal state a new opposite WATCH gets a new campaignId", () => {
   });
   const failed = buildEngine29SqueezeV2Campaign({
     priorCampaign: up.campaign,
-    observation: obs({ direction: "DOWN", es10mQuality: 70 }),
+    observation: obs({ sourceTimestamp: "2026-10-05T14:20:00.000Z", direction: "DOWN", es10mQuality: 70 }),
     now: Date.parse("2026-10-05T14:20:00Z"),
   });
   const down = buildEngine29SqueezeV2Campaign({
     priorCampaign: failed.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
       direction: "DOWN",
       directionalBreadthPct: 31,
     }),
@@ -247,6 +255,7 @@ test("WATCH expires after two consecutive valid observations lose WATCH evidence
   const weak1 = buildEngine29SqueezeV2Campaign({
     priorCampaign: watch.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       es10mQuality: 10,
       esAbnormalityQuality: 15,
       internalDivergence: 80,
@@ -265,6 +274,7 @@ test("WATCH expires after two consecutive valid observations lose WATCH evidence
   const weak2 = buildEngine29SqueezeV2Campaign({
     priorCampaign: weak1.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
       es10mQuality: 8,
       esAbnormalityQuality: 10,
       internalDivergence: 78,
@@ -290,6 +300,7 @@ test("FORMING expires after persistent valid evidence loss", () => {
   const forming = buildEngine29SqueezeV2Campaign({
     priorCampaign: watch.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       watchQualified: true,
       activeQualified: false,
     }),
@@ -301,6 +312,7 @@ test("FORMING expires after persistent valid evidence loss", () => {
   const weak1 = buildEngine29SqueezeV2Campaign({
     priorCampaign: forming.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       es10mQuality: 20,
       esAbnormalityQuality: 20,
       squeezePressure: 15,
@@ -313,6 +325,7 @@ test("FORMING expires after persistent valid evidence loss", () => {
   const weak2 = buildEngine29SqueezeV2Campaign({
     priorCampaign: weak1.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
       es10mQuality: 15,
       esAbnormalityQuality: 15,
       squeezePressure: 10,
@@ -347,6 +360,7 @@ test("ACTIVE weakens then terminates after persistent core evidence collapse", (
   const collapse1 = buildEngine29SqueezeV2Campaign({
     priorCampaign: active.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
       es10mQuality: 15,
       esAbnormalityQuality: 20,
       internalDivergence: 35,
@@ -365,6 +379,8 @@ test("ACTIVE weakens then terminates after persistent core evidence collapse", (
   const collapse2 = buildEngine29SqueezeV2Campaign({
     priorCampaign: collapse1.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:20:00.000Z",
+      sourceTimestamp: "2026-10-05T14:30:00.000Z",
       es10mQuality: 10,
       esAbnormalityQuality: 15,
       internalDivergence: 30,
@@ -389,6 +405,7 @@ test("DATA GAP preserves identity and does not increment evidence-loss persisten
   const weak = buildEngine29SqueezeV2Campaign({
     priorCampaign: watch.campaign,
     observation: obs({
+      sourceTimestamp: "2026-10-05T14:10:00.000Z",
       es10mQuality: 15,
       esAbnormalityQuality: 15,
       squeezePressure: 10,
