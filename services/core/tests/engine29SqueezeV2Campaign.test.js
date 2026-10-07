@@ -236,3 +236,181 @@ test("consumer contract has no trading authority", () => {
   assert.equal(r.public.safety.permissionAuthority, false);
   assert.equal(r.public.safety.executionAuthority, false);
 });
+
+
+test("WATCH expires after two consecutive valid observations lose WATCH evidence", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs(),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  const weak1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      es10mQuality: 10,
+      esAbnormalityQuality: 15,
+      internalDivergence: 80,
+      participationConfirmation: 20,
+      squeezePressure: 12,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  assert.equal(weak1.active, true);
+  assert.equal(weak1.public.state, "SQUEEZE_WATCH");
+  assert.equal(weak1.campaign.evidenceLossCount, 1);
+
+  const weak2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: weak1.campaign,
+    observation: obs({
+      es10mQuality: 8,
+      esAbnormalityQuality: 10,
+      internalDivergence: 78,
+      participationConfirmation: 22,
+      squeezePressure: 8,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:30:00Z"),
+  });
+
+  assert.equal(weak2.active, false);
+  assert.equal(weak2.public.state, "SQUEEZE_FAILED");
+  assert.equal(weak2.campaign.evidenceLossCount, 2);
+});
+
+test("FORMING expires after persistent valid evidence loss", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs(),
+    now: Date.parse("2026-10-05T14:00:00Z"),
+  });
+
+  const forming = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      watchQualified: true,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  assert.equal(forming.public.state, "SQUEEZE_FORMING");
+
+  const weak1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: forming.campaign,
+    observation: obs({
+      es10mQuality: 20,
+      esAbnormalityQuality: 20,
+      squeezePressure: 15,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  const weak2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: weak1.campaign,
+    observation: obs({
+      es10mQuality: 15,
+      esAbnormalityQuality: 15,
+      squeezePressure: 10,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:30:00Z"),
+  });
+
+  assert.equal(weak2.active, false);
+  assert.equal(weak2.public.state, "SQUEEZE_FAILED");
+});
+
+test("ACTIVE weakens then terminates after persistent core evidence collapse", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs(),
+    now: Date.parse("2026-10-05T14:00:00Z"),
+  });
+
+  const active = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      esAbnormalityQuality: 75,
+      internalDivergence: 85,
+      participationConfirmation: 15,
+      squeezePressure: 64,
+      activeQualified: true,
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  const collapse1 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: active.campaign,
+    observation: obs({
+      es10mQuality: 15,
+      esAbnormalityQuality: 20,
+      internalDivergence: 35,
+      participationConfirmation: 40,
+      squeezePressure: 7,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  assert.equal(collapse1.active, true);
+  assert.equal(collapse1.public.state, "SQUEEZE_WEAKENING");
+  assert.equal(collapse1.campaign.evidenceLossCount, 1);
+
+  const collapse2 = buildEngine29SqueezeV2Campaign({
+    priorCampaign: collapse1.campaign,
+    observation: obs({
+      es10mQuality: 10,
+      esAbnormalityQuality: 15,
+      internalDivergence: 30,
+      participationConfirmation: 42,
+      squeezePressure: 5,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:30:00Z"),
+  });
+
+  assert.equal(collapse2.active, false);
+  assert.equal(collapse2.public.state, "SQUEEZE_FAILED");
+});
+
+test("DATA GAP preserves identity and does not increment evidence-loss persistence", () => {
+  const watch = buildEngine29SqueezeV2Campaign({
+    observation: obs(),
+    now: Date.parse("2026-10-05T14:00:00Z"),
+  });
+
+  const weak = buildEngine29SqueezeV2Campaign({
+    priorCampaign: watch.campaign,
+    observation: obs({
+      es10mQuality: 15,
+      esAbnormalityQuality: 15,
+      squeezePressure: 10,
+      watchQualified: false,
+      activeQualified: false,
+    }),
+    now: Date.parse("2026-10-05T14:10:00Z"),
+  });
+
+  assert.equal(weak.campaign.evidenceLossCount, 1);
+
+  const gap = buildEngine29SqueezeV2Campaign({
+    priorCampaign: weak.campaign,
+    observation: {
+      available: false,
+      dataDegraded: true,
+    },
+    now: Date.parse("2026-10-05T14:20:00Z"),
+  });
+
+  assert.equal(gap.active, true);
+  assert.equal(gap.public.campaignId, watch.public.campaignId);
+  assert.equal(gap.campaign.evidenceLossCount, 1);
+  assert.equal(gap.public.dataDegraded, true);
+});
