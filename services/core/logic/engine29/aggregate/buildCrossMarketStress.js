@@ -7,6 +7,7 @@ import { buildEngine29GroupStateBundle } from "../groups/buildGroupStateBundle.j
 import { buildEngine29TacticalCharacter } from "../tacticalCharacter/buildTacticalCharacter.js";
 import { buildEngine29EsFuturesAnchor } from "../tacticalCharacter/buildEsFuturesAnchor.js";
 import { buildEngine29SqueezeTransitionMonitor } from "../tacticalCharacter/buildSqueezeTransitionMonitor.js";
+import { buildEngine29SqueezeV2Observation } from "../tacticalCharacter/buildSqueezeV2Observation.js";
 import { buildEngine29TrapDetection } from "../trapDetection/buildTrapDetection.js";
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
 import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
@@ -288,6 +289,12 @@ export async function buildEngine29CrossMarketStress({
       }
     );
 
+  const squeezeV2Observation =
+    await buildEngine29SqueezeV2Observation({
+      now,
+      esAnchor,
+    });
+
   const trapDetection =
     await buildEngine29TrapDetection({
       now,
@@ -352,6 +359,7 @@ export async function buildEngine29CrossMarketStress({
     fastTactical,
     moveCharacter: move,
     liveMonitor,
+    squeezeV2Observation,
     trapDetection,
 
     marketCharacter: {
