@@ -1,0 +1,179 @@
+name: Engine29 Squeeze v2 Phase 4 replay
+
+on:
+  push:
+    branches:
+      - engine29-squeeze-v2-phase2-scoring
+  workflow_dispatch: {}
+
+jobs:
+  squeeze-v2-replay:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout research branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Fetch Engine25 immutable 10m archive
+        run: |
+          git fetch --no-tags origin data-archive-10min
+          git worktree add /tmp/engine25-10m-archive origin/data-archive-10min
+
+      - name: Fetch Engine25 immutable 30m archive
+        run: |
+          git fetch --no-tags origin data-archive-30m-internals
+          git worktree add /tmp/engine25-30m-archive origin/data-archive-30m-internals
+
+      - name: Oct 5 ES extraction
+        run: |
+          node --input-type=module - <<'NODE'
+          const url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&tf=10m&limit=5000";
+          const res = await fetch(url, { headers: { accept: "application/json", "cache-control": "no-store" } });
+          if (!res.ok) throw new Error("ES OHLC HTTP " + res.status);
+          const payload = await res.json();
+          const rows = Array.isArray(payload) ? payload : (payload.bars || []);
+          const toMs = (v) => {
+            const n = Number(v);
+            if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+            return Date.parse(v);
+          };
+          const start = Date.parse("2026-10-05T13:20:00Z");
+          const end = Date.parse("2026-10-05T20:40:00Z");
+          const bars = rows.map(b => ({
+            t: toMs(b.time ?? b.t),
+            o: Number(b.open ?? b.o),
+            h: Number(b.high ?? b.h),
+            l: Number(b.low ?? b.l),
+            c: Number(b.close ?? b.c)
+          })).filter(b => Number.isFinite(b.t) && b.t >= start && b.t <= end)
+             .sort((a,b)=>a.t-b.t);
+          console.log("OCT5_ES_10M " + JSON.stringify(bars));
+          NODE
+
+      - name: Oct 5 reconstructed squeeze benchmark
+        run: |
+          node --input-type=module - <<'NODE'
+          import {
+            scoreESAbnormalityHorizon,
+            scoreESAbnormalityQuality,
+            scoreSqueezePressure,
+            scoreSqueezeV2Internals,
+          } from "./services/core/logic/engine29/tacticalCharacter/squeezeV2Scoring.js";
+
+          const url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&tf=10m&limit=5000";
+          const res = await fetch(url, { headers: { accept: "application/json", "cache-control": "no-store" } });
+          if (!res.ok) throw new Error("ES OHLC HTTP " + res.status);
+          const payload = await res.json();
+          const rows = Array.isArray(payload) ? payload : (payload.bars || []);
+          const toMs = (v) => {
+            const n = Number(v);
+            if (Number.isFinite(n)) return n < 1e12 ? n * 1000 : n;
+            return Date.parse(v);
+          };
+          const raw = rows.map(b => ({
+            t: toMs(b.time ?? b.t),
+            o: Number(b.open ?? b.o),
+            h: Number(b.high ?? b.h),
+            l: Number(b.low ?? b.l),
+            c: Number(b.close ?? b.c)
+          })).filter(b => Number.isFinite(b.t) && Number.isFinite(b.c))
+             .sort((a,b)=>a.t-b.t);
+
+          const buckets = new Map();
+          for (const b of raw) {
+            const k = Math.floor(b.t / 600000) * 600000;
+            const x = buckets.get(k);
+            if (!x) buckets.set(k, { t:k, o:b.o, h:b.h, l:b.l, c:b.c });
+            else {
+              x.h = Math.max(x.h, b.h);
+              x.l = Math.min(x.l, b.l);
+              x.c = b.c;
+            }
+          }
+          const bars = [...buckets.values()].sort((a,b)=>a.t-b.t);
+          const pct=(a,b)=>((b-a)/Math.abs(a))*100;
+          const hist=(idx,back)=>{
+            const out=[];
+            const start=Math.max(back,idx-40);
+            for(let e=start;e<idx;e++){
+              const v=pct(bars[e-back].c,bars[e].c);
+              if(Number.isFinite(v)) out.push(v);
+            }
+            return out;
+          };
+          const internals=[
+            {az:"06:05",ts:"2026-10-05T13:05:01Z",adv:48.5224586288,s:3,n:8,w:0,nh:440,nl:313,av:75.4270315117},
+            {az:"07:09",ts:"2026-10-05T14:09:00Z",adv:33.3513221802,s:0,n:4,w:7,nh:1021,nl:1758,av:58.3985980347},
+            {az:"08:08",ts:"2026-10-05T15:08:17Z",adv:51.7817371938,s:6,n:3,w:2,nh:950,nl:809,av:62.4669422046},
+            {az:"09:05",ts:"2026-10-05T16:05:35Z",adv:77.9906343125,s:6,n:5,w:0,nh:676,nl:424,av:75.2784455461},
+            {az:"10:04",ts:"2026-10-05T17:04:38Z",adv:72.8003384095,s:8,n:3,w:0,nh:869,nl:253,av:65.6102855787},
+            {az:"11:04",ts:"2026-10-05T18:04:10Z",adv:60.2217936355,s:7,n:2,w:2,nh:687,nl:331,av:59.4819930748},
+            {az:"12:09",ts:"2026-10-05T19:09:10Z",adv:54.6262415055,s:5,n:5,w:1,nh:815,nl:290,av:68.0504004866},
+            {az:"13:29",ts:"2026-10-05T20:29:45Z",adv:42.3112767940,s:2,n:8,w:1,nh:838,nl:537,av:48.0776344277},
+          ];
+
+          const out=[];
+          for (const p of internals) {
+            const t=Date.parse(p.ts);
+            let idx=-1;
+            for(let i=0;i<bars.length;i++) if(bars[i].t<=t) idx=i; else break;
+            if(idx<2) continue;
+            const r10=pct(bars[idx-1].c,bars[idx].c);
+            const r20=pct(bars[idx-2].c,bars[idx].c);
+            const q10=scoreESAbnormalityHorizon({currentReturnPct:r10,historicalSameWindowReturnsPct:hist(idx,1)});
+            const q20=scoreESAbnormalityHorizon({currentReturnPct:r20,historicalSameWindowReturnsPct:hist(idx,2)});
+            const eq=scoreESAbnormalityQuality({quality10:q10.quality,quality20:q20.quality});
+            const ints=scoreSqueezeV2Internals({
+              advancingBreadthPct:p.adv,
+              decliningBreadthPct:100-p.adv,
+              strongSectorCount:p.s,
+              neutralSectorCount:p.n,
+              weakSectorCount:p.w,
+              newHighs:p.nh,
+              newLows:p.nl,
+              advancingVolumeShare:p.av,
+              decliningVolumeShare:100-p.av,
+            },"UP");
+            const sp=scoreSqueezePressure({
+              esAbnormalityQuality:eq.score,
+              internalDivergence:ints.internalDivergence.score,
+            });
+            out.push({
+              az:p.az,
+              esClose:bars[idx].c,
+              es10:+r10.toFixed(4),
+              es20:+r20.toFixed(4),
+              z10:q10.robustZ===null?null:+q10.robustZ.toFixed(2),
+              z20:q20.robustZ===null?null:+q20.robustZ.toFixed(2),
+              esQuality:eq.score===null?null:+eq.score.toFixed(1),
+              breadth:+p.adv.toFixed(1),
+              sectors:`${p.s}/${p.n}/${p.w}`,
+              netNHNL:p.nh-p.nl,
+              advVol:+p.av.toFixed(1),
+              divergence:+ints.internalDivergence.score.toFixed(1),
+              participation:+ints.participationConfirmation.score.toFixed(1),
+              squeezePressure:sp.score===null?null:+sp.score.toFixed(1)
+            });
+          }
+          console.log("OCT5_RECONSTRUCTED_SQUEEZE " + JSON.stringify(out));
+          NODE
+
+      - name: Run Squeeze v2 real-data replay
+        env:
+          ENGINE29_REPLAY_DATE: "2026-10-06"
+          ENGINE25_10M_ARCHIVE_ROOT: "/tmp/engine25-10m-archive/data/engine25-10m-history"
+          ENGINE25_30M_ARCHIVE_ROOT: "/tmp/engine25-30m-archive/data/engine25-30m-history"
+          ENGINE29_REPLAY_BACKEND: "https://frye-market-backend-1.onrender.com"
+        run: node services/core/qa/runEngine29SqueezeV2Replay.js
+
+      - name: Oct 5 reconstructed acceptance
+        env:
+          ENGINE29_REPLAY_BACKEND: "https://frye-market-backend-1.onrender.com"
+        run: node services/core/qa/runEngine29SqueezeV2Oct5Reconstruction.js
