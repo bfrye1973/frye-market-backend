@@ -30,6 +30,11 @@ function cards(states) {
     down: state === "WEAK" ? 20 : state === "STRONG" ? 5 : 10,
     advancingVolume: 1000 + i,
     decliningVolume: 900 + i,
+    unchangedVolume: 100 + i,
+    nh: state === "STRONG" ? 12 : state === "WEAK" ? 4 : 8,
+    nl: state === "WEAK" ? 12 : state === "STRONG" ? 4 : 8,
+    stocksScanned: 100,
+    stocksWithVolume: 90,
   }));
 }
 
@@ -91,18 +96,20 @@ function canonicalInputs() {
   return {
     routes: {
       intraday: "/live/intraday",
+      thirtyMinute: "/live/30m-internals",
       hourly: "/live/hourly",
       fourHour: "/live/4h",
       eod: "/live/eod",
     },
     intraday: payload([...Array(10).fill("WEAK"), "NEUTRAL"], "2026-10-02T15:15:25Z"),
+    thirtyMinute: payload([...Array(7).fill("WEAK"), ...Array(4).fill("NEUTRAL")], "2026-10-02T15:00:00Z"),
     hourly: payload([...Array(8).fill("STRONG"), ...Array(3).fill("NEUTRAL")], "2026-10-02T15:09:55Z"),
     fourHour: payload(["STRONG", ...Array(10).fill("NEUTRAL")], "2026-10-02T14:37:31Z"),
     eod: payload([...Array(4).fill("STRONG"), ...Array(6).fill("NEUTRAL"), "WEAK"], "2026-10-02T14:38:37Z"),
   };
 }
 
-test("publisher preserves all existing participation fields and adds blend fields", () => {
+test("publisher preserves legacy distribution for audit and publishes Distribution v2 canonically", () => {
   const source = sectorHealth();
   const before = buildEngine25ParticipationArtifact({ sectorHealth: source, now: NOW });
   const after = buildPublishedEngine25Participation({
@@ -111,17 +118,25 @@ test("publisher preserves all existing participation fields and adds blend field
     now: NOW,
   });
 
-  for (const key of Object.keys(before)) {
-    assert.deepEqual(after[key], before[key], `legacy field changed: ${key}`);
-  }
-
+  assert.deepEqual(
+    after.participation.legacyDistributionPressure,
+    before.participation.distributionPressure
+  );
+  assert.equal(
+    after.participation.distributionPressure.schema,
+    "engine25.distributionPressure.v2"
+  );
+  assert.equal(
+    after.participation.distributionPressure.authority.canonicalScoreTimeframe,
+    "4h"
+  );
   assert.ok(after.fastParticipation);
   assert.ok(after.blendedParticipation);
   assert.ok(after.sourceDiagnostics);
   assert.equal(after.blendedParticipation.state, "SHORT_TERM_DETERIORATION");
 });
 
-test("canonical loader requests exactly the four approved live routes", async () => {
+test("canonical loader requests the approved 10m/30m/1h/4h/EOD live routes", async () => {
   const seen = [];
   const fake = async (url) => {
     seen.push(url);
@@ -134,6 +149,7 @@ test("canonical loader requests exactly the four approved live routes", async ()
   });
 
   assert.deepEqual(seen.sort(), [
+    "https://example.test/live/30m-internals",
     "https://example.test/live/4h",
     "https://example.test/live/eod",
     "https://example.test/live/hourly",
@@ -142,6 +158,7 @@ test("canonical loader requests exactly the four approved live routes", async ()
 
   assert.deepEqual(out.routes, {
     intraday: "https://example.test/live/intraday",
+    thirtyMinute: "https://example.test/live/30m-internals",
     hourly: "https://example.test/live/hourly",
     fourHour: "https://example.test/live/4h",
     eod: "https://example.test/live/eod",
