@@ -15,6 +15,7 @@ const MACRO_FILE = path.join(DATA_DIR, "engine25-data-test.json");
 const MARKET_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
 const FMP_FILE = path.join(DATA_DIR, "engine25-fmp-feeds-test.json");
 const SECTOR_FILE = path.join(DATA_DIR, "engine25-sector-health-test.json");
+const PARTICIPATION_FILE = path.join(DATA_DIR, "engine25-participation.json");
 const ES_TECH_FILE = path.join(DATA_DIR, "engine25-es-technical-context.json");
 const ENGINE29_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 
@@ -534,6 +535,20 @@ async function main() {
     const marketData = readJsonSafe(MARKET_FILE, true);
     const fmpData = readJsonSafe(FMP_FILE, false);
     const sectorHealthData = readJsonSafe(SECTOR_FILE, false);
+    const participationData = readJsonSafe(PARTICIPATION_FILE, false);
+    const canonicalDistribution =
+      participationData?.participation?.distributionPressure?.schema ===
+      "engine25.distributionPressure.v2"
+        ? participationData.participation.distributionPressure
+        : null;
+    const sectorHealthForMarketHealth = canonicalDistribution
+      ? {
+          ...(sectorHealthData || {}),
+          legacyDistributionPressure:
+            sectorHealthData?.distributionPressure || null,
+          distributionPressure: canonicalDistribution,
+        }
+      : sectorHealthData;
     const esTechnicalContextData = readJsonSafe(ES_TECH_FILE, false);
     const engine29Data = readJsonSafe(ENGINE29_FILE, false);
 
@@ -541,7 +556,7 @@ async function main() {
       macroData,
       marketData,
       fmpData,
-      sectorHealthData,
+      sectorHealthData: sectorHealthForMarketHealth,
       esTechnicalContextData,
       engine29Data,
     });
@@ -563,6 +578,10 @@ async function main() {
     console.log("Bias:", result.bias);
     console.log("Risk:", result.riskLevel);
     console.log("Intraday:", intradayProxyDamage.label, intradayProxyDamage.score);
+    console.log(
+      "Distribution source:",
+      canonicalDistribution ? "ENGINE25_DISTRIBUTION_V2_4H" : "LEGACY_FALLBACK"
+    );
     console.log("Wrote:", OUTPUT_FILE);
     console.log("Intraday file:", INTRADAY_DAMAGE_FILE);
     console.log("========================================");
