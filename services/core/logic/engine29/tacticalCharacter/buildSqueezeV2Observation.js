@@ -237,6 +237,8 @@ export async function buildEngine29SqueezeV2Observation({
     dataDegraded: false,
     timestamp,
     sourceTimestamp: internalsInput.sourceTimestamp,
+    observationId: internalsInput.sourceTimestamp,
+    observationTimeframe: "10m",
     sourceAgeMs: ageMs,
     direction,
     es10mReturnPct: r10,
