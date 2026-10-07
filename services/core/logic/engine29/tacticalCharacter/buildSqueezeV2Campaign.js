@@ -38,6 +38,41 @@ function iso(now) {
   return new Date(Number(now)).toISOString();
 }
 
+function observationIdentity(observation) {
+  const value =
+    observation?.observationId ||
+    observation?.sourceTimestamp ||
+    null;
+
+  if (!value) return null;
+
+  const ms = Date.parse(String(value));
+  if (!Number.isFinite(ms)) return null;
+
+  return {
+    key: String(value),
+    ms,
+  };
+}
+
+function priorObservationIdentity(campaign) {
+  const value =
+    campaign?.lastProcessedObservationId ||
+    campaign?.lastProcessedSourceTimestamp ||
+    campaign?.latest?.sourceTimestamp ||
+    null;
+
+  if (!value) return null;
+
+  const ms = Date.parse(String(value));
+  if (!Number.isFinite(ms)) return null;
+
+  return {
+    key: String(value),
+    ms,
+  };
+}
+
 function campaignId(direction, at) {
   const stamp = String(at).replace(/[-:.TZ]/g, "").slice(0, 14);
   return `E29SQ-${direction}-${stamp}`;
@@ -47,6 +82,10 @@ function metricObservation(observation, timestamp) {
   return {
     timestamp,
     sourceTimestamp: observation?.sourceTimestamp ?? null,
+    observationId:
+      observation?.observationId ??
+      observation?.sourceTimestamp ??
+      null,
     direction: observation?.direction ?? null,
     es10mReturnPct: finite(observation?.es10mReturnPct),
     es20mReturnPct: finite(observation?.es20mReturnPct),
@@ -271,6 +310,44 @@ export function buildEngine29SqueezeV2Campaign({
 } = {}) {
   const timestamp = iso(now);
 
+  const currentObservationIdentity =
+    observationIdentity(observation);
+
+  const priorProcessedIdentity =
+    priorObservationIdentity(priorCampaign);
+
+  if (
+    observation?.available === true &&
+    priorCampaign &&
+    currentObservationIdentity &&
+    priorProcessedIdentity &&
+    currentObservationIdentity.ms <= priorProcessedIdentity.ms
+  ) {
+    const repeated = {
+      ...priorCampaign,
+      lastUpdatedAt: timestamp,
+      duplicateObservationBuildCount:
+        Number(priorCampaign?.duplicateObservationBuildCount || 0) + 1,
+      reasonCodes: [
+        ...(priorCampaign.reasonCodes || []),
+        "SQUEEZE_V2_DUPLICATE_SOURCE_OBSERVATION_NO_STATE_ADVANCE",
+      ],
+    };
+
+    return {
+      active: ACTIVE_FAMILY.has(repeated.state),
+      campaign: repeated,
+      public: publicContract({
+        campaign: repeated,
+        observation,
+        state: repeated.state,
+        timestamp,
+        dataDegraded: false,
+        endedAt: repeated?.endedAt ?? null,
+      }),
+    };
+  }
+
   if (observation?.available !== true) {
     if (priorCampaign && ACTIVE_FAMILY.has(priorCampaign.state)) {
       const held = {
@@ -309,7 +386,10 @@ export function buildEngine29SqueezeV2Campaign({
   }
 
   if (!priorCampaign || !ACTIVE_FAMILY.has(priorCampaign.state)) {
-    if (observation?.watchQualified !== true) {
+    if (
+      !currentObservationIdentity ||
+      observation?.watchQualified !== true
+    ) {
       return {
         active: false,
         campaign: null,
@@ -337,6 +417,9 @@ export function buildEngine29SqueezeV2Campaign({
       weakeningAt: null,
       endedAt: null,
       lastUpdatedAt: timestamp,
+      lastProcessedObservationId: currentObservationIdentity.key,
+      lastProcessedSourceTimestamp: observation?.sourceTimestamp ?? currentObservationIdentity.key,
+      duplicateObservationBuildCount: 0,
       counterToParent:
         parentMove?.active === true &&
         ["UP", "DOWN"].includes(parentMove?.direction) &&
@@ -395,6 +478,17 @@ export function buildEngine29SqueezeV2Campaign({
     broadeningVelocity10,
     broadeningVelocity20,
     evidenceLossCount,
+    lastProcessedObservationId:
+      currentObservationIdentity?.key ??
+      priorCampaign?.lastProcessedObservationId ??
+      null,
+    lastProcessedSourceTimestamp:
+      observation?.sourceTimestamp ??
+      currentObservationIdentity?.key ??
+      priorCampaign?.lastProcessedSourceTimestamp ??
+      null,
+    duplicateObservationBuildCount:
+      Number(priorCampaign?.duplicateObservationBuildCount || 0),
     lastUpdatedAt: timestamp,
     dataDegraded: false,
     reasonCodes: [
