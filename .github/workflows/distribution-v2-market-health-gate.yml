@@ -1,0 +1,21 @@
+name: Distribution v2 Market Health Gate
+
+on:
+  push:
+    branches:
+      - engine25-distribution-v2-market-health
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax
+        run: |
+          node --check services/core/jobs/updateEngine25MarketHealth.js
+          node --check services/core/logic/engine25MarketHealth.js
+      - name: Distribution tests
+        run: node --test services/core/tests/engine25DistributionPressureV2.test.js
