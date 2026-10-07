@@ -1,0 +1,30 @@
+name: Squeeze v2 production regression gate
+
+on:
+  push:
+    branches:
+      - engine29-squeeze-v2-prod-sync
+  workflow_dispatch:
+
+jobs:
+  core-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Run current core JavaScript regression suite
+        run: |
+          find services/core/tests -type f -name '*.test.js' -print0 \
+            | sort -z \
+            | xargs -0 node --test
