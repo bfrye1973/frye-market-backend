@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - engine29-squeeze-v2-phase2-scoring
+      - engine29-squeeze-v2-prod-sync
   workflow_dispatch: {}
 
 jobs:
