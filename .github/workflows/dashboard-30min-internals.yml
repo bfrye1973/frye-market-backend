@@ -140,6 +140,11 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git config user.name "Engine25 CI"
 
+          # The generated artifact is already staged safely in /tmp.
+          # Remove the working-tree copy before switching branches so Git
+          # cannot reject checkout due to an untracked overwrite.
+          rm -f data/outlook_30m_internals.json
+
           if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
             git fetch origin "$LIVE_BRANCH"
             git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH"
