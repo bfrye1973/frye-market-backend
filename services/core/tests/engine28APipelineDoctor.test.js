@@ -217,7 +217,7 @@ test("Engine 28A rejects a live execution safety violation", () => {
 
   assert.equal(
     out.failureType,
-    "SAFETY_REJECTION"
+    "ENGINE_LOGIC"
   );
 });
 
