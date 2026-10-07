@@ -234,3 +234,125 @@ test("Engine 28A has no current Engine 7B owner", () => {
     false
   );
 });
+
+
+test("Engine 28A classifies Engine 4 unresolved participation as WAITING", () => {
+  const input = baseStrategy();
+
+  input.confluence.context.volume.engine4AuthorizedReactionParticipation = {
+    participationState: "PARTICIPATION_WAITING",
+    status: "PARTICIPATION_WAITING",
+    direction: "NEUTRAL",
+    participationQuality: "WEAK",
+    participationConfirmed: false,
+    allowed: false,
+    hardBlocked: false,
+    blockers: ["PARTICIPATION_NOT_CONFIRMED"],
+    reasonCodes: ["PARTICIPATION_WAITING"],
+  };
+
+  const out =
+    buildEngine28APipelineDoctor(
+      input
+    );
+
+  assert.equal(
+    out.pipelineStatus,
+    "WAITING"
+  );
+
+  assert.equal(
+    out.firstFailingEngine,
+    "engine4"
+  );
+
+  assert.equal(
+    out.failureType,
+    "WAITING_FOR_MARKET"
+  );
+
+  assert.equal(
+    out.rootCause,
+    "ENGINE4_PARTICIPATION_NOT_CONFIRMED"
+  );
+});
+
+test("Engine 28A classifies genuine Engine 4 adverse participation as BLOCKED", () => {
+  const input = baseStrategy();
+
+  input.confluence.context.volume.engine4AuthorizedReactionParticipation = {
+    participationState: "ADVERSE_PARTICIPATION_BLOCKED",
+    status: "ADVERSE_PARTICIPATION_BLOCKED",
+    direction: "SHORT",
+    participationQuality: "RISK",
+    participationConfirmed: false,
+    allowed: false,
+    hardBlocked: true,
+    blockers: ["VALID_COMPLETED_ADVERSE_PARTICIPATION"],
+    reasonCodes: [
+      "VALID_COMPLETED_ADVERSE_PARTICIPATION",
+      "ADVERSE_PARTICIPATION_BLOCKED",
+    ],
+  };
+
+  const out =
+    buildEngine28APipelineDoctor(
+      input
+    );
+
+  assert.equal(
+    out.pipelineStatus,
+    "BLOCKED"
+  );
+
+  assert.equal(
+    out.firstFailingEngine,
+    "engine4"
+  );
+
+  assert.equal(
+    out.failureType,
+    "ENGINE_LOGIC"
+  );
+
+  assert.equal(
+    out.rootCause,
+    "ENGINE4_ADVERSE_PARTICIPATION_BLOCKED"
+  );
+});
+
+test("Engine 28A classifies Engine 4 identity mismatch as contract mismatch", () => {
+  const input = baseStrategy();
+
+  input.confluence.context.volume.engine4AuthorizedReactionParticipation = {
+    participationState: "IDENTITY_MISMATCH",
+    status: "IDENTITY_MISMATCH",
+    direction: "NEUTRAL",
+    participationQuality: "RISK",
+    participationConfirmed: false,
+    allowed: false,
+    hardBlocked: true,
+    blockers: ["IDENTITY_MISMATCH"],
+    reasonCodes: ["IDENTITY_MISMATCH"],
+  };
+
+  const out =
+    buildEngine28APipelineDoctor(
+      input
+    );
+
+  assert.equal(
+    out.pipelineStatus,
+    "BLOCKED"
+  );
+
+  assert.equal(
+    out.failureType,
+    "CONTRACT_MISMATCH"
+  );
+
+  assert.equal(
+    out.rootCause,
+    "ENGINE4_IDENTITY_MISMATCH"
+  );
+});

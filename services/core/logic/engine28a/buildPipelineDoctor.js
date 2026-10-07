@@ -388,15 +388,46 @@ export function buildEngine28APipelineDoctor(strategy = {}) {
   }
 
   const e4Direction = upper(e4?.direction);
+  const e4State = upper(
+    e4?.participationState ||
+    e4?.status
+  );
+
   const e4Pass =
     e4?.participationConfirmed === true &&
     e4?.allowed === true &&
     e4?.hardBlocked !== true &&
     e4Direction === e3Direction;
 
+  const e4IdentityFailure =
+    e4State === "IDENTITY_MISMATCH" ||
+    reasonText([
+      ...arr(e4?.blockers),
+      ...arr(e4?.reasonCodes),
+    ]).includes("IDENTITY_MISMATCH");
+
+  const e4Invalidated =
+    e4State === "CANDIDATE_INVALIDATED" ||
+    reasonText([
+      ...arr(e4?.blockers),
+      ...arr(e4?.reasonCodes),
+    ]).includes("CANDIDATE_INVALIDATED");
+
+  const e4HardBlock =
+    e4?.hardBlocked === true ||
+    e4State === "ADVERSE_PARTICIPATION_BLOCKED";
+
+  const e4StageState =
+    e4Pass
+      ? "PASS"
+      : e4HardBlock || e4IdentityFailure || e4Invalidated
+      ? "BLOCKED"
+      : "WAITING";
+
   stages.push(
-    stage("engine4", e4Pass ? "PASS" : "WAITING", {
+    stage("engine4", e4StageState, {
       participationState: proof(e4?.participationState),
+      status: proof(e4?.status),
       direction: proof(e4?.direction),
       participationQuality: proof(e4?.participationQuality),
       confirmed: proof(e4?.participationConfirmed),
@@ -408,11 +439,36 @@ export function buildEngine28APipelineDoctor(strategy = {}) {
   );
 
   if (!e4Pass) {
+    const e4Failure =
+      e4IdentityFailure
+        ? {
+            pipelineStatus: "BLOCKED",
+            failureType: "CONTRACT_MISMATCH",
+            rootCause: "ENGINE4_IDENTITY_MISMATCH",
+          }
+        : e4Invalidated
+        ? {
+            pipelineStatus: "BLOCKED",
+            failureType: "ENGINE_LOGIC",
+            rootCause: "ENGINE4_CANDIDATE_INVALIDATED",
+          }
+        : e4HardBlock
+        ? {
+            pipelineStatus: "BLOCKED",
+            failureType: "ENGINE_LOGIC",
+            rootCause: "ENGINE4_ADVERSE_PARTICIPATION_BLOCKED",
+          }
+        : {
+            pipelineStatus: "WAITING",
+            failureType: "WAITING_FOR_MARKET",
+            rootCause: "ENGINE4_PARTICIPATION_NOT_CONFIRMED",
+          };
+
     return fail({
       firstFailingEngine: "engine4",
-      pipelineStatus: "WAITING",
-      failureType: "WAITING_FOR_MARKET",
-      rootCause: "ENGINE4_PARTICIPATION_NOT_CONFIRMED",
+      pipelineStatus: e4Failure.pipelineStatus,
+      failureType: e4Failure.failureType,
+      rootCause: e4Failure.rootCause,
       proof: stages.at(-1),
       stages,
       doNotChange: [
