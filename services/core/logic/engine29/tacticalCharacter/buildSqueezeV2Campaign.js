@@ -15,6 +15,10 @@ export const ENGINE29_SQUEEZE_V2_STATES = Object.freeze({
   BROAD: "SQUEEZE_TRANSITIONED_TO_BROAD_MOVE",
 });
 
+// Evidence-loss expiry is confirmed over two consecutive valid 10m observations
+// (20 minutes). Missing/degraded data never increments this counter.
+export const SQUEEZE_V2_EVIDENCE_LOSS_CONFIRMATIONS = 2;
+
 const ACTIVE_FAMILY = new Set([
   ENGINE29_SQUEEZE_V2_STATES.WATCH,
   ENGINE29_SQUEEZE_V2_STATES.FORMING,
@@ -129,7 +133,39 @@ function publicContract({
   };
 }
 
-function nextState({ prior, observation, v10, v20 }) {
+function isEvidenceLoss(state, observation) {
+  if (
+    state === ENGINE29_SQUEEZE_V2_STATES.WATCH ||
+    state === ENGINE29_SQUEEZE_V2_STATES.FORMING
+  ) {
+    return observation?.watchQualified !== true;
+  }
+
+  if (
+    [
+      ENGINE29_SQUEEZE_V2_STATES.ACTIVE,
+      ENGINE29_SQUEEZE_V2_STATES.HOLDING,
+      ENGINE29_SQUEEZE_V2_STATES.ACCELERATING,
+      ENGINE29_SQUEEZE_V2_STATES.WEAKENING,
+    ].includes(state)
+  ) {
+    const pressure = finite(observation?.squeezePressure);
+    const divergence = finite(observation?.internalDivergence);
+    const esQuality = finite(observation?.esAbnormalityQuality);
+
+    return (
+      Number.isFinite(pressure) &&
+      Number.isFinite(divergence) &&
+      Number.isFinite(esQuality) &&
+      pressure < 25 &&
+      (divergence < 45 || esQuality < 35)
+    );
+  }
+
+  return false;
+}
+
+function nextState({ prior, observation, v10, v20, evidenceLossCount = 0 }) {
   const state = prior?.state || ENGINE29_SQUEEZE_V2_STATES.NONE;
   const participation = finite(observation?.participationConfirmation);
   const pressure = finite(observation?.squeezePressure);
@@ -153,6 +189,12 @@ function nextState({ prior, observation, v10, v20 }) {
 
   if (broadened) {
     return ENGINE29_SQUEEZE_V2_STATES.BROAD;
+  }
+
+  if (
+    evidenceLossCount >= SQUEEZE_V2_EVIDENCE_LOSS_CONFIRMATIONS
+  ) {
+    return ENGINE29_SQUEEZE_V2_STATES.FAILED;
   }
 
   if (
@@ -303,6 +345,7 @@ export function buildEngine29SqueezeV2Campaign({
       history: [latest],
       broadeningVelocity10: null,
       broadeningVelocity20: null,
+      evidenceLossCount: 0,
       dataDegraded: false,
       reasonCodes: ["SQUEEZE_V2_NEW_CAMPAIGN_WATCH"],
     };
@@ -327,11 +370,20 @@ export function buildEngine29SqueezeV2Campaign({
   const { broadeningVelocity10, broadeningVelocity20 } =
     velocities(history, currentParticipation);
 
+  const evidenceLoss =
+    isEvidenceLoss(priorCampaign.state, observation);
+
+  const evidenceLossCount =
+    evidenceLoss
+      ? Number(priorCampaign.evidenceLossCount || 0) + 1
+      : 0;
+
   const state = nextState({
     prior: priorCampaign,
     observation,
     v10: broadeningVelocity10,
     v20: broadeningVelocity20,
+    evidenceLossCount,
   });
 
   const latest = metricObservation(observation, timestamp);
@@ -342,12 +394,20 @@ export function buildEngine29SqueezeV2Campaign({
     history: [...history, latest].slice(-36),
     broadeningVelocity10,
     broadeningVelocity20,
+    evidenceLossCount,
     lastUpdatedAt: timestamp,
     dataDegraded: false,
     reasonCodes: [
       ...(priorCampaign.reasonCodes || []),
+      evidenceLoss
+        ? `SQUEEZE_V2_VALID_EVIDENCE_LOSS_${evidenceLossCount}_OF_${SQUEEZE_V2_EVIDENCE_LOSS_CONFIRMATIONS}`
+        : "SQUEEZE_V2_EVIDENCE_LOSS_RESET",
+      state === ENGINE29_SQUEEZE_V2_STATES.FAILED &&
+      evidenceLossCount >= SQUEEZE_V2_EVIDENCE_LOSS_CONFIRMATIONS
+        ? "SQUEEZE_V2_EXPIRED_AFTER_PERSISTENT_VALID_EVIDENCE_LOSS"
+        : null,
       `SQUEEZE_V2_STATE_${state}`,
-    ],
+    ].filter(Boolean),
   };
 
   campaign = applyMilestone(campaign, state, timestamp);
