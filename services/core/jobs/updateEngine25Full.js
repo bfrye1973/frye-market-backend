@@ -473,9 +473,21 @@ async function writeSectorHealthFile() {
 
   const canonicalInputs = await fetchCanonicalParticipationInputs();
 
+  let previousParticipation = null;
+  try {
+    if (fs.existsSync(PARTICIPATION_FILE)) {
+      previousParticipation = JSON.parse(
+        fs.readFileSync(PARTICIPATION_FILE, "utf8")
+      );
+    }
+  } catch {
+    previousParticipation = null;
+  }
+
   const participation = buildPublishedEngine25Participation({
     sectorHealth,
     canonicalInputs,
+    previousArtifact: previousParticipation,
     now: Date.now(),
   });
 

@@ -19,6 +19,7 @@ import { fileURLToPath } from "url";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 import { buildEngine25ParticipationArtifact } from "../logic/engine25/buildParticipationArtifact.js";
 import { buildEngine25BlendedParticipation } from "../logic/engine25/buildBlendedParticipation.js";
+import { buildEngine25DistributionPressureV2 } from "../logic/engine25/buildDistributionPressureV2.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,13 +66,15 @@ export async function fetchCanonicalParticipationInputs({
 
   const routes = {
     intraday: `${base}/live/intraday`,
+    thirtyMinute: `${base}/live/30m-internals`,
     hourly: `${base}/live/hourly`,
     fourHour: `${base}/live/4h`,
     eod: `${base}/live/eod`,
   };
 
-  const [intraday, hourly, fourHour, eod] = await Promise.all([
+  const [intraday, thirtyMinute, hourly, fourHour, eod] = await Promise.all([
     fetchJsonFn(routes.intraday),
+    fetchJsonFn(routes.thirtyMinute),
     fetchJsonFn(routes.hourly),
     fetchJsonFn(routes.fourHour),
     fetchJsonFn(routes.eod),
@@ -80,6 +83,7 @@ export async function fetchCanonicalParticipationInputs({
   return {
     routes,
     intraday,
+    thirtyMinute,
     hourly,
     fourHour,
     eod,
@@ -89,6 +93,7 @@ export async function fetchCanonicalParticipationInputs({
 export function buildPublishedEngine25Participation({
   sectorHealth,
   canonicalInputs = null,
+  previousArtifact = null,
   now = Date.now(),
 } = {}) {
   if (!sectorHealth || typeof sectorHealth !== "object") {
@@ -110,8 +115,29 @@ export function buildPublishedEngine25Participation({
     now,
   });
 
+  const legacyDistributionPressure =
+    baseArtifact?.participation?.distributionPressure || null;
+
+  const distributionPressure = buildEngine25DistributionPressureV2({
+    intraday: canonicalInputs.intraday,
+    thirtyMinute: canonicalInputs.thirtyMinute,
+    hourly: canonicalInputs.hourly,
+    fourHour: canonicalInputs.fourHour,
+    previous:
+      previousArtifact?.participation?.distributionPressure?.schema ===
+      "engine25.distributionPressure.v2"
+        ? previousArtifact.participation.distributionPressure
+        : null,
+    now,
+  });
+
   return {
     ...baseArtifact,
+    participation: {
+      ...(baseArtifact.participation || {}),
+      legacyDistributionPressure,
+      distributionPressure,
+    },
     fastParticipation: blended.fastParticipation,
     blendedParticipation: blended.blendedParticipation,
     sourceDiagnostics: blended.sourceDiagnostics,
@@ -122,6 +148,7 @@ export function buildPublishedEngine25Participation({
       config: blended.config,
       canonicalRoutes: canonicalInputs.routes || {
         intraday: "/live/intraday",
+        thirtyMinute: "/live/30m-internals",
         hourly: "/live/hourly",
         fourHour: "/live/4h",
         eod: "/live/eod",
@@ -137,9 +164,19 @@ export function publishEngine25Participation({
   participationFile = PARTICIPATION_FILE,
   legacyFile = LEGACY_COMPATIBILITY_FILE,
 } = {}) {
+  let previousArtifact = null;
+  try {
+    if (fs.existsSync(participationFile)) {
+      previousArtifact = JSON.parse(fs.readFileSync(participationFile, "utf8"));
+    }
+  } catch {
+    previousArtifact = null;
+  }
+
   const artifact = buildPublishedEngine25Participation({
     sectorHealth,
     canonicalInputs,
+    previousArtifact,
     now,
   });
 
@@ -192,6 +229,8 @@ if (isDirectRun) {
           freshness: result.artifact.freshness,
           fastParticipation: result.artifact.fastParticipation,
           blendedParticipation: result.artifact.blendedParticipation,
+          distributionPressure:
+            result.artifact.participation?.distributionPressure || null,
           participationFile: result.participationFile,
           legacyFile: result.legacyFile,
           scannerBuildCount: 1,
