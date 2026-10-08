@@ -2,7 +2,7 @@ name: dashboard-archive-30min-internals
 
 on:
   workflow_run:
-    workflows: ["dashboard-30min-internals"]
+    workflows: ["dashboard-30min"]
     types: [completed]
   workflow_dispatch: {}
 
