@@ -1,0 +1,27 @@
+name: Engine25 Durable Distribution History Gate
+
+on:
+  push:
+    branches:
+      - engine25-distribution-durable-history
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine25/buildDistributionPressureV2.js
+          node --check services/core/jobs/updateEngine25Participation.js
+          node --check services/core/jobs/updateEngine25Full.js
+      - name: Distribution tests
+        run: node --test services/core/tests/engine25DistributionPressureV2.test.js
+      - name: Publishing tests
+        run: |
+          node --test services/core/tests/engine25BlendedParticipationPublishing.test.js
+          node services/core/tests/engine25ParticipationPublisher.test.js
