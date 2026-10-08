@@ -1730,7 +1730,6 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: context.currentPrice,
     degreeStates,
     engine22Display,
-    currentWavelength,
     waveFibState,
     currentLifecycleState,
   });
@@ -1934,6 +1933,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     waveFibState,
     degreeStates,
     engine22Display,
+    currentWavelength,
 
     // Canonical active structural Fib model for Strategy 1 Minute.
     // Consumers should prefer this over selecting targetModel vs
