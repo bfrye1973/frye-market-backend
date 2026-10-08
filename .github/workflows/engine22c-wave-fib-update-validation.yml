@@ -1,0 +1,54 @@
+name: Engine22C wave fib update validation
+
+on:
+  push:
+    branches:
+      - engine22c-micro-subminute-fibs-20261008
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-fib-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check syntax
+        run: |
+          node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+          node --check services/core/logic/engine22/wave/buildEngine22Display.js
+          node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+      - name: Install declared dependencies
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund
+      - name: Build ES strategy snapshot
+        working-directory: services/core
+        env:
+          SYMBOL: ES
+          NODE_ENV: test
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: |
+          if [ -z "$POLYGON_API_KEY" ] && [ -n "$POLY_KEY" ]; then export POLYGON_API_KEY="$POLY_KEY"; fi
+          test -n "$POLYGON_API_KEY"
+          node jobs/buildStrategySnapshot.js
+      - name: Validate specific wavelength targets and safe status
+        run: |
+          jq -e '
+            .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength as $w |
+            $w.degrees.micro.origin == 7784 and
+            $w.degrees.micro.invalidation == 7784 and
+            ([$w.degrees.micro.levels[].price] == [7833.75,7849,7864.25,7914,7949.25,7994.25,8044]) and
+            $w.degrees.micro.state == "MICRO_W5_LAUNCH_WATCH" and
+            $w.degrees.subminute.origin == 7671.5 and
+            ([$w.degrees.subminute.levels[].price] == [7780,7813.75,7847.25,7955.75,8033,8131.5,8240]) and
+            $w.degrees.subminute.confirmationStatus == "PENDING_TOMORROW" and
+            $w.degrees.subminute.levels[2].status == "TOUCHED" and
+            $w.degrees.subminute.fibAnchorStatus == "PROVISIONAL_SUBMINUTE_W1_ANCHORS_MANAGER_REVIEW"
+          ' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
