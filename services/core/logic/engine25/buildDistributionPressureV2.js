@@ -4,6 +4,8 @@
 // 30m owns confirmation/transition.
 // 10m owns acceleration warning.
 
+import { resolveEquityScannerSession } from "./buildParticipationArtifact.js";
+
 export const ENGINE25_DISTRIBUTION_V2_SCHEMA = "engine25.distributionPressure.v2";
 
 export const DISTRIBUTION_V2_CONFIG = Object.freeze({
@@ -278,6 +280,55 @@ function lastTwo(history, timeframe) {
   return (history?.[timeframe] || []).slice(-2);
 }
 
+function lastValidRow(history, timeframe) {
+  const rows = Array.isArray(history?.[timeframe]) ? history[timeframe] : [];
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
+function buildEquitySessionDisplay({
+  timeframe,
+  observation,
+  history,
+  equitySession,
+} = {}) {
+  const lastValid = lastValidRow(history, timeframe);
+
+  if (equitySession?.active === true) {
+    return {
+      state: observation?.available === true ? "LIVE_EQUITY_READ" : "UNAVAILABLE",
+      reason: observation?.available === true ? "ACTIVE_EQUITY_SESSION" : observation?.reason || "CURRENT_EVIDENCE_UNAVAILABLE",
+      pressure: observation?.available === true ? observation?.pressure ?? null : null,
+      label: observation?.available === true ? observation?.label ?? "UNAVAILABLE" : "UNAVAILABLE",
+      sourceTimestamp: observation?.available === true ? observation?.sourceTimestamp ?? null : null,
+      lastValidEquityRead: null,
+    };
+  }
+
+  if (lastValid) {
+    return {
+      state: "LAST_VALID_EQUITY_READ",
+      reason: "EQUITY_SESSION_CLOSED",
+      pressure: finite(lastValid.pressure),
+      label: lastValid.label || classifyDistributionPressure(lastValid.pressure),
+      sourceTimestamp: lastValid.sourceTimestamp || null,
+      lastValidEquityRead: {
+        pressure: finite(lastValid.pressure),
+        label: lastValid.label || classifyDistributionPressure(lastValid.pressure),
+        sourceTimestamp: lastValid.sourceTimestamp || null,
+      },
+    };
+  }
+
+  return {
+    state: "UNAVAILABLE",
+    reason: "EQUITY_SESSION_CLOSED_NO_VALID_PRIOR_OBSERVATION",
+    pressure: null,
+    label: "UNAVAILABLE",
+    sourceTimestamp: null,
+    lastValidEquityRead: null,
+  };
+}
+
 function oneHourTrend(history, observation) {
   if (!observation?.available) return { state: "UNAVAILABLE", confirmed: false };
   const rows = lastTwo(history, "1h");
@@ -444,10 +495,23 @@ export function buildEngine25DistributionPressureV2({
   };
 
   const history = mergeHistory(previous, observations);
+  const equitySession = resolveEquityScannerSession(now);
   const structural4h = observations["4h"];
   const trend = oneHourTrend(history, observations["1h"]);
   const confirmation = thirtyConfirmation(history, observations["30m"], structural4h?.pressure);
   const acceleration = tenAcceleration(history, observations["10m"], observations["30m"]);
+  const display30m = buildEquitySessionDisplay({
+    timeframe: "30m",
+    observation: observations["30m"],
+    history,
+    equitySession,
+  });
+  const display10m = buildEquitySessionDisplay({
+    timeframe: "10m",
+    observation: observations["10m"],
+    history,
+    equitySession,
+  });
   const persistence = structuralPersistence(history, structural4h);
   const state = integratedState(structural4h, trend, confirmation, acceleration);
 
@@ -475,10 +539,19 @@ export function buildEngine25DistributionPressureV2({
     pressureLabel,
     integratedState: state,
     persistence,
+    equitySession,
     structural4h,
     tactical1h: { ...observations["1h"], trend },
-    confirmation30m: { ...observations["30m"], confirmation },
-    acceleration10m: { ...observations["10m"], acceleration },
+    confirmation30m: {
+      ...observations["30m"],
+      confirmation,
+      display: display30m,
+    },
+    acceleration10m: {
+      ...observations["10m"],
+      acceleration,
+      display: display10m,
+    },
     observations,
     history,
   };
