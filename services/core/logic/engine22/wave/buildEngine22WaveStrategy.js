@@ -37,6 +37,7 @@ import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
+import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 
 function round2(x) {
   const n = Number(x);
@@ -1724,6 +1725,15 @@ export function buildEngine22WaveStrategy(input = {}) {
   });
 
   const engine22Display = buildEngine22Display({ degreeStates });
+  const currentWavelength = buildCurrentWavelength({
+    symbol: context.symbol,
+    currentPrice: context.currentPrice,
+    degreeStates,
+    engine22Display,
+    currentWavelength,
+    waveFibState,
+    currentLifecycleState,
+  });
 
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
