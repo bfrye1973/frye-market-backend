@@ -1,0 +1,49 @@
+name: Engine22C current wavelength validation
+
+on:
+  push:
+    branches:
+      - engine22c-current-wavelength-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine22c-backend-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-engine22c:
+    if: github.ref == 'refs/heads/engine22c-current-wavelength-v1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Engine22C branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check current wavelength syntax
+        run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+
+      - name: Check strategy wrapper syntax
+        run: node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+
+      - name: Build isolated ES snapshot
+        working-directory: services/core
+        env:
+          SYMBOL: ES
+          NODE_ENV: test
+        run: node jobs/buildStrategySnapshot.js
+
+      - name: Print and require current wavelength JSON
+        working-directory: services/core
+        run: |
+          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength' data/strategy-snapshot-es.json
+          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.version == "engine22.currentWavelength.v1"' data/strategy-snapshot-es.json
