@@ -35,6 +35,9 @@ jobs:
       - name: Check strategy wrapper syntax
         run: node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
 
+      - name: Install declared backend dependencies
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund
+
       - name: Build isolated ES snapshot
         working-directory: services/core
         env:
