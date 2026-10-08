@@ -1,3 +1,4 @@
+import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
 // READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
 // Micro W5 targets use the user-updated W4 low at 7784.00; prior W3 high remains 7897.75.
@@ -58,17 +59,34 @@ export function buildCurrentWavelength({
   currentLifecycleState = null,
   intrabarLow = null,
   lastClosed10mClose = null,
+  microCandidateW1High = null,
+  microConfirmedW1High = null,
+  microW1CompletionConfirmed = false,
+  microW1ConfirmationSource = null,
+  microConfirmedW2Low = null,
+  microW2CompletionConfirmed = false,
 } = {}) {
   const price = n(currentPrice);
   const low = n(intrabarLow);
   const close10m = n(lastClosed10mClose);
-  const microLevels = MICRO_TARGETS.map(([key, label, target]) =>
-    level(key, label, target, price != null && price >= target ? "TOUCHED" : "WATCH")
-  );
-  const microBreach = low != null && low < 7784.00 || price != null && price < 7784.00;
-  const microFailed = close10m != null && close10m < 7784.00;
-  const microStatus = microFailed ? "FAILED" : microBreach ? "INVALIDATION_TOUCHED" : "MICRO_W5_LAUNCH_WATCH";
-  const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach ? "FAILED_REVIEW_REQUIRED" : "PENDING";
+  const microSequence = buildMicroWaveSequence({
+    currentPrice: price,
+    candidateW1High: microCandidateW1High,
+    confirmedW1High: microConfirmedW1High,
+    w1CompletionConfirmed: microW1CompletionConfirmed,
+    w1ConfirmationSource: microW1ConfirmationSource,
+    confirmedW2Low: microConfirmedW2Low,
+    w2CompletionConfirmed: microW2CompletionConfirmed,
+  });
+  const microLevels = microSequence.activeWave === "W1"
+    ? microSequence.projectedW1
+    : microSequence.activeWave === "W2" ? microSequence.projectedW2 : [];
+  const microBreach = low != null && low < 7784 || price != null && price < 7784;
+  const microFailed = close10m != null && close10m < 7784;
+  const microStatus = microFailed ? "FAILED" : microBreach
+    ? "INVALIDATION_TOUCHED" : microSequence.state;
+  const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach
+    ? "FAILED_REVIEW_REQUIRED" : microSequence.confirmationStatus;
 
   // Subminute W3 extension map is PROVISIONAL pending Manager verification of
   // the user's chart anchors: Subminute W1 7575.00 -> 7859.25, W2 7671.50.
@@ -90,9 +108,10 @@ export function buildCurrentWavelength({
   });
   const degrees = {
     micro: {
-      degree: "micro", role: "TIMING_ONLY", activeWave: "W5",
+      degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
+      microSequence,
       state: microStatus, origin: 7784.00, invalidation: 7784.00,
-      confirmation: 7897.75, confirmationStatus: microConfirmationStatus,
+      confirmation: null, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
       failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
       levels: microLevels, nextLevel: nextLevel(microLevels, price),
