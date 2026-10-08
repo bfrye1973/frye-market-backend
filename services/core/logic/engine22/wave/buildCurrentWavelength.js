@@ -9,6 +9,27 @@ const MICRO_TARGETS = [
   ["e1618", "1.618", 7993.00],
   ["e2000", "2.000", 8042.75],
 ];
+// Explicit legacy-mark anchors are only used for manager-reviewed display projections.
+// These are not confirmation rules and never influence trade permissions.
+const WAVE_PROJECTION_RATIOS = [
+  ["e0382", "0.382", 0.382],
+  ["e0500", "0.500", 0.5],
+  ["e0618", "0.618", 0.618],
+  ["e1000", "1.000", 1],
+  ["e1272", "1.272", 1.272],
+  ["e1618", "1.618", 1.618],
+  ["e2000", "2.000", 2],
+];
+function waveProjectionLevels({ w1Low, w1High, start, currentPrice, anchorSource }) {
+  const length = w1High - w1Low;
+  if (![w1Low, w1High, start].every(Number.isFinite) || length <= 0) return [];
+  return WAVE_PROJECTION_RATIOS.map(([key, label, ratio]) => {
+    const target = Math.round((start + length * ratio) * 4) / 4;
+    return level(key, label, target, currentPrice != null && currentPrice >= target ? "TOUCHED" : "WATCH", {
+      anchorSource, projectionMode: "MANAGER_REVIEW_PROVISIONAL", wave1Length: length,
+    });
+  });
+}
 const ALERT_EVENTS = [
   "FIB_LEVEL_TOUCHED",
   "FIB_LEVEL_CONFIRMED",
@@ -56,10 +77,14 @@ export function buildCurrentWavelength({
       note: "Touched per Manager; exact W3 extension price pending anchor lock.",
     }),
   ];
-  const minuteLevels = [
-    level("reclaim", "First reclaim", 7848.50),
-    level("confirmation", "Stronger confirmation", 7906.25),
-  ];
+  const minuteLevels = waveProjectionLevels({
+    w1Low: 7591.00, w1High: 7848.50, start: 7576.00, currentPrice: price,
+    anchorSource: "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+  });
+  const minorLevels = waveProjectionLevels({
+    w1Low: 6417.00, w1High: 6948.75, start: 7398.00, currentPrice: price,
+    anchorSource: "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+  });
   const degrees = {
     micro: {
       degree: "micro", role: "TIMING_ONLY", activeWave: "W5",
@@ -79,6 +104,7 @@ export function buildCurrentWavelength({
       confirmationRule: "NEXT_SESSION_10M_ACCEPTANCE_ABOVE_0618_REQUIRED",
       confirmationNote: "Requires 10m close acceptance above locked .618 and intact Micro W4 / Subminute support. No auto-confirmation until exact .618 is locked.",
       levels: subminuteLevels, nextLevel: null,
+      fibAnchorStatus: "PENDING_SUBMINUTE_W1_ANCHOR_LOCK",
       lastTouchedLevel: lastTouchedLevel(subminuteLevels),
       alertEligibleEvents: ALERT_EVENTS,
     },
@@ -89,13 +115,13 @@ export function buildCurrentWavelength({
       confirmationLevels: [7848.50, 7906.25],
       confirmationStatus: "PENDING", levels: minuteLevels,
       nextLevel: nextLevel(minuteLevels, price),
-      lastTouchedLevel: null, alertEligibleEvents: ALERT_EVENTS,
+      lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
     },
     minor: {
       degree: "minor", activeWave: "W5", state: "MINOR_W5_ACTIVE_CANDIDATE",
       origin: 7398.00, invalidation: 7398.00,
-      confirmationStatus: "ACTIVE_CANDIDATE", levels: [],
-      nextLevel: null, lastTouchedLevel: null, alertEligibleEvents: ALERT_EVENTS,
+      confirmationStatus: "ACTIVE_CANDIDATE", levels: minorLevels,
+      nextLevel: nextLevel(minorLevels, price), lastTouchedLevel: lastTouchedLevel(minorLevels), alertEligibleEvents: ALERT_EVENTS,
     },
   };
   return {
