@@ -36,7 +36,8 @@ const ALERT_EVENTS = [
   "WAVE_INVALIDATION_TOUCHED",
   "WAVE_CONFIRMATION_TOUCHED",
 ];
-const n = (x) => x == null || x === "" ? null : Number.isFinite(Number(x)) ? Number(x) : null;
+// Market prices must be positive. Missing values sometimes arrive as 0 from snapshot adapters.
+const n = (x) => { const value = Number(x); return x == null || x === "" || !Number.isFinite(value) || value <= 0 ? null : value; };
 const round = (x) => x == null ? null : Math.round(x * 100) / 100;
 const level = (key, label, price, status = "WATCH", extra = {}) => ({
   key, label, price, status, touchedAt: null, confirmedAt: null, ...extra,
