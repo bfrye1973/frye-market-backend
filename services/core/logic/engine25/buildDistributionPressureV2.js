@@ -276,6 +276,65 @@ function mergeHistory(previous, observations) {
   return history;
 }
 
+
+function bootstrapHistoryRows(bootstrapInputs) {
+  const rows = {};
+  const candidates = {
+    "10m": bootstrapInputs?.intraday || null,
+    "30m": bootstrapInputs?.thirtyMinute || null,
+  };
+
+  for (const [timeframe, payload] of Object.entries(candidates)) {
+    if (!payload) continue;
+    const timestamp = extractDistributionSourceTimestamp(payload);
+    const sourceMs = Date.parse(String(timestamp || ""));
+    if (!Number.isFinite(sourceMs)) continue;
+
+    const observation = buildDistributionTimeframeObservation({
+      timeframe,
+      payload,
+      now: sourceMs,
+    });
+
+    if (
+      observation?.available === true &&
+      observation?.sourceTimestamp &&
+      observation?.pressure !== null
+    ) {
+      rows[timeframe] = [{
+        sourceTimestamp: observation.sourceTimestamp,
+        pressure: observation.pressure,
+        label: observation.label,
+      }];
+    }
+  }
+
+  return rows;
+}
+
+function mergeBootstrapIntoPrevious(previous, bootstrapInputs) {
+  if (!bootstrapInputs) return previous;
+
+  const seeded = bootstrapHistoryRows(bootstrapInputs);
+  if (!Object.keys(seeded).length) return previous;
+
+  const next = previous
+    ? JSON.parse(JSON.stringify(previous))
+    : { history: {} };
+  next.history = next.history || {};
+
+  for (const [timeframe, rows] of Object.entries(seeded)) {
+    const existing = Array.isArray(next.history[timeframe])
+      ? next.history[timeframe]
+      : [];
+    if (!existing.length) {
+      next.history[timeframe] = rows;
+    }
+  }
+
+  return next;
+}
+
 function lastTwo(history, timeframe) {
   return (history?.[timeframe] || []).slice(-2);
 }
@@ -485,6 +544,7 @@ export function buildEngine25DistributionPressureV2({
   hourly,
   fourHour,
   previous = null,
+  bootstrapInputs = null,
   now = Date.now(),
 } = {}) {
   const observations = {
@@ -494,7 +554,11 @@ export function buildEngine25DistributionPressureV2({
     "4h": buildDistributionTimeframeObservation({ timeframe: "4h", payload: fourHour, now }),
   };
 
-  const history = mergeHistory(previous, observations);
+  const previousWithBootstrap = mergeBootstrapIntoPrevious(
+    previous,
+    bootstrapInputs
+  );
+  const history = mergeHistory(previousWithBootstrap, observations);
   const equitySession = resolveEquityScannerSession(now);
   const structural4h = observations["4h"];
   const trend = oneHourTrend(history, observations["1h"]);

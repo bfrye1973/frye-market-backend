@@ -9,6 +9,10 @@ import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalCon
 import {
   buildPublishedEngine25Participation,
   fetchCanonicalParticipationInputs,
+  fetchDurableLastValidEquityInputs,
+  hasDistributionHistory,
+  readPersistentDistributionArtifact,
+  writePersistentDistributionArtifact,
 } from "./updateEngine25Participation.js";
 
 import {
@@ -484,16 +488,33 @@ async function writeSectorHealthFile() {
     previousParticipation = null;
   }
 
+  if (!hasDistributionHistory(previousParticipation)) {
+    const persistentParticipation = readPersistentDistributionArtifact();
+    if (hasDistributionHistory(persistentParticipation)) {
+      previousParticipation = persistentParticipation;
+    }
+  }
+
+  let durableLastValidEquityInputs = null;
+  if (!hasDistributionHistory(previousParticipation)) {
+    durableLastValidEquityInputs =
+      await fetchDurableLastValidEquityInputs({ now: Date.now() });
+  }
+
   const participation = buildPublishedEngine25Participation({
     sectorHealth,
     canonicalInputs,
     previousArtifact: previousParticipation,
+    durableLastValidEquityInputs,
     now: Date.now(),
   });
 
   fs.writeFileSync(
     PARTICIPATION_FILE,
     JSON.stringify(participation, null, 2)
+  );
+  writePersistentDistributionArtifact(
+    participation?.participation?.distributionPressure || null
   );
 
   console.log(

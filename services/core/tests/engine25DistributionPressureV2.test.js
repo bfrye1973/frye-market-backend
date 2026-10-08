@@ -321,3 +321,68 @@ test("active equity session with low coverage stays unavailable and does not car
   assert.equal(out.acceleration10m.display.lastValidEquityRead, null);
   assert.equal(out.confirmation30m.display.lastValidEquityRead, null);
 });
+
+
+test("durable bootstrap seeds 10m and 30m history after a restart", () => {
+  const closedNow = Date.parse("2026-10-08T11:30:00Z");
+
+  const archived10 = payload({
+    ts: "2026-10-07T20:03:17Z",
+    up: 5,
+    down: 5,
+    nh: 9,
+    nl: 11,
+    advancingVolume: 45,
+    decliningVolume: 55,
+    weak: 4,
+  });
+  const archived30 = payload({
+    ts: "2026-10-07T20:00:00Z",
+    up: 4,
+    down: 6,
+    nh: 8,
+    nl: 12,
+    advancingVolume: 35,
+    decliningVolume: 65,
+    weak: 6,
+  });
+
+  const overnight10 = payload({
+    ts: "2026-10-08T11:20:00Z",
+    advancingVolume: 55,
+    decliningVolume: 45,
+  });
+  const overnight30 = payload({
+    ts: "2026-10-08T10:00:00Z",
+    advancingVolume: 55,
+    decliningVolume: 45,
+  });
+  for (const card of overnight10.sectorCards) card.stocksWithVolume = 40;
+  for (const card of overnight30.sectorCards) card.stocksWithVolume = 30;
+
+  const out = buildEngine25DistributionPressureV2({
+    intraday: overnight10,
+    thirtyMinute: overnight30,
+    hourly: payload({ ts: "2026-10-08T11:02:31Z" }),
+    fourHour: payload({ ts: "2026-10-08T11:24:41Z" }),
+    previous: null,
+    bootstrapInputs: {
+      intraday: archived10,
+      thirtyMinute: archived30,
+    },
+    now: closedNow,
+  });
+
+  assert.equal(out.history["10m"].length, 1);
+  assert.equal(out.history["30m"].length, 1);
+  assert.equal(out.acceleration10m.display.state, "LAST_VALID_EQUITY_READ");
+  assert.equal(out.confirmation30m.display.state, "LAST_VALID_EQUITY_READ");
+  assert.equal(
+    out.acceleration10m.display.sourceTimestamp,
+    "2026-10-07T20:03:17Z"
+  );
+  assert.equal(
+    out.confirmation30m.display.sourceTimestamp,
+    "2026-10-07T20:00:00Z"
+  );
+});
