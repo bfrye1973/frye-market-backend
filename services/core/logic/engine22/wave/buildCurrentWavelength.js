@@ -1,13 +1,14 @@
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
 // READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
+// Micro W5 targets use the user-updated W4 low at 7784.00; prior W3 high remains 7897.75.
 const MICRO_TARGETS = [
-  ["e0382", "0.382", 7832.50],
-  ["e0500", "0.500", 7847.75],
-  ["e0618", "0.618", 7863.00],
-  ["e1000", "1.000", 7912.75],
-  ["e1272", "1.272", 7948.25],
-  ["e1618", "1.618", 7993.00],
-  ["e2000", "2.000", 8042.75],
+  ["e0382", "0.382", 7833.75],
+  ["e0500", "0.500", 7849.00],
+  ["e0618", "0.618", 7864.25],
+  ["e1000", "1.000", 7914.00],
+  ["e1272", "1.272", 7949.25],
+  ["e1618", "1.618", 7994.25],
+  ["e2000", "2.000", 8044.00],
 ];
 // Explicit legacy-mark anchors are only used for manager-reviewed display projections.
 // These are not confirmation rules and never influence trade permissions.
@@ -64,20 +65,21 @@ export function buildCurrentWavelength({
   const microLevels = MICRO_TARGETS.map(([key, label, target]) =>
     level(key, label, target, price != null && price >= target ? "TOUCHED" : "WATCH")
   );
-  const microBreach = low != null && low < 7782.75 || price != null && price < 7782.75;
-  const microFailed = close10m != null && close10m < 7782.75;
+  const microBreach = low != null && low < 7784.00 || price != null && price < 7784.00;
+  const microFailed = close10m != null && close10m < 7784.00;
   const microStatus = microFailed ? "FAILED" : microBreach ? "INVALIDATION_TOUCHED" : "MICRO_W5_LAUNCH_WATCH";
   const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach ? "FAILED_REVIEW_REQUIRED" : "PENDING";
 
-  // The .618 was touched according to the Manager. The old canonical Subminute
-  // model is an earlier DOWN C-wave and must not be treated as this UP W3 extension.
-  const subminuteLevels = [
-    level("e0382", "0.382", null),
-    level("e0500", "0.500", null),
-    level("e0618", "0.618", null, "TOUCHED", {
-      note: "Touched per Manager; exact W3 extension price pending anchor lock.",
-    }),
-  ];
+  // Subminute W3 extension map is PROVISIONAL pending Manager verification of
+  // the user's chart anchors: Subminute W1 7575.00 -> 7859.25, W2 7671.50.
+  // Manager-locked historical .618 touch is retained on pullbacks.
+  const subminuteLevels = waveProjectionLevels({
+    w1Low: 7575.00, w1High: 7859.25, start: 7671.50, currentPrice: price,
+    anchorSource: "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+  }).map((fib) => fib.key === "e0618" ? {
+    ...fib, status: "TOUCHED",
+    note: "Historical .618 touch per Manager; projected price is provisional pending anchor review.",
+  } : fib);
   const minuteLevels = waveProjectionLevels({
     w1Low: 7591.00, w1High: 7848.50, start: 7576.00, currentPrice: price,
     anchorSource: "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
@@ -89,7 +91,7 @@ export function buildCurrentWavelength({
   const degrees = {
     micro: {
       degree: "micro", role: "TIMING_ONLY", activeWave: "W5",
-      state: microStatus, origin: 7782.75, invalidation: 7782.75,
+      state: microStatus, origin: 7784.00, invalidation: 7784.00,
       confirmation: 7897.75, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
       failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
@@ -99,13 +101,13 @@ export function buildCurrentWavelength({
     },
     subminute: {
       degree: "subminute", activeWave: "W3",
-      state: "SUBMINUTE_W3_ACTIVE_CANDIDATE", origin: 7672.50,
-      invalidation: 7672.50,
+      state: "SUBMINUTE_W3_ACTIVE_CANDIDATE", origin: 7671.50,
+      invalidation: 7671.50,
       confirmationStatus: "PENDING_TOMORROW",
       confirmationRule: "NEXT_SESSION_10M_ACCEPTANCE_ABOVE_0618_REQUIRED",
-      confirmationNote: "Requires 10m close acceptance above locked .618 and intact Micro W4 / Subminute support. No auto-confirmation until exact .618 is locked.",
-      levels: subminuteLevels, nextLevel: null,
-      fibAnchorStatus: "PENDING_SUBMINUTE_W1_ANCHOR_LOCK",
+      confirmationNote: "Requires 10m close acceptance above locked .618 and intact Micro W4 / Subminute support. No auto-confirmation until provisional .618 anchors are Manager-locked.",
+      levels: subminuteLevels, nextLevel: nextLevel(subminuteLevels, price),
+      fibAnchorStatus: "PROVISIONAL_SUBMINUTE_W1_ANCHORS_MANAGER_REVIEW",
       lastTouchedLevel: lastTouchedLevel(subminuteLevels),
       alertEligibleEvents: ALERT_EVENTS,
     },
