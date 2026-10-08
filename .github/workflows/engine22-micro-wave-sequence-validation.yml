@@ -1,0 +1,23 @@
+name: Engine22 Micro wave sequence validation
+on:
+  push:
+    branches: [engine22-micro-wave-sequence-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-micro-sequence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax and unit tests
+        run: |
+          node --check services/core/logic/engine22/wave/buildMicroWaveSequence.js
+          node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+          node --check services/core/logic/engine22/wave/buildEngine22Display.js
+          node --test services/core/tests/engine22MicroWaveSequence.test.js
