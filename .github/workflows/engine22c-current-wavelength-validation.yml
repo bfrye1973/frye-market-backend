@@ -43,7 +43,17 @@ jobs:
         env:
           SYMBOL: ES
           NODE_ENV: test
-        run: node jobs/buildStrategySnapshot.js
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: |
+          if [ -z "$POLYGON_API_KEY" ] && [ -n "$POLY_KEY" ]; then
+            export POLYGON_API_KEY="$POLY_KEY"
+          fi
+          if [ -z "$POLYGON_API_KEY" ]; then
+            echo "Required Polygon credential unavailable to isolated CI" >&2
+            exit 1
+          fi
+          node jobs/buildStrategySnapshot.js
 
       - name: Print and require current wavelength JSON
         working-directory: services/core
