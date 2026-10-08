@@ -171,30 +171,25 @@ function microDisplay() {
   return {
     degree: "micro",
     label: "Micro",
-    subtitle: "Immediate timing",
-    badge: "W5",
-    headline: "Micro W5 launch watch — W4 completed candidate at 7782.75",
+    subtitle: "Sequential timing — W1 then W2",
+    badge: "W1",
+    headline: "Micro W1 high search from 7784.00 — provisional projections",
     active: true,
     direction: "UP",
     rows: clean([
       row("Role", "Timing only"),
       row("Parent", "Subminute W3"),
-      row("W1", `${price(MICRO_MARKS.w1Low.price)} → ${price(MICRO_MARKS.w1High.price)}`, { kind: "mark" }),
-      row("W2", pointText(MICRO_MARKS.w2Low), { kind: "mark" }),
-      row("W3", pointText(MICRO_MARKS.w3High), { kind: "mark" }),
-      row("W4", pointText(MICRO_MARKS.w4Low), { status: "COMPLETED_CANDIDATE", kind: "mark" }),
-      row("Current", "Micro W5 launch watch", { tone: "long" }),
-      row("Invalid", `Below ${price(MICRO_MARKS.w4Low.price)}`, { tone: "warning" }),
-      row("Confirm", `Reclaim / hold above ${price(MICRO_MARKS.w3High.price)}`, { tone: "watch" }),
+      row("W1 start", "7784.00", { kind: "mark" }),
+      row("Current", "Micro W1 high search", { tone: "watch" }),
+      row("W1 high", "Not confirmed", { tone: "warning" }),
+      row("W2 fib", "Await confirmed W1 high", { tone: "watch" }),
+      row("Invalid", "Below 7784.00", { tone: "warning" }),
     ]),
-    levels: [
-      { label: "W4 low", price: MICRO_MARKS.w4Low.price, status: "INVALIDATION" },
-      { label: "W3 high", price: MICRO_MARKS.w3High.price, status: "CONFIRMATION" },
-    ],
+    levels: [{ label: "W1 origin", price: 7784, status: "REVIEW" }],
     rules: [
-      "Micro is timing only — no execution or permission.",
-      `Hold above ${price(MICRO_MARKS.w4Low.price)} keeps Micro W5 launch watch alive.`,
-      `Reclaim ${price(MICRO_MARKS.w3High.price)} confirms Micro W5 strength.`,
+      "W1 upside targets are provisional timing references, not confirmed reversal highs.",
+      "W2 retracement ladder is unavailable until a validated W1 high.",
+      "No permission, sizing or execution.",
     ],
   };
 }
@@ -216,7 +211,7 @@ function subminuteDisplay(state) {
       row("W2 low", price(CURRENT_LOCKED.subminuteW2Low), { status: "COMPLETED_CANDIDATE", kind: "mark" }),
       row("W3 start", price(CURRENT_LOCKED.subminuteW3Start), { status: "ACTIVE_CANDIDATE", kind: "mark" }),
       row("Current", "Subminute W3 active candidate", { tone: "long" }),
-      row("Micro", "Micro W5 launch watch", { tone: "watch" }),
+      row("Micro", "Micro W1 high search", { tone: "watch" }),
       row("Invalid", `Below ${price(CURRENT_LOCKED.subminuteW2Low)}`, { tone: "warning" }),
     ]),
     levels: [
@@ -336,7 +331,7 @@ export function buildEngine22Display({ degreeStates = null } = {}) {
 
   return {
     version: "engine22Display.v1",
-    headline: "Micro W5 launch watch inside Subminute W3; Minute W3 confirmation pending.",
+    headline: "Micro W1 high search inside Subminute W3; Minute W3 confirmation pending.",
     degreeOrder: [...DEGREE_ORDER],
     degrees: {
       micro: microDisplay(),
