@@ -79,7 +79,7 @@ async function fetchJson(url) {
 }
 
 
-function readPersistentDistributionArtifact() {
+export function readPersistentDistributionArtifact() {
   try {
     if (!fs.existsSync(DISTRIBUTION_HISTORY_FILE)) return null;
     const distributionPressure = JSON.parse(
@@ -98,7 +98,7 @@ function readPersistentDistributionArtifact() {
   }
 }
 
-function writePersistentDistributionArtifact(distributionPressure) {
+export function writePersistentDistributionArtifact(distributionPressure) {
   if (distributionPressure?.schema !== "engine25.distributionPressure.v2") return;
   try {
     fs.mkdirSync(path.dirname(DISTRIBUTION_HISTORY_FILE), { recursive: true });
@@ -114,7 +114,7 @@ function writePersistentDistributionArtifact(distributionPressure) {
   }
 }
 
-function hasDistributionHistory(artifact) {
+export function hasDistributionHistory(artifact) {
   const history =
     artifact?.participation?.distributionPressure?.history || null;
   return Boolean(
