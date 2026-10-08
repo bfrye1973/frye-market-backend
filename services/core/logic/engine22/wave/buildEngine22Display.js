@@ -12,7 +12,7 @@ const MICRO_MARKS = {
   w1High: { price: 7805.0, time: "2026-10-02 07:00" },
   w2Low: { price: 7757.75, time: "2026-10-05 03:00" },
   w3High: { price: 7897.75, time: "2026-10-06 07:00" },
-  w4Low: { price: 7782.75, time: "2026-10-08 07:00" },
+  w4Low: { price: 7784.00, time: "2026-10-08 (user-updated; exact time unverified)" },
 };
 
 const CURRENT_LOCKED = {
@@ -20,8 +20,8 @@ const CURRENT_LOCKED = {
   minuteW3Origin: 7576.0,
   minuteW3Reclaim: 7848.5,
   minuteW3Confirmation: 7906.25,
-  subminuteW2Low: 7672.5,
-  subminuteW3Start: 7672.5,
+  subminuteW2Low: 7671.5,
+  subminuteW3Start: 7671.5,
 };
 
 const num = (v) => {
@@ -207,7 +207,7 @@ function subminuteDisplay(state) {
     label: "Subminute",
     subtitle: "Immediate wave path",
     badge: "W3",
-    headline: "Subminute W3 active candidate from 7672.50 / 7680 area",
+    headline: "Subminute W3 active candidate from 7671.50 — fib anchors provisional",
     active: true,
     direction: "UP",
     rows: clean([
