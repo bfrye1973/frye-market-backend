@@ -60,3 +60,4 @@ jobs:
         run: |
           jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
           jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.version == "engine22.currentWavelength.v1"' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
+          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength | (.currentPrice != null or (.degrees.micro.state == "MICRO_W5_LAUNCH_WATCH" and .degrees.micro.confirmationStatus == "PENDING"))' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
