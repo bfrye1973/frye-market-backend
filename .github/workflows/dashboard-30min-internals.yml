@@ -2,20 +2,16 @@ name: dashboard-30min-internals
 
 on:
   workflow_dispatch: {}
-  schedule:
-    # Broad UTC clock. The job itself gates in America/New_York so DST is safe.
-    # :05/:35 means we evaluate completed :00/:30 30m bars.
-    - cron: "5,35 * * * 0-5"
 
 jobs:
   thirtymin_internals:
-    name: Build & Publish Engine25 30m Internals
+    name: Build & Publish Engine25 30m Internals (manual backup)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
-      group: engine25-30m-internals
+      group: engine25-30m-internals-manual
       cancel-in-progress: false
 
     env:
@@ -28,73 +24,25 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
-      - name: Gate to ES/CME Globex 30m checkpoints
-        id: session
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          python - << 'PY'
-          import os
-          from datetime import datetime
-          from zoneinfo import ZoneInfo
-
-          event_name = os.environ.get("EVENT_NAME", "")
-          now = datetime.now(ZoneInfo("America/New_York"))
-
-          if event_name == "workflow_dispatch":
-              valid = True
-              reason = "MANUAL_RUN"
-          else:
-              # ES/CME Globex master clock:
-              # Sunday 18:00 ET -> Friday 17:00 ET,
-              # with the daily 17:00-18:00 ET maintenance break.
-              wd = now.weekday()  # Mon=0 ... Sun=6
-              if wd == 6:  # Sunday
-                  valid = now.hour >= 18
-              elif 0 <= wd <= 3:  # Monday-Thursday
-                  valid = now.hour != 17
-              elif wd == 4:  # Friday
-                  valid = now.hour < 17
-              else:  # Saturday
-                  valid = False
-
-              # Do not run the 18:05 ET slot immediately after reopen because
-              # a new full 30m bar has not completed yet. First post-reopen run
-              # is 18:35 ET.
-              if wd in [0, 1, 2, 3, 6] and now.hour == 18 and now.minute < 30:
-                  valid = False
-
-              reason = "ES_GLOBEX_30M_CHECKPOINT" if valid else "OUTSIDE_ES_GLOBEX_30M_WINDOW"
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
-              f.write(f"run={'true' if valid else 'false'}\n")
-              f.write(f"reason={reason}\n")
-
-          print("NY time:", now.isoformat())
-          print("run:", valid, "reason:", reason)
-          PY
-
       - name: Checkout repository
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Setup Python 3.11
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Build Engine25 full-market 30m internals
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           mkdir -p data
-          python -u scripts/build_engine25_30m_internals.py             --sectors-dir data/sectors             --out data/outlook_30m_internals.json
+          python -u scripts/build_engine25_30m_internals.py \
+            --sectors-dir data/sectors \
+            --out data/outlook_30m_internals.json
 
       - name: Validate canonical contract
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           python - << 'PY'
           import json
@@ -122,21 +70,16 @@ jobs:
           PY
 
       - name: Stage artifacts
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           mkdir -p /tmp/engine25-30m
           cp data/outlook_30m_internals.json /tmp/engine25-30m/outlook_30m_internals.json
 
       - name: Publish live branch
-        if: steps.session.outputs.run == 'true' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           git config user.email "bot@users.noreply.github.com"
           git config user.name "Engine25 CI"
 
-          # The generated artifact is already staged safely in /tmp.
-          # Remove the working-tree copy before switching branches so Git
-          # cannot reject checkout due to an untracked overwrite.
           rm -f data/outlook_30m_internals.json
 
           if git ls-remote --exit-code --heads origin "$LIVE_BRANCH" >/dev/null 2>&1; then
@@ -151,5 +94,5 @@ jobs:
           cp /tmp/engine25-30m/outlook_30m_internals.json data/outlook_30m_internals.json
 
           git add data/outlook_30m_internals.json
-          git commit -m "Engine25 30m internals $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || exit 0
+          git commit -m "Engine25 30m internals manual $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || exit 0
           git push --force origin "$LIVE_BRANCH"
