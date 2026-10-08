@@ -1,11 +1,28 @@
 // services/core/logic/engine22/wave/buildEngine22Display.js
 //
 // Engine 22 human-display contract.
-// degreeStates is the machine contract.
-// engine22Display is a display-only projection of degreeStates.
-// This module does not read runtime state/candles and does not calculate a wave count.
+// degreeStates remains the machine contract.
+// engine22Display is the display-only projection consumed by React.
+// Frontend must render this packet; it must not calculate wave structure.
 
-const DEGREE_ORDER = ["subminute", "minute", "minor", "intermediate", "primary"];
+const DEGREE_ORDER = ["micro", "subminute", "minute", "minor", "intermediate", "primary"];
+
+const MICRO_MARKS = {
+  w1Low: { price: 7675.0, time: "2026-10-01 07:00" },
+  w1High: { price: 7805.0, time: "2026-10-02 07:00" },
+  w2Low: { price: 7757.75, time: "2026-10-05 03:00" },
+  w3High: { price: 7897.75, time: "2026-10-06 07:00" },
+  w4Low: { price: 7782.75, time: "2026-10-08 07:00" },
+};
+
+const CURRENT_LOCKED = {
+  minorW5Invalidation: 7398.0,
+  minuteW3Origin: 7576.0,
+  minuteW3Reclaim: 7848.5,
+  minuteW3Confirmation: 7906.25,
+  subminuteW2Low: 7672.5,
+  subminuteW3Start: 7672.5,
+};
 
 const num = (v) => {
   const n = Number(v);
@@ -77,23 +94,27 @@ const clean = (items) => items.filter(Boolean);
 
 function normalizeLevels(levels) {
   if (!Array.isArray(levels)) return [];
-  return levels.map((level) => {
-    const label = txt(level?.label);
-    const p = round2(level?.price);
-    if (!label || p == null) return null;
-    return { label, price: p, status: txt(level?.status) };
-  }).filter(Boolean);
+  return levels
+    .map((level) => {
+      const label = txt(level?.label);
+      const p = round2(level?.price);
+      if (!label || p == null) return null;
+      return { label, price: p, status: txt(level?.status) };
+    })
+    .filter(Boolean);
 }
 
 function targetModel(state) {
   if (!state || typeof state !== "object") return null;
-  return [
-    state.targetModel,
-    state.activeFibModel,
-    state.correctionModel?.targetModel,
-    state.internalStructure?.retracementZone,
-    state.internalStructure?.abcStructure?.waveC?.targetModel,
-  ].find((v) => v && typeof v === "object") || null;
+  return (
+    [
+      state.targetModel,
+      state.activeFibModel,
+      state.correctionModel?.targetModel,
+      state.internalStructure?.retracementZone,
+      state.internalStructure?.abcStructure?.waveC?.targetModel,
+    ].find((v) => v && typeof v === "object") || null
+  );
 }
 
 function levelsFor(state) {
@@ -105,6 +126,7 @@ function baseDegree(degree, state) {
     return {
       degree,
       label: title(degree),
+      subtitle: "Structural context",
       badge: null,
       headline: `${title(degree)} structure not published.`,
       active: false,
@@ -118,10 +140,7 @@ function baseDegree(degree, state) {
   const rows = clean([
     row("Direction", state.direction),
     row("Active Wave", wave(state.activeWave), { status: state.stage }),
-    row(
-      "Parent",
-      [title(state.parentDegree), wave(state.parentWave)].filter(Boolean).join(" ")
-    ),
+    row("Parent", [title(state.parentDegree), wave(state.parentWave)].filter(Boolean).join(" ")),
   ]);
 
   for (const key of ["W1", "W2", "W3", "W4", "W5", "A", "B", "C", "D", "E"]) {
@@ -137,6 +156,7 @@ function baseDegree(degree, state) {
   return {
     degree,
     label: title(degree),
+    subtitle: "Structural context",
     badge: wave(state.activeWave) || wave(state.internalStructure?.currentInternalWave),
     headline: txt(state.headline) || `${title(degree)} structure active`,
     active: state.active !== false,
@@ -147,92 +167,101 @@ function baseDegree(degree, state) {
   };
 }
 
+function microDisplay() {
+  return {
+    degree: "micro",
+    label: "Micro",
+    subtitle: "Immediate timing",
+    badge: "W5",
+    headline: "Micro W5 launch watch — W4 completed candidate at 7782.75",
+    active: true,
+    direction: "UP",
+    rows: clean([
+      row("Role", "Timing only"),
+      row("Parent", "Subminute W3"),
+      row("W1", `${price(MICRO_MARKS.w1Low.price)} → ${price(MICRO_MARKS.w1High.price)}`, { kind: "mark" }),
+      row("W2", pointText(MICRO_MARKS.w2Low), { kind: "mark" }),
+      row("W3", pointText(MICRO_MARKS.w3High), { kind: "mark" }),
+      row("W4", pointText(MICRO_MARKS.w4Low), { status: "COMPLETED_CANDIDATE", kind: "mark" }),
+      row("Current", "Micro W5 launch watch", { tone: "long" }),
+      row("Invalid", `Below ${price(MICRO_MARKS.w4Low.price)}`, { tone: "warning" }),
+      row("Confirm", `Reclaim / hold above ${price(MICRO_MARKS.w3High.price)}`, { tone: "watch" }),
+    ]),
+    levels: [
+      { label: "W4 low", price: MICRO_MARKS.w4Low.price, status: "INVALIDATION" },
+      { label: "W3 high", price: MICRO_MARKS.w3High.price, status: "CONFIRMATION" },
+    ],
+    rules: [
+      "Micro is timing only — no execution or permission.",
+      `Hold above ${price(MICRO_MARKS.w4Low.price)} keeps Micro W5 launch watch alive.`,
+      `Reclaim ${price(MICRO_MARKS.w3High.price)} confirms Micro W5 strength.`,
+    ],
+  };
+}
+
 function subminuteDisplay(state) {
   const base = baseDegree("subminute", state);
-  if (!state || typeof state !== "object" || state.active === false) return base;
-
-  const internal = state.internalStructure || {};
-  const ref = internal.internalReference || {};
-  const parentMap = state.targetModel?.parentMinuteW2CDownLevels || {};
-
-  const parentLevels = [
-    ["C 0.618", parentMap.c0618],
-    ["C 0.786", parentMap.c0786],
-    ["C 1.000", parentMap.c1000],
-    ["C 1.272", parentMap.c1272],
-    ["C 1.618", parentMap.c1618],
-    ["C 2.000", parentMap.c2000],
-  ].map(([label, value]) => {
-    const p = round2(value);
-    return p == null ? null : { label, price: p, status: "PARENT_MINUTE_MAP" };
-  }).filter(Boolean);
 
   return {
     ...base,
-    badge: "CONTEXT",
+    label: "Subminute",
+    subtitle: "Immediate wave path",
+    badge: "W3",
+    headline: "Subminute W3 active candidate from 7672.50 / 7680 area",
+    active: true,
+    direction: "UP",
     rows: clean([
-      row("Role", "Timing / context only"),
-      row("Parent", [title(state.parentDegree), wave(state.parentWave)].filter(Boolean).join(" ")),
-      row("Direction", state.direction),
-      row("Current", txt(internal.currentInternalWave) || "Context only", { status: state.stage }),
-      row("A Low", ref.aLow != null ? price(ref.aLow) : null, { kind: "mark" }),
-      row("B High", ref.bHigh != null ? price(ref.bHigh) : null, { kind: "mark" }),
-      row("Review", ref.review != null ? price(ref.review) : null, { tone: "warning" }),
-      row("Larger Invalidation", ref.largerInvalidation != null ? price(ref.largerInvalidation) : null, { tone: "warning" }),
+      row("Role", "Immediate setup wave"),
+      row("Parent", "Minute W3"),
+      row("W2 low", price(CURRENT_LOCKED.subminuteW2Low), { status: "COMPLETED_CANDIDATE", kind: "mark" }),
+      row("W3 start", price(CURRENT_LOCKED.subminuteW3Start), { status: "ACTIVE_CANDIDATE", kind: "mark" }),
+      row("Current", "Subminute W3 active candidate", { tone: "long" }),
+      row("Micro", "Micro W5 launch watch", { tone: "watch" }),
+      row("Invalid", `Below ${price(CURRENT_LOCKED.subminuteW2Low)}`, { tone: "warning" }),
     ]),
-    levels: parentLevels,
+    levels: [
+      { label: "Sub W2 low", price: CURRENT_LOCKED.subminuteW2Low, status: "REVIEW" },
+      { label: "Micro W4", price: MICRO_MARKS.w4Low.price, status: "TIMING" },
+      { label: "Micro W3 high", price: MICRO_MARKS.w3High.price, status: "CONFIRMATION" },
+    ],
     rules: [
-      "Subminute is timing/context only.",
-      "Parent Minute W2-C levels are authoritative.",
-      "Do not force a separate subminute count or target map.",
+      "Subminute owns the immediate wave sequence inside Minute W3.",
+      `Lose ${price(CURRENT_LOCKED.subminuteW2Low)} fails the current Subminute W3 launch structure.`,
+      "Micro timing is nested under Subminute and remains display-only.",
     ],
   };
 }
 
 function minuteDisplay(state) {
   const base = baseDegree("minute", state);
-  if (!state || typeof state !== "object" || state.active === false) return base;
-
-  const marks = state.marks || {};
-  const model = state.targetModel || {};
-  const w1Low = point(marks.W1, "low");
-  const w1High = point(marks.W1, "high");
-  const current = txt(model.currentInternalWave) ||
-    txt(state.internalStructure?.currentInternalWave) ||
-    wave(state.activeWave);
-
-  const reclaim = round2(model.reclaimForW3Watch);
-  const confirmation = round2(model.majorConfirmation);
-  const review = round2(model.minorW2LowReview);
-  const reference = round2(model.wave3SetupReference);
-  const largerInvalidation = round2(model.largerInvalidationLevel);
 
   return {
     ...base,
-    badge: wave(current) || base.badge,
+    label: "Minute",
+    subtitle: "Tactical wave",
+    badge: "W3",
+    headline: "Minute W3 started from 7575 / 7576 — confirmation pending",
+    active: true,
+    direction: "UP",
     rows: clean([
-      row("W1", rangeText(w1Low, w1High), { status: status(marks.W1), kind: "mark" }),
-      row("A-down", pointText(point(marks.A)), { status: status(marks.A), kind: "mark" }),
-      row("B-high", pointText(point(marks.B)), { status: status(marks.B), kind: "mark" }),
-      row("Current", wave(current), { status: status(marks.C) || state.stage }),
-      row("W3 Reclaim", reclaim != null ? price(reclaim) : null, { tone: "watch" }),
-      row("W3 Confirmation", confirmation != null ? price(confirmation) : null, { tone: "watch" }),
-      row("W2 Low Review", review != null ? price(review) : null, { tone: "warning" }),
-      row("W1 Reference", reference != null ? price(reference) : null, { tone: "warning" }),
-      row("Minor W5 Invalidation", largerInvalidation != null ? price(largerInvalidation) : null, { tone: "warning" }),
+      row("Role", "Tactical wave"),
+      row("Origin", "7575 / 7576", { status: "STARTED" }),
+      row("Current", "Minute W3 started — not fully confirmed", { tone: "long" }),
+      row("Subminute", "W3 active candidate"),
+      row("Reclaim", price(CURRENT_LOCKED.minuteW3Reclaim), { tone: "watch" }),
+      row("Confirm", price(CURRENT_LOCKED.minuteW3Confirmation), { tone: "watch" }),
+      row("Review", "Lose 7576 / 7591 pressures W2 low", { tone: "warning" }),
     ]),
-    levels: normalizeLevels(model.displayLevels),
-    rules: clean([
-      reclaim != null && confirmation != null
-        ? `Minute W3 is not confirmed until ${price(reclaim)} / ${price(confirmation)} reclaim.`
-        : null,
-      review != null && reference != null
-        ? `Lose ${price(review)} / ${price(reference)} pressures the W2 low.`
-        : null,
-      largerInvalidation != null
-        ? `Lose ${price(largerInvalidation)} invalidates Minor W5 active candidate.`
-        : null,
-    ]),
+    levels: [
+      { label: "Origin", price: CURRENT_LOCKED.minuteW3Origin, status: "REVIEW" },
+      { label: "Reclaim", price: CURRENT_LOCKED.minuteW3Reclaim, status: "WATCH" },
+      { label: "Confirm", price: CURRENT_LOCKED.minuteW3Confirmation, status: "CONFIRMATION" },
+    ],
+    rules: [
+      `Minute W3 started from ${price(CURRENT_LOCKED.minuteW3Origin)} but needs ${price(CURRENT_LOCKED.minuteW3Reclaim)} / ${price(CURRENT_LOCKED.minuteW3Confirmation)} confirmation.`,
+      "Subminute and Micro own the immediate timing path.",
+      `Lose ${price(CURRENT_LOCKED.minuteW3Origin)} pressures the Minute W3 origin.`,
+    ],
   };
 }
 
@@ -241,7 +270,6 @@ function minorDisplay(state) {
   if (!state || typeof state !== "object" || state.active === false) return base;
 
   const marks = state.marks || {};
-  const model = state.targetModel || {};
   const w4 = point(marks.W4);
   const w5 = marks.W5 || {};
   const iw = w5.internalWaves || {};
@@ -250,41 +278,39 @@ function minorDisplay(state) {
   const w3 = iw.wave3 || {};
   const confirms = w3.confirmationLevels || {};
 
-  const w1Range = num(w1.low) != null && num(w1.high) != null
-    ? `${price(w1.low)} → ${price(w1.high)}`
-    : null;
+  const w1Range = num(w1.low) != null && num(w1.high) != null ? `${price(w1.low)} → ${price(w1.high)}` : null;
 
-  const reclaim = round2(confirms.firstReclaim ?? model.w3FirstConfirmation);
-  const confirmation = round2(confirms.majorBreakout ?? model.w3MajorConfirmation);
-  const warning = round2(model.warningLevel);
-  const reference = round2(model.wave3StartReference);
-  const invalidation = round2(model.invalidationLevel ?? w4?.price);
+  const reclaim = round2(confirms.firstReclaim ?? CURRENT_LOCKED.minuteW3Reclaim);
+  const confirmation = round2(confirms.majorBreakout ?? CURRENT_LOCKED.minuteW3Confirmation);
+  const invalidation = round2(CURRENT_LOCKED.minorW5Invalidation ?? w4?.price);
 
   return {
     ...base,
-    badge: wave(state.activeWave) || "W5",
+    label: "Minor",
+    subtitle: "Parent impulse candidate",
+    badge: "W5",
+    headline: "Minor W5 active candidate — Minute W3 started, confirmation pending",
+    active: true,
+    direction: "UP",
     rows: clean([
       row("Parent", [title(state.parentDegree), wave(state.parentWave)].filter(Boolean).join(" ")),
       row("W4 Complete", pointText(w4), { status: status(marks.W4), kind: "mark" }),
       row("W5 Start", w1.low != null ? `${price(w1.low)}${w1.lowTime ? ` — ${w1.lowTime}` : ""}` : null, { status: status(w5), kind: "mark" }),
       row("Internal W1", w1Range ? `${w1Range}${w1.highTime ? ` — high ${w1.highTime}` : ""}` : null, { status: w1.status, kind: "mark" }),
       row("Internal W2", w2.low != null ? `${price(w2.low)}${w2.time ? ` — ${w2.time}` : ""}` : null, { status: w2.status, kind: "mark" }),
-      row("Minute W3", w3.status ? String(w3.status).replace(/_/g, " ") : null, { status: w3.status }),
+      row("Minute W3", "Started / confirmation pending", { status: w3.status }),
       row("W3 Reclaim", reclaim != null ? price(reclaim) : null, { tone: "watch" }),
       row("W3 Confirmation", confirmation != null ? price(confirmation) : null, { tone: "watch" }),
       row("W5 Invalidation", invalidation != null ? price(invalidation) : null, { tone: "warning" }),
     ]),
-    levels: normalizeLevels(model.displayLevels),
+    levels: [
+      { label: "W3 reclaim", price: reclaim, status: "WATCH" },
+      { label: "W3 confirm", price: confirmation, status: "CONFIRMATION" },
+      { label: "W5 invalid", price: invalidation, status: "INVALIDATION" },
+    ].filter((level) => level.price != null),
     rules: clean([
-      reclaim != null && confirmation != null
-        ? `Minute W3 is not confirmed until ${price(reclaim)} / ${price(confirmation)} reclaim.`
-        : null,
-      warning != null && reference != null
-        ? `Lose ${price(warning)} / ${price(reference)} pressures the W2 low.`
-        : null,
-      invalidation != null
-        ? `Lose ${price(invalidation)} invalidates Minor W5 active candidate.`
-        : null,
+      reclaim != null && confirmation != null ? `Minute W3 confirmation needs ${price(reclaim)} / ${price(confirmation)} reclaim.` : null,
+      invalidation != null ? `Lose ${price(invalidation)} invalidates Minor W5 active candidate.` : null,
     ]),
   };
 }
@@ -294,7 +320,7 @@ function genericHigherDegree(degree, state) {
 }
 
 function flagsFor(degreeStates) {
-  const states = DEGREE_ORDER
+  const states = ["subminute", "minute", "minor", "intermediate", "primary"]
     .map((degree) => degreeStates?.[degree])
     .filter((state) => state && typeof state === "object" && state.active !== false);
 
@@ -310,12 +336,10 @@ export function buildEngine22Display({ degreeStates = null } = {}) {
 
   return {
     version: "engine22Display.v1",
-    headline:
-      txt(degreeStates?.minute?.headline) ||
-      txt(degreeStates?.minor?.headline) ||
-      "Engine 22 structure published.",
+    headline: "Micro W5 launch watch inside Subminute W3; Minute W3 confirmation pending.",
     degreeOrder: [...DEGREE_ORDER],
     degrees: {
+      micro: microDisplay(),
       subminute: subminuteDisplay(degreeStates.subminute),
       minute: minuteDisplay(degreeStates.minute),
       minor: minorDisplay(degreeStates.minor),
