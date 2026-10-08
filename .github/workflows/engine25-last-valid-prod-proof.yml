@@ -1,0 +1,19 @@
+name: Engine25 Last Valid Production Proof
+on:
+  push:
+    branches: [engine25-last-valid-prod-proof]
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check live payload
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 8 --retry-delay 5             "https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard"             -o /tmp/e25.json
+          jq '{
+            equitySession: .participationArtifact.participation.distributionPressure.equitySession,
+            thirty: .participationArtifact.participation.distributionPressure.confirmation30m.display,
+            ten: .participationArtifact.participation.distributionPressure.acceleration10m.display
+          }' /tmp/e25.json
+          jq -e '.participationArtifact.participation.distributionPressure.confirmation30m.display.state == "LAST_VALID_EQUITY_READ"' /tmp/e25.json
+          jq -e '.participationArtifact.participation.distributionPressure.acceleration10m.display.state == "LAST_VALID_EQUITY_READ"' /tmp/e25.json
