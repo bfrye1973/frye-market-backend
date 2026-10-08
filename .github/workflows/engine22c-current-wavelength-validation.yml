@@ -58,5 +58,5 @@ jobs:
       - name: Print and require current wavelength JSON
         working-directory: services/core
         run: |
-          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength' data/strategy-snapshot-es.json
-          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.version == "engine22.currentWavelength.v1"' data/strategy-snapshot-es.json
+          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
+          jq -e '.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.version == "engine22.currentWavelength.v1"' /opt/render/project/src/services/core/data/strategy-snapshot-es.json
