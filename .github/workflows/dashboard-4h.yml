@@ -16,6 +16,11 @@ on:
     - cron: "30 21 * * 1-4"       # Mon-Thu 2:30 PM Phoenix
     - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix — final weekly run
 
+    # Intraday 4H developing-bar refresh.
+    # Broad UTC window + New York gate below keeps DST correct.
+    - cron: "35 13-21 * * 1-5"     # hourly candidates; gate to 9:30 AM-4:00 PM ET
+    - cron: "5 14-22 * * 1-5"      # final-close candidate; gate to ~4:05 PM ET
+
 jobs:
   build_and_publish_4h:
     name: Build and Publish 4H
@@ -33,6 +38,7 @@ jobs:
       LIVE_BRANCH: data-live-4h
       PYTHONUNBUFFERED: "1"
       FD_MAX_WORKERS: "16"
+      H4_INCLUDE_DEVELOPING: "false"
 
       # ✅ Your choice: 14 day cushion
       H4_LOOKBACK_DAYS: "14"
@@ -60,22 +66,65 @@ jobs:
           python -m pip install --upgrade pip
           pip install --upgrade requests python-dateutil tzdata
 
-      - name: Determine mode (baseline vs incremental)
+      - name: Resolve 4H session mode
         id: mode
         run: |
           set -euo pipefail
-          MODE="incremental"
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            if [ -n "${{ inputs.mode }}" ]; then
-              MODE="${{ inputs.mode }}"
-            fi
-          fi
-          echo "MODE=$MODE" >> "$GITHUB_ENV"
-          echo "::notice:: MODE=$MODE"
+          now = datetime.now(ZoneInfo("America/New_York"))
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          schedule = os.environ.get("GITHUB_SCHEDULE", "")
+
+          minutes = now.hour * 60 + now.minute
+          cash_active = (9 * 60 + 30) <= minutes < (16 * 60)
+          close_capture = (16 * 60) <= minutes <= (16 * 60 + 10)
+
+          # Hourly intraday candidates use the developing 4H bar.
+          intraday_candidate = schedule in {
+              "35 13-21 * * 1-5",
+              "5 14-22 * * 1-5",
+          }
+
+          if intraday_candidate and (cash_active or close_capture):
+              mode = "baseline"
+              include_developing = cash_active
+              run = True
+              reason = "EQUITY_INTRADAY_4H_REFRESH" if cash_active else "EQUITY_CLOSE_4H_CAPTURE"
+          elif intraday_candidate:
+              mode = "incremental"
+              include_developing = False
+              run = False
+              reason = "OUTSIDE_EQUITY_INTRADAY_WINDOW"
+          else:
+              # Existing 4H cadence and manual runs keep completed-bar behavior.
+              mode = "incremental"
+              include_developing = False
+              run = True
+              reason = "STANDARD_4H_CHECKPOINT"
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"MODE={mode}\n")
+              f.write(f"H4_INCLUDE_DEVELOPING={'true' if include_developing else 'false'}\n")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"run={'true' if run else 'false'}\n")
+              f.write(f"reason={reason}\n")
+
+          print("NY time:", now.isoformat())
+          print("schedule:", schedule or "manual")
+          print("run:", run, "mode:", mode, "includeDeveloping:", include_developing, "reason:", reason)
+          PY
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_SCHEDULE: ${{ github.event.schedule }}
 
       # Pull prior cache from live branch if exists (for incremental)
       - name: Restore prior cache if exists
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           mkdir -p data
@@ -93,6 +142,7 @@ jobs:
 
       # 1) Build 4H sectorCards source (baseline or incremental)
       - name: Build 4H sectorCards source (baseline/incremental)
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           mkdir -p data
@@ -114,6 +164,7 @@ jobs:
 
       # 2) Build 4H payload
       - name: Build 4H payload
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           python -u scripts/make_dashboard_4h.py \
@@ -122,12 +173,14 @@ jobs:
 
       # 3) Post-process 4H (colors + mirrors)
       - name: Compute 4H trend capsule
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_4h.py
 
       # 4) Validate payload
       - name: Validate required keys
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -144,12 +197,14 @@ jobs:
 
       # 5) Heartbeat
       - name: Write heartbeat
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_4h.txt
 
       # 6) Publish live branch
       - name: Publish live branch
+        if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
 
