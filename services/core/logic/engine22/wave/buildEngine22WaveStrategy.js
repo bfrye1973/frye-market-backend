@@ -38,6 +38,12 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
+import {
+  mergeEngine22MicroSequenceState,
+  persistEngine22MicroWaveRuntimeState,
+  readEngine22MicroWaveRuntimeState,
+  recoverLatestLockedMicroSequenceFromReplay,
+} from "./runtimeStateStore.js";
 
 function round2(x) {
   const n = Number(x);
@@ -1725,6 +1731,94 @@ export function buildEngine22WaveStrategy(input = {}) {
   });
 
   let engine22Display = buildEngine22Display({ degreeStates });
+
+  /*
+   * Engine 22 Micro durability hotfix.
+   *
+   * A confirmed/locked Micro W1/W2 anchor must survive:
+   * - strategy snapshot rebuilds
+   * - Render restarts / deploys
+   * - temporary loss of previousSnapshot lineage
+   *
+   * Source priority:
+   * 1) durable Engine 22 Micro runtime state
+   * 2) previous strategy snapshot Micro sequence
+   * 3) one-time recovery from immutable Engine 12 Replay when durable state
+   *    does not yet exist (migration/hotfix recovery only)
+   *
+   * This is structural state only. It creates no trade permission or execution.
+   */
+  const durableMicroRecord =
+    context.marketType === "FUTURES"
+      ? readEngine22MicroWaveRuntimeState({
+          symbol: context.symbol,
+        })
+      : null;
+
+  const durableMicroSequence =
+    durableMicroRecord?.microSequence ||
+    null;
+
+  const previousMicroState =
+    String(
+      context.previousMicroSequence
+        ?.w1Completion
+        ?.state ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  const durableMicroState =
+    String(
+      durableMicroSequence
+        ?.w1Completion
+        ?.state ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+  const replayRecoverySequence =
+    context.marketType === "FUTURES" &&
+    !["CONFIRMED", "LOCKED"].includes(
+      durableMicroState
+    ) &&
+    !["CONFIRMED", "LOCKED"].includes(
+      previousMicroState
+    )
+      ? recoverLatestLockedMicroSequenceFromReplay({
+          symbol: context.symbol,
+        })
+      : null;
+
+  if (replayRecoverySequence) {
+    console.log(
+      "[Engine22 Micro RuntimeState] Recovered locked W1 from Replay",
+      {
+        symbol: context.symbol,
+        confirmedW1High:
+          replayRecoverySequence.confirmedW1High ??
+          null,
+        replayDate:
+          replayRecoverySequence.recoveredReplayDate ??
+          null,
+        replayTime:
+          replayRecoverySequence.recoveredReplayTime ??
+          null,
+      }
+    );
+  }
+
+  const previousMicroSequence =
+    mergeEngine22MicroSequenceState({
+      snapshotSequence:
+        context.previousMicroSequence,
+      durableSequence:
+        durableMicroSequence ||
+        replayRecoverySequence,
+    });
+
   const currentWavelength = buildCurrentWavelength({
     symbol: context.symbol,
     currentPrice: context.currentPrice,
@@ -1734,8 +1828,25 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentLifecycleState,
     microBars5m: context.barsByTf?.["5m"] || [],
     evaluationTimeMs: context.evaluationTimeMs,
-    previousMicroSequence: context.previousMicroSequence,
+    previousMicroSequence,
   });
+
+  if (
+    context.marketType === "FUTURES" &&
+    currentWavelength
+      ?.degrees
+      ?.micro
+      ?.microSequence
+  ) {
+    persistEngine22MicroWaveRuntimeState({
+      symbol: context.symbol,
+      microSequence:
+        currentWavelength
+          .degrees
+          .micro
+          .microSequence,
+    });
+  }
 
   engine22Display = buildEngine22Display({ degreeStates, currentWavelength });
 
