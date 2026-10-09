@@ -185,6 +185,99 @@ function normalizeOpenTrade(trade) {
   };
 }
 
+function toMs(value) {
+  if (value == null || value === "") return null;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) {
+    return numeric > 1e12
+      ? numeric
+      : numeric * 1000;
+  }
+
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function realPositionFreshness({
+  position,
+  realFillObserverState,
+  evaluationTimeMs,
+  realMaxStalenessSec,
+} = {}) {
+  if (position?.accountMode !== "REAL") {
+    return {
+      status: "NOT_REQUIRED",
+      reliableForAlerts: true,
+      lastSuccessfulPollAt: null,
+      ageSeconds: null,
+    };
+  }
+
+  const accounts =
+    realFillObserverState?.accounts &&
+    typeof realFillObserverState.accounts === "object"
+      ? Object.values(realFillObserverState.accounts)
+      : [];
+
+  const account =
+    accounts.find(
+      (item) =>
+        String(item?.journalAccount || "").trim().toUpperCase() ===
+        String(position?.journalAccount || "").trim().toUpperCase()
+    ) || null;
+
+  const lastSuccessfulPollAt =
+    account?.lastSuccessfulPollAt ?? null;
+
+  const lastMs =
+    toMs(lastSuccessfulPollAt);
+
+  const nowMs =
+    toMs(evaluationTimeMs) ??
+    Date.now();
+
+  const maxAge =
+    Math.max(
+      30,
+      Number(realMaxStalenessSec) || 120
+    );
+
+  if (lastMs == null) {
+    return {
+      status: "UNKNOWN",
+      reliableForAlerts: false,
+      lastSuccessfulPollAt,
+      ageSeconds: null,
+    };
+  }
+
+  const ageSeconds =
+    Math.max(
+      0,
+      Math.floor(
+        (nowMs - lastMs) / 1000
+      )
+    );
+
+  return {
+    status:
+      ageSeconds <= maxAge
+        ? "FRESH"
+        : "STALE",
+
+    reliableForAlerts:
+      ageSeconds <= maxAge,
+
+    lastSuccessfulPollAt,
+
+    ageSeconds,
+
+    maxStalenessSeconds:
+      maxAge,
+  };
+}
+
 function severityRank(value) {
   return {
     NONE: 0,
@@ -283,6 +376,9 @@ export function buildMicroPositionContext({
   engine4Participation = null,
   openTrades = [],
   currentPrice = null,
+  realFillObserverState = null,
+  evaluationTimeMs = null,
+  realMaxStalenessSec = 120,
 } = {}) {
   const micro =
     engine22WaveStrategy
@@ -364,6 +460,14 @@ export function buildMicroPositionContext({
               })
             : "NONE";
 
+        const positionTruthFreshness =
+          realPositionFreshness({
+            position,
+            realFillObserverState,
+            evaluationTimeMs,
+            realMaxStalenessSec,
+          });
+
         const guidance =
           guidanceFor({
             conflict,
@@ -410,6 +514,8 @@ export function buildMicroPositionContext({
           conflictSeverity:
             severity,
 
+          positionTruthFreshness,
+
           posture:
             guidance.posture,
 
@@ -425,9 +531,20 @@ export function buildMicroPositionContext({
                   eligible:
                     ["MODERATE", "HIGH", "CRITICAL"].includes(
                       severity
-                    ),
+                    ) &&
+                    positionTruthFreshness
+                      .reliableForAlerts === true,
 
                   severity,
+
+                  positionTruthStatus:
+                    positionTruthFreshness.status,
+
+                  suppressedReason:
+                    positionTruthFreshness
+                      .reliableForAlerts === true
+                      ? null
+                      : "REAL_POSITION_TRUTH_NOT_FRESH",
 
                   title:
                     `Micro position conflict — ${severity}`,
@@ -442,6 +559,9 @@ export function buildMicroPositionContext({
                   severity: "NONE",
                   title: null,
                   message: null,
+                  positionTruthStatus:
+                    positionTruthFreshness.status,
+                  suppressedReason: null,
                 },
         };
       }
@@ -566,6 +686,27 @@ export function buildMicroPositionContext({
         .filter(
           (alert) =>
             alert?.eligible === true
+        ),
+
+    alertsSuppressed:
+      positionReads
+        .map(
+          (position) => ({
+            tradeId:
+              position.tradeId,
+            accountMode:
+              position.accountMode,
+            severity:
+              position.conflictSeverity,
+            positionTruthStatus:
+              position.positionTruthFreshness?.status ?? null,
+            reason:
+              position.alertPreview?.suppressedReason ?? null,
+          })
+        )
+        .filter(
+          (item) =>
+            item.reason != null
         ),
 
     trainingTags: [
