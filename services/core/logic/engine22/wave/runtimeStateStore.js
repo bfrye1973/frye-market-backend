@@ -460,6 +460,101 @@ export function persistEngine22MicroWaveRuntimeState({
   });
 }
 
+export function resetEngine22MicroW2ToActive({
+  symbol = "ES",
+  filePath = null,
+} = {}) {
+  const targetPath =
+    filePath ||
+    getEngine22MicroWaveRuntimeStatePath();
+
+  const record =
+    readEngine22MicroWaveRuntimeState({
+      symbol,
+      filePath: targetPath,
+    });
+
+  const existing =
+    record?.microSequence ||
+    null;
+
+  if (
+    !existing ||
+    String(
+      existing?.w1Completion?.state ||
+      ""
+    ).trim().toUpperCase() !== "LOCKED" ||
+    !Number.isFinite(
+      Number(existing?.confirmedW1High)
+    )
+  ) {
+    return false;
+  }
+
+  const resetSequence = {
+    ...existing,
+
+    activeWave:
+      "W2",
+
+    state:
+      "MICRO_W2_PULLBACK_WATCH",
+
+    confirmationStatus:
+      "W1_CONFIRMED_W2_PENDING",
+
+    w2Completion: {
+      state:
+        "DEVELOPING",
+      anchor:
+        null,
+      evidence: {
+        timeframe:
+          "UNVERIFIED",
+        sourceTimestamp:
+          null,
+      },
+      reasonCodes: [
+        "MANAGER_RESET_PREMATURE_W2_LOCK",
+        "AWAIT_FIVE_MIN_STRUCTURAL_EVIDENCE",
+      ],
+    },
+
+    w2CandidateLow:
+      null,
+
+    confirmedW2Low:
+      null,
+
+    managerResetReason:
+      "PREMATURE_W2_LOCK",
+
+    managerResetAt:
+      new Date().toISOString(),
+  };
+
+  return writeEngine22WaveRuntimeState({
+    symbol,
+    degree: "micro",
+    filePath: targetPath,
+    record: {
+      microSequence:
+        resetSequence,
+
+      source:
+        "ENGINE22_MANAGER_MICRO_W2_RESET",
+
+      reasonCodes: [
+        "MANAGER_RESET_PREMATURE_W2_LOCK",
+        "W1_LOCKED_PRESERVED",
+        "W2_RESTORED_ACTIVE",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    },
+  });
+}
+
 export function recoverLatestLockedMicroSequenceFromReplay({
   symbol = "ES",
   replayRoot = null,
@@ -604,5 +699,6 @@ export default {
   mergeEngine22MicroSequenceState,
   readEngine22MicroWaveRuntimeState,
   persistEngine22MicroWaveRuntimeState,
+  resetEngine22MicroW2ToActive,
   recoverLatestLockedMicroSequenceFromReplay,
 };
