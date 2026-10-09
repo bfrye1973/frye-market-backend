@@ -1,4 +1,5 @@
 import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
+import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
 // READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
 // Micro W5 targets use the user-updated W4 low at 7784.00; prior W3 high remains 7897.75.
@@ -65,19 +66,48 @@ export function buildCurrentWavelength({
   microW1ConfirmationSource = null,
   microConfirmedW2Low = null,
   microW2CompletionConfirmed = false,
+  microBars5m = [],
+  evaluationTimeMs = null,
+  previousMicroSequence = null,
 } = {}) {
   const price = n(currentPrice);
   const low = n(intrabarLow);
   const close10m = n(lastClosed10mClose);
+  const previous = previousMicroSequence && typeof previousMicroSequence === "object"
+    ? previousMicroSequence : {};
+  const w1Read = buildMicroFiveMinuteEvidence({
+    bars: microBars5m, evaluationTimeMs, side: "HIGH", origin: 7784,
+    prior: { candidateAnchor: previous.candidateW1High,
+      lastObservedBarTime: previous.w1LastObservedBarTime },
+  });
+  const priorHigh = previous.confirmedW1High;
+  const w2Read = (previous.w1Completion?.state === "LOCKED" || previous.w1Completion?.state === "CONFIRMED")
+    ? buildMicroFiveMinuteEvidence({
+      bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7784,
+      prior: { candidateAnchor: previous.w2CandidateLow,
+        lastObservedBarTime: previous.w2LastObservedBarTime,
+        confirmedW1High: priorHigh },
+    }) : { evidence: null, candidateAnchor: null, lastObservedBarTime: null };
   const microSequence = buildMicroWaveSequence({
     currentPrice: price,
-    candidateW1High: microCandidateW1High,
+    candidateW1High: w1Read.candidateAnchor ?? previous.candidateW1High ?? microCandidateW1High,
+    w1Evidence5m: w1Read.evidence,
+    w1PriorState: previous.w1Completion?.state ?? "DEVELOPING",
+    lockedW1High: previous.w1Completion?.state === "CONFIRMED" ||
+      previous.w1Completion?.state === "LOCKED" ? previous.confirmedW1High : null,
+    w2Evidence5m: w2Read.evidence,
+    w2PriorState: previous.w2Completion?.state ?? "DEVELOPING",
+    lockedW2Low: previous.w2Completion?.state === "CONFIRMED" ||
+      previous.w2Completion?.state === "LOCKED" ? previous.confirmedW2Low : null,
     confirmedW1High: microConfirmedW1High,
     w1CompletionConfirmed: microW1CompletionConfirmed,
     w1ConfirmationSource: microW1ConfirmationSource,
-    confirmedW2Low: microConfirmedW2Low,
+    confirmedW2Low: w2Read.candidateAnchor ?? previous.w2CandidateLow ?? microConfirmedW2Low,
     w2CompletionConfirmed: microW2CompletionConfirmed,
   });
+  microSequence.w1LastObservedBarTime = w1Read.lastObservedBarTime;
+  microSequence.w2LastObservedBarTime = w2Read.lastObservedBarTime;
+  microSequence.w2CandidateLow = w2Read.candidateAnchor;
   const microLevels = microSequence.activeWave === "W1"
     ? microSequence.projectedW1
     : microSequence.activeWave === "W2" ? microSequence.projectedW2 : [];
