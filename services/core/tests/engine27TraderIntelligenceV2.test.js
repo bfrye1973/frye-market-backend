@@ -116,7 +116,7 @@ function fixture() {
                 activeWave: "W2",
                 state: "MICRO_W2_PULLBACK_WATCH",
                 invalidation: 7782.75,
-                confirmationStatus: "COMPLETION_CANDIDATE",
+                confirmationStatus: "W1_CONFIRMED_W2_PENDING",
                 microSequence: {
                   activeWave: "W2",
                   w2Completion: {
@@ -230,7 +230,11 @@ test("Micro preserves Engine 22 completion state and evidence freshness", () => 
   assert.equal(micro.activeWave, "W2");
   assert.equal(micro.waveDirection, "DOWN");
   assert.equal(micro.currentCondition, "COMPLETION_CANDIDATE");
-  assert.equal(micro.provenance.confirmationStatus, "COMPLETION_CANDIDATE");
+  assert.equal(micro.provenance.confirmationStatus, "W1_CONFIRMED_W2_PENDING");
+  assert.notEqual(
+    micro.currentCondition,
+    micro.provenance.confirmationStatus
+  );
   assert.equal(
     micro.provenance.freshness.evidenceTimestamp,
     "2026-10-09T01:25:00.000Z"
