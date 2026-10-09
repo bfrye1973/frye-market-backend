@@ -20,6 +20,85 @@ const DEFAULT_STATE_PATH = path.resolve(
 
 export const ENGINE22_WAVE_RUNTIME_SCHEMA = "engine22-wave-runtime-state@v1";
 
+
+const MICRO_DURABLE_STATES = new Set([
+  "CONFIRMED",
+  "LOCKED",
+]);
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function microStateRank(value) {
+  const state = String(value || "").trim().toUpperCase();
+
+  return {
+    DEVELOPING: 0,
+    COMPLETION_CANDIDATE: 1,
+    CONFIRMED: 2,
+    LOCKED: 3,
+  }[state] ?? -1;
+}
+
+function microHasDurableW1(sequence) {
+  return (
+    isObject(sequence) &&
+    MICRO_DURABLE_STATES.has(
+      String(sequence?.w1Completion?.state || "").trim().toUpperCase()
+    ) &&
+    Number.isFinite(Number(sequence?.confirmedW1High)) &&
+    Number(sequence.confirmedW1High) > 0
+  );
+}
+
+function microHasLockedW1(sequence) {
+  return (
+    isObject(sequence) &&
+    String(sequence?.w1Completion?.state || "").trim().toUpperCase() === "LOCKED" &&
+    Number.isFinite(Number(sequence?.confirmedW1High)) &&
+    Number(sequence.confirmedW1High) > 0
+  );
+}
+
+function defaultMicroRuntimeStatePath() {
+  if (process.env.ENGINE22_MICRO_RUNTIME_STATE_PATH) {
+    return process.env.ENGINE22_MICRO_RUNTIME_STATE_PATH;
+  }
+
+  if (fs.existsSync("/var/data/replay")) {
+    return "/var/data/replay/engine22-micro-wave-runtime-state.json";
+  }
+
+  return path.resolve(
+    MODULE_DIR,
+    "../../../data/engine22-micro-wave-runtime-state.json"
+  );
+}
+
+function defaultEsReplayRoot() {
+  if (process.env.ENGINE22_MICRO_REPLAY_ROOT) {
+    return process.env.ENGINE22_MICRO_REPLAY_ROOT;
+  }
+
+  const replayDataDir = String(
+    process.env.REPLAY_DATA_DIR || ""
+  ).trim();
+
+  if (replayDataDir) {
+    return path.join(replayDataDir, "replay", "es");
+  }
+
+  if (fs.existsSync("/var/data/replay/es")) {
+    return "/var/data/replay/es";
+  }
+
+  return path.resolve(
+    MODULE_DIR,
+    "../../../data/replay/es"
+  );
+}
+
 function normalizeSymbol(symbol) {
   return String(symbol || "ES").trim().toUpperCase() || "ES";
 }
@@ -191,9 +270,324 @@ export function persistConfirmedMinuteW4State({
   });
 }
 
+
+export function getEngine22MicroWaveRuntimeStatePath() {
+  return defaultMicroRuntimeStatePath();
+}
+
+export function mergeEngine22MicroSequenceState({
+  snapshotSequence = null,
+  durableSequence = null,
+} = {}) {
+  const snapshot = isObject(snapshotSequence)
+    ? { ...snapshotSequence }
+    : null;
+
+  const durable = isObject(durableSequence)
+    ? { ...durableSequence }
+    : null;
+
+  if (!snapshot && !durable) return null;
+  if (!durable) return snapshot;
+  if (!snapshot) return durable;
+
+  const merged = {
+    ...durable,
+    ...snapshot,
+  };
+
+  for (const waveKey of ["w1", "w2"]) {
+    const completionKey = `${waveKey}Completion`;
+    const durableCompletion = durable?.[completionKey];
+    const snapshotCompletion = snapshot?.[completionKey];
+
+    const durableRank = microStateRank(
+      durableCompletion?.state
+    );
+
+    const snapshotRank = microStateRank(
+      snapshotCompletion?.state
+    );
+
+    if (
+      durableRank > snapshotRank ||
+      (
+        durableRank === 3 &&
+        snapshotRank === 3
+      )
+    ) {
+      merged[completionKey] = durableCompletion;
+    }
+  }
+
+  const mergedW1Rank = microStateRank(
+    merged?.w1Completion?.state
+  );
+
+  const durableW1Rank = microStateRank(
+    durable?.w1Completion?.state
+  );
+
+  if (durableW1Rank >= 2 && durableW1Rank >= mergedW1Rank) {
+    merged.confirmedW1High =
+      durable.confirmedW1High ??
+      durable?.w1Completion?.anchor ??
+      merged.confirmedW1High ??
+      null;
+
+    if (durable.candidateW1High != null) {
+      merged.candidateW1High = durable.candidateW1High;
+    }
+  }
+
+  const mergedW2Rank = microStateRank(
+    merged?.w2Completion?.state
+  );
+
+  const durableW2Rank = microStateRank(
+    durable?.w2Completion?.state
+  );
+
+  if (durableW2Rank >= 2 && durableW2Rank >= mergedW2Rank) {
+    merged.confirmedW2Low =
+      durable.confirmedW2Low ??
+      durable?.w2Completion?.anchor ??
+      merged.confirmedW2Low ??
+      null;
+
+    if (durable.w2CandidateLow != null) {
+      merged.w2CandidateLow = durable.w2CandidateLow;
+    }
+  }
+
+  const w1State = String(
+    merged?.w1Completion?.state || ""
+  ).trim().toUpperCase();
+
+  const w2State = String(
+    merged?.w2Completion?.state || ""
+  ).trim().toUpperCase();
+
+  merged.activeWave =
+    w1State !== "LOCKED"
+      ? "W1"
+      : w2State !== "LOCKED"
+      ? "W2"
+      : "W3_WATCH";
+
+  merged.state =
+    merged.activeWave === "W1"
+      ? "MICRO_W1_HIGH_SEARCH"
+      : merged.activeWave === "W2"
+      ? "MICRO_W2_PULLBACK_WATCH"
+      : "MICRO_W3_SETUP_WATCH";
+
+  merged.confirmationStatus =
+    !["CONFIRMED", "LOCKED"].includes(w1State)
+      ? "W1_COMPLETION_NOT_CONFIRMED"
+      : !["CONFIRMED", "LOCKED"].includes(w2State)
+      ? "W1_CONFIRMED_W2_PENDING"
+      : "W2_CONFIRMED_W3_PENDING";
+
+  return merged;
+}
+
+export function readEngine22MicroWaveRuntimeState({
+  symbol = "ES",
+  filePath = null,
+} = {}) {
+  const record = readEngine22WaveRuntimeState({
+    symbol,
+    degree: "micro",
+    filePath:
+      filePath ||
+      getEngine22MicroWaveRuntimeStatePath(),
+  });
+
+  return isObject(record?.microSequence)
+    ? {
+        ...record,
+        microSequence: {
+          ...record.microSequence,
+        },
+      }
+    : null;
+}
+
+export function persistEngine22MicroWaveRuntimeState({
+  symbol = "ES",
+  microSequence = null,
+  filePath = null,
+} = {}) {
+  if (!isObject(microSequence)) return false;
+
+  const targetPath =
+    filePath ||
+    getEngine22MicroWaveRuntimeStatePath();
+
+  const existing =
+    readEngine22MicroWaveRuntimeState({
+      symbol,
+      filePath: targetPath,
+    })?.microSequence ||
+    null;
+
+  const merged =
+    mergeEngine22MicroSequenceState({
+      snapshotSequence: microSequence,
+      durableSequence: existing,
+    });
+
+  if (!microHasDurableW1(merged)) {
+    return false;
+  }
+
+  return writeEngine22WaveRuntimeState({
+    symbol,
+    degree: "micro",
+    filePath: targetPath,
+    record: {
+      microSequence: merged,
+      source:
+        "ENGINE22_DURABLE_MICRO_WAVE_STATE",
+      reasonCodes: [
+        "ENGINE22_MICRO_CONFIRMED_OR_LOCKED_STATE_PERSISTED",
+        "LOCKED_MICRO_ANCHORS_MUST_NOT_REPAINT",
+        "NO_EXECUTION",
+        "NO_PERMISSION_CREATED",
+      ],
+    },
+  });
+}
+
+export function recoverLatestLockedMicroSequenceFromReplay({
+  symbol = "ES",
+  replayRoot = null,
+  maxFiles = 500,
+} = {}) {
+  const normalizedSymbol =
+    normalizeSymbol(symbol);
+
+  if (normalizedSymbol !== "ES") {
+    return null;
+  }
+
+  const root =
+    replayRoot ||
+    defaultEsReplayRoot();
+
+  try {
+    if (!fs.existsSync(root)) {
+      return null;
+    }
+
+    const dateDirs =
+      fs.readdirSync(root, {
+        withFileTypes: true,
+      })
+        .filter(
+          (entry) =>
+            entry.isDirectory() &&
+            /^\d{4}-\d{2}-\d{2}$/.test(
+              entry.name
+            )
+        )
+        .map((entry) => entry.name)
+        .sort()
+        .reverse();
+
+    let inspected = 0;
+
+    for (const dateDir of dateDirs) {
+      const dirPath =
+        path.join(root, dateDir);
+
+      const files =
+        fs.readdirSync(dirPath)
+          .filter(
+            (name) =>
+              /^\d{4}\.json$/.test(
+                name
+              )
+          )
+          .sort()
+          .reverse();
+
+      for (const name of files) {
+        if (inspected >= maxFiles) {
+          return null;
+        }
+
+        inspected += 1;
+
+        try {
+          const parsed =
+            JSON.parse(
+              fs.readFileSync(
+                path.join(
+                  dirPath,
+                  name
+                ),
+                "utf8"
+              )
+            );
+
+          const sequence =
+            parsed
+              ?.strategies
+              ?.[
+                "intraday_scalp@10m"
+              ]
+              ?.engine22WaveStrategy
+              ?.currentWavelength
+              ?.degrees
+              ?.micro
+              ?.microSequence ||
+            null;
+
+          if (
+            microHasLockedW1(
+              sequence
+            )
+          ) {
+            return {
+              ...sequence,
+              recoveredFromReplay: true,
+              recoveredReplayDate:
+                dateDir,
+              recoveredReplayTime:
+                name.replace(
+                  /\.json$/,
+                  ""
+                ),
+            };
+          }
+        } catch {
+          // Ignore malformed/unrelated replay files and continue backward.
+        }
+      }
+    }
+
+    return null;
+  } catch (error) {
+    console.warn(
+      "[Engine22 Micro RuntimeState] Failed Replay recovery:",
+      error?.message || error
+    );
+
+    return null;
+  }
+}
+
+
 export default {
   getEngine22WaveRuntimeStatePath,
   readEngine22WaveRuntimeState,
   writeEngine22WaveRuntimeState,
   persistConfirmedMinuteW4State,
+  getEngine22MicroWaveRuntimeStatePath,
+  mergeEngine22MicroSequenceState,
+  readEngine22MicroWaveRuntimeState,
+  persistEngine22MicroWaveRuntimeState,
+  recoverLatestLockedMicroSequenceFromReplay,
 };
