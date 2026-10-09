@@ -240,6 +240,22 @@ test("Micro preserves Engine 22 completion state and evidence freshness", () => 
     "2026-10-09T01:25:00.000Z"
   );
   assert.ok(micro.confirmationNeeded.evidence.includes("FIVE_MIN_SWING_BREAK"));
+  assert.equal(
+    micro.provenance.sourceMap.activeWave,
+    "engine22WaveStrategy.currentWavelength"
+  );
+  assert.equal(
+    micro.provenance.sourceMap.waveDirection,
+    "engine22WaveStrategy.engine22Display"
+  );
+  assert.equal(
+    micro.provenance.sourceMap.currentCondition,
+    "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence"
+  );
+  assert.equal(
+    micro.provenance.structuralSource,
+    "ENGINE22_CANONICAL_COMPOSITE"
+  );
 });
 
 test("Minute keeps Elliott direction separate from Strategy 1 direction", () => {
