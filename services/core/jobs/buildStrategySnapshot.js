@@ -8383,7 +8383,10 @@ const strategy1TenMinuteEma10 =
 
         breakoutContext: engine22Scalp?.breakoutContext || null,
 
+        evaluationTimeMs,
+        previousMicroSequence: previousSnapshot?.strategies?.[s.strategyId]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.microSequence || null,
         barsByTf: {
+          "5m": engine3DiagnosticBars?.fiveMinute?.ok === true ? (engine3DiagnosticBars.fiveMinute.bars || []) : [],
           "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
           "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
           "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
