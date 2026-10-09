@@ -185,13 +185,23 @@ function findAtOrAfter(
 }
 
 function sessionDate(snapshot) {
-  return (
-    snapshot?.dateYmd ??
+  const explicit =
+    String(
+      snapshot?.dateYmd || ""
+    ).trim();
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const fromArizonaTime =
     String(
       snapshot?.azTime || ""
-    ).slice(0, 10) ||
-    null
-  );
+    )
+      .slice(0, 10)
+      .trim();
+
+  return fromArizonaTime || null;
 }
 
 function findEndOfSession(
