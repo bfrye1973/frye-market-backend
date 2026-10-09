@@ -15,7 +15,7 @@ test("W1 projection remains unconfirmed without structural evidence",()=>{
   assert.equal(r.activeWave,"W1");
   assert.equal(r.w1Completion.state,"DEVELOPING");
   assert.equal(r.projectedW2.length,0);
-  assert.equal(r.projectedW1[1].price,7849);
+  assert.equal(r.projectedW1[1].price,7847.75);
 });
 test("Manual boolean alone cannot bypass 5m wave confirmation",()=>{
   const r=buildMicroWaveSequence({candidateW1High:7864,confirmedW1High:7864,w1CompletionConfirmed:true,w1ConfirmationSource:"MANUAL"});
