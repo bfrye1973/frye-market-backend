@@ -37,13 +37,26 @@ test("5m rejection and pivot break without confirmation remains candidate",()=>{
 });
 test("5m swing break with strong displacement confirms W1",()=>{
   const r=buildMicroWaveSequence({candidateW1High:7864,w1Evidence5m:w1});
-  assert.equal(r.w1Completion.state,"CONFIRMED");
-  assert.equal(r.activeWave,"W2");
+  assert.equal(r.w1Completion.state,"COMPLETION_CANDIDATE");
+  assert.equal(r.activeWave,"W1");
   assert.ok(r.w1Completion.reasonCodes.includes("FIVE_MIN_DISPLACEMENT"));
   assert.equal(r.projectedW2.find(x=>x.label==="0.500").price,7824);
 });
+test("structural candidate can confirm W1, lock, and unlock W2",()=>{
+  const candidate=buildMicroWaveSequence({candidateW1High:7864,w1Evidence5m:w1});
+  assert.equal(candidate.w1Completion.state,"COMPLETION_CANDIDATE");
+  const confirmed=buildMicroWaveSequence({candidateW1High:7864,w1PriorState:"COMPLETION_CANDIDATE",w1Evidence5m:w1});
+  assert.equal(confirmed.w1Completion.state,"CONFIRMED");
+  assert.equal(confirmed.w2TargetsAvailable,true);
+  assert.equal(confirmed.activeWave,"W1");
+  const locked=buildMicroWaveSequence({candidateW1High:7900,w1PriorState:"CONFIRMED",lockedW1High:7864});
+  assert.equal(locked.w1Completion.state,"LOCKED");
+  assert.equal(locked.activeWave,"W2");
+  assert.equal(locked.confirmedW1High,7864);
+});
+
 test("two consecutive 5m closes also confirm",()=>{
-  const r=buildMicroWaveSequence({candidateW1High:7864,
+  const r=buildMicroWaveSequence({candidateW1High:7864,w1PriorState:"COMPLETION_CANDIDATE",
     w1Evidence5m:{...w1,swingBreak:false,displacement:false,consecutiveClosesBeyondPivot:2}});
   assert.equal(r.w1Completion.state,"CONFIRMED");
   assert.ok(r.w1Completion.reasonCodes.includes("TWO_CLOSE_CONFIRMATION"));
@@ -58,13 +71,17 @@ test("locked high never repaints",()=>{
   assert.equal(r.confirmedW1High,7864);
   assert.equal(r.projectedW2.find(x=>x.label==="0.500").price,7824);
 });
-test("W2 must react in valid retracement and break 5m pivot",()=>{
-  const r=buildMicroWaveSequence({
-    w1PriorState:"LOCKED",lockedW1High:7864,
-    confirmedW2Low:7825,w2Evidence5m:w2
-  });
-  assert.equal(r.w2Completion.state,"CONFIRMED");
-  assert.equal(r.activeWave,"W3_WATCH");
+test("W2 requires candidate, then confirmed, then locked before W3 watch",()=>{
+  const base={w1PriorState:"LOCKED",lockedW1High:7864,confirmedW2Low:7825,w2Evidence5m:w2};
+  const first=buildMicroWaveSequence(base);
+  assert.equal(first.w2Completion.state,"COMPLETION_CANDIDATE");
+  assert.equal(first.activeWave,"W2");
+  const second=buildMicroWaveSequence({...base,w2PriorState:"COMPLETION_CANDIDATE"});
+  assert.equal(second.w2Completion.state,"CONFIRMED");
+  assert.equal(second.activeWave,"W2");
+  const third=buildMicroWaveSequence({...base,w2PriorState:"CONFIRMED",lockedW2Low:7825});
+  assert.equal(third.w2Completion.state,"LOCKED");
+  assert.equal(third.activeWave,"W3_WATCH");
 });
 test("W2 bounce without structural proof cannot complete",()=>{
   const r=buildMicroWaveSequence({
