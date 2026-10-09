@@ -89,6 +89,15 @@ export function buildMicroTimingAutomationShadow(strategy = {}) {
     affectsEngine3: false,
     affectsEngine4: false,
     affectsEngine6: false,
+
+    // Explicit ownership guardrails use both owner names and authority names so
+    // downstream diagnostics cannot mistake this read-only contract for a gate.
+    affectsCandidate: false,
+    affectsIdentity: false,
+    affectsLocation: false,
+    affectsReactionEligibility: false,
+    affectsParticipation: false,
+    affectsPermission: false,
     affectsSizing: false,
     affectsManagement: false,
     affectsExecution: false,
