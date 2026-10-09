@@ -44,6 +44,7 @@ import {
   persistCanonicalMicroState,
 } from "../microV2/canonicalMicroStore.js";
 import { buildMicroProjectionBundle } from "../microV2/buildMicroProjectionBundle.js";
+import { buildMicroW2W3TransitionFibs } from "../microV2/buildMicroW2W3TransitionFibs.js";
 import {
   mergeEngine22MicroSequenceState,
   persistEngine22MicroWaveRuntimeState,
@@ -2068,6 +2069,19 @@ export function buildEngine22WaveStrategy(input = {}) {
         }
       : null;
 
+  const microW2W3TransitionFibs =
+    microV2Migration?.available === true &&
+    microV2Migration?.canonicalState
+      ? buildMicroW2W3TransitionFibs({
+          canonicalState:
+            microV2Migration.canonicalState,
+          currentPrice:
+            context.currentPrice,
+          tickSize:
+            0.25,
+        })
+      : null;
+
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
     degreeStates,
@@ -2272,6 +2286,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
     microExecutionContext,
+    microW2W3TransitionFibs,
     microV2Migration: microV2Migration
       ? {
           mode: "SHADOW_ONLY",
