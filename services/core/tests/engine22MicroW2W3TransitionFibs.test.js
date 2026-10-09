@@ -84,21 +84,21 @@ test("W3 developing publishes both W2 retracements and W3 extensions", () => {
   );
 });
 
-test("W2 .382 retracement is touched when W2 low reaches through it", () => {
+test("W2 .236 retracement is touched when W2 low reaches through it", () => {
   const out =
     buildMicroW2W3TransitionFibs({
       canonicalState:
         state(),
     });
 
-  const r382 =
+  const r236 =
     out.w2Down.levels.find(
       (item) =>
-        item.key === "r382"
+        item.key === "r236"
     );
 
   assert.equal(
-    r382.status,
+    r236.status,
     "TOUCHED"
   );
 });
