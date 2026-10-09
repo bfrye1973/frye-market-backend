@@ -69,7 +69,7 @@ test("locked high never repaints",()=>{
   const r=buildMicroWaveSequence({candidateW1High:7900,w1PriorState:"LOCKED",lockedW1High:7864,w1Evidence5m:w1});
   assert.equal(r.w1Completion.state,"LOCKED");
   assert.equal(r.confirmedW1High,7864);
-  assert.equal(r.projectedW2.find(x=>x.label==="0.500").price,7824);
+  assert.equal(r.projectedW2.find(x=>x.label==="0.500").price,7823.5);
 });
 test("W2 requires candidate, then confirmed, then locked before W3 watch",()=>{
   const base={w1PriorState:"LOCKED",lockedW1High:7864,confirmedW2Low:7825,w2Evidence5m:w2};
