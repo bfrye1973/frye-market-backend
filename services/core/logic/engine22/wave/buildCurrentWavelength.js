@@ -86,7 +86,9 @@ export function buildCurrentWavelength({
       bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7784,
       prior: { candidateAnchor: previous.w2CandidateLow,
         lastObservedBarTime: previous.w2LastObservedBarTime,
-        confirmedW1High: priorHigh },
+        confirmedW1High: priorHigh,
+        startAfterTimestamp: previous.w1Completion?.evidence?.sourceTimestamp ||
+          previous.w1ConfirmedAtBarTime || null },
     }) : { evidence: null, candidateAnchor: null, lastObservedBarTime: null };
   const microSequence = buildMicroWaveSequence({
     currentPrice: price,
@@ -106,6 +108,9 @@ export function buildCurrentWavelength({
     w2CompletionConfirmed: microW2CompletionConfirmed,
   });
   microSequence.w1LastObservedBarTime = w1Read.lastObservedBarTime;
+  microSequence.w1ConfirmedAtBarTime = previous.w1ConfirmedAtBarTime ||
+    (microSequence.w1Completion?.state === "CONFIRMED" ?
+      microSequence.w1Completion?.evidence?.sourceTimestamp : null);
   microSequence.w2LastObservedBarTime = w2Read.lastObservedBarTime;
   microSequence.w2CandidateLow = w2Read.candidateAnchor;
   const microLevels = microSequence.activeWave === "W1"
