@@ -1,0 +1,40 @@
+name: Engine22 Micro Dual W2 W3 Fibs V1
+
+on:
+  push:
+    branches:
+      - micro-dual-transition-fibs-v1
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/microV2/buildMicroW2W3TransitionFibs.js"
+      - "services/core/logic/engine22/wave/buildEngine22WaveStrategy.js"
+      - "services/core/tests/engine22MicroW2W3TransitionFibs.test.js"
+      - "services/core/tests/engine22MicroW2W3TransitionFibsWiring.test.js"
+      - ".github/workflows/engine22-micro-dual-w2-w3-fibs-v1.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/buildMicroW2W3TransitionFibs.js
+          node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+
+      - name: Dual Fib tests
+        run: |
+          node --test             services/core/tests/engine22MicroW2W3TransitionFibs.test.js             services/core/tests/engine22MicroW2W3TransitionFibsWiring.test.js
+
+      - name: Existing Micro regressions
+        run: |
+          node --test             services/core/tests/engine22MicroConsistencyReplayV2.test.js             services/core/tests/engine22MicroProductionMigrationV2.test.js             services/core/tests/engine22MicroNegotiatedMidlineConfluence.test.js             services/core/tests/engine22MicroPositionContext.test.js             services/core/tests/engine27TraderIntelligenceV2.test.js
