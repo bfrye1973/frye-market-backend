@@ -151,3 +151,35 @@ Existing production contracts remain additive and compatible during migration:
 - emergency restore/reset environment variables are migration-only and must not remain normal production authority.
 
 No Engine 26 consumer may use V2 timing until all acceptance gates pass.
+
+
+## Phase 3/4 durable count + recount contract
+
+Canonical persistence is separated from lifecycle calculation.
+
+Durable store layout:
+- active canonical count snapshot
+- immutable per-count snapshots
+- append-only transition JSONL
+- append-only recount JSONL
+
+Normal lifecycle persistence may never cross a count boundary.
+
+Only an explicitly authorized recount may:
+1. close the prior count as HISTORICAL,
+2. preserve its locked anchors and audit history,
+3. create a distinct new countId/sequenceId,
+4. start the new count clean at W1 DEVELOPING,
+5. record the recount reason and provenance.
+
+Approved recount reason codes:
+- COMPLETED_CLOSE_INVALIDATION
+- PARENT_DEGREE_INVALIDATION
+- MICRO_W5_PARENT_HANDOFF
+- DETERMINISTIC_RECOUNT_RULE
+- MANAGER_AUTHORIZED_RECOUNT
+- CORRUPT_OR_MISSING_STATE_RECOVERY
+
+For non-manager/non-recovery recounts, the current count must already be INVALIDATED, RECOUNT_REQUIRED, or COMPLETE_PENDING_PARENT_HANDOFF.
+
+A recount never inherits locked anchors from the prior count.
