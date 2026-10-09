@@ -1,6 +1,11 @@
 // Engine 22 — Micro sequential wave intelligence v1.
 // Display-only. No trade authority, fills, alerts, or canonical wave-state changes.
-const START = 7784.00;
+const START = 7782.75;
+const MICRO_ANCHOR = Object.freeze({
+  source: "MANAGER_LOCKED_MICRO_W4_LOW",
+  price: START,
+  timestamp: "2026-10-08 07:00",
+});
 const REFERENCE_LENGTH = 130.00; // Earlier Micro W1, 7675 -> 7805. Provisional scaling reference.
 const W1_RATIOS = [0.382, 0.5, 0.618, 1, 1.272, 1.618, 2];
 const W2_RETRACEMENTS = [0.236, 0.382, 0.5, 0.618, 0.786];
@@ -117,6 +122,8 @@ export function buildMicroWaveSequence({
     version: "engine22.microWaveSequence.v1",
     role: "TIMING_ONLY",
     origin: START,
+    invalidation: START,
+    anchorProvenance: MICRO_ANCHOR,
     referenceLength: REFERENCE_LENGTH,
     currentPrice: price,
     activeWave: !w1Locked ? "W1" : !w2Locked ? "W2" : "W3_WATCH",
