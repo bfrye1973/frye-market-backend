@@ -253,13 +253,20 @@ function parentRead({ degree, state, display, currentWavelength }) {
     const timingDegree = textOrNull(currentWavelength?.timingDegree);
     const activeDegree = textOrNull(currentWavelength?.primaryActiveDegree);
 
+    const parentWave =
+      timingDegree === "micro" && activeDegree
+        ? textOrNull(
+            currentWavelength?.degrees?.[activeDegree]?.activeWave
+          )
+        : null;
+
     return {
       parentDegree:
         timingDegree === "micro" ? activeDegree : null,
-      parentWave: null,
+      parentWave,
       displayText:
         timingDegree === "micro" && activeDegree
-          ? `Micro timing is nested inside ${DEGREE_LABELS[activeDegree] || activeDegree}.`
+          ? `Micro timing is nested inside ${DEGREE_LABELS[activeDegree] || activeDegree}${parentWave ? ` ${parentWave}` : ""}.`
           : null,
     };
   }
