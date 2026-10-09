@@ -26,6 +26,27 @@ jobs:
               microSequence: .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence
             }'
 
-      - name: Inspect replay times today
+      - name: Find today's Replay snapshots that had Micro W2
         run: |
-          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/times?date=2026-10-09" | jq '.'
+          set -e
+          times_json="$(curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/times?date=2026-10-09")"
+          echo "$times_json" | jq '.'
+          echo "$times_json" | jq -r '.times[]?' | while read -r t; do
+            snap="$(curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/snapshot?date=2026-10-09&time=$t&symbol=ES" || true)"
+            [ -n "$snap" ] || continue
+            active="$(echo "$snap" | jq -r '.snapshot.engine27Strategies.engine27TraderIntelligenceV2.degrees.micro.activeWave // .engine27Strategies.engine27TraderIntelligenceV2.degrees.micro.activeWave // .snapshot.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.activeWave // .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.activeWave // empty')"
+            if [ "$active" = "W2" ]; then
+              echo "=== W2 SNAPSHOT $t ==="
+              echo "$snap" | jq '{
+                time: "'"$t"'",
+                micro: (
+                  .snapshot.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro //
+                  .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro
+                ),
+                v2: (
+                  .snapshot.engine27Strategies.engine27TraderIntelligenceV2.degrees.micro //
+                  .engine27Strategies.engine27TraderIntelligenceV2.degrees.micro
+                )
+              }'
+            fi
+          done
