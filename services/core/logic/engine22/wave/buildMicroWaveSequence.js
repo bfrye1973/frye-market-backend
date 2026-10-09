@@ -40,7 +40,8 @@ function evaluateCompletion({ side, evidence, priorState, anchor, lockedAnchor }
   if (twoCloses) codes.push("TWO_CLOSE_CONFIRMATION");
   const validCandidate = is5m && rejected && directionBreak && retracement && anchor != null;
   const structurallyConfirmed = validCandidate && (twoCloses || (displacement && swing));
-  const nextState = prior === "CONFIRMED" ? "LOCKED"
+  const nextState = prior === "CONFIRMED" && lockedAnchor != null ? "LOCKED"
+    : prior === "CONFIRMED" ? "CONFIRMED"
     : structurallyConfirmed && (prior === "COMPLETION_CANDIDATE" || prior === "DEVELOPING")
       ? "CONFIRMED" : validCandidate ? "COMPLETION_CANDIDATE" : prior;
   return {
@@ -118,7 +119,7 @@ export function buildMicroWaveSequence({
     confirmationStatus: !w1Confirmed ? "W1_COMPLETION_NOT_CONFIRMED" : !w2Confirmed ? "W1_CONFIRMED_W2_PENDING" : "W2_CONFIRMED_W3_PENDING",
     candidateW1High: candidate != null && candidate > START ? candidate : null,
     confirmedW1High: high,
-    w1ConfirmationSource: w1Confirmed ? String(w1ConfirmationSource) : null,
+    w1ConfirmationSource: w1Completion.state === "CONFIRMED" || w1Completion.state === "LOCKED" ? "FIVE_MIN_STRUCTURAL_EVIDENCE" : w1Confirmed ? String(w1ConfirmationSource) : null,
     w1Completion,
     w2Completion,
     projectedW1,
