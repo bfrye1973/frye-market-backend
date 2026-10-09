@@ -82,6 +82,9 @@ import {
   buildMicroPositionContext,
 } from "../logic/engine22/microV2/buildMicroPositionContext.js";
 import {
+  readEngine8RealFillObserverState,
+} from "../logic/trading/schwab/engine8RealFillStore.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -10019,6 +10022,14 @@ if (
             validPrice(price) ??
             validPrice(engine26LocationCandidate?.currentPrice) ??
             null,
+          realFillObserverState:
+            readEngine8RealFillObserverState(),
+          evaluationTimeMs,
+          realMaxStalenessSec:
+            Number(
+              process.env.ENGINE13_REAL_POSITION_MAX_STALENESS_SECONDS ??
+              120
+            ),
         })
       : null;
      
