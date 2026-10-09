@@ -96,6 +96,9 @@ def choose_poly_key() -> Optional[str]:
 
 POLY_KEY = choose_poly_key()
 MAX_WORKERS = int(os.environ.get("FD_MAX_WORKERS", "12"))
+H4_INCLUDE_DEVELOPING = str(
+    os.environ.get("H4_INCLUDE_DEVELOPING", "false")
+).strip().lower() in ("1", "true", "yes", "on")
 
 def http_get(url: str, timeout: int = 22) -> str:
     req = urllib.request.Request(
@@ -165,8 +168,11 @@ def fetch_4h_bars(ticker: str, start: date, end: date, sort: str = "asc", limit:
         except Exception:
             continue
     out.sort(key=lambda x: x["t"])
-    # drop in-flight 4H bar
-    if out:
+    # Normally keep only completed 4H bars.
+    # During the regular equity session the workflow may explicitly enable the
+    # developing 4H bar so the structural read can update intraday instead of
+    # waiting for the next 4H close.
+    if out and not H4_INCLUDE_DEVELOPING:
         now = int(time.time())
         last = out[-1]["t"]
         if (last // (4*3600)) == (now // (4*3600)):
