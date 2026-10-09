@@ -44,7 +44,15 @@ jobs:
       - name: Prove Engine 27A-E production logic is unchanged
         run: |
           git fetch origin main --depth=1
-          git diff --exit-code origin/main...HEAD --             services/core/logic/engine27/wave/buildWaveIntelligence.js             services/core/logic/engine27/fib/buildFibIntelligence.js             services/core/logic/engine27/alignment/buildMultiDegreeAlignment.js             services/core/logic/engine27/story/buildMarketStory.js             services/core/logic/engine27/decision/buildTraderDecision.js
+          for file in \
+            services/core/logic/engine27/wave/buildWaveIntelligence.js \
+            services/core/logic/engine27/fib/buildFibIntelligence.js \
+            services/core/logic/engine27/alignment/buildMultiDegreeAlignment.js \
+            services/core/logic/engine27/story/buildMarketStory.js \
+            services/core/logic/engine27/decision/buildTraderDecision.js
+          do
+            test "$(git rev-parse HEAD:$file)" = "$(git rev-parse origin/main:$file)"
+          done
 
       # engine27TraderDecision.phase6.test.js is intentionally not used as a V2
       # gate because the exact test + 27E production file currently fail together
