@@ -1792,6 +1792,92 @@ export function buildEngine22WaveStrategy(input = {}) {
         })
       : null;
 
+  const managerRestoreHigh =
+    Number(
+      process.env
+        .ENGINE22_MICRO_RESTORE_LOCKED_W1_HIGH
+    );
+
+  const managerRestoreSequence =
+    context.marketType === "FUTURES" &&
+    !replayRecoverySequence &&
+    !["CONFIRMED", "LOCKED"].includes(
+      durableMicroState
+    ) &&
+    !["CONFIRMED", "LOCKED"].includes(
+      previousMicroState
+    ) &&
+    Number.isFinite(
+      managerRestoreHigh
+    ) &&
+    managerRestoreHigh > 7782.75
+      ? {
+          version:
+            "engine22.microWaveSequence.v1",
+          role:
+            "TIMING_ONLY",
+          origin:
+            7782.75,
+          invalidation:
+            7782.75,
+          activeWave:
+            "W2",
+          state:
+            "MICRO_W2_PULLBACK_WATCH",
+          confirmationStatus:
+            "W1_CONFIRMED_W2_PENDING",
+          candidateW1High:
+            managerRestoreHigh,
+          confirmedW1High:
+            managerRestoreHigh,
+          w1ConfirmationSource:
+            "MANAGER_RESTORE_PREVIOUSLY_LOCKED_W1",
+          w1Completion: {
+            state:
+              "LOCKED",
+            anchor:
+              managerRestoreHigh,
+            evidence: {
+              timeframe:
+                "5m",
+              immutable:
+                true,
+              sourceTimestamp:
+                null,
+            },
+            reasonCodes: [
+              "MANAGER_RESTORE_PREVIOUSLY_LOCKED_W1_AFTER_STATE_LOSS",
+              "ANCHOR_LOCKED_NO_REPAINT",
+            ],
+          },
+          w2Completion: {
+            state:
+              "DEVELOPING",
+            anchor:
+              null,
+            evidence: {
+              timeframe:
+                "UNVERIFIED",
+              sourceTimestamp:
+                null,
+            },
+            reasonCodes: [
+              "AWAIT_FIVE_MIN_STRUCTURAL_EVIDENCE",
+            ],
+          },
+          w2CandidateLow:
+            null,
+          confirmedW2Low:
+            null,
+          noPermissionCreated:
+            true,
+          noExecution:
+            true,
+          noSizing:
+            true,
+        }
+      : null;
+
   if (replayRecoverySequence) {
     console.log(
       "[Engine22 Micro RuntimeState] Recovered locked W1 from Replay",
@@ -1810,13 +1896,27 @@ export function buildEngine22WaveStrategy(input = {}) {
     );
   }
 
+  if (managerRestoreSequence) {
+    console.log(
+      "[Engine22 Micro RuntimeState] Restoring previously locked W1 from Manager-approved emergency seed",
+      {
+        symbol:
+          context.symbol,
+        confirmedW1High:
+          managerRestoreSequence
+            .confirmedW1High,
+      }
+    );
+  }
+
   const previousMicroSequence =
     mergeEngine22MicroSequenceState({
       snapshotSequence:
         context.previousMicroSequence,
       durableSequence:
         durableMicroSequence ||
-        replayRecoverySequence,
+        replayRecoverySequence ||
+        managerRestoreSequence,
     });
 
   const currentWavelength = buildCurrentWavelength({
