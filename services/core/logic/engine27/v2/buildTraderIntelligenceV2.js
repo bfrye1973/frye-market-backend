@@ -167,7 +167,7 @@ function confirmationEvidence({ degree, wavelength, currentWavelength }) {
         textOrNull(wavelength?.confirmationStatus) ||
         "NOT_PUBLISHED",
       evidence: unique([
-        ...safeArray(completion?.evidence?.reasonCodes),
+        ...safeArray(completion?.reasonCodes),
         textOrNull(completion?.evidence?.event),
         textOrNull(completion?.evidence?.structureState),
       ]),
