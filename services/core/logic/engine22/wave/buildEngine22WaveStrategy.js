@@ -38,6 +38,12 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
+import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
+import {
+  readActiveCanonicalMicroCount,
+  persistCanonicalMicroState,
+} from "../microV2/canonicalMicroStore.js";
+import { buildMicroProjectionBundle } from "../microV2/buildMicroProjectionBundle.js";
 import {
   mergeEngine22MicroSequenceState,
   persistEngine22MicroWaveRuntimeState,
@@ -1970,6 +1976,98 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   engine22Display = buildEngine22Display({ degreeStates, currentWavelength });
 
+  /*
+   * Engine 22 Micro V2 production migration — SHADOW ONLY.
+   *
+   * The existing currentWavelength Micro sequence remains production structural
+   * authority during this phase. We build/persist a V2 canonical shadow from the
+   * same observed production state, then expose additive sourceCountId-tagged
+   * projections for comparison. Engine 26 and automated trading are NOT allowed
+   * to consume this shadow yet.
+   */
+  let microV2Migration = null;
+  let microProjectionBundle = null;
+
+  if (
+    context.marketType === "FUTURES" &&
+    normalizeSymbol(context.symbol) === "ES" &&
+    currentWavelength?.degrees?.micro?.microSequence
+  ) {
+    const existingCanonicalMicro =
+      readActiveCanonicalMicroCount();
+
+    microV2Migration =
+      buildCanonicalMicroMigrationShadow({
+        symbol: context.symbol,
+        legacySequence:
+          currentWavelength.degrees.micro.microSequence,
+        existingCanonicalState:
+          existingCanonicalMicro,
+        currentPrice:
+          context.currentPrice,
+        sourceTimestamp:
+          context.evaluationTimeMs ??
+          context.snapshotNow ??
+          null,
+        parentDegree:
+          "SUBMINUTE",
+        parentWave:
+          degreeStates?.subminute?.activeWave ??
+          null,
+        parentDirection:
+          degreeStates?.subminute?.direction ??
+          null,
+      });
+
+    if (
+      microV2Migration?.available === true &&
+      microV2Migration?.canonicalState
+    ) {
+      persistCanonicalMicroState({
+        state:
+          microV2Migration.canonicalState,
+      });
+
+      microProjectionBundle =
+        buildMicroProjectionBundle({
+          canonicalState:
+            microV2Migration.canonicalState,
+          degreeStates,
+          currentWavelength,
+          engine22Display,
+        });
+    }
+  }
+
+  const publishedDegreeStates =
+    microProjectionBundle?.available === true
+      ? microProjectionBundle.degreeStates
+      : degreeStates;
+
+  const publishedCurrentWavelength =
+    microProjectionBundle?.available === true
+      ? microProjectionBundle.currentWavelength
+      : currentWavelength;
+
+  const publishedEngine22Display =
+    microProjectionBundle?.available === true
+      ? microProjectionBundle.engine22Display
+      : engine22Display;
+
+  const microExecutionContext =
+    microProjectionBundle?.available === true
+      ? {
+          ...microProjectionBundle.microExecutionContext,
+          automationEligible: false,
+          migrationStatus: "SHADOW_ONLY",
+          reasonCodes: [
+            ...(microProjectionBundle.microExecutionContext?.reasonCodes || []),
+            "PRODUCTION_MIGRATION_SHADOW_ONLY",
+            "ENGINE26_NOT_AUTHORIZED",
+          ],
+        }
+      : null;
+
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
     degreeStates,
@@ -2167,9 +2265,21 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: round2(context.currentPrice),
 
     waveFibState,
-    degreeStates,
-    engine22Display,
-    currentWavelength,
+    degreeStates: publishedDegreeStates,
+    engine22Display: publishedEngine22Display,
+    currentWavelength: publishedCurrentWavelength,
+
+    // Engine 22 Micro V2 migration shadow. Additive/read-only only.
+    // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
+    microExecutionContext,
+    microV2Migration: microV2Migration
+      ? {
+          mode: "SHADOW_ONLY",
+          automationEligible: false,
+          comparison: microV2Migration.comparison,
+          reasonCodes: microV2Migration.reasonCodes,
+        }
+      : null,
 
     // Canonical active structural Fib model for Strategy 1 Minute.
     // Consumers should prefer this over selecting targetModel vs
