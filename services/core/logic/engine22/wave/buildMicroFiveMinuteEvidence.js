@@ -23,7 +23,9 @@ export function buildMicroFiveMinuteEvidence({bars = [], evaluationTimeMs = null
   if(side==="HIGH" && previousTime==null && anchorIndex<0)
     return {evidence:null,candidateAnchor:null,lastObservedBarTime:null,
       reasonCodes:["MICRO_START_LOW_NOT_IN_COMPLETED_FIVE_MIN_HISTORY"]};
-  const relevant=anchorIndex>=0 ? unique.slice(anchorIndex) : unique;
+  const startAfter=positive(prior?.startAfterTimestamp);
+  const relevant=startAfter!=null ? unique.filter(b=>b.time>startAfter) :
+    anchorIndex>=0 ? unique.slice(anchorIndex) : unique;
   const last=relevant.at(-1);
   if(relevant.length<5 || !last || previousTime != null && last.time<=previousTime)
     return {evidence:null, candidateAnchor:positive(prior?.candidateAnchor), lastObservedBarTime:last?.time ?? previousTime,
