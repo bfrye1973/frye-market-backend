@@ -35,7 +35,8 @@ export function buildMicroFiveMinuteEvidence({bars = [], evaluationTimeMs = null
   const priorAnchor=positive(prior?.candidateAnchor);
   const candidateAnchor=side==="HIGH" ? Math.max(origin,selected,priorAnchor||origin) :
     priorAnchor!=null ? Math.min(selected,priorAnchor) : selected;
-  const priorThree=past.slice(-3);
+  // A two-close shelf must be defined BEFORE either confirmation close.
+  const priorThree=relevant.slice(0,-2).slice(-3);
   const pivot=side==="HIGH" ? Math.min(...priorThree.map(b=>b.low)) :
     Math.max(...priorThree.map(b=>b.high));
   const directionBreak=side==="HIGH" ? last.close<pivot : last.close>pivot;
