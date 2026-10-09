@@ -2,7 +2,7 @@ import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
 import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
 // READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
-// Micro W5 targets use the user-updated W4 low at 7784.00; prior W3 high remains 7897.75.
+// Micro W1 progression uses Manager-locked 7782.75 start; prior W3 high remains historical.
 const MICRO_TARGETS = [
   ["e0382", "0.382", 7833.75],
   ["e0500", "0.500", 7849.00],
@@ -76,14 +76,14 @@ export function buildCurrentWavelength({
   const previous = previousMicroSequence && typeof previousMicroSequence === "object"
     ? previousMicroSequence : {};
   const w1Read = buildMicroFiveMinuteEvidence({
-    bars: microBars5m, evaluationTimeMs, side: "HIGH", origin: 7784,
+    bars: microBars5m, evaluationTimeMs, side: "HIGH", origin: 7782.75,
     prior: { candidateAnchor: previous.candidateW1High,
       lastObservedBarTime: previous.w1LastObservedBarTime },
   });
   const priorHigh = previous.confirmedW1High;
   const w2Read = (previous.w1Completion?.state === "LOCKED" || previous.w1Completion?.state === "CONFIRMED")
     ? buildMicroFiveMinuteEvidence({
-      bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7784,
+      bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7782.75,
       prior: { candidateAnchor: previous.w2CandidateLow,
         lastObservedBarTime: previous.w2LastObservedBarTime,
         confirmedW1High: priorHigh,
@@ -126,8 +126,8 @@ export function buildCurrentWavelength({
   const microLevels = microSequence.activeWave === "W1"
     ? microSequence.projectedW1
     : microSequence.activeWave === "W2" ? microSequence.projectedW2 : [];
-  const microBreach = low != null && low < 7784 || price != null && price < 7784;
-  const microFailed = close10m != null && close10m < 7784;
+  const microBreach = low != null && low < 7782.75 || price != null && price < 7782.75;
+  const microFailed = close10m != null && close10m < 7782.75;
   const microStatus = microFailed ? "FAILED" : microBreach
     ? "INVALIDATION_TOUCHED" : microSequence.state;
   const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach
@@ -154,8 +154,9 @@ export function buildCurrentWavelength({
   const degrees = {
     micro: {
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
+      anchorProvenance: microSequence.anchorProvenance,
       microSequence,
-      state: microStatus, origin: 7784.00, invalidation: 7784.00,
+      state: microStatus, origin: 7782.75.00, invalidation: 7782.75,
       confirmation: null, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
       failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
