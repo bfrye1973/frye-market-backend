@@ -9,6 +9,7 @@ import {
   persistEngine22MicroWaveRuntimeState,
   readEngine22MicroWaveRuntimeState,
   recoverLatestLockedMicroSequenceFromReplay,
+  resetEngine22MicroW2ToActive,
 } from "../logic/engine22/wave/runtimeStateStore.js";
 
 import {
@@ -391,6 +392,160 @@ test("developing Micro state never overwrites an existing locked W1", () => {
         .microSequence
         .activeWave,
       "W2"
+    );
+  } finally {
+    fs.rmSync(
+      root,
+      {
+        recursive: true,
+        force: true,
+      }
+    );
+  }
+});
+
+
+test("confirmed W2 does not auto-lock without a new completed 5m confirmation", () => {
+  const previous = lockedW1Sequence(7854);
+
+  previous.w2Completion = {
+    state: "CONFIRMED",
+    anchor: 7828.5,
+    evidence: {
+      timeframe: "5m",
+      sourceTimestamp: "2026-10-09T13:15:00Z",
+    },
+    reasonCodes: [
+      "FIVE_MIN_SWING_BREAK",
+      "FIVE_MIN_DISPLACEMENT",
+    ],
+  };
+
+  previous.w2CandidateLow = 7828.5;
+  previous.confirmedW2Low = 7828.5;
+  previous.w2LastObservedBarTime = 1791542100;
+
+  const result =
+    buildCurrentWavelength({
+      symbol: "ES",
+      currentPrice: 7839.25,
+      previousMicroSequence: previous,
+      microBars5m: [],
+      evaluationTimeMs:
+        Date.parse(
+          "2026-10-09T13:25:00Z"
+        ),
+    });
+
+  const micro =
+    result
+      .degrees
+      .micro
+      .microSequence;
+
+  assert.equal(
+    micro.w2Completion.state,
+    "CONFIRMED"
+  );
+
+  assert.equal(
+    micro.activeWave,
+    "W2"
+  );
+
+  assert.equal(
+    micro.confirmedW1High,
+    7854
+  );
+
+  assert.ok(
+    micro.projectedW2.length > 0
+  );
+});
+
+test("manager reset restores active W2 while preserving locked W1", () => {
+  const root =
+    fs.mkdtempSync(
+      path.join(
+        os.tmpdir(),
+        "engine22-micro-w2-reset-"
+      )
+    );
+
+  const stateFile =
+    path.join(
+      root,
+      "micro-runtime.json"
+    );
+
+  try {
+    const locked =
+      lockedW1Sequence(7854);
+
+    locked.w2Completion = {
+      state: "LOCKED",
+      anchor: 7828.5,
+      evidence: {
+        timeframe: "5m",
+        immutable: true,
+      },
+      reasonCodes: [
+        "ANCHOR_LOCKED_NO_REPAINT",
+      ],
+    };
+
+    locked.w2CandidateLow = 7828.5;
+    locked.confirmedW2Low = 7828.5;
+    locked.activeWave = "W3_WATCH";
+    locked.state = "MICRO_W3_SETUP_WATCH";
+    locked.confirmationStatus = "W2_CONFIRMED_W3_PENDING";
+
+    assert.equal(
+      persistEngine22MicroWaveRuntimeState({
+        symbol: "ES",
+        microSequence: locked,
+        filePath: stateFile,
+      }),
+      true
+    );
+
+    assert.equal(
+      resetEngine22MicroW2ToActive({
+        symbol: "ES",
+        filePath: stateFile,
+      }),
+      true
+    );
+
+    const stored =
+      readEngine22MicroWaveRuntimeState({
+        symbol: "ES",
+        filePath: stateFile,
+      });
+
+    assert.equal(
+      stored.microSequence.w1Completion.state,
+      "LOCKED"
+    );
+
+    assert.equal(
+      stored.microSequence.confirmedW1High,
+      7854
+    );
+
+    assert.equal(
+      stored.microSequence.w2Completion.state,
+      "DEVELOPING"
+    );
+
+    assert.equal(
+      stored.microSequence.activeWave,
+      "W2"
+    );
+
+    assert.equal(
+      stored.microSequence.confirmedW2Low,
+      null
     );
   } finally {
     fs.rmSync(
