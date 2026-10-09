@@ -70,6 +70,9 @@ import {
   buildEngine26BPipeline,
 } from "../logic/engine26/strategy1/buildEngine26BPipeline.js";
 import {
+  buildEngine26MicroTimingShadow,
+} from "../logic/engine26/strategy1/buildEngine26MicroTimingShadow.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -9920,6 +9923,21 @@ if (
   if (analytics?.engine5) {
     analytics.engine5.timingContext = engine5TimingContext;
   }
+
+  /*
+   * Engine 26 Phase 9B — read-only Engine 22 Micro timing shadow.
+   *
+   * This is deliberately built AFTER Engine 26A candidate discovery and after
+   * permission/geometry calculation. It cannot affect the candidate, identity,
+   * reaction eligibility, Engine 6 permission, sizing, management or execution.
+   */
+  const engine26MicroTimingShadow =
+    isEsIntradayScalp
+      ? buildEngine26MicroTimingShadow({
+          engine22WaveStrategy,
+          engine26LocationCandidate,
+        })
+      : null;
      
    return {
     strategyId: s.strategyId,
@@ -9940,6 +9958,7 @@ if (
     engine26LocationCandidate,
     engine26ReactionHandoff,
     engine26GeometryHandoff,
+    engine26MicroTimingShadow,
 
     engine26ImbalanceWatch,
     engine26StructuralContext,
