@@ -4,6 +4,12 @@ on:
   push:
     branches:
       - engine22-micro-persistence-hotfix
+  pull_request:
+    paths:
+      - ".github/workflows/engine22-micro-hotfix-diagnostic.yml"
+      - "services/core/logic/engine22/wave/**"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine22Micro*"
   workflow_dispatch: {}
 
 jobs:
