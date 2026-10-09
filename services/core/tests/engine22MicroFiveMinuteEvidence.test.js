@@ -4,15 +4,15 @@ import { buildMicroFiveMinuteEvidence } from "../logic/engine22/wave/buildMicroF
 const base=1791504000; // synthetic ordered seconds; these tests do not depend on live market time
 const candle=(i,o,h,l,c)=>({time:base+i*300,open:o,high:h,low:l,close:c});
 const bars=[
-  candle(0,7786,7792,7784,7790),
+  candle(0,7786,7792,7782.75,7790),
   candle(1,7790,7810,7789,7807),
   candle(2,7807,7830,7804,7826),
   candle(3,7826,7864,7820,7858),
-  candle(4,7858,7862,7849,7851),
+  candle(4,7858,7862,7847.75,7851),
   candle(5,7851,7852,7810,7812),
 ];
-test("Does not invent W1 anchor when 7784 absent",()=>{
-  const noOrigin=bars.map(b=>({...b,low:b.low===7784?7785:b.low}));
+test("Does not invent W1 anchor when 7782.75 absent",()=>{
+  const noOrigin=bars.map(b=>({...b,low:b.low===7782.75?7785:b.low}));
   const r=buildMicroFiveMinuteEvidence({bars:noOrigin,evaluationTimeMs:(base+6*300)*1000});
   assert.equal(r.evidence,null);
   assert.ok(r.reasonCodes.includes("MICRO_START_LOW_NOT_IN_COMPLETED_FIVE_MIN_HISTORY"));
