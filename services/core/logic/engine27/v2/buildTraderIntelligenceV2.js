@@ -372,13 +372,80 @@ function buildDegree({
     display,
   });
 
+  const sourceMap = {
+    activeWave:
+      textOrNull(wavelength?.activeWave)
+        ? "engine22WaveStrategy.currentWavelength"
+        : textOrNull(display?.badge)
+        ? "engine22WaveStrategy.engine22Display"
+        : textOrNull(state?.activeWave)
+        ? "engine22WaveStrategy.degreeStates"
+        : "NOT_PUBLISHED",
+
+    waveDirection:
+      textOrNull(display?.direction)
+        ? "engine22WaveStrategy.engine22Display"
+        : textOrNull(state?.direction)
+        ? "engine22WaveStrategy.degreeStates"
+        : "NOT_PUBLISHED",
+
+    currentCondition:
+      degree === "micro" && microCompletion(currentWavelength)
+        ? "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence"
+        : textOrNull(wavelength?.state)
+        ? "engine22WaveStrategy.currentWavelength"
+        : rowLookup(display, ["Current"])?.status
+        ? "engine22WaveStrategy.engine22Display"
+        : textOrNull(state?.stage)
+        ? "engine22WaveStrategy.degreeStates"
+        : "NOT_PUBLISHED",
+
+    potentialCompletion:
+      safeArray(wavelength?.levels).length
+        ? "engine22WaveStrategy.currentWavelength"
+        : safeArray(display?.levels).length
+        ? "engine22WaveStrategy.engine22Display"
+        : "NOT_PUBLISHED",
+
+    invalidation:
+      numberOrNull(wavelength?.invalidation) !== null
+        ? "engine22WaveStrategy.currentWavelength"
+        : (
+            numberOrNull(state?.internalStructure?.invalidationLevel) !== null ||
+            numberOrNull(state?.invalidationLevel) !== null
+          )
+        ? "engine22WaveStrategy.degreeStates"
+        : (
+            rowLookup(display, ["Invalidation", "Invalid", "W5 Invalidation"]) ||
+            rowsContaining(display, ["INVALID"])[0]
+          )
+        ? "engine22WaveStrategy.engine22Display"
+        : "NOT_PUBLISHED",
+
+    parentContext:
+      degree === "micro"
+        ? "engine22WaveStrategy.currentWavelength"
+        : (
+            textOrNull(state?.parentDegree) ||
+            textOrNull(state?.parentWave)
+          )
+        ? "engine22WaveStrategy.degreeStates"
+        : rowLookup(display, ["Parent"])
+        ? "engine22WaveStrategy.engine22Display"
+        : "NOT_PUBLISHED",
+  };
+
+  const structuralSources = unique(
+    Object.values(sourceMap).filter(
+      (source) => source && source !== "NOT_PUBLISHED"
+    )
+  );
+
   const source =
-    wavelength
-      ? "engine22WaveStrategy.currentWavelength"
-      : display
-      ? "engine22WaveStrategy.engine22Display"
-      : state
-      ? "engine22WaveStrategy.degreeStates"
+    structuralSources.length === 1
+      ? structuralSources[0]
+      : structuralSources.length > 1
+      ? "ENGINE22_CANONICAL_COMPOSITE"
       : "NOT_PUBLISHED";
 
   return {
@@ -412,6 +479,7 @@ function buildDegree({
 
     provenance: {
       structuralSource: source,
+      sourceMap,
       confirmationStatus: confirmation.status,
       freshness: freshnessRead({
         snapshotTime,
