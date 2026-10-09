@@ -90,15 +90,21 @@ export function buildCurrentWavelength({
         startAfterTimestamp: previous.w1Completion?.evidence?.sourceTimestamp ||
           previous.w1ConfirmedAtBarTime || null },
     }) : { evidence: null, candidateAnchor: null, lastObservedBarTime: null };
+  const w1NewExtreme = previous.w1Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.candidateW1High != null && w1Read.candidateAnchor != null &&
+    w1Read.candidateAnchor > previous.candidateW1High;
+  const w2NewExtreme = previous.w2Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.w2CandidateLow != null && w2Read.candidateAnchor != null &&
+    w2Read.candidateAnchor < previous.w2CandidateLow;
   const microSequence = buildMicroWaveSequence({
     currentPrice: price,
     candidateW1High: w1Read.candidateAnchor ?? previous.candidateW1High ?? microCandidateW1High,
     w1Evidence5m: w1Read.evidence,
-    w1PriorState: previous.w1Completion?.state ?? "DEVELOPING",
+    w1PriorState: w1NewExtreme ? "DEVELOPING" : previous.w1Completion?.state ?? "DEVELOPING",
     lockedW1High: previous.w1Completion?.state === "CONFIRMED" ||
       previous.w1Completion?.state === "LOCKED" ? previous.confirmedW1High : null,
     w2Evidence5m: w2Read.evidence,
-    w2PriorState: previous.w2Completion?.state ?? "DEVELOPING",
+    w2PriorState: w2NewExtreme ? "DEVELOPING" : previous.w2Completion?.state ?? "DEVELOPING",
     lockedW2Low: previous.w2Completion?.state === "CONFIRMED" ||
       previous.w2Completion?.state === "LOCKED" ? previous.confirmedW2Low : null,
     confirmedW1High: microConfirmedW1High,
@@ -107,6 +113,10 @@ export function buildCurrentWavelength({
     confirmedW2Low: w2Read.candidateAnchor ?? previous.w2CandidateLow ?? microConfirmedW2Low,
     w2CompletionConfirmed: microW2CompletionConfirmed,
   });
+  microSequence.resetReasonCodes = [
+    ...(w1NewExtreme ? ["W1_CANDIDATE_RESET_NEW_HIGH"] : []),
+    ...(w2NewExtreme ? ["W2_CANDIDATE_RESET_NEW_LOW"] : []),
+  ];
   microSequence.w1LastObservedBarTime = w1Read.lastObservedBarTime;
   microSequence.w1ConfirmedAtBarTime = previous.w1ConfirmedAtBarTime ||
     (microSequence.w1Completion?.state === "CONFIRMED" ?
