@@ -2,6 +2,7 @@
 import express from "express";
 import { runAlertGoSignals } from "../jobs/alertGoSignals.js";
 import { runAlertEngine29SqueezeFromBackend } from "../jobs/alertEngine29Squeeze.js";
+import { runMicroPositionAlertsFromSnapshot } from "../jobs/alertMicroPositionConflict.js";
 
 export const alertsRouter = express.Router();
 
@@ -32,5 +33,18 @@ alertsRouter.post("/check-squeeze", async (req, res) => {
     `${req.protocol}://${req.get("host")}`;
 
   const out = await runAlertEngine29SqueezeFromBackend({ baseUrl });
+  res.status(out.ok ? 200 : 500).json(out);
+});
+
+
+/**
+ * POST /api/v1/alerts/check-micro-position
+ * Engine 13 read-only consumer of Strategy 1 microPositionContext.
+ * Sends only deduplicated progressive conflict/easing/resolution notices.
+ */
+alertsRouter.post("/check-micro-position", async (req, res) => {
+  const out =
+    await runMicroPositionAlertsFromSnapshot();
+
   res.status(out.ok ? 200 : 500).json(out);
 });
