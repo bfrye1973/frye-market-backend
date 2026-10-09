@@ -162,9 +162,13 @@ function confirmationEvidence({ degree, wavelength, currentWavelength }) {
     const completion = microCompletion(currentWavelength);
 
     return {
+      // Keep the wave-completion lifecycle and Engine 22 confirmation summary
+      // separate. currentCondition owns DEVELOPING -> CANDIDATE -> CONFIRMED
+      // -> LOCKED; this field preserves Engine 22's broader confirmation read.
       status:
-        textOrNull(completion?.state) ||
         textOrNull(wavelength?.confirmationStatus) ||
+        textOrNull(currentWavelength?.degrees?.micro?.microSequence?.confirmationStatus) ||
+        textOrNull(completion?.state) ||
         "NOT_PUBLISHED",
       evidence: unique([
         ...safeArray(completion?.reasonCodes),
