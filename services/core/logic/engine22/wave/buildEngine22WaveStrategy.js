@@ -1732,6 +1732,9 @@ export function buildEngine22WaveStrategy(input = {}) {
     engine22Display,
     waveFibState,
     currentLifecycleState,
+    microBars5m: context.barsByTf?.["5m"] || [],
+    evaluationTimeMs: context.evaluationTimeMs,
+    previousMicroSequence: context.previousMicroSequence,
   });
 
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
