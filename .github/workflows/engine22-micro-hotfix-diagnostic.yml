@@ -1,0 +1,25 @@
+name: Engine22 Micro Hotfix Diagnostic
+
+on:
+  push:
+    branches:
+      - engine22-micro-persistence-hotfix
+  workflow_dispatch: {}
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect live Micro state
+        run: |
+          set -e
+          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1"           | jq '{
+              now,
+              micro: .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro,
+              microSequence: .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence
+            }'
+
+      - name: Inspect replay times today
+        run: |
+          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/replay/times?date=2026-10-09" | jq '.'
