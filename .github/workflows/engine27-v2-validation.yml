@@ -1,0 +1,57 @@
+name: Engine27 V2 Validation
+
+on:
+  push:
+    branches:
+      - engine27-v2-additive-readonly
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/**"
+      - "services/core/tests/engine27*"
+      - "services/core/tests/engine22*"
+      - "services/core/tests/engine12Engine27ReplayPreservation.test.js"
+      - "docs/engine27-v2-compatibility-matrix.md"
+      - ".github/workflows/engine27-v2-validation.yml"
+  workflow_dispatch: {}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install core dependencies
+        working-directory: services/core
+        run: npm install
+
+      - name: Syntax check V2 builder
+        run: node --check services/core/logic/engine27/v2/buildTraderIntelligenceV2.js
+
+      - name: Syntax check Engine 27 root builder
+        run: node --check services/core/logic/engine27/buildEngine27Strategies.js
+
+      - name: V2 contract tests
+        run: node --test services/core/tests/engine27TraderIntelligenceV2.test.js
+
+      - name: Existing Engine 27E regression
+        run: node --test services/core/tests/engine27TraderDecision.phase6.test.js
+
+      - name: Engine 22 automatic propagation regression
+        run: node --test services/core/tests/engine22AutomaticPropagation.test.js
+
+      - name: Engine 22 Minute W3 downstream alignment regression
+        run: node --test services/core/tests/engine22MinuteW3DownstreamAlignment.test.js
+
+      - name: Engine 22 Micro lifecycle regression
+        run: node --test services/core/tests/engine22MicroWaveSequence.test.js
+
+      - name: Engine 12 Engine 27 Replay preservation regression
+        run: node --test services/core/tests/engine12Engine27ReplayPreservation.test.js
