@@ -472,98 +472,113 @@ export function recoverLatestLockedMicroSequenceFromReplay({
     return null;
   }
 
-  const root =
-    replayRoot ||
-    defaultEsReplayRoot();
+  const roots = replayRoot
+    ? [replayRoot]
+    : [
+        defaultEsReplayRoot(),
+        "/var/data/replay/es",
+        "/var/data/replay/replay/es",
+        path.resolve(
+          MODULE_DIR,
+          "../../../data/replay/es"
+        ),
+      ];
+
+  const uniqueRoots =
+    [...new Set(roots.filter(Boolean))];
 
   try {
-    if (!fs.existsSync(root)) {
-      return null;
-    }
-
-    const dateDirs =
-      fs.readdirSync(root, {
-        withFileTypes: true,
-      })
-        .filter(
-          (entry) =>
-            entry.isDirectory() &&
-            /^\d{4}-\d{2}-\d{2}$/.test(
-              entry.name
-            )
-        )
-        .map((entry) => entry.name)
-        .sort()
-        .reverse();
-
     let inspected = 0;
 
-    for (const dateDir of dateDirs) {
-      const dirPath =
-        path.join(root, dateDir);
+    for (const root of uniqueRoots) {
+      if (!fs.existsSync(root)) {
+        continue;
+      }
 
-      const files =
-        fs.readdirSync(dirPath)
+      const dateDirs =
+        fs.readdirSync(root, {
+          withFileTypes: true,
+        })
           .filter(
-            (name) =>
-              /^\d{4}\.json$/.test(
-                name
+            (entry) =>
+              entry.isDirectory() &&
+              /^\d{4}-\d{2}-\d{2}$/.test(
+                entry.name
               )
           )
+          .map((entry) => entry.name)
           .sort()
           .reverse();
 
-      for (const name of files) {
-        if (inspected >= maxFiles) {
-          return null;
-        }
+      for (const dateDir of dateDirs) {
+        const dirPath =
+          path.join(root, dateDir);
 
-        inspected += 1;
-
-        try {
-          const parsed =
-            JSON.parse(
-              fs.readFileSync(
-                path.join(
-                  dirPath,
+        const files =
+          fs.readdirSync(dirPath)
+            .filter(
+              (name) =>
+                /^\d{4}\.json$/.test(
                   name
-                ),
-                "utf8"
-              )
-            );
-
-          const sequence =
-            parsed
-              ?.strategies
-              ?.[
-                "intraday_scalp@10m"
-              ]
-              ?.engine22WaveStrategy
-              ?.currentWavelength
-              ?.degrees
-              ?.micro
-              ?.microSequence ||
-            null;
-
-          if (
-            microHasLockedW1(
-              sequence
+                )
             )
-          ) {
-            return {
-              ...sequence,
-              recoveredFromReplay: true,
-              recoveredReplayDate:
-                dateDir,
-              recoveredReplayTime:
-                name.replace(
-                  /\.json$/,
-                  ""
-                ),
-            };
+            .sort()
+            .reverse();
+
+        for (const name of files) {
+          if (inspected >= maxFiles) {
+            return null;
           }
-        } catch {
-          // Ignore malformed/unrelated replay files and continue backward.
+
+          inspected += 1;
+
+          try {
+            const parsed =
+              JSON.parse(
+                fs.readFileSync(
+                  path.join(
+                    dirPath,
+                    name
+                  ),
+                  "utf8"
+                )
+              );
+
+            const sequence =
+              parsed
+                ?.strategies
+                ?.[
+                  "intraday_scalp@10m"
+                ]
+                ?.engine22WaveStrategy
+                ?.currentWavelength
+                ?.degrees
+                ?.micro
+                ?.microSequence ||
+              null;
+
+            if (
+              microHasLockedW1(
+                sequence
+              )
+            ) {
+              return {
+                ...sequence,
+                recoveredFromReplay: true,
+                recoveredReplayRoot:
+                  root,
+                recoveredReplayDate:
+                  dateDir,
+                recoveredReplayTime:
+                  name.replace(
+                    /\.json$/,
+                    ""
+                  ),
+              };
+            }
+          } catch {
+            // Ignore malformed/unrelated replay files and continue backward.
+          }
         }
       }
     }
