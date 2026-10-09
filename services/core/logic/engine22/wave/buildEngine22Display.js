@@ -12,7 +12,7 @@ const MICRO_MARKS = {
   w1High: { price: 7805.0, time: "2026-10-02 07:00" },
   w2Low: { price: 7757.75, time: "2026-10-05 03:00" },
   w3High: { price: 7897.75, time: "2026-10-06 07:00" },
-  w4Low: { price: 7784.00, time: "2026-10-08 (user-updated; exact time unverified)" },
+  w4Low: { price: 7782.75, time: "2026-10-08 (user-updated; exact time unverified)" },
 };
 
 const CURRENT_LOCKED = {
@@ -167,29 +167,32 @@ function baseDegree(degree, state) {
   };
 }
 
-function microDisplay() {
+function microDisplay(currentWavelength = null) {
+  const micro = currentWavelength?.degrees?.micro;
+  const sequence = micro?.microSequence;
+  const wave = sequence?.activeWave || "W1";
+  const phase = wave === "W2" ? "Micro W2 retracement watch" :
+    wave === "W3_WATCH" ? "Micro W3 setup watch" : "Micro W1 high search";
   return {
-    degree: "micro",
-    label: "Micro",
-    subtitle: "Sequential timing — W1 then W2",
-    badge: "W1",
-    headline: "Micro W1 high search from 7784.00 — provisional projections",
-    active: true,
-    direction: "UP",
+    degree: "micro", label: "Micro", subtitle: "Five-minute wave structure",
+    badge: wave, headline: phase, active: true, direction: wave === "W2" ? "DOWN" : "UP",
     rows: clean([
       row("Role", "Timing only"),
-      row("Parent", "Subminute W3"),
-      row("W1 start", "7784.00", { kind: "mark" }),
-      row("Current", "Micro W1 high search", { tone: "watch" }),
-      row("W1 high", "Not confirmed", { tone: "warning" }),
-      row("W2 fib", "Await confirmed W1 high", { tone: "watch" }),
-      row("Invalid", "Below 7784.00", { tone: "warning" }),
+      row("Origin", "7782.75", {kind:"mark"}),
+      row("Anchor", "MANAGER_LOCKED_MICRO_W4_LOW"),
+      row("Anchor time", "2026-10-08 07:00"),
+      row("Current", phase),
+      row("W1 Candidate", sequence?.candidateW1High != null ? price(sequence.candidateW1High) : "Pending"),
+      row("W1 High", sequence?.confirmedW1High != null ? price(sequence.confirmedW1High) : "Not confirmed"),
+      row("W1 status", sequence?.w1Completion?.state || "DEVELOPING"),
+      row("W2 status", sequence?.w2Completion?.state || "DEVELOPING"),
+      row("Invalidation", "7782.75"),
     ]),
-    levels: [{ label: "W1 origin", price: 7784, status: "REVIEW" }],
+    levels: [{label:"Micro origin",price:7782.75,status:"INVALIDATION"}],
     rules: [
-      "W1 upside targets are provisional timing references, not confirmed reversal highs.",
-      "W2 retracement ladder is unavailable until a validated W1 high.",
-      "No permission, sizing or execution.",
+      "5m confirms wave completion; 1m diagnostic only.",
+      "W2 fibs require confirmed W1 high; next official wave requires LOCKED anchor.",
+      "Micro timing only; no permission, sizing or execution.",
     ],
   };
 }
@@ -211,7 +214,7 @@ function subminuteDisplay(state) {
       row("W2 low", price(CURRENT_LOCKED.subminuteW2Low), { status: "COMPLETED_CANDIDATE", kind: "mark" }),
       row("W3 start", price(CURRENT_LOCKED.subminuteW3Start), { status: "ACTIVE_CANDIDATE", kind: "mark" }),
       row("Current", "Subminute W3 active candidate", { tone: "long" }),
-      row("Micro", "Micro W1 high search", { tone: "watch" }),
+      row("Micro", "See Micro structural state", { tone: "watch" }),
       row("Invalid", `Below ${price(CURRENT_LOCKED.subminuteW2Low)}`, { tone: "warning" }),
     ]),
     levels: [
@@ -326,15 +329,15 @@ function flagsFor(degreeStates) {
   };
 }
 
-export function buildEngine22Display({ degreeStates = null } = {}) {
+export function buildEngine22Display({ degreeStates = null, currentWavelength = null } = {}) {
   if (!degreeStates || typeof degreeStates !== "object") return null;
 
   return {
     version: "engine22Display.v1",
-    headline: "Micro W1 high search inside Subminute W3; Minute W3 confirmation pending.",
+    headline: currentWavelength?.degrees?.micro?.microSequence?.state || "Micro structural timing inside Subminute W3.",
     degreeOrder: [...DEGREE_ORDER],
     degrees: {
-      micro: microDisplay(),
+      micro: microDisplay(currentWavelength),
       subminute: subminuteDisplay(degreeStates.subminute),
       minute: minuteDisplay(degreeStates.minute),
       minor: minorDisplay(degreeStates.minor),
