@@ -32,6 +32,10 @@ import {
   buildTraderDecision,
 } from "./decision/buildTraderDecision.js";
 
+import {
+  buildEngine27TraderIntelligenceV2,
+} from "./v2/buildTraderIntelligenceV2.js";
+
 function barsForTimeframe(
   snapshot,
   timeframe
@@ -299,6 +303,16 @@ export function buildEngine27Strategies({
       subminutePipelineContext,
     });
 
+  /*
+   * Engine 27 V2 is additive and read-only.
+   * It consumes canonical Engine 22 / Strategy 1 facts from the snapshot
+   * and does not replace or mutate Engine 27A–27E production contracts.
+   */
+  const engine27TraderIntelligenceV2 =
+    buildEngine27TraderIntelligenceV2({
+      snapshot,
+    });
+
   return {
     active: true,
 
@@ -320,6 +334,9 @@ export function buildEngine27Strategies({
     engine27Alignment,
     engine27MarketStory,
     engine27TraderDecision,
+
+    // Additive V2 presentation contract. Existing A–E fields remain frozen.
+    engine27TraderIntelligenceV2,
 
     laneCount:
       lanes.length,
@@ -346,6 +363,7 @@ export function buildEngine27Strategies({
       "ENGINE27_ALIGNMENT_BUILT",
       "ENGINE27_MARKET_STORY_BUILT",
       "ENGINE27_TRADER_DECISION_BUILT",
+      "ENGINE27_V2_SIX_DEGREE_PRESENTATION_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
