@@ -156,7 +156,7 @@ export function buildCurrentWavelength({
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
       anchorProvenance: microSequence.anchorProvenance,
       microSequence,
-      state: microStatus, origin: 7782.75.00, invalidation: 7782.75,
+      state: microStatus, origin: 7782.75, invalidation: 7782.75,
       confirmation: null, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
       failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
