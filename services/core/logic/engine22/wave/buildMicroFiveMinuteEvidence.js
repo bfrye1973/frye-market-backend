@@ -1,6 +1,14 @@
 // Engine 22-only read of completed 5m candles. This does NOT depend on
 // Engine 3 reaction decisions; the shared source is raw ES 5m OHLC.
-import { deriveCandleCompletionTruth } from "../../engine3/candleCompletionTruth.js";
+// Engine 22 independently classifies five-minute candle completion.
+function completedFiveMinuteBars(bars, evaluationTimeMs) {
+  const now = Number(evaluationTimeMs);
+  if (!Number.isFinite(now) || now <= 0 || !Array.isArray(bars)) return [];
+  return bars.filter(bar => {
+    const start = tSec(bar);
+    return start != null && start * 1000 + 300000 <= now;
+  });
+}
 const positive = x => x == null || x === "" || !Number.isFinite(Number(x)) || Number(x) <= 0 ? null : Number(x);
 const tSec = b => positive(b?.time ?? b?.t ?? b?.tSec);
 function normalized(bar) {
@@ -11,8 +19,8 @@ function normalized(bar) {
     low <= Math.min(open,close) ? {time,open,high,low,close} : null;
 }
 export function buildMicroFiveMinuteEvidence({bars = [], evaluationTimeMs = null,
-  side = "HIGH", origin = 7784, prior = null} = {}) {
-  const completed=deriveCandleCompletionTruth({bars,timeframe:"5m",evaluationTimeMs}).completedBars
+  side = "HIGH", origin = 7782.75, prior = null} = {}) {
+  const completed=completedFiveMinuteBars(bars,evaluationTimeMs)
     .map(normalized).filter(Boolean).sort((a,b)=>a.time-b.time);
   const unique=completed.filter((bar,i)=>i===0 || bar.time>completed[i-1].time);
   const previousTime=positive(prior?.lastObservedBarTime);
