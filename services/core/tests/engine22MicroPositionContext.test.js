@@ -60,7 +60,9 @@ test("open SHORT against W3 UP creates HIGH conflict and do-not-add guidance", (
       engine22WaveStrategy:
         micro(),
       openTrades: [
-        shortTrade(),
+        shortTrade({
+          accountMode: "PAPER",
+        }),
       ],
       currentPrice:
         7862,
