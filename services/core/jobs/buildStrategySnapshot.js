@@ -73,6 +73,9 @@ import {
   buildEngine26MicroTimingShadow,
 } from "../logic/engine26/strategy1/buildEngine26MicroTimingShadow.js";
 import {
+  buildMicroTimingAutomationShadow,
+} from "../logic/engine28a/buildMicroTimingAutomationShadow.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -9938,6 +9941,22 @@ if (
           engine26LocationCandidate,
         })
       : null;
+
+  /*
+   * Engine 28A Phase 10 — read-only acceptance telemetry.
+   * This reads the already-computed canonical chain and records the first
+   * waiting gate. It is intentionally assembled last and cannot feed upstream.
+   */
+  const engine28AMicroTimingAutomationShadow =
+    isEsIntradayScalp
+      ? buildMicroTimingAutomationShadow({
+          engine22WaveStrategy,
+          engine26MicroTimingShadow,
+          engine26LocationCandidate,
+          confluence: patchedConfluence,
+          permission: finalPermission,
+        })
+      : null;
      
    return {
     strategyId: s.strategyId,
@@ -9959,6 +9978,7 @@ if (
     engine26ReactionHandoff,
     engine26GeometryHandoff,
     engine26MicroTimingShadow,
+    engine28AMicroTimingAutomationShadow,
 
     engine26ImbalanceWatch,
     engine26StructuralContext,
