@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildMicroWaveSequence } from "../logic/engine22/wave/buildMicroWaveSequence.js";
+import { buildCurrentWavelength } from "../logic/engine22/wave/buildCurrentWavelength.js";
 
 const w1 = { timeframe:"5m", closed:true, close:7840, localPivot:7850,
   anchorRejection:true, swingBreak:true, displacement:true,
@@ -99,4 +100,23 @@ test("Manager-locked W4 low provenance and exact W1 fib origin",()=>{
     source:"MANAGER_LOCKED_MICRO_W4_LOW",price:7782.75,timestamp:"2026-10-08 07:00"
   });
   assert.equal(r.projectedW1.find(x=>x.label==="0.500").price,7847.75);
+});
+
+test("Intrabar loss of 7782.75 triggers review, never silent W1 confirmation",()=>{
+  const r=buildCurrentWavelength({currentPrice:7783,intrabarLow:7782.5});
+  assert.equal(r.degrees.micro.origin,7782.75);
+  assert.equal(r.degrees.micro.invalidation,7782.75);
+  assert.equal(r.degrees.micro.state,"INVALIDATION_TOUCHED");
+  assert.equal(r.degrees.micro.confirmationStatus,"FAILED_REVIEW_REQUIRED");
+});
+test("10m close below 7782.75 confirms failed count/recount review",()=>{
+  const r=buildCurrentWavelength({currentPrice:7783,lastClosed10mClose:7782.5});
+  assert.equal(r.degrees.micro.state,"FAILED");
+  assert.equal(r.degrees.micro.confirmationStatus,"FAILED_CONFIRMED");
+});
+test("Missing ES price never manufactures an invalidation",()=>{
+  const r=buildCurrentWavelength({currentPrice:null});
+  assert.equal(r.currentPrice,null);
+  assert.notEqual(r.degrees.micro.state,"FAILED");
+  assert.notEqual(r.degrees.micro.state,"INVALIDATION_TOUCHED");
 });
