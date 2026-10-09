@@ -73,9 +73,6 @@ export function buildMicroWaveSequence({
   const price = safe(currentPrice);
   const candidate = safe(candidateW1High);
   const confirmed = safe(confirmedW1High);
-  const w1Confirmed = w1Completion.state === "LOCKED" || (w1Completion.state === "CONFIRMED" && w1Completion.anchor != null) || (w1CompletionConfirmed === true &&
-    confirmed != null && confirmed > START &&
-    Boolean(String(w1ConfirmationSource || "").trim()));
   const w1Completion = evaluateCompletion({
     side: "HIGH", evidence: w1Evidence5m, priorState: w1PriorState,
     anchor: candidate, lockedAnchor: safe(lockedW1High),
@@ -84,6 +81,11 @@ export function buildMicroWaveSequence({
     side: "LOW", evidence: w2Evidence5m, priorState: w2PriorState,
     anchor: safe(confirmedW2Low), lockedAnchor: safe(lockedW2Low),
   });
+  // Structural 5m evidence is the only confirmation authority.
+  // Legacy manual booleans remain accepted as inputs but cannot confirm waves.
+  const w1Confirmed = (w1Completion.state === "CONFIRMED" ||
+    w1Completion.state === "LOCKED") && w1Completion.anchor != null &&
+    w1Completion.anchor > START;
   const projectedW1 = W1_RATIOS.map((ratio) => {
     const target = tick(START + REFERENCE_LENGTH * ratio);
     return {
@@ -94,7 +96,7 @@ export function buildMicroWaveSequence({
       touchedAt: null, confirmedAt: null,
     };
   });
-  const high = w1Completion.state === "LOCKED" ? safe(lockedW1High) : w1Completion.state === "CONFIRMED" ? candidate : w1Confirmed ? confirmed : null;
+  const high = w1Confirmed ? w1Completion.anchor : null;
   const range = high == null ? null : high - START;
   const projectedW2 = range == null ? [] : W2_RETRACEMENTS.map((ratio) => ({
     key: "r" + Math.round(ratio * 1000),
@@ -105,7 +107,7 @@ export function buildMicroWaveSequence({
     anchorSource: "CONFIRMED_MICRO_W1_HIGH",
   }));
   const w2Low = safe(confirmedW2Low);
-  const w2Confirmed = w1Confirmed && (w2Completion.state === "LOCKED" || w2Completion.state === "CONFIRMED" || w2CompletionConfirmed === true) &&
+  const w2Confirmed = w1Confirmed && (w2Completion.state === "LOCKED" || w2Completion.state === "CONFIRMED" ) &&
     (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) != null &&
     (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) > START && (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) < high;
   return {
@@ -119,7 +121,7 @@ export function buildMicroWaveSequence({
     confirmationStatus: !w1Confirmed ? "W1_COMPLETION_NOT_CONFIRMED" : !w2Confirmed ? "W1_CONFIRMED_W2_PENDING" : "W2_CONFIRMED_W3_PENDING",
     candidateW1High: candidate != null && candidate > START ? candidate : null,
     confirmedW1High: high,
-    w1ConfirmationSource: w1Completion.state === "CONFIRMED" || w1Completion.state === "LOCKED" ? "FIVE_MIN_STRUCTURAL_EVIDENCE" : w1Confirmed ? String(w1ConfirmationSource) : null,
+    w1ConfirmationSource: w1Confirmed ? "FIVE_MIN_STRUCTURAL_EVIDENCE" : null,
     w1Completion,
     w2Completion,
     projectedW1,
