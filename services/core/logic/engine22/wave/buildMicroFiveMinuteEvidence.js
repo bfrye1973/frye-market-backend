@@ -15,12 +15,20 @@ export function buildMicroFiveMinuteEvidence({bars = [], evaluationTimeMs = null
   const completed=deriveCandleCompletionTruth({bars,timeframe:"5m",evaluationTimeMs}).completedBars
     .map(normalized).filter(Boolean).sort((a,b)=>a.time-b.time);
   const unique=completed.filter((bar,i)=>i===0 || bar.time>completed[i-1].time);
-  const last=unique.at(-1);
   const previousTime=positive(prior?.lastObservedBarTime);
-  if(unique.length<5 || !last || previousTime != null && last.time<=previousTime)
+  // For an initial W1 observation, require the actual initiating low to be
+  // present in the completed 5m series. Never borrow an older wave's highs.
+  const anchorIndex=side==="HIGH" && previousTime == null
+    ? unique.findLastIndex(b=>Math.abs(b.low-origin)<=0.25) : -1;
+  if(side==="HIGH" && previousTime==null && anchorIndex<0)
+    return {evidence:null,candidateAnchor:null,lastObservedBarTime:null,
+      reasonCodes:["MICRO_START_LOW_NOT_IN_COMPLETED_FIVE_MIN_HISTORY"]};
+  const relevant=anchorIndex>=0 ? unique.slice(anchorIndex) : unique;
+  const last=relevant.at(-1);
+  if(relevant.length<5 || !last || previousTime != null && last.time<=previousTime)
     return {evidence:null, candidateAnchor:positive(prior?.candidateAnchor), lastObservedBarTime:last?.time ?? previousTime,
       reasonCodes:["AWAIT_NEW_COMPLETED_5M_CANDLES"]};
-  const past=unique.slice(0,-1);
+  const past=relevant.slice(0,-1);
   const selected=side==="HIGH" ? Math.max(...past.map(b=>b.high)) : Math.min(...past.map(b=>b.low));
   const priorAnchor=positive(prior?.candidateAnchor);
   const candidateAnchor=side==="HIGH" ? Math.max(origin,selected,priorAnchor||origin) :
@@ -33,7 +41,7 @@ export function buildMicroFiveMinuteEvidence({bars = [], evaluationTimeMs = null
     last.low>candidateAnchor && last.close>last.open;
   const length=last.high-last.low;
   const bodyRatio=length>0 ? Math.abs(last.close-last.open)/length : 0;
-  const two=unique.slice(-2).every(b=>side==="HIGH" ? b.close<pivot : b.close>pivot);
+  const two=relevant.slice(-2).every(b=>side==="HIGH" ? b.close<pivot : b.close>pivot);
   const reZone=side==="HIGH" ? true : positive(prior?.confirmedW1High) != null &&
     candidateAnchor>origin && candidateAnchor<prior.confirmedW1High &&
     ((prior.confirmedW1High-candidateAnchor)/(prior.confirmedW1High-origin))>=0.236;
