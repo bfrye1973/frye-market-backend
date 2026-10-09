@@ -16,10 +16,9 @@ on:
     - cron: "30 21 * * 1-4"       # Mon-Thu 2:30 PM Phoenix
     - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix — final weekly run
 
-    # Intraday 4H developing-bar refresh.
+    # Intraday 4H developing-bar refresh — once per hour.
     # Broad UTC window + New York gate below keeps DST correct.
-    - cron: "35 13-21 * * 1-5"     # hourly candidates; gate to 9:30 AM-4:00 PM ET
-    - cron: "5 14-22 * * 1-5"      # final-close candidate; gate to ~4:05 PM ET
+    - cron: "35 13-21 * * 1-5"     # hourly; gate to regular equity session
 
 jobs:
   build_and_publish_4h:
@@ -81,19 +80,16 @@ jobs:
 
           minutes = now.hour * 60 + now.minute
           cash_active = (9 * 60 + 30) <= minutes < (16 * 60)
-          close_capture = (16 * 60) <= minutes <= (16 * 60 + 10)
+          close_capture = False
 
           # Hourly intraday candidates use the developing 4H bar.
-          intraday_candidate = schedule in {
-              "35 13-21 * * 1-5",
-              "5 14-22 * * 1-5",
-          }
+          intraday_candidate = schedule == "35 13-21 * * 1-5"
 
-          if intraday_candidate and (cash_active or close_capture):
+          if intraday_candidate and cash_active:
               mode = "baseline"
-              include_developing = cash_active
+              include_developing = True
               run = True
-              reason = "EQUITY_INTRADAY_4H_REFRESH" if cash_active else "EQUITY_CLOSE_4H_CAPTURE"
+              reason = "EQUITY_INTRADAY_4H_REFRESH"
           elif intraday_candidate:
               mode = "incremental"
               include_developing = False
