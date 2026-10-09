@@ -1,6 +1,8 @@
+import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
+import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
 // READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
-// Micro W5 targets use the user-updated W4 low at 7784.00; prior W3 high remains 7897.75.
+// Micro W1 progression uses Manager-locked 7782.75 start; prior W3 high remains historical.
 const MICRO_TARGETS = [
   ["e0382", "0.382", 7833.75],
   ["e0500", "0.500", 7849.00],
@@ -58,17 +60,78 @@ export function buildCurrentWavelength({
   currentLifecycleState = null,
   intrabarLow = null,
   lastClosed10mClose = null,
+  microCandidateW1High = null,
+  microConfirmedW1High = null,
+  microW1CompletionConfirmed = false,
+  microW1ConfirmationSource = null,
+  microConfirmedW2Low = null,
+  microW2CompletionConfirmed = false,
+  microBars5m = [],
+  evaluationTimeMs = null,
+  previousMicroSequence = null,
 } = {}) {
   const price = n(currentPrice);
   const low = n(intrabarLow);
   const close10m = n(lastClosed10mClose);
-  const microLevels = MICRO_TARGETS.map(([key, label, target]) =>
-    level(key, label, target, price != null && price >= target ? "TOUCHED" : "WATCH")
-  );
-  const microBreach = low != null && low < 7784.00 || price != null && price < 7784.00;
-  const microFailed = close10m != null && close10m < 7784.00;
-  const microStatus = microFailed ? "FAILED" : microBreach ? "INVALIDATION_TOUCHED" : "MICRO_W5_LAUNCH_WATCH";
-  const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach ? "FAILED_REVIEW_REQUIRED" : "PENDING";
+  const previous = previousMicroSequence && typeof previousMicroSequence === "object"
+    ? previousMicroSequence : {};
+  const w1Read = buildMicroFiveMinuteEvidence({
+    bars: microBars5m, evaluationTimeMs, side: "HIGH", origin: 7782.75,
+    prior: { candidateAnchor: previous.candidateW1High,
+      lastObservedBarTime: previous.w1LastObservedBarTime },
+  });
+  const priorHigh = previous.confirmedW1High;
+  const w2Read = (previous.w1Completion?.state === "LOCKED" || previous.w1Completion?.state === "CONFIRMED")
+    ? buildMicroFiveMinuteEvidence({
+      bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7782.75,
+      prior: { candidateAnchor: previous.w2CandidateLow,
+        lastObservedBarTime: previous.w2LastObservedBarTime,
+        confirmedW1High: priorHigh,
+        startAfterTimestamp: previous.w1Completion?.evidence?.sourceTimestamp ||
+          previous.w1ConfirmedAtBarTime || null },
+    }) : { evidence: null, candidateAnchor: null, lastObservedBarTime: null };
+  const w1NewExtreme = previous.w1Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.candidateW1High != null && w1Read.candidateAnchor != null &&
+    w1Read.candidateAnchor > previous.candidateW1High;
+  const w2NewExtreme = previous.w2Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.w2CandidateLow != null && w2Read.candidateAnchor != null &&
+    w2Read.candidateAnchor < previous.w2CandidateLow;
+  const microSequence = buildMicroWaveSequence({
+    currentPrice: price,
+    candidateW1High: w1Read.candidateAnchor ?? previous.candidateW1High ?? microCandidateW1High,
+    w1Evidence5m: w1Read.evidence,
+    w1PriorState: w1NewExtreme ? "DEVELOPING" : previous.w1Completion?.state ?? "DEVELOPING",
+    lockedW1High: previous.w1Completion?.state === "CONFIRMED" ||
+      previous.w1Completion?.state === "LOCKED" ? previous.confirmedW1High : null,
+    w2Evidence5m: w2Read.evidence,
+    w2PriorState: w2NewExtreme ? "DEVELOPING" : previous.w2Completion?.state ?? "DEVELOPING",
+    lockedW2Low: previous.w2Completion?.state === "CONFIRMED" ||
+      previous.w2Completion?.state === "LOCKED" ? previous.confirmedW2Low : null,
+    confirmedW1High: microConfirmedW1High,
+    w1CompletionConfirmed: microW1CompletionConfirmed,
+    w1ConfirmationSource: microW1ConfirmationSource,
+    confirmedW2Low: w2Read.candidateAnchor ?? previous.w2CandidateLow ?? microConfirmedW2Low,
+    w2CompletionConfirmed: microW2CompletionConfirmed,
+  });
+  microSequence.resetReasonCodes = [
+    ...(w1NewExtreme ? ["W1_CANDIDATE_RESET_NEW_HIGH"] : []),
+    ...(w2NewExtreme ? ["W2_CANDIDATE_RESET_NEW_LOW"] : []),
+  ];
+  microSequence.w1LastObservedBarTime = w1Read.lastObservedBarTime;
+  microSequence.w1ConfirmedAtBarTime = previous.w1ConfirmedAtBarTime ||
+    (microSequence.w1Completion?.state === "CONFIRMED" ?
+      microSequence.w1Completion?.evidence?.sourceTimestamp : null);
+  microSequence.w2LastObservedBarTime = w2Read.lastObservedBarTime;
+  microSequence.w2CandidateLow = w2Read.candidateAnchor;
+  const microLevels = microSequence.activeWave === "W1"
+    ? microSequence.projectedW1
+    : microSequence.activeWave === "W2" ? microSequence.projectedW2 : [];
+  const microBreach = low != null && low < 7782.75 || price != null && price < 7782.75;
+  const microFailed = close10m != null && close10m < 7782.75;
+  const microStatus = microFailed ? "FAILED" : microBreach
+    ? "INVALIDATION_TOUCHED" : microSequence.state;
+  const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach
+    ? "FAILED_REVIEW_REQUIRED" : microSequence.confirmationStatus;
 
   // Subminute W3 extension map is PROVISIONAL pending Manager verification of
   // the user's chart anchors: Subminute W1 7575.00 -> 7859.25, W2 7671.50.
@@ -90,9 +153,11 @@ export function buildCurrentWavelength({
   });
   const degrees = {
     micro: {
-      degree: "micro", role: "TIMING_ONLY", activeWave: "W5",
-      state: microStatus, origin: 7784.00, invalidation: 7784.00,
-      confirmation: 7897.75, confirmationStatus: microConfirmationStatus,
+      degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
+      anchorProvenance: microSequence.anchorProvenance,
+      microSequence,
+      state: microStatus, origin: 7782.75, invalidation: 7782.75,
+      confirmation: null, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
       failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
       levels: microLevels, nextLevel: nextLevel(microLevels, price),

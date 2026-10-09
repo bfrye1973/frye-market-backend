@@ -1724,7 +1724,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     currentPrice: context.currentPrice,
   });
 
-  const engine22Display = buildEngine22Display({ degreeStates });
+  let engine22Display = buildEngine22Display({ degreeStates });
   const currentWavelength = buildCurrentWavelength({
     symbol: context.symbol,
     currentPrice: context.currentPrice,
@@ -1732,7 +1732,12 @@ export function buildEngine22WaveStrategy(input = {}) {
     engine22Display,
     waveFibState,
     currentLifecycleState,
+    microBars5m: context.barsByTf?.["5m"] || [],
+    evaluationTimeMs: context.evaluationTimeMs,
+    previousMicroSequence: context.previousMicroSequence,
   });
+
+  engine22Display = buildEngine22Display({ degreeStates, currentWavelength });
 
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,

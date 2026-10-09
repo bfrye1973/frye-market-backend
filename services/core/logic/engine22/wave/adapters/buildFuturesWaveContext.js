@@ -139,6 +139,8 @@ export function buildFuturesWaveContext(input = {}) {
     snapshotNow = null,
     currentTimeSec = null,
     barsByTf = {},
+    evaluationTimeMs = null,
+    previousMicroSequence = null,
   } = input || {};
 
   const symbol = normalizeSymbol(rawSymbol);
@@ -192,6 +194,8 @@ export function buildFuturesWaveContext(input = {}) {
     snapshotNow,
     currentTimeSec,
     barsByTf,
+    evaluationTimeMs,
+    previousMicroSequence,
 
     reasonCodes: [
       "FUTURES_WAVE_CONTEXT_BUILT",
