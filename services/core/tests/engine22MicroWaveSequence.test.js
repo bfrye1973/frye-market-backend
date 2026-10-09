@@ -90,3 +90,13 @@ test("W2 bounce without structural proof cannot complete",()=>{
   });
   assert.equal(r.activeWave,"W2");
 });
+
+test("Manager-locked W4 low provenance and exact W1 fib origin",()=>{
+  const r=buildMicroWaveSequence();
+  assert.equal(r.origin,7782.75);
+  assert.equal(r.invalidation,7782.75);
+  assert.deepEqual(r.anchorProvenance,{
+    source:"MANAGER_LOCKED_MICRO_W4_LOW",price:7782.75,timestamp:"2026-10-08 07:00"
+  });
+  assert.equal(r.projectedW1.find(x=>x.label==="0.500").price,7847.75);
+});
