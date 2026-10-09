@@ -76,6 +76,9 @@ import {
   buildMicroTimingAutomationShadow,
 } from "../logic/engine28a/buildMicroTimingAutomationShadow.js";
 import {
+  buildMicroNegotiatedMidlineConfluence,
+} from "../logic/engine22/microV2/buildMicroNegotiatedMidlineConfluence.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -9957,6 +9960,27 @@ if (
           permission: finalPermission,
         })
       : null;
+
+  /*
+   * Micro + negotiated midpoint confluence.
+   * Read-only quality context only: does not mutate Engine 26 setupGrade or
+   * create permission. W1-W5 can qualify when the active Micro wave is at/near
+   * the canonical negotiated midpoint.
+   */
+  const engine22MicroNegotiatedMidlineConfluence =
+    isEsIntradayScalp
+      ? buildMicroNegotiatedMidlineConfluence({
+          engine22WaveStrategy,
+          engine26LocationCandidate,
+          bars10m:
+            marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+          currentPrice:
+            validPrice(price) ??
+            validPrice(engine26LocationCandidate?.currentPrice) ??
+            null,
+          tickSize: 0.25,
+        })
+      : null;
      
    return {
     strategyId: s.strategyId,
@@ -9979,6 +10003,7 @@ if (
     engine26GeometryHandoff,
     engine26MicroTimingShadow,
     engine28AMicroTimingAutomationShadow,
+    engine22MicroNegotiatedMidlineConfluence,
 
     engine26ImbalanceWatch,
     engine26StructuralContext,
