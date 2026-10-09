@@ -1,0 +1,39 @@
+name: Micro Replay Learning V1
+
+on:
+  push:
+    branches:
+      - micro-learning-replay-v1
+  pull_request:
+    paths:
+      - "services/core/logic/engine28a/buildMicroReplayLearning.js"
+      - "services/core/jobs/auditMicroReplayLearning.js"
+      - "services/core/tests/engine28AMicroReplayLearning.test.js"
+      - ".github/workflows/micro-replay-learning-v1.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine28a/buildMicroReplayLearning.js
+          node --check services/core/jobs/auditMicroReplayLearning.js
+
+      - name: Replay learning tests
+        run: |
+          node --test             services/core/tests/engine28AMicroReplayLearning.test.js
+
+      - name: Existing Micro analytics regressions
+        run: |
+          node --test             services/core/tests/engine28AMicroTimingShadowReplayAudit.test.js             services/core/tests/engine28AMicroTimingAutomationShadow.test.js             services/core/tests/engine22MicroPositionContext.test.js             services/core/tests/engine22MicroNegotiatedMidlineConfluence.test.js
