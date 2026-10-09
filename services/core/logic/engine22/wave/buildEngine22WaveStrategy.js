@@ -1792,6 +1792,24 @@ export function buildEngine22WaveStrategy(input = {}) {
         })
       : null;
 
+  if (replayRecoverySequence) {
+    console.log(
+      "[Engine22 Micro RuntimeState] Recovered locked W1 from Replay",
+      {
+        symbol: context.symbol,
+        confirmedW1High:
+          replayRecoverySequence.confirmedW1High ??
+          null,
+        replayDate:
+          replayRecoverySequence.recoveredReplayDate ??
+          null,
+        replayTime:
+          replayRecoverySequence.recoveredReplayTime ??
+          null,
+      }
+    );
+  }
+
   const previousMicroSequence =
     mergeEngine22MicroSequenceState({
       snapshotSequence:
