@@ -96,6 +96,55 @@ export function buildCurrentWavelength({
   const w2NewExtreme = previous.w2Completion?.state === "COMPLETION_CANDIDATE" &&
     previous.w2CandidateLow != null && w2Read.candidateAnchor != null &&
     w2Read.candidateAnchor < previous.w2CandidateLow;
+
+  /*
+   * W2 must not auto-lock merely because the previous snapshot reached
+   * CONFIRMED. A separate NEW completed 5m structural confirmation is
+   * required before the confirmed W2 low becomes LOCKED.
+   *
+   * This prevents repeated snapshot builds from advancing W2 -> W3_WATCH
+   * without new confirmation evidence.
+   */
+  const w2Evidence = w2Read?.evidence || null;
+  const w2EvidenceClose = Number(w2Evidence?.close);
+  const w2EvidencePivot = Number(w2Evidence?.localPivot);
+  const w2DirectionBreak =
+    w2Evidence?.timeframe === "5m" &&
+    w2Evidence?.closed === true &&
+    Number.isFinite(w2EvidenceClose) &&
+    Number.isFinite(w2EvidencePivot) &&
+    w2EvidenceClose > w2EvidencePivot;
+
+  const w2StrongDisplacement =
+    w2DirectionBreak &&
+    w2Evidence?.displacement === true &&
+    w2Evidence?.displacementQuality === "HIGH" &&
+    Number(w2Evidence?.bodyToRange) >= 0.65;
+
+  const w2SwingBreak =
+    w2DirectionBreak &&
+    w2Evidence?.swingBreak === true;
+
+  const w2TwoCloseConfirmation =
+    w2DirectionBreak &&
+    Number(w2Evidence?.consecutiveClosesBeyondPivot) >= 2;
+
+  const w2LockEvidence =
+    w2Evidence?.anchorRejection === true &&
+    w2Evidence?.validRetracementReaction === true &&
+    (
+      w2TwoCloseConfirmation ||
+      (w2StrongDisplacement && w2SwingBreak)
+    );
+
+  const lockedW2Low =
+    previous.w2Completion?.state === "LOCKED"
+      ? previous.confirmedW2Low
+      : previous.w2Completion?.state === "CONFIRMED" &&
+        w2LockEvidence === true
+      ? previous.confirmedW2Low
+      : null;
+
   const microSequence = buildMicroWaveSequence({
     currentPrice: price,
     candidateW1High: w1Read.candidateAnchor ?? previous.candidateW1High ?? microCandidateW1High,
@@ -105,8 +154,7 @@ export function buildCurrentWavelength({
       previous.w1Completion?.state === "LOCKED" ? previous.confirmedW1High : null,
     w2Evidence5m: w2Read.evidence,
     w2PriorState: w2NewExtreme ? "DEVELOPING" : previous.w2Completion?.state ?? "DEVELOPING",
-    lockedW2Low: previous.w2Completion?.state === "CONFIRMED" ||
-      previous.w2Completion?.state === "LOCKED" ? previous.confirmedW2Low : null,
+    lockedW2Low,
     confirmedW1High: microConfirmedW1High,
     w1CompletionConfirmed: microW1CompletionConfirmed,
     w1ConfirmationSource: microW1ConfirmationSource,
