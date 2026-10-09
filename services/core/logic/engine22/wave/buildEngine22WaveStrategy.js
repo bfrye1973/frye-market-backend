@@ -42,6 +42,7 @@ import {
   mergeEngine22MicroSequenceState,
   persistEngine22MicroWaveRuntimeState,
   readEngine22MicroWaveRuntimeState,
+  resetEngine22MicroW2ToActive,
   recoverLatestLockedMicroSequenceFromReplay,
 } from "./runtimeStateStore.js";
 
@@ -1748,6 +1749,25 @@ export function buildEngine22WaveStrategy(input = {}) {
    *
    * This is structural state only. It creates no trade permission or execution.
    */
+  if (
+    context.marketType === "FUTURES" &&
+    process.env.ENGINE22_MICRO_MANAGER_RESET_W2_ACTIVE === "1"
+  ) {
+    const resetApplied =
+      resetEngine22MicroW2ToActive({
+        symbol: context.symbol,
+      });
+
+    if (resetApplied) {
+      console.log(
+        "[Engine22 Micro RuntimeState] Manager reset applied: W2 restored active",
+        {
+          symbol: context.symbol,
+        }
+      );
+    }
+  }
+
   const durableMicroRecord =
     context.marketType === "FUTURES"
       ? readEngine22MicroWaveRuntimeState({
