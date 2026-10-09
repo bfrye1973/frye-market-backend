@@ -79,6 +79,9 @@ import {
   buildMicroNegotiatedMidlineConfluence,
 } from "../logic/engine22/microV2/buildMicroNegotiatedMidlineConfluence.js";
 import {
+  buildMicroPositionContext,
+} from "../logic/engine22/microV2/buildMicroPositionContext.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -8509,6 +8512,7 @@ attachEngine4AuthorizedReactionParticipation({
       : null;
 
 let engine26OpenPaperTrades = [];
+let engine10OpenEsFamilyTrades = [];
 
 if (isEsIntradayScalp) {
   try {
@@ -8525,6 +8529,19 @@ if (isEsIntradayScalp) {
   } catch (err) {
     console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
     engine26OpenPaperTrades = [];
+  }
+
+  try {
+    const openAllResp = await listTrades({
+      status: "OPEN",
+    });
+
+    engine10OpenEsFamilyTrades = Array.isArray(openAllResp?.trades)
+      ? openAllResp.trades
+      : [];
+  } catch (err) {
+    console.error("[ENGINE10 OPEN POSITION AWARENESS READ ERROR]", err);
+    engine10OpenEsFamilyTrades = [];
   }
 }
 
@@ -9981,6 +9998,29 @@ if (
           tickSize: 0.25,
         })
       : null;
+
+  /*
+   * Micro Position Awareness — read-only comparison of canonical Engine 10
+   * OPEN ES/MES-family positions against Engine 22 Micro structure.
+   * This is assembled after all canonical Strategy 1 owners so it cannot
+   * create or alter permission, sizing, management, execution, or journal.
+   */
+  const microPositionContext =
+    isEsIntradayScalp
+      ? buildMicroPositionContext({
+          engine22WaveStrategy,
+          engine3Reaction:
+            patchedConfluence?.context?.reaction?.paperScalpReaction || null,
+          engine4Participation:
+            patchedConfluence?.context?.volume?.engine4AuthorizedReactionParticipation || null,
+          openTrades:
+            engine10OpenEsFamilyTrades,
+          currentPrice:
+            validPrice(price) ??
+            validPrice(engine26LocationCandidate?.currentPrice) ??
+            null,
+        })
+      : null;
      
    return {
     strategyId: s.strategyId,
@@ -10004,6 +10044,7 @@ if (
     engine26MicroTimingShadow,
     engine28AMicroTimingAutomationShadow,
     engine22MicroNegotiatedMidlineConfluence,
+    microPositionContext,
 
     engine26ImbalanceWatch,
     engine26StructuralContext,
