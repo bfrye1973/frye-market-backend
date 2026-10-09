@@ -40,7 +40,7 @@ test("5m swing break with strong displacement confirms W1",()=>{
   assert.equal(r.w1Completion.state,"COMPLETION_CANDIDATE");
   assert.equal(r.activeWave,"W1");
   assert.ok(r.w1Completion.reasonCodes.includes("FIVE_MIN_DISPLACEMENT"));
-  assert.equal(r.projectedW2.find(x=>x.label==="0.500").price,7824);
+  assert.equal(r.projectedW2.length,0);
 });
 test("structural candidate can confirm W1, lock, and unlock W2",()=>{
   const candidate=buildMicroWaveSequence({candidateW1High:7864,w1Evidence5m:w1});
