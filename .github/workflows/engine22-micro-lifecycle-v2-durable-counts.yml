@@ -1,0 +1,43 @@
+name: Engine22 Micro Lifecycle V2 Durable Counts
+
+on:
+  push:
+    branches:
+      - engine22-micro-lifecycle-v2-durable-counts
+  pull_request:
+    paths:
+      - "docs/engine22-micro-lifecycle-v2-contract.md"
+      - "services/core/logic/engine22/microV2/**"
+      - "services/core/tests/engine22MicroCanonicalStateV2.test.js"
+      - "services/core/tests/engine22MicroLifecycleReducerV2.test.js"
+      - "services/core/tests/engine22MicroDurableCountsV2.test.js"
+      - ".github/workflows/engine22-micro-lifecycle-v2-durable-counts.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/canonicalMicroState.js
+          node --check services/core/logic/engine22/microV2/reduceCanonicalMicroState.js
+          node --check services/core/logic/engine22/microV2/createAuthorizedMicroRecount.js
+          node --check services/core/logic/engine22/microV2/canonicalMicroStore.js
+
+      - name: V2 canonical lifecycle and durable-count tests
+        run: |
+          node --test             services/core/tests/engine22MicroCanonicalStateV2.test.js             services/core/tests/engine22MicroLifecycleReducerV2.test.js             services/core/tests/engine22MicroDurableCountsV2.test.js
+
+      - name: Existing Micro regressions
+        run: |
+          node --test             services/core/tests/engine22MicroWaveSequence.test.js             services/core/tests/engine22MicroFiveMinuteEvidence.test.js             services/core/tests/engine22MicroRuntimePersistence.test.js
