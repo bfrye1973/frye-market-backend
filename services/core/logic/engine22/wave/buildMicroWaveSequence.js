@@ -42,8 +42,9 @@ function evaluateCompletion({ side, evidence, priorState, anchor, lockedAnchor }
   const structurallyConfirmed = validCandidate && (twoCloses || (displacement && swing));
   const nextState = prior === "CONFIRMED" && lockedAnchor != null ? "LOCKED"
     : prior === "CONFIRMED" ? "CONFIRMED"
-    : structurallyConfirmed && (prior === "COMPLETION_CANDIDATE" || prior === "DEVELOPING")
-      ? "CONFIRMED" : validCandidate ? "COMPLETION_CANDIDATE" : prior;
+    : prior === "COMPLETION_CANDIDATE" && structurallyConfirmed ? "CONFIRMED"
+    : prior === "DEVELOPING" && validCandidate ? "COMPLETION_CANDIDATE"
+    : prior;
   return {
     state: nextState, anchor: nextState === "LOCKED" ? lockedAnchor : anchor,
     evidence: { timeframe: is5m ? "5m" : "UNVERIFIED", localPivot: pivot,
@@ -106,18 +107,20 @@ export function buildMicroWaveSequence({
     touchedAt: null, confirmedAt: null,
     anchorSource: "CONFIRMED_MICRO_W1_HIGH",
   }));
+  const w1Locked = w1Completion.state === "LOCKED";
   const w2Low = safe(confirmedW2Low);
   const w2Confirmed = w1Confirmed && (w2Completion.state === "LOCKED" || w2Completion.state === "CONFIRMED" ) &&
     (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) != null &&
     (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) > START && (w2Completion.state === "LOCKED" ? safe(lockedW2Low) : w2Low) < high;
+  const w2Locked = w2Completion.state === "LOCKED";
   return {
     version: "engine22.microWaveSequence.v1",
     role: "TIMING_ONLY",
     origin: START,
     referenceLength: REFERENCE_LENGTH,
     currentPrice: price,
-    activeWave: !w1Confirmed ? "W1" : !w2Confirmed ? "W2" : "W3_WATCH",
-    state: !w1Confirmed ? "MICRO_W1_HIGH_SEARCH" : !w2Confirmed ? "MICRO_W2_PULLBACK_WATCH" : "MICRO_W3_SETUP_WATCH",
+    activeWave: !w1Locked ? "W1" : !w2Locked ? "W2" : "W3_WATCH",
+    state: !w1Locked ? "MICRO_W1_HIGH_SEARCH" : !w2Locked ? "MICRO_W2_PULLBACK_WATCH" : "MICRO_W3_SETUP_WATCH",
     confirmationStatus: !w1Confirmed ? "W1_COMPLETION_NOT_CONFIRMED" : !w2Confirmed ? "W1_CONFIRMED_W2_PENDING" : "W2_CONFIRMED_W3_PENDING",
     candidateW1High: candidate != null && candidate > START ? candidate : null,
     confirmedW1High: high,
