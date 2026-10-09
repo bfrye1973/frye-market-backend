@@ -120,3 +120,22 @@ test("Missing ES price never manufactures an invalidation",()=>{
   assert.notEqual(r.degrees.micro.state,"FAILED");
   assert.notEqual(r.degrees.micro.state,"INVALIDATION_TOUCHED");
 });
+
+
+test("W2 retracement levels mark touched when observed low trades through them",()=> {
+  const lockedW1 = buildMicroWaveSequence({
+    w1PriorState:"LOCKED",
+    lockedW1High:7843,
+    w2ObservedLow:7827,
+  });
+
+  assert.equal(lockedW1.activeWave,"W2");
+
+  const r236 = lockedW1.projectedW2.find(x => x.label === "0.236");
+  const r382 = lockedW1.projectedW2.find(x => x.label === "0.382");
+
+  assert.equal(r236.price,7828.75);
+  assert.equal(r236.status,"TOUCHED");
+  assert.equal(r382.price,7820);
+  assert.equal(r382.status,"WATCH");
+});
