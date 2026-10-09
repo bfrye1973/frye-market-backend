@@ -1,0 +1,39 @@
+name: Engine22 Micro Lifecycle V2 Reducer
+
+on:
+  push:
+    branches:
+      - engine22-micro-lifecycle-v2-reducer
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/microV2/**"
+      - "services/core/tests/engine22MicroCanonicalStateV2.test.js"
+      - "services/core/tests/engine22MicroLifecycleReducerV2.test.js"
+      - ".github/workflows/engine22-micro-lifecycle-v2-reducer.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/canonicalMicroState.js
+          node --check services/core/logic/engine22/microV2/reduceCanonicalMicroState.js
+
+      - name: V2 canonical and lifecycle tests
+        run: |
+          node --test             services/core/tests/engine22MicroCanonicalStateV2.test.js             services/core/tests/engine22MicroLifecycleReducerV2.test.js
+
+      - name: Existing Micro regressions
+        run: |
+          node --test             services/core/tests/engine22MicroWaveSequence.test.js             services/core/tests/engine22MicroFiveMinuteEvidence.test.js             services/core/tests/engine22MicroRuntimePersistence.test.js
