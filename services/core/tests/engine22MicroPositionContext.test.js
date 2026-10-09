@@ -60,7 +60,9 @@ test("open SHORT against W3 UP creates HIGH conflict and do-not-add guidance", (
       engine22WaveStrategy:
         micro(),
       openTrades: [
-        shortTrade(),
+        shortTrade({
+          accountMode: "PAPER",
+        }),
       ],
       currentPrice:
         7862,
@@ -257,5 +259,133 @@ test("module is read-only and never mutates Engine10 trade objects", () => {
   assert.deepEqual(
     trade,
     before
+  );
+});
+
+
+test("REAL alert is suppressed when broker observer freshness is stale", () => {
+  const out =
+    buildMicroPositionContext({
+      engine22WaveStrategy:
+        micro({
+          microTimingState:
+            "TIMING_READY",
+        }),
+      openTrades: [
+        shortTrade({
+          accountMode: "REAL",
+        }),
+      ],
+      realFillObserverState: {
+        accounts: {
+          SCHWAB_6380: {
+            journalAccount:
+              "INTRADAY",
+            lastSuccessfulPollAt:
+              "2026-10-09T19:00:00Z",
+          },
+        },
+      },
+      evaluationTimeMs:
+        Date.parse(
+          "2026-10-09T20:00:00Z"
+        ),
+      realMaxStalenessSec:
+        120,
+    });
+
+  assert.equal(
+    out.positions[0]
+      .positionTruthFreshness
+      .status,
+    "STALE"
+  );
+
+  assert.equal(
+    out.alertsPreview.length,
+    0
+  );
+
+  assert.equal(
+    out.alertsSuppressed.length,
+    1
+  );
+
+  assert.equal(
+    out.alertsSuppressed[0].reason,
+    "REAL_POSITION_TRUTH_NOT_FRESH"
+  );
+});
+
+test("REAL alert becomes eligible only with fresh matching account watermark", () => {
+  const out =
+    buildMicroPositionContext({
+      engine22WaveStrategy:
+        micro({
+          microTimingState:
+            "TIMING_READY",
+        }),
+      openTrades: [
+        shortTrade({
+          accountMode: "REAL",
+        }),
+      ],
+      realFillObserverState: {
+        accounts: {
+          SCHWAB_6380: {
+            journalAccount:
+              "INTRADAY",
+            lastSuccessfulPollAt:
+              "2026-10-09T19:59:30Z",
+          },
+        },
+      },
+      evaluationTimeMs:
+        Date.parse(
+          "2026-10-09T20:00:00Z"
+        ),
+      realMaxStalenessSec:
+        120,
+    });
+
+  assert.equal(
+    out.positions[0]
+      .positionTruthFreshness
+      .status,
+    "FRESH"
+  );
+
+  assert.equal(
+    out.alertsPreview.length,
+    1
+  );
+});
+
+test("PAPER position alert freshness does not depend on Schwab observer", () => {
+  const out =
+    buildMicroPositionContext({
+      engine22WaveStrategy:
+        micro({
+          microTimingState:
+            "TIMING_READY",
+        }),
+      openTrades: [
+        shortTrade({
+          accountMode: "PAPER",
+        }),
+      ],
+      realFillObserverState: null,
+    });
+
+  assert.equal(
+    out.positions[0]
+      .positionTruthFreshness
+      .status,
+    "NOT_REQUIRED"
+  );
+
+  assert.equal(
+    out.alertsPreview.length,
+    1
   );
 });

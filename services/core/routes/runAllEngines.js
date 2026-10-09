@@ -38,6 +38,13 @@ const ENGINE28A_PIPELINE_DOCTOR_JOB = path.resolve(
   "jobs/updateEngine28APipelineDoctor.js"
 );
 
+// Step 3A-alert: Engine 13 reads the completed ES snapshot and may send
+// deduplicated Micro-vs-position warnings. It never mutates trading state.
+const MICRO_POSITION_ALERT_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/alertMicroPositionConflict.js"
+);
+
 // Step 3C: Archive slim ES replay snapshot.
 const ES_REPLAY_ARCHIVE_JOB = path.resolve(
   CORE_DIR,
@@ -284,6 +291,34 @@ async function handle(req, res) {
     });
 
     // ---------------------------------
+    // STEP 3A-ALERT: Micro position-conflict notice
+    //
+    // Alert delivery is intentionally non-authoritative. A notification
+    // failure must never prevent the market/trading engines from refreshing.
+    // ---------------------------------
+    let step3alert = {
+      code: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        skipped: true,
+        reason: "ES_SNAPSHOT_BUILD_FAILED",
+      }),
+      stderr: "",
+      startedAt: null,
+      endedAt: null,
+      elapsedMs: 0,
+    };
+
+    if (step3a.code === 0) {
+      step3alert = await runStep({
+        name: "engine13_micro_position_alert",
+        cmd: "node",
+        args: [MICRO_POSITION_ALERT_JOB],
+        cwd: CORE_DIR,
+      });
+    }
+
+    // ---------------------------------
     // STEP 3B: Engine 28A Pipeline Doctor
     // Reads the completed ES snapshot, writes only Engine 28A output,
     // and attaches the diagnosis before Replay is archived.
@@ -394,6 +429,9 @@ async function handle(req, res) {
       "== STEP 3A: SYMBOL=ES node jobs/buildStrategySnapshot.js ==",
       step3a.stdout,
       "",
+      "== STEP 3A-ALERT: node jobs/alertMicroPositionConflict.js ==",
+      step3alert.stdout,
+      "",
       "== STEP 3B: node jobs/updateEngine28APipelineDoctor.js ==",
       step3doctor.stdout,
       "",
@@ -419,6 +457,9 @@ async function handle(req, res) {
       "",
       "== STEP 3A STDERR ==",
       step3a.stderr,
+      "",
+      "== STEP 3A-ALERT STDERR ==",
+      step3alert.stderr,
       "",
       "== STEP 3B STDERR ==",
       step3doctor.stderr,
@@ -473,6 +514,7 @@ async function handle(req, res) {
         engine1_and_shelves: step1.elapsedMs,
         runAllEngines_sh: step2.elapsedMs,
         build_es_strategy_snapshot: step3a.elapsedMs,
+        engine13_micro_position_alert: step3alert.elapsedMs,
         engine28a_pipeline_doctor: step3doctor.elapsedMs,
         archive_es_replay_snapshot: step3b.elapsedMs,
         engine28a_replay_window_audit: step3audit.elapsedMs,
@@ -502,6 +544,13 @@ async function handle(req, res) {
           startedAt: step3a.startedAt,
           endedAt: step3a.endedAt,
           elapsedMs: step3a.elapsedMs,
+        },
+        engine13_micro_position_alert: {
+          code: step3alert.code,
+          startedAt: step3alert.startedAt,
+          endedAt: step3alert.endedAt,
+          elapsedMs: step3alert.elapsedMs,
+          nonAuthoritative: true,
         },
         engine28a_pipeline_doctor: {
           code: step3doctor.code,
