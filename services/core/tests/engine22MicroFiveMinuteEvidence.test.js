@@ -25,7 +25,7 @@ test("Completed 5m bars derive Micro candidate and close-based evidence",()=>{
   assert.ok(r.evidence.bodyToRange>0.65);
 });
 test("Forming bar is not 5m confirmation evidence",()=>{
-  const r=buildMicroFiveMinuteEvidence({bars,evaluationTimeMs:(base+5*300+1000)*1000});
+  const r=buildMicroFiveMinuteEvidence({bars,evaluationTimeMs:(base+5*300+1)*1000});
   assert.equal(r.lastObservedBarTime,bars[4].time);
 });
 test("Previously observed 5m candle cannot advance a lifecycle twice",()=>{
