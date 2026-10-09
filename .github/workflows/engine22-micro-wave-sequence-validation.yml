@@ -20,4 +20,5 @@ jobs:
           node --check services/core/logic/engine22/wave/buildMicroWaveSequence.js
           node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
           node --check services/core/logic/engine22/wave/buildEngine22Display.js
-          node --test services/core/tests/engine22MicroWaveSequence.test.js
+          node --check services/core/logic/engine22/wave/buildMicroFiveMinuteEvidence.js
+          node --test services/core/tests/engine22MicroWaveSequence.test.js services/core/tests/engine22MicroFiveMinuteEvidence.test.js
