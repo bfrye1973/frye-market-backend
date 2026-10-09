@@ -159,6 +159,11 @@ export function buildCurrentWavelength({
     w1CompletionConfirmed: microW1CompletionConfirmed,
     w1ConfirmationSource: microW1ConfirmationSource,
     confirmedW2Low: w2Read.candidateAnchor ?? previous.w2CandidateLow ?? microConfirmedW2Low,
+    w2ObservedLow:
+      w2Read.candidateAnchor ??
+      previous.w2CandidateLow ??
+      microConfirmedW2Low ??
+      null,
     w2CompletionConfirmed: microW2CompletionConfirmed,
   });
   microSequence.resetReasonCodes = [

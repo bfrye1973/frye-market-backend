@@ -68,6 +68,7 @@ export function buildMicroWaveSequence({
   w1CompletionConfirmed = false,
   w1ConfirmationSource = null,
   confirmedW2Low = null,
+  w2ObservedLow = null,
   w2CompletionConfirmed = false,
   w1Evidence5m = null,
   w2Evidence5m = null,
@@ -104,14 +105,22 @@ export function buildMicroWaveSequence({
   });
   const high = w1Confirmed ? w1Completion.anchor : null;
   const range = high == null ? null : high - START;
-  const projectedW2 = range == null ? [] : W2_RETRACEMENTS.map((ratio) => ({
-    key: "r" + Math.round(ratio * 1000),
-    label: label(ratio),
-    price: tick(high - range * ratio),
-    status: "WATCH",
-    touchedAt: null, confirmedAt: null,
-    anchorSource: "CONFIRMED_MICRO_W1_HIGH",
-  }));
+  const observedW2Low = safe(w2ObservedLow);
+  const projectedW2 = range == null ? [] : W2_RETRACEMENTS.map((ratio) => {
+    const target = tick(high - range * ratio);
+    return {
+      key: "r" + Math.round(ratio * 1000),
+      label: label(ratio),
+      price: target,
+      status:
+        observedW2Low != null && observedW2Low <= target
+          ? "TOUCHED"
+          : "WATCH",
+      touchedAt: null,
+      confirmedAt: null,
+      anchorSource: "CONFIRMED_MICRO_W1_HIGH",
+    };
+  });
   const w1Locked = w1Completion.state === "LOCKED";
   const w2Low = safe(confirmedW2Low);
   const w2Confirmed = w1Confirmed && (w2Completion.state === "LOCKED" || w2Completion.state === "CONFIRMED" ) &&
