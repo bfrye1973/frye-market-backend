@@ -121,8 +121,8 @@ function fixture() {
                   activeWave: "W2",
                   w2Completion: {
                     state: "COMPLETION_CANDIDATE",
+                    reasonCodes: ["FIVE_MIN_SWING_BREAK"],
                     evidence: {
-                      reasonCodes: ["FIVE_MIN_SWING_BREAK"],
                       sourceTimestamp: "2026-10-09T01:25:00.000Z",
                     },
                   },
