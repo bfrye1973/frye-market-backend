@@ -300,3 +300,61 @@ test("candidate identity is carried read-only without alteration", () => {
     }
   );
 });
+
+
+test("Subminute W3 publishes explicit UP direction from current wavelength", () => {
+  const snapshot = {
+    now: "2026-10-10T20:55:00.000Z",
+    strategies: {
+      "intraday_scalp@10m": {
+        engine22WaveStrategy: {
+          currentWavelength: {
+            degrees: {
+              subminute: {
+                activeWave: "W3",
+                direction: "UP",
+                state: "SUBMINUTE_W3_ACTIVE_CANDIDATE",
+                confirmationStatus: "PENDING_TOMORROW",
+                levels: [],
+              },
+            },
+          },
+          degreeStates: {
+            subminute: {
+              activeWave: "W3",
+              direction: null,
+            },
+          },
+          engine22Display: {
+            degrees: {
+              subminute: {
+                badge: "W3",
+                direction: null,
+                headline: "Subminute W3 active candidate",
+                rows: [],
+                levels: [],
+              },
+            },
+          },
+        },
+      },
+    },
+  };
+
+  const out = buildEngine27TraderIntelligenceV2({ snapshot });
+
+  assert.equal(
+    out.degrees.subminute.activeWave,
+    "W3"
+  );
+
+  assert.equal(
+    out.degrees.subminute.waveDirection,
+    "UP"
+  );
+
+  assert.equal(
+    out.degrees.subminute.provenance.sourceMap.waveDirection,
+    "engine22WaveStrategy.currentWavelength"
+  );
+});
