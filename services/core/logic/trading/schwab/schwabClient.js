@@ -140,7 +140,7 @@ export async function exchangeSchwabAuthorizationCode(
     redirect_uri: config.redirectUri,
   });
 
-  return saveSchwabTokens(tokenResponse);
+  return saveSchwabTokens(tokenResponse, { authorization: true });
 }
 
 export async function refreshSchwabAccessToken() {
@@ -170,7 +170,7 @@ export async function refreshSchwabAccessToken() {
       null,
   };
 
-  saveSchwabTokens(mergedResponse);
+  saveSchwabTokens(mergedResponse, { authorization: false });
 
   return {
     ok: true,
