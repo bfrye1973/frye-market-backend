@@ -1,0 +1,48 @@
+name: Strategy Account Entry Context V1
+
+on:
+  push:
+    branches:
+      - strategy-account-entry-context-v1
+  pull_request:
+    paths:
+      - "services/core/logic/accounts/buildStructuralEntryContext.js"
+      - "services/core/logic/accounts/buildStrategyAccountMonitoring.js"
+      - "services/core/logic/journal/tradeJournalStore.js"
+      - "services/core/tests/strategyAccountEntryContext.test.js"
+      - "services/core/tests/engine10RealStructuralEntryContext.test.js"
+      - ".github/workflows/strategy-account-entry-context-v1.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/accounts/buildStructuralEntryContext.js
+          node --check services/core/logic/accounts/buildStrategyAccountMonitoring.js
+          node --check services/core/logic/journal/tradeJournalStore.js
+
+      - name: Entry context tests
+        run: |
+          node --test services/core/tests/strategyAccountEntryContext.test.js
+          node --test services/core/tests/engine10RealStructuralEntryContext.test.js
+
+      - name: Account monitor regressions
+        run: |
+          node --test services/core/tests/strategyAccountRegistry.test.js
+          node --test services/core/tests/strategyAccountMonitoring.test.js
+
+      - name: Engine10 contract regressions
+        run: |
+          node --test services/core/tests/engine10RealContractIdentity.test.js
