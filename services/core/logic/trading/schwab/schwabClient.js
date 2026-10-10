@@ -224,7 +224,7 @@ function accessTokenNeedsRefresh(tokens) {
   }
 
   if (!tokens?.expires_at) {
-    return false;
+    return true;
   }
 
   const expiresAtMs = Date.parse(tokens.expires_at);
