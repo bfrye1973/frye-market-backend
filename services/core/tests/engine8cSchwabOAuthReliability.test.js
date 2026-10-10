@@ -19,7 +19,7 @@ import {
   updateEngine8RealFillAccountWatermark,
 } from "../logic/trading/schwab/engine8RealFillStore.js";
 import { summarizeEngine8Health } from "../logic/trading/schwab/engine8AuthHealth.js";
-import { computeEngine8RealFillQueryStart } from "../logic/trading/schwab/engine8RealFillObserver.js";
+import { computeEngine8RealFillQueryStart, resolveEngine8AccountRecoveryMode } from "../logic/trading/schwab/engine8RealFillObserver.js";
 
 const originalFetch = globalThis.fetch;
 const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "engine8c-sch-"));
@@ -94,6 +94,8 @@ test("account-specific recovery survives state reload and remains bounded by boo
   const state = readEngine8RealFillObserverState();
   assert.equal(state.accounts.SCHWAB_6380.recoveryRequired,false);
   assert.equal(state.accounts.SCHWAB_0747.recoveryRequired,true);
+  assert.equal(resolveEngine8AccountRecoveryMode(false,state.accounts.SCHWAB_6380),false);
+  assert.equal(resolveEngine8AccountRecoveryMode(false,state.accounts.SCHWAB_0747),true);
   const start = computeEngine8RealFillQueryStart({
     deliveryEnabled:true,recoveryMode:true,
     bootstrapStartedAt:"2026-09-01T19:59:29.555Z",
