@@ -7,6 +7,9 @@ import {
   getStrategyAccountRegistry,
   resolveStrategyAccountRole,
 } from "./strategyAccountRegistry.js";
+import {
+  compareStructuralContext,
+} from "./buildStructuralEntryContext.js";
 
 function upper(value) {
   return String(value ?? "").trim().toUpperCase();
@@ -62,6 +65,8 @@ function normalizeTrade(trade) {
     openedAt: trade?.summary?.openTime ?? trade?.entry?.time ?? trade?.createdAt ?? null,
     futuresContractCode: trade?.futuresContractCode ?? trade?.realBroker?.futuresContractCode ?? null,
     source: trade?.source ?? null,
+    structuralContextAtEntry:
+      trade?.structuralContextAtEntry ?? null,
   };
 }
 
@@ -112,6 +117,29 @@ function structuralViewForRole({ role, engine22WaveStrategy }) {
   };
 }
 
+const THESIS_SEVERITY = Object.freeze({
+  ENTRY_STRUCTURE_UNAVAILABLE: 0,
+  ALIGNED: 1,
+  LOWER_DEGREE_PULLBACK: 2,
+  EARLY_WARNING: 3,
+  THESIS_WEAKENING: 4,
+  THESIS_BROKEN: 5,
+});
+
+function worstThesisState(comparisons) {
+  if (!comparisons.length) {
+    return "ENTRY_STRUCTURE_UNAVAILABLE";
+  }
+
+  return comparisons
+    .map((row) => row?.state || "ENTRY_STRUCTURE_UNAVAILABLE")
+    .sort(
+      (left, right) =>
+        (THESIS_SEVERITY[right] || 0) -
+        (THESIS_SEVERITY[left] || 0)
+    )[0];
+}
+
 function summarizeCampaigns(campaigns) {
   if (!campaigns.length) {
     return { positionPresent: false, direction: "FLAT", contracts: 0, campaignCount: 0 };
@@ -147,6 +175,28 @@ export function buildStrategyAccountMonitoring({
       engine22WaveStrategy,
     });
 
+    const campaignComparisons =
+      campaigns.map((campaign) => ({
+        tradeId: campaign.tradeId,
+        direction: campaign.direction,
+        remainingQty: campaign.remainingQty,
+        ...compareStructuralContext({
+          entryContext:
+            campaign.structuralContextAtEntry,
+          currentEngine22WaveStrategy:
+            engine22WaveStrategy,
+          positionDirection:
+            campaign.direction,
+        }),
+      }));
+
+    const thesisState =
+      position.positionPresent
+        ? worstThesisState(
+            campaignComparisons
+          )
+        : "FLAT";
+
     const structureDirection = upper(structure?.direction);
     const positionDirection = upper(position?.direction);
     const aligned =
@@ -175,6 +225,8 @@ export function buildStrategyAccountMonitoring({
       position,
       campaigns,
       structure,
+      campaignComparisons,
+      thesisState,
       alignment: !position.positionPresent ? "FLAT" : aligned ? "ALIGNED" : conflict ? "CONFLICT" : "UNKNOWN",
       conflict,
       lowerDegreeTiming: account.lowerDegreeTiming,
@@ -188,7 +240,7 @@ export function buildStrategyAccountMonitoring({
   const shortContracts = accounts.reduce((sum, account) => sum + (account?.position?.direction === "SHORT" ? Number(account?.position?.contracts || 0) : 0), 0);
 
   return {
-    version: "redline.strategyAccountMonitoring.v1",
+    version: "redline.strategyAccountMonitoring.v2",
     mode: "READ_ONLY",
     instrument: "MES",
     dollarsPerPointPerContract: 5,
