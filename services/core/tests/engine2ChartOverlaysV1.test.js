@@ -36,3 +36,22 @@ test("Primary uses published structural marks and levels", () => {
 test("unsupported symbol rejects source", () => {
   assert.equal(buildEngine2ChartOverlayV1(mock(), "NQ").error, "UNSUPPORTED_SYMBOL");
 });
+
+test("Micro draws its own verified origin and independent W1 anchor without Subminute marks", () => {
+  const micro = {
+    activeWave: "W1", levels: [{key:"e382",price:7832.5,status:"WATCH"}],
+    microSequence: {origin:7782.75,anchorProvenance:{price:7782.75,timestamp:"2026-10-08 07:00"},
+      w1Completion:{state:"CONFIRMED",anchor:7835.25,evidence:{sourceTimestamp:"2026-10-09T16:00:00Z"}}}
+  };
+  const result = buildEngine2ChartOverlayV1(mock(micro));
+  assert.deepEqual(result.degrees.micro.marks.map(m=>m.id), ["MICRO_ORIGIN","MICRO_W1_HIGH"]);
+  assert.equal(result.degrees.micro.marks[1].price, 7835.25);
+  assert.equal(result.degrees.micro.lines[0].price, 7832.5);
+  assert.ok(result.degrees.micro.marks.every(m=>m.price !== 9999));
+});
+test("Micro W1 completion without reliable time must not fabricate an anchor timestamp", () => {
+  const micro = { activeWave:"W1", levels:[], microSequence:{ w1Completion:{state:"COMPLETION_CANDIDATE", anchor:7800.25}} };
+  const result = buildEngine2ChartOverlayV1(mock(micro));
+  assert.equal(result.degrees.micro.marks.length,0);
+  assert.equal(result.degrees.micro.drawable,false);
+});
