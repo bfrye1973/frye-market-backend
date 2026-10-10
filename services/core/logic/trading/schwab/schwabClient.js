@@ -45,16 +45,23 @@ async function readResponseBody(response) {
   }
 }
 
+export function classifySchwabFailure(error) {
+  const status = Number(error?.status || 0);
+  const code = String(error?.brokerCode || "").toLowerCase();
+  if (code === "invalid_grant") return "SCHWAB_INVALID_GRANT";
+  if (status === 429) return "SCHWAB_RATE_LIMITED";
+  if (status === 401 || status === 403) return "SCHWAB_AUTHORIZATION_REJECTED";
+  if (status >= 500 || !status) return "SCHWAB_TEMPORARY_FAILURE";
+  return "SCHWAB_API_FAILURE";
+}
+
 function safeBrokerError({
   status,
   operation,
   body,
 }) {
   const brokerMessage =
-    body?.message ||
-    body?.error_description ||
-    body?.error ||
-    null;
+    body?.error || body?.code || null;
 
   const error = new Error(
     brokerMessage
@@ -65,10 +72,8 @@ function safeBrokerError({
   error.status = status;
   error.operation = operation;
   error.brokerCode =
-    body?.error ||
-    body?.code ||
-    null;
-
+    body?.error || body?.code || null;
+  error.reason = classifySchwabFailure(error);
   return error;
 }
 
