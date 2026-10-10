@@ -13,6 +13,7 @@ import {
   observeSchwabRealFills,
 } from "../logic/trading/schwab/engine8RealFillObserver.js";
 import { markEngine8RealFillRecoveryRequired } from "../logic/trading/schwab/engine8RealFillStore.js";
+import { maybeNotifySchwabHealth } from "../logic/trading/schwab/engine8AuthHealth.js";
 
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(
@@ -109,6 +110,16 @@ while (true) {
       now: startedAt,
       recoveryMode: firstIteration,
     });
+
+    try {
+      const invalid = (out.errors || []).some(e => String(e).includes("invalid_grant"));
+      await maybeNotifySchwabHealth({
+        failedReason: invalid ? "SCHWAB_INVALID_GRANT" : null,
+        recovered: out.ok === true && out.recoveryMode === true && out.accountsRead === 2,
+      });
+    } catch (alertError) {
+      console.error("[engine8 schwab health] notification check failed", String(alertError?.message || "UNKNOWN"));
+    }
 
     console.log(
       JSON.stringify({
