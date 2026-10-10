@@ -94,7 +94,7 @@ test("two independent Node processes serialize refresh against one persisted tok
     run(process.execPath, ["--input-type=module","-e",childScript], { env }),
     run(process.execPath, ["--input-type=module","-e",childScript], { env }),
   ]);
-  assert.equal(fs.readFileSync(logFile,"utf8").trim().split("\\n").length,1);
+  assert.equal(fs.readFileSync(logFile,"utf8").trim().split(String.fromCharCode(10)).length,1);
   assert.equal(readSchwabTokens().refresh_token,"fresh-process-refresh");
 });
 
