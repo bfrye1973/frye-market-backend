@@ -218,7 +218,7 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
-      degree: "subminute", activeWave: "W3",
+      degree: "subminute", activeWave: "W3", direction: "UP",
       state: "SUBMINUTE_W3_ACTIVE_CANDIDATE", origin: 7671.50,
       invalidation: 7671.50,
       confirmationStatus: "PENDING_TOMORROW",
@@ -230,7 +230,7 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     minute: {
-      degree: "minute", activeWave: "W3",
+      degree: "minute", activeWave: "W3", direction: "UP",
       state: "MINUTE_W3_STARTED_CONFIRMATION_PENDING",
       origin: 7576.00, originArea: [7575.00, 7576.00],
       confirmationLevels: [7848.50, 7906.25],
@@ -239,7 +239,7 @@ export function buildCurrentWavelength({
       lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
     },
     minor: {
-      degree: "minor", activeWave: "W5", state: "MINOR_W5_ACTIVE_CANDIDATE",
+      degree: "minor", activeWave: "W5", direction: "UP", state: "MINOR_W5_ACTIVE_CANDIDATE",
       origin: 7398.00, invalidation: 7398.00,
       confirmationStatus: "ACTIVE_CANDIDATE", levels: minorLevels,
       nextLevel: nextLevel(minorLevels, price), lastTouchedLevel: lastTouchedLevel(minorLevels), alertEligibleEvents: ALERT_EVENTS,
