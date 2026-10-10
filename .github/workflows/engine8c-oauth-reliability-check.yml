@@ -18,4 +18,19 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --ignore-scripts
-      - run: node --test services/core/tests/engine8cSchwabOAuthReliability.test.js services/core/tests/engine8RealSchwabObserver.test.js services/core/tests/engine10RealSchwabJournal.test.js services/core/tests/engine10RealBrokerFillLegIdentity.test.js services/core/tests/engine10RealMultiCampaignFifo.test.js services/core/tests/engine10RealFuturesExpirationIdentity.test.js
+      # These legacy Engine 10 test files use shared default fixture paths.
+      # Run separately to avoid parallel Journal fixture collisions.
+      - name: Run Engine 8C and Engine 8/10 regressions in isolation
+        shell: bash
+        run: |
+          set -e
+          for testfile in \
+            services/core/tests/engine8cSchwabOAuthReliability.test.js \
+            services/core/tests/engine8RealSchwabObserver.test.js \
+            services/core/tests/engine10RealSchwabJournal.test.js \
+            services/core/tests/engine10RealBrokerFillLegIdentity.test.js \
+            services/core/tests/engine10RealMultiCampaignFifo.test.js \
+            services/core/tests/engine10RealFuturesExpirationIdentity.test.js
+          do
+            node --test "$testfile"
+          done
