@@ -85,6 +85,12 @@ import {
   readEngine8RealFillObserverState,
 } from "../logic/trading/schwab/engine8RealFillStore.js";
 import {
+  getStrategyAccountRegistry,
+} from "../logic/accounts/strategyAccountRegistry.js";
+import {
+  buildStrategyAccountMonitoring,
+} from "../logic/accounts/buildStrategyAccountMonitoring.js";
+import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import {
@@ -10390,6 +10396,11 @@ console.log("Engine21 alignment fetched");
     thirtyMin: engine21ThirtyMin,
   },
   engine16: null,
+  strategyAccountRegistry:
+    String(symbol || "").toUpperCase() === "ES"
+      ? getStrategyAccountRegistry()
+      : null,
+  strategyAccountMonitoring: null,
   strategies: {},
 };
 
@@ -11503,6 +11514,56 @@ if (String(symbol || "").toUpperCase() === "ES") {
       }
     }
   } 
+
+  if (String(symbol || "").toUpperCase() === "ES") {
+    try {
+      const openReal =
+        await listTrades({
+          status: "OPEN",
+          accountMode: "REAL",
+        });
+
+      result.strategyAccountMonitoring =
+        buildStrategyAccountMonitoring({
+          openTrades:
+            Array.isArray(openReal?.trades)
+              ? openReal.trades
+              : [],
+          engine22WaveStrategy:
+            result.strategies
+              ?.["intraday_scalp@10m"]
+              ?.engine22WaveStrategy ||
+            null,
+        });
+    } catch (error) {
+      console.error(
+        "[STRATEGY ACCOUNT MONITORING ERROR]",
+        error
+      );
+
+      result.strategyAccountMonitoring = {
+        version:
+          "redline.strategyAccountMonitoring.v1",
+        mode:
+          "READ_ONLY",
+        available:
+          false,
+        reasonCodes: [
+          "ENGINE10_REAL_OPEN_POSITION_READ_FAILED",
+        ],
+        error:
+          String(
+            error?.message || error
+          ),
+        noPermissionCreated:
+          true,
+        noExecution:
+          true,
+        noJournalMutation:
+          true,
+      };
+    }
+  }
 
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
