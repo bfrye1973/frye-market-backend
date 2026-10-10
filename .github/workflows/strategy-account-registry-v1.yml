@@ -1,0 +1,48 @@
+name: Strategy Account Registry V1
+
+on:
+  push:
+    branches:
+      - strategy-account-registry-v1
+  pull_request:
+    paths:
+      - "services/core/logic/accounts/**"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/strategyAccountRegistry.test.js"
+      - "services/core/tests/strategyAccountMonitoring.test.js"
+      - "services/core/tests/strategyAccountRegistryWiring.test.js"
+      - ".github/workflows/strategy-account-registry-v1.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/accounts/strategyAccountRegistry.js
+          node --check services/core/logic/accounts/buildStrategyAccountMonitoring.js
+          node --check services/core/jobs/buildStrategySnapshot.js
+
+      - name: Strategy account tests
+        run: |
+          node --test \
+            services/core/tests/strategyAccountRegistry.test.js \
+            services/core/tests/strategyAccountMonitoring.test.js \
+            services/core/tests/strategyAccountRegistryWiring.test.js
+
+      - name: Existing Engine10 and Micro regressions
+        run: |
+          node --test \
+            services/core/tests/engine10RealSchwabJournal.test.js \
+            services/core/tests/engine10RealContractIdentity.test.js \
+            services/core/tests/engine22MicroPositionContext.test.js
