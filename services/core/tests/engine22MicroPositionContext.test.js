@@ -389,3 +389,88 @@ test("PAPER position alert freshness does not depend on Schwab observer", () => 
     1
   );
 });
+
+
+test("REAL SWING/Subminute positions never leak into Micro position awareness", () => {
+  const trade =
+    shortTrade({
+      accountMode: "REAL",
+      qty: 4,
+    });
+
+  trade.tradeId =
+    "T-SUBMINUTE-1";
+
+  trade.journalAccount =
+    "SWING";
+
+  const out =
+    buildMicroPositionContext({
+      engine22WaveStrategy:
+        micro(),
+      openTrades: [
+        trade,
+      ],
+    });
+
+  assert.equal(
+    out.positionPresent,
+    false
+  );
+
+  assert.equal(
+    out.positions.length,
+    0
+  );
+
+  assert.ok(
+    out.reasonCodes.includes(
+      "REAL_POSITIONS_ROUTED_TO_INTRADAY_ONLY"
+    )
+  );
+});
+
+test("REAL INTRADAY and SWING together expose only INTRADAY to Micro", () => {
+  const intraday =
+    shortTrade({
+      accountMode: "REAL",
+      qty: 2,
+    });
+
+  const swing =
+    shortTrade({
+      accountMode: "REAL",
+      qty: 4,
+    });
+
+  swing.tradeId =
+    "T-SUBMINUTE-2";
+
+  swing.journalAccount =
+    "SWING";
+
+  const out =
+    buildMicroPositionContext({
+      engine22WaveStrategy:
+        micro(),
+      openTrades: [
+        intraday,
+        swing,
+      ],
+    });
+
+  assert.equal(
+    out.openPositionCount,
+    1
+  );
+
+  assert.equal(
+    out.positions[0].journalAccount,
+    "INTRADAY"
+  );
+
+  assert.equal(
+    out.positions[0].remainingQty,
+    2
+  );
+});

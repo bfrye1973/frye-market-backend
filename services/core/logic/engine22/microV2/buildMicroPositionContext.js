@@ -114,6 +114,31 @@ function normalizeOpenTrade(trade) {
   const qty =
     remainingQty(trade);
 
+  const accountMode =
+    upper(trade?.accountMode) ||
+    "UNKNOWN";
+
+  const journalAccount =
+    upper(
+      trade?.journalAccount ??
+      trade?.realBroker?.journalAccount
+    );
+
+  /*
+   * Locked six-account rule:
+   * - REAL Micro position awareness belongs only to the INTRADAY account.
+   * - SWING/Subminute and future higher-degree accounts must never leak
+   *   into Micro conflict logic.
+   * - PAPER Strategy 1 remains eligible because it does not depend on
+   *   Schwab journal-account routing.
+   */
+  if (
+    accountMode === "REAL" &&
+    journalAccount !== "INTRADAY"
+  ) {
+    return null;
+  }
+
   if (
     status !== "OPEN" ||
     qty <= 0
@@ -138,9 +163,7 @@ function normalizeOpenTrade(trade) {
       trade?.identity?.tradeId ??
       null,
 
-    accountMode:
-      upper(trade?.accountMode) ||
-      "UNKNOWN",
+    accountMode,
 
     journalAccount:
       trade?.journalAccount ??
@@ -737,6 +760,7 @@ export function buildMicroPositionContext({
 
     reasonCodes: [
       "MICRO_POSITION_AWARENESS_EVALUATED",
+      "REAL_POSITIONS_ROUTED_TO_INTRADAY_ONLY",
       positions.length > 0
         ? "ENGINE10_OPEN_POSITION_PRESENT"
         : "ENGINE10_NO_OPEN_ES_FAMILY_POSITION",
