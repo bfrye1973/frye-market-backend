@@ -12,7 +12,9 @@ export function summarizeEngine8Health(now = Date.now()) {
   const state = readEngine8RealFillObserverState();
   const expiration = token.refreshExpiresAt ? Date.parse(token.refreshExpiresAt) : NaN;
   const hoursLeft = Number.isFinite(expiration) ? (expiration - now) / 3600000 : null;
-  const authHealth = !token.hasRefreshToken ? "NOT_AUTHORIZED"
+  const recordedInvalidGrant = ["SCHWAB_6380", "SCHWAB_0747"].some(label => state.accounts?.[label]?.recoveryRequired === true && state.accounts?.[label]?.recoveryReason === "SCHWAB_INVALID_GRANT");
+  const authHealth = recordedInvalidGrant ? "SCHWAB_INVALID_GRANT"
+    : !token.hasRefreshToken ? "NOT_AUTHORIZED"
     : token.authorizationDeadlineStatus === "AUTH_DEADLINE_UNKNOWN" ? "AUTH_DEADLINE_UNKNOWN"
     : hoursLeft <= 0 ? "REFRESH_TOKEN_EXPIRED"
     : hoursLeft <= 24 ? "EXPIRING_WITHIN_24H"
@@ -37,7 +39,7 @@ export function summarizeEngine8Health(now = Date.now()) {
     lastAuthorizationAt: token.lastAuthorizationAt,
     lastSuccessfulRefreshAt: token.lastSuccessfulRefreshAt,
     refreshTokenExpiresAt: token.refreshExpiresAt,
-    accountDiscoveryHealth: accounts.every(a => a.watcherHealth === "RECENT_SUCCESS") ? "RECENTLY_POLLING_BOTH" : "UNVERIFIED",
+    accountDiscoveryHealth: recordedInvalidGrant ? "AUTHORIZATION_REJECTED" : accounts.every(a => a.watcherHealth === "RECENT_SUCCESS") ? "RECENTLY_POLLING_BOTH" : "UNVERIFIED",
     watcherHealth: accounts.every(a => a.watcherHealth === "RECENT_SUCCESS") ? "RECENT_SUCCESS" : "STALE_OR_UNKNOWN",
     journalSyncHealth: accounts.some(a => a.recoveryRequired) ? "RECOVERY_PENDING" : "NOT_INDEPENDENTLY_RECONCILED",
     accounts,
