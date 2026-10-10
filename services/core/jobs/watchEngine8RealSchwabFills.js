@@ -12,6 +12,7 @@
 import {
   observeSchwabRealFills,
 } from "../logic/trading/schwab/engine8RealFillObserver.js";
+import { markEngine8RealFillRecoveryRequired } from "../logic/trading/schwab/engine8RealFillStore.js";
 
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(
@@ -96,6 +97,8 @@ console.log(
   )
 );
 
+// Preserve restart recovery if the first poll fails before account discovery.
+markEngine8RealFillRecoveryRequired(["SCHWAB_6380", "SCHWAB_0747"], "WATCHER_STARTED");
 let firstIteration = true;
 
 while (true) {
