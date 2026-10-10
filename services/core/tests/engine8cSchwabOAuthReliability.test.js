@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import path from "node:path";
 import {
   exchangeSchwabAuthorizationCode,
@@ -61,6 +63,39 @@ test("new human authorization sets hard deadline; normal refresh and rotation pr
   assert.equal(updated.lastAuthorizationAt, original.lastAuthorizationAt);
   assert.equal(updated.refreshTokenExpiresAt, original.refreshTokenExpiresAt);
   assert.ok(updated.lastSuccessfulRefreshAt);
+});
+
+test("two independent Node processes serialize refresh against one persisted token", async () => {
+  const logFile = path.join(baseDir, "cross-process-refresh.log");
+  saveSchwabTokens({
+    access_token: "old-process-token",
+    refresh_token: "old-process-refresh",
+    expires_in: 0.01,
+    refresh_token_expires_in: 604800,
+  }, { authorization: true });
+  await new Promise(resolve => setTimeout(resolve, 30));
+  const clientUrl = new URL("../logic/trading/schwab/schwabClient.js", import.meta.url).href;
+  const childScript = `
+    import fs from "node:fs";
+    const { getValidSchwabAccessToken } = await import(process.env.TEST_SCHWAB_CLIENT_URL);
+    globalThis.fetch = async () => {
+      fs.appendFileSync(process.env.TEST_REFRESH_LOG, "REFRESH\\n");
+      await new Promise(resolve => setTimeout(resolve, 150));
+      return { ok:true, status:200, text:async () => JSON.stringify({
+        access_token:"fresh-process-access",refresh_token:"fresh-process-refresh",expires_in:1800
+      }) };
+    };
+    const access = await getValidSchwabAccessToken();
+    if (access !== "fresh-process-access") process.exitCode = 1;
+  `;
+  const run = promisify(execFile);
+  const env = { ...process.env, TEST_SCHWAB_CLIENT_URL:clientUrl, TEST_REFRESH_LOG:logFile };
+  await Promise.all([
+    run(process.execPath, ["--input-type=module","-e",childScript], { env }),
+    run(process.execPath, ["--input-type=module","-e",childScript], { env }),
+  ]);
+  assert.equal(fs.readFileSync(logFile,"utf8").trim().split("\\n").length,1);
+  assert.equal(readSchwabTokens().refresh_token,"fresh-process-refresh");
 });
 
 test("legacy credentials with unknown original authorization date remain unknown", () => {
