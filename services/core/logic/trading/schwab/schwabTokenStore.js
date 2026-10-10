@@ -158,61 +158,57 @@ function decryptJson(envelope, encryptionSecret) {
   return JSON.parse(plaintext.toString("utf8"));
 }
 
-function normalizeTokenRecord(tokens = {}) {
+// Preserve the immutable human authorization clock across access-token refreshes.
+function validIso(value) {
+  const ms = Date.parse(String(value || ""));
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+}
+
+function normalizeTokenRecord(tokens = {}, previous = null, authorization = false) {
   const accessToken = String(tokens.access_token || "").trim();
-  const refreshToken = String(tokens.refresh_token || "").trim();
-  const tokenType = String(tokens.token_type || "Bearer").trim();
-  const scope = String(tokens.scope || "").trim();
+  const refreshToken = String(tokens.refresh_token || previous?.refresh_token || "").trim();
+  if (!accessToken) throw new Error("MISSING_SCHWAB_ACCESS_TOKEN");
+  if (!refreshToken) throw new Error("MISSING_SCHWAB_REFRESH_TOKEN");
 
-  const expiresInSeconds = Number(tokens.expires_in);
-  const refreshExpiresInSeconds = Number(
-    tokens.refresh_token_expires_in ??
-      tokens.refresh_expires_in
-  );
+  const now = Date.now();
+  const accessLifetime = Number(tokens.expires_in);
+  const brokerRefreshLifetime = Number(tokens.refresh_token_expires_in ?? tokens.refresh_expires_in);
+  const lastAuthorizationAt = authorization
+    ? new Date(now).toISOString()
+    : validIso(previous?.lastAuthorizationAt || previous?.last_authorization_at);
+  // Legacy records have no provable original authorization time. Fail closed
+  // on deadline reporting instead of perpetually sliding an invented deadline.
+  const refreshTokenExpiresAt = authorization
+    ? (Number.isFinite(brokerRefreshLifetime) && brokerRefreshLifetime > 0
+        ? new Date(now + brokerRefreshLifetime * 1000).toISOString()
+        : new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString())
+    : (lastAuthorizationAt
+        ? (validIso(previous?.refreshTokenExpiresAt || previous?.refresh_expires_at)
+            || new Date(Date.parse(lastAuthorizationAt) + 7 * 24 * 60 * 60 * 1000).toISOString())
+        : null);
 
-  const issuedAtMs = Date.now();
-
-  const expiresAt =
-    Number.isFinite(expiresInSeconds) && expiresInSeconds > 0
-      ? new Date(
-          issuedAtMs + expiresInSeconds * 1000
-        ).toISOString()
-      : null;
-
-  const refreshExpiresAt =
-    Number.isFinite(refreshExpiresInSeconds) &&
-    refreshExpiresInSeconds > 0
-      ? new Date(
-          issuedAtMs + refreshExpiresInSeconds * 1000
-        ).toISOString()
-      : null;
-
-  if (!accessToken) {
-    throw new Error("MISSING_SCHWAB_ACCESS_TOKEN");
-  }
-
-  if (!refreshToken) {
-    throw new Error("MISSING_SCHWAB_REFRESH_TOKEN");
-  }
-
+  const accessTokenExpiresAt = Number.isFinite(accessLifetime) && accessLifetime > 0
+    ? new Date(now + accessLifetime * 1000).toISOString()
+    : null;
+  const lastSuccessfulRefreshAt = authorization
+    ? null
+    : new Date(now).toISOString();
   return {
     access_token: accessToken,
     refresh_token: refreshToken,
-    token_type: tokenType || "Bearer",
-    scope: scope || null,
-    expires_in:
-      Number.isFinite(expiresInSeconds) &&
-      expiresInSeconds > 0
-        ? expiresInSeconds
-        : null,
-    refresh_token_expires_in:
-      Number.isFinite(refreshExpiresInSeconds) &&
-      refreshExpiresInSeconds > 0
-        ? refreshExpiresInSeconds
-        : null,
-    issued_at: nowIso(),
-    expires_at: expiresAt,
-    refresh_expires_at: refreshExpiresAt,
+    token_type: String(tokens.token_type || previous?.token_type || "Bearer").trim(),
+    scope: String(tokens.scope || previous?.scope || "").trim() || null,
+    expires_in: Number.isFinite(accessLifetime) && accessLifetime > 0 ? accessLifetime : null,
+    refresh_token_expires_in: Number.isFinite(brokerRefreshLifetime) && brokerRefreshLifetime > 0
+      ? brokerRefreshLifetime : (previous?.refresh_token_expires_in ?? null),
+    issued_at: new Date(now).toISOString(),
+    expires_at: accessTokenExpiresAt,
+    refresh_expires_at: refreshTokenExpiresAt,
+    lastAuthorizationAt,
+    lastSuccessfulRefreshAt,
+    accessTokenExpiresAt,
+    refreshTokenExpiresAt,
+    authorizationDeadlineStatus: refreshTokenExpiresAt ? "KNOWN" : "AUTH_DEADLINE_UNKNOWN",
   };
 }
 
@@ -224,7 +220,7 @@ export function tokenFileExists() {
   );
 }
 
-export function saveSchwabTokens(tokens) {
+export function saveSchwabTokens(tokens, { authorization = false } = {}) {
   const config = getSchwabConfig();
 
   if (!config.tokenEncryptionKey) {
@@ -233,7 +229,8 @@ export function saveSchwabTokens(tokens) {
 
   ensurePrivateDirectory(config);
 
-  const normalizedTokens = normalizeTokenRecord(tokens);
+  const previous = authorization ? null : readSchwabTokens();
+  const normalizedTokens = normalizeTokenRecord(tokens, previous, authorization);
   const encryptedEnvelope = encryptJson(
     normalizedTokens,
     config.tokenEncryptionKey
@@ -306,6 +303,9 @@ export function getSafeTokenStatus() {
     expiresAt: null,
     refreshExpiresAt: null,
     error: null,
+    lastAuthorizationAt: null,
+    lastSuccessfulRefreshAt: null,
+    authorizationDeadlineStatus: "AUTH_DEADLINE_UNKNOWN",
   };
 
   if (!config.tokenFile) {
@@ -327,14 +327,17 @@ export function getSafeTokenStatus() {
     status.hasRefreshToken = Boolean(tokens?.refresh_token);
     status.expiresAt = tokens?.expires_at || null;
     status.refreshExpiresAt =
-      tokens?.refresh_expires_at || null;
+      tokens?.lastAuthorizationAt ? (tokens?.refreshTokenExpiresAt || tokens?.refresh_expires_at || null) : null;
+    status.lastAuthorizationAt = tokens?.lastAuthorizationAt || null;
+    status.lastSuccessfulRefreshAt = tokens?.lastSuccessfulRefreshAt || null;
+    status.authorizationDeadlineStatus = status.refreshExpiresAt ? "KNOWN" : "AUTH_DEADLINE_UNKNOWN";
 
     status.accessTokenExpired = tokens?.expires_at
       ? Date.parse(tokens.expires_at) <= Date.now()
       : null;
 
-    status.refreshTokenExpired = tokens?.refresh_expires_at
-      ? Date.parse(tokens.refresh_expires_at) <= Date.now()
+    status.refreshTokenExpired = status.refreshExpiresAt
+      ? Date.parse(status.refreshExpiresAt) <= Date.now()
       : null;
   } catch (error) {
     status.error = String(
