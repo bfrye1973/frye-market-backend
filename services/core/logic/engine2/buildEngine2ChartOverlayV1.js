@@ -1,7 +1,6 @@
 // Engine 2B v1 — read-only published-structure chart adapter.
 // Never computes Fibonacci levels, changes engine state, or falls back from Micro to Subminute.
 const DEGREE_NAMES = ["primary", "intermediate", "minor", "minute", "micro"];
-const FIB_KEYS = /^(?:[er c][0-9]+|c[0-9]+)$/i;
 const finite = (value) => value == null || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
 const safeArray = (v) => Array.isArray(v) ? v : [];
 function addLine(lines, id, key, rawPrice, kind, sourcePath, status = null) {
@@ -44,6 +43,31 @@ function markArray(marks, path) {
   }
   return out;
 }
+function microMarks(state, source) {
+  const seq = state?.microSequence || {};
+  const out = [];
+  const origin = seq.anchorProvenance || state.anchorProvenance || null;
+  const originPrice = finite(origin?.price ?? seq.origin ?? state.origin);
+  if (originPrice != null && origin?.timestamp) out.push({
+    id: "MICRO_ORIGIN", label: "ORIGIN", price: originPrice, time: origin.timestamp,
+    status: "LOCKED", sourcePath: source + ".microSequence.anchorProvenance"
+  });
+  const w1Price = finite(seq.w1Completion?.anchor ?? seq.confirmedW1High ?? seq.candidateW1High);
+  const w1Time = seq.w1Completion?.evidence?.sourceTimestamp ?? seq.w1ConfirmedAtBarTime ?? null;
+  if (w1Price != null && w1Time != null) out.push({
+    id: "MICRO_W1_HIGH", label: "W1", price: w1Price, time: w1Time,
+    status: seq.w1Completion?.state || "CANDIDATE",
+    sourcePath: source + ".microSequence.w1Completion"
+  });
+  const w2Price = finite(seq.w2Completion?.anchor ?? seq.confirmedW2Low);
+  const w2Time = seq.w2Completion?.evidence?.sourceTimestamp ?? null;
+  if (w2Price != null && w2Time != null) out.push({
+    id: "MICRO_W2_LOW", label: "W2", price: w2Price, time: w2Time,
+    status: seq.w2Completion?.state || "CANDIDATE",
+    sourcePath: source + ".microSequence.w2Completion"
+  });
+  return out;
+}
 function empty(degree, source, reason) {
   return { degree, drawable: false, reason, severity: "blocking", reasonCodes: [reason],
     sourceDegree: degree, wave: null, marks: [], lines: [], zones: [],
@@ -62,7 +86,7 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
       "engine22WaveStrategy.degreeStates." + degree;
     const state = micro ? wavelength?.degrees?.micro : published?.[degree];
     if (!state || typeof state !== "object") { degrees[degree] = empty(degree, source, "CANONICAL_DEGREE_UNAVAILABLE"); continue; }
-    const marks = micro ? markArray(state?.microSequence?.marks || state?.microSequence?.waves, source + ".microSequence") :
+    const marks = micro ? microMarks(state, source) :
       markArray(state.marks, source + ".marks");
     // For Micro only published currentWavelength levels are authoritative. Never substitute subminute.
     let lines = micro ? levelArray(state.levels, source + ".levels") :
