@@ -22,6 +22,7 @@
 import {
   getSchwabAccountNumbers,
   schwabApiRequest,
+  classifySchwabFailure,
 } from "./schwabClient.js";
 import { getSchwabConfig } from "./schwabConfig.js";
 import {
@@ -466,7 +467,7 @@ export async function observeSchwabRealFills({
     accountsResult =
       await getSchwabAccountNumbers();
   } catch (error) {
-    markEngine8RealFillRecoveryRequired(["SCHWAB_6380", "SCHWAB_0747"], "SCHWAB_ACCOUNT_DISCOVERY_FAILED");
+    markEngine8RealFillRecoveryRequired(["SCHWAB_6380", "SCHWAB_0747"], classifySchwabFailure(error));
     return {
       ...result,
       ok: false,
@@ -593,7 +594,7 @@ export async function observeSchwabRealFills({
         transactions.length;
     } catch (error) {
       accountRun.failed = true;
-      markEngine8RealFillRecoveryRequired(brokerAccountLabel, "SCHWAB_TRANSACTIONS_FAILED");
+      markEngine8RealFillRecoveryRequired(brokerAccountLabel, classifySchwabFailure(error));
       result.accountErrors += 1;
       result.errors.push({
         account:
