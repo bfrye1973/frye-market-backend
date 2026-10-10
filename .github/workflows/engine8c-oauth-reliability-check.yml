@@ -1,0 +1,21 @@
+name: Engine 8C OAuth Reliability Checks
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/trading/schwab/**'
+      - 'services/core/jobs/watchEngine8RealSchwabFills.js'
+      - 'services/core/routes/schwabAuth.js'
+      - 'services/core/tests/engine8cSchwabOAuthReliability.test.js'
+      - '.github/workflows/engine8c-oauth-reliability-check.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts
+      - run: node --test services/core/tests/engine8cSchwabOAuthReliability.test.js services/core/tests/engine8RealSchwabObserver.test.js services/core/tests/engine10RealSchwabJournal.test.js services/core/tests/engine10RealBrokerFillLegIdentity.test.js services/core/tests/engine10RealMultiCampaignFifo.test.js services/core/tests/engine10RealFuturesExpirationIdentity.test.js
