@@ -42,7 +42,6 @@ jobs:
 
       - name: Existing Engine10 and Micro regressions
         run: |
-          node --test \
-            services/core/tests/engine10RealSchwabJournal.test.js \
-            services/core/tests/engine10RealContractIdentity.test.js \
-            services/core/tests/engine22MicroPositionContext.test.js
+          node --test services/core/tests/engine10RealSchwabJournal.test.js
+          node --test services/core/tests/engine10RealContractIdentity.test.js
+          node --test services/core/tests/engine22MicroPositionContext.test.js
