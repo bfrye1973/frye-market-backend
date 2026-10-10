@@ -268,6 +268,10 @@ function normalizeTransactionCandidates({
   };
 }
 
+export function resolveEngine8AccountRecoveryMode(recoveryMode, watermark) {
+  return recoveryMode === true || watermark?.recoveryRequired === true;
+}
+
 export function computeEngine8RealFillQueryStart({
   deliveryEnabled,
   recoveryMode,
@@ -518,7 +522,7 @@ export async function observeSchwabRealFills({
         brokerAccountLabel
       );
 
-    const accountRecoveryMode = recoveryMode === true || existingWatermark?.recoveryRequired === true;
+    const accountRecoveryMode = resolveEngine8AccountRecoveryMode(recoveryMode, existingWatermark);
     if (accountRecoveryMode) result.recoveryMode = true;
 
     let startDate;
