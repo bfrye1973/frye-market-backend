@@ -22,6 +22,7 @@
 import {
   getSchwabAccountNumbers,
   schwabApiRequest,
+  classifySchwabFailure,
 } from "./schwabClient.js";
 import { getSchwabConfig } from "./schwabConfig.js";
 import {
@@ -34,6 +35,7 @@ import {
   getEngine8RealFillBootstrapStartedAt,
   getEngine8RealFillRecord,
   updateEngine8RealFillAccountWatermark,
+  markEngine8RealFillRecoveryRequired,
   upsertEngine8RealFillRecord,
 } from "./engine8RealFillStore.js";
 
@@ -266,6 +268,10 @@ function normalizeTransactionCandidates({
   };
 }
 
+export function resolveEngine8AccountRecoveryMode(recoveryMode, watermark) {
+  return recoveryMode === true || watermark?.recoveryRequired === true;
+}
+
 export function computeEngine8RealFillQueryStart({
   deliveryEnabled,
   recoveryMode,
@@ -465,6 +471,7 @@ export async function observeSchwabRealFills({
     accountsResult =
       await getSchwabAccountNumbers();
   } catch (error) {
+    markEngine8RealFillRecoveryRequired(["SCHWAB_6380", "SCHWAB_0747"], classifySchwabFailure(error));
     return {
       ...result,
       ok: false,
@@ -515,13 +522,16 @@ export async function observeSchwabRealFills({
         brokerAccountLabel
       );
 
+    const accountRecoveryMode = resolveEngine8AccountRecoveryMode(recoveryMode, existingWatermark);
+    if (accountRecoveryMode) result.recoveryMode = true;
+
     let startDate;
 
     try {
       startDate =
         computeEngine8RealFillQueryStart({
           deliveryEnabled,
-          recoveryMode,
+          recoveryMode: accountRecoveryMode,
           bootstrapStartedAt,
           lastBrokerFillTimeSeen:
             existingWatermark
@@ -553,6 +563,7 @@ export async function observeSchwabRealFills({
       startDate,
       endDate,
       existingWatermark,
+      recoveryMode: accountRecoveryMode,
       candidates: [],
       failed: false,
     };
@@ -568,8 +579,7 @@ export async function observeSchwabRealFills({
         accountIdentity.journalAccount,
       startDate,
       endDate,
-      recoveryMode:
-        recoveryMode === true,
+      recoveryMode: accountRecoveryMode,
     });
 
     let transactions;
@@ -588,6 +598,7 @@ export async function observeSchwabRealFills({
         transactions.length;
     } catch (error) {
       accountRun.failed = true;
+      markEngine8RealFillRecoveryRequired(brokerAccountLabel, classifySchwabFailure(error));
       result.accountErrors += 1;
       result.errors.push({
         account:
@@ -904,6 +915,7 @@ export async function observeSchwabRealFills({
       accountRuns.values()
     ) {
       if (accountRun.failed) {
+        markEngine8RealFillRecoveryRequired(accountRun.brokerAccountLabel, "RECOVERY_DELIVERY_INCOMPLETE");
         result.watermarkHeld += 1;
         continue;
       }
@@ -922,6 +934,9 @@ export async function observeSchwabRealFills({
             accountRun.journalAccount,
           lastSuccessfulPollAt:
             endDate,
+          recoveryRequired: false,
+          recoveryReason: null,
+          ...(accountRun.recoveryMode ? { lastRecoverySuccessAt: endDate } : {}),
           ...(latest
             ? {
                 lastBrokerFillTimeSeen:
@@ -949,7 +964,7 @@ export async function observeSchwabRealFills({
         : result.pending > 0
           ? "COMPLETED_WITH_PENDING_ENGINE10_DELIVERIES"
           : deliveryEnabled
-            ? recoveryMode
+            ? result.recoveryMode
               ? "REAL_FILL_RECOVERY_COMPLETE"
               : "REAL_FILL_OBSERVER_DELIVERY_COMPLETE"
             : "REAL_FILL_OBSERVER_DRY_RUN_COMPLETE",
