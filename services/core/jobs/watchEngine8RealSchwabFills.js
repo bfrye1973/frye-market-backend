@@ -141,6 +141,9 @@ while (true) {
       })
     );
   } catch (error) {
+    // A thrown iteration must never cause the next poll to forget catch-up.
+    try { markEngine8RealFillRecoveryRequired(["SCHWAB_6380", "SCHWAB_0747"], "WATCHER_ITERATION_FAILED"); }
+    catch { /* retain original failure log; watcher continues */ }
     console.error(
       "[engine8 real fill watcher] iteration failed:",
       error?.stack || error
