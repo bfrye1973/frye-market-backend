@@ -2,6 +2,9 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import {
+  buildStructuralContextAtEntry,
+} from "../accounts/buildStructuralEntryContext.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +23,11 @@ const JOURNAL_FILE = path.resolve(
 const SNAPSHOT_FILE = path.resolve(
   DATA_DIR,
   "strategy-snapshot.json"
+);
+
+const ES_SNAPSHOT_FILE = path.resolve(
+  DATA_DIR,
+  "strategy-snapshot-es.json"
 );
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -660,6 +668,46 @@ function readStrategySnapshot() {
     now: nowIso(),
     strategies: {},
   });
+}
+
+function readStructuralEntrySnapshot(symbol = null) {
+  const normalized =
+    normalizeSymbol(symbol);
+
+  const preferred =
+    normalized === "ES" ||
+    normalized === "MES"
+      ? ES_SNAPSHOT_FILE
+      : SNAPSHOT_FILE;
+
+  const snapshot =
+    readJson(preferred, null);
+
+  if (
+    snapshot &&
+    typeof snapshot === "object"
+  ) {
+    return snapshot;
+  }
+
+  if (
+    preferred !== SNAPSHOT_FILE
+  ) {
+    return readJson(
+      SNAPSHOT_FILE,
+      {
+        ok: false,
+        now: null,
+        strategies: {},
+      }
+    );
+  }
+
+  return {
+    ok: false,
+    now: null,
+    strategies: {},
+  };
 }
 
 function activeZoneFromStrategyNode(strategyNode) {
@@ -3219,6 +3267,25 @@ function createRealCampaign({
   const tradeId =
     makeRealTradeId(fill);
 
+  const structuralSnapshot =
+    readStructuralEntrySnapshot(
+      fill.instrumentRoot
+    );
+
+  const structuralContextAtEntry =
+    buildStructuralContextAtEntry({
+      strategySnapshot:
+        structuralSnapshot,
+      brokerAccountLabel:
+        fill.brokerAccountLabel,
+      legacyJournalAccount:
+        fill.journalAccount,
+      fillTime:
+        fill.fillTime,
+      capturedAt:
+        nowIso(),
+    });
+
   const openingContracts =
     buildRealOpeningContracts({
       tradeId,
@@ -3333,6 +3400,13 @@ function createRealCampaign({
 
     strategyId:
       "schwab_real@broker",
+
+    strategyAccountRole:
+      structuralContextAtEntry
+        ?.accountRole ||
+      null,
+
+    structuralContextAtEntry,
 
     timeframe:
       "BROKER",
