@@ -344,7 +344,9 @@ function buildDegree({
   const wave = activeWave({ wavelength, display, state });
 
   const direction = normalizeDirection(
-    display?.direction ?? state?.direction
+    wavelength?.direction ??
+    display?.direction ??
+    state?.direction
   );
 
   const condition = currentCondition({
@@ -390,7 +392,9 @@ function buildDegree({
         : "NOT_PUBLISHED",
 
     waveDirection:
-      textOrNull(display?.direction)
+      textOrNull(wavelength?.direction)
+        ? "engine22WaveStrategy.currentWavelength"
+        : textOrNull(display?.direction)
         ? "engine22WaveStrategy.engine22Display"
         : textOrNull(state?.direction)
         ? "engine22WaveStrategy.degreeStates"
