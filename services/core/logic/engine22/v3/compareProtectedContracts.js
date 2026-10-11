@@ -12,7 +12,8 @@ export function compareEngine22V3ProtectedOutputs({legacy=null,candidate=null}={
    differences.push({key,before:clone(before),after:clone(after)});
   }
  }
- const sideEffectKeys=["tradeDecision","tradeContextSummary","topCandidate","action","bias"];
+ const sideEffectKeys=["tradeDecision","tradeContextSummary","topCandidate","action","bias",
+ "engine26Strategy1","engine28ManualPaper","engine27Strategies","engine6Permission"];
  const protectedChanges=sideEffectKeys.filter(key=>
   JSON.stringify(legacy[key]??null)!==JSON.stringify(candidate[key]??null));
  return {pass:differences.length===0&&protectedChanges.length===0,
