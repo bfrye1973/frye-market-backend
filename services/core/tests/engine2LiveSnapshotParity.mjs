@@ -34,7 +34,12 @@ for(const degree of ["primary","intermediate","minor","minute","micro"]) {
   }
   records.push({degree,sourceAvailable:true,drawable:block.drawable,
     marks:block.marks.length,levels:block.lines.filter(l=>l.kind==="FIB").length,
-    reason:block.reason||null});
+    reason:block.reason||null,
+    activeWave:source.activeWave||null,
+    activeFibActive:source.activeFibModel?.active ?? null,
+    activeFibModelType:source.activeFibModel?.modelType||null,
+    microProjectedW1:source.microSequence?.projectedW1?.length ?? null,
+    microProjectedW2:source.microSequence?.projectedW2?.length ?? null});
 }
 console.log("LIVE_ENGINE22_SNAPSHOT_PARITY_PASS",JSON.stringify({
   schema:chart.schemaVersion,sourceMode:owner.currentWavelength?.sourceMode||null,
