@@ -33,9 +33,10 @@ test("ES adapter uses explicit current price with either legacy engine null",()=
  for(const [,i] of versions){assert.equal(buildFuturesWaveContext(i).currentPrice,base.currentPrice);}
 });
 test("Engine22 input isolation differences classified per output family",()=>{
- const results=versions.map(([name,i])=>({name,out:fields(buildEngine22WaveStrategy(i))}));
+ const results=versions.map(([name,i])=>{try {return {name,out:fields(buildEngine22WaveStrategy(i)),error:null};} catch(e) {return {name,out:{},error:String(e?.message||e)};}});
  const families=["degreeStates","currentWavelength","waveFibState","microExecutionContext","waveOpportunity","tradeDecision","timelineRead"];
  const diffs=Object.fromEntries(families.map(key=>[key,results.slice(1).map(r=>({variant:r.name,equal:JSON.stringify(clean(r.out[key]))===JSON.stringify(clean(results[0].out[key]))}))]));
+ console.log("ENGINE22_ISOLATION_ERRORS="+JSON.stringify(results.map(r=>({variant:r.name,error:r.error}))));
  console.log("ENGINE22_ISOLATION_DIFFERENCE_MATRIX="+JSON.stringify(diffs));
  assert.equal(results.length,4);
  // This is a diagnostic test, not a claim of equivalence.
