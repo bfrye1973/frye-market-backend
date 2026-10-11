@@ -29,3 +29,19 @@ test("no inferred start timestamp",()=>{
  const z=s("W1");delete z.waveStartTimestamp;
  assert.ok(propose({degreeState:z,bars:data}).reasonCodes.includes("WAVE_START_TIMESTAMP_REQUIRED"));
 });
+
+test("same completed pivot is not rediscovered on repeated snapshots",()=>{
+ const initial=propose({degreeState:s("W1"),bars:data.slice(0,5)});
+ const prior=s("W1");
+ prior.lastCandidateEvidenceId=initial.candidate.sourceBarId;
+ const again=propose({degreeState:prior,bars:data.slice(0,5)});
+ assert.equal(again.available,false);
+ assert.ok(again.reasonCodes.includes("ALREADY_OBSERVED_CANDIDATE"));
+});
+test("candidate must be confirmed after previously evaluated observation",()=>{
+ const state=s("W1");
+ state.lastEvaluatedEvidenceTimestamp=data[4].sourceTimestamp;
+ const r=propose({degreeState:state,bars:data.slice(0,5)});
+ assert.equal(r.available,false);
+ assert.ok(r.reasonCodes.includes("CANDIDATE_EVIDENCE_NOT_NEWER"));
+});
