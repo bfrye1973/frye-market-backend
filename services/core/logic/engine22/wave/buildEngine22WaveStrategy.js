@@ -38,6 +38,7 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildSubmicroMigrationCandidate } from "../migration/buildSubmicroMigrationCandidate.js";
+import { buildOwnerAuthorizedProvisionalMicroCount } from "../migration/buildOwnerAuthorizedProvisionalMicroCount.js";
 import { buildSevenDegreeShadowProjection } from "../migration/buildSevenDegreeShadowProjection.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
@@ -2045,15 +2046,20 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive, non-authoritative seven-degree preview. No new parent Micro count is
   // fabricated: without independently verified parent identity, preview is incomplete.
   const legacyMicroForSubmicro = microV2Migration?.canonicalState ?? null;
+  // Owner accepted Micro overlap for PROVISIONAL review, not standard impulse.
+  const provisionalParentMicro = context.marketType === "FUTURES" &&
+    normalizeSymbol(context.symbol) === "ES"
+      ? buildOwnerAuthorizedProvisionalMicroCount({ownerAcceptsOverlap:true}).count
+      : null;
   const submicroMigrationCandidate = legacyMicroForSubmicro
     ? buildSubmicroMigrationCandidate({
         sourceMicroState: legacyMicroForSubmicro,
-        parentMicroCountId: null, // Parent unknown until independently verified.
+        parentMicroCountId: provisionalParentMicro?.countId ?? null,
       })
     : null;
   const sevenDegreeMigrationShadow = buildSevenDegreeShadowProjection({
     legacyDegreeStates: degreeStates,
-    microCount: null, // Do not represent the old operating Micro as its new parent.
+    microCount: provisionalParentMicro, // Distinct owner-authorized provisional parent; never locked.
     submicroCandidate: submicroMigrationCandidate?.ok
       ? submicroMigrationCandidate.candidate : null,
   });
