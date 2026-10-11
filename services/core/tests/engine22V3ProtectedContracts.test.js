@@ -47,7 +47,10 @@ test("seven-degree shadow sidecar leaves all legacy contracts byte-identical",()
  }}};
  const preview=buildEngine22V3CompatibilityPreview({legacy,shadow});
  assert.equal(preview.available,true);
- assert.equal(preview.pass,true);
+ assert.equal(preview.pass,false);
+ assert.equal(preview.protectedContractsUnchanged,true);
+ assert.equal(preview.mappingReady,false);
+ assert.ok(preview.reasonCodes.includes("LEGACY_V3_PROJECTION_MAPPING_NOT_WIRED"));
  assert.equal(preview.publicationEligible,false);
  assert.equal(preview.candidate.microExecutionContext.sourceCountId,"OLD-OPERATIONAL-MICRO");
  assert.equal(preview.candidate.engine22V3Shadow.degreeStates.degrees.micro.sourceCountId,"NEW-MICRO-C");
