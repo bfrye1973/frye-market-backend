@@ -19,9 +19,11 @@ export function proposeEngine22V3CanonicalObservation({
  // If market bars are provided, derive the proof from them instead of
  // accepting a caller-provided proof. No structural confirmation is possible
  // without a matching closed-bar pivot and a passed structural rule.
- if(evidence.completionConfirmed===true && (marketBars!==null || waveCandidate!==null)) {
+ if(evidence.completionConfirmed===true) {
+   // Strict V3 invariant: the caller cannot claim a verified wave endpoint.
+   // Independently recompute proof against closed bars for every confirmation.
    if(!Array.isArray(marketBars)||!waveCandidate)
-     return {ok:false,reasonCodes:["MARKET_EVIDENCE_INCOMPLETE"],proposedCanonical:null};
+     return {ok:false,reasonCodes:["MARKET_EVIDENCE_REQUIRED_FOR_COMPLETION"],proposedCanonical:null};
    const assessment=verifyEngine22V3WaveCompletion({
      degreeState:{...source,degreeId:degree},candidate:waveCandidate,bars:marketBars,
    });
