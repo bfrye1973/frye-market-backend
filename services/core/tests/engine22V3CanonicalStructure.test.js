@@ -51,3 +51,20 @@ test("allow unchanged locked anchors with growing history",()=>{
   const a=state(),b=structuredClone(a); b.degrees.MICRO.history.push({event:"EVALUATED"});
   assert.equal(validateEngine22V3Transition(a,b).ok,true);
 });
+
+test("history cannot be rewritten even when its length is preserved",()=>{
+ const a=state(),b=structuredClone(a);
+ b.degrees.MICRO.history[0]={event:"REWRITTEN"};
+ assert.ok(validateEngine22V3Transition(a,b).errors.includes("MICRO_HISTORY_REWRITTEN"));
+});
+test("blank recount IDs never authorize count replacement",()=>{
+ const a=state(),b=structuredClone(a);
+ b.degrees.MICRO.countId="REPLACED";
+ b.degrees.MICRO.provenance.managerApprovalId="";
+ const r=validateEngine22V3Transition(a,b,{approvedRecountIds:[""]});
+ assert.ok(r.errors.includes("MICRO_UNAUTHORIZED_RECOUNT"));
+});
+test("reject inconsistent parent count identity",()=>{
+ const a=state();a.degrees.INTRADAY_SUBMICRO.parentCountId="WRONG-PARENT";
+ assert.ok(validateEngine22V3Canonical(a).errors.includes("INTRADAY_SUBMICRO_PARENT_COUNT_ID_MISMATCH"));
+});
