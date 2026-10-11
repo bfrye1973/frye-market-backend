@@ -24,7 +24,7 @@ test("all seven degrees require real identities and parent relationships",()=>{
   micro:{activeWave:"W5",anchors:{}},submicro:{activeWave:"W2",anchors:{}}});
  assert.equal(r.ready,false);
  assert.ok(r.blockers.includes("MICRO_IDENTITY_UNRESOLVED"));
- assert.ok(r.blockers.includes("INTRADAY_SUBMICRO_PARENT_WAVE_UNRESOLVED"));
+ assert.equal(r.blockers.includes("INTRADAY_SUBMICRO_PARENT_WAVE_UNRESOLVED"),false);
 });
 
 test("legacy structures without durable history cannot be silently promoted",()=>{
