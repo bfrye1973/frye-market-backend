@@ -34,7 +34,7 @@ export function preflightEngine22V3Migration({
     if (parent && !str(parentWave)) blockers.push(degree + "_PARENT_WAVE_UNRESOLVED");
     // Do not synthesize structural anchors from projections or timestamp-less marks.
     const legacyManualDegree = degree !== "MICRO" && degree !== "INTRADAY_SUBMICRO";
-    if (!Array.isArray(source.history) && !legacyManualDegree)
+    if ((!Array.isArray(source.history) || source.history.length === 0) && !legacyManualDegree)
       blockers.push(degree + "_HISTORY_SOURCE_REQUIRED");
     if (source.history?.some(event => event == null || typeof event !== "object"))
       blockers.push(degree + "_HISTORY_INVALID");
