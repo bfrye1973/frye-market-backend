@@ -115,6 +115,19 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
     // Inactive fibs must never be replaced with historical targetModel under an "active" label.
     let lines = micro ? levelArray(state.levels, source + ".levels") :
       activeFib ? levelArray(activeFib.levels ?? activeFib.displayLevels, source + ".activeFibModel") : [];
+    // Prior Micro W1/W2 projection ladders remain structural references, NOT active W3 targets.
+    // They may be displayed as context, with explicit provenance and non-authoritative kind.
+    if (micro && lines.length === 0 && state?.microSequence) {
+      const sequence = state.microSequence;
+      for (const [waveKey, label] of [["projectedW1", "PRIOR W1"], ["projectedW2", "PRIOR W2"]]) {
+        const reference = levelArray(sequence[waveKey], source + ".microSequence." + waveKey);
+        for (const entry of reference) {
+          lines.push({ ...entry, id: waveKey + "_" + entry.id,
+            kind: "FIB_CONTEXT", label: label + " " + entry.label,
+            status: entry.status || "REFERENCE", referenceOnly: true });
+        }
+      }
+    }
     if (!micro && activeFib) {
       addLine(lines, "active_fib_invalidation", "active fib invalidation",
         activeFib.invalidationLevel, "INVALIDATION", source + ".activeFibModel.invalidationLevel");
@@ -131,6 +144,7 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
     const componentAvailability = {
       waveMarks: marks.length > 0,
       fibLevels: lines.some(line => line.kind === "FIB"),
+      historicalFibReferences: lines.some(line => line.kind === "FIB_CONTEXT"),
       structuralLines: lines.some(line => line.kind !== "FIB"),
     };
     degrees[degree] = { degree, sourceDegree: degree, parentDegree: micro ? (wavelength?.degrees?.micro?.parentDegree || "subminute") : (state.parentDegree || null),
