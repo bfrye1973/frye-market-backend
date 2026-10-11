@@ -15,9 +15,24 @@ export function proposeEngine22V3SubmicroMigration({
   if (!str(parentMicroCountId)) errors.push("PARENT_MICRO_ID_REQUIRED");
   if (!str(managerApprovalId)) errors.push("MANAGER_APPROVAL_ID_REQUIRED");
   if (!str(migrationTimestamp)) errors.push("MIGRATION_TIMESTAMP_REQUIRED");
-  if (!Array.isArray(originalMicro?.history)) errors.push("LEGACY_HISTORY_REQUIRED");
+  if (!Array.isArray(originalMicro?.history) || originalMicro.history.length === 0) errors.push("LEGACY_HISTORY_REQUIRED");
   if (!originalMicro?.waves || typeof originalMicro.waves !== "object")
     errors.push("LEGACY_WAVES_REQUIRED");
+  const waves=originalMicro?.waves;
+  const preservedLocks={};
+  if(waves && typeof waves==="object"){
+    for(const [wave,record] of Object.entries(waves)){
+      if(record?.lifecycle!=="LOCKED")continue;
+      if(typeof record.lockedAnchor!=="number" || !Number.isFinite(record.lockedAnchor) ||
+         record.lockedAnchor<=0 || !record.lockedAt){
+        errors.push("LOCKED_WAVE_PROVENANCE_INCOMPLETE_"+wave);
+      }else preservedLocks[wave]={
+        lockedAnchor:record.lockedAnchor,lockedAt:record.lockedAt,
+        completionEvidence:clone(record.completionEvidence ?? null),
+        structuralEvidence:clone(record.structuralEvidence ?? null),
+      };
+    }
+  }
   if (errors.length) return {ok:false,errors,candidate:null};
   const newCountId = "ES-SUBMICRO-FROM-" + sourceCountId;
   const newSequenceId = "ES-SUBMICRO-FROM-" + sourceSequenceId;
@@ -30,12 +45,15 @@ export function proposeEngine22V3SubmicroMigration({
     countId:newCountId,sequenceId:newSequenceId,
     parentDegree:"MICRO",parentCountId:str(parentMicroCountId),
     parentWave:originalMicro.parentContext?.wave ?? null,
+    migrationId:"ES-V3-SUBMICRO-FROM-"+sourceCountId,
     migrationReason:reason,migrationTimestamp,managerApprovalId,
+    managerApprovalRequired:true,
     priorIdentity:{degreeId:"MICRO",countId:sourceCountId,sequenceId:sourceSequenceId,
       revision:originalMicro.revision ?? null,sourceTimestamp:originalMicro.sourceTimestamp ?? null},
     newIdentity:{degreeId:"INTRADAY_SUBMICRO",countId:newCountId,sequenceId:newSequenceId},
     preservedAnchors:clone(originalMicro.waves),
     preservedHistory:clone(originalMicro.history),
+    preservedLocks:clone(preservedLocks),
     sourceProvenance:clone(originalMicro.sourceProvenance ?? originalMicro.parentContext ?? {}),
     publicationEligible:false,automationEligible:false,
     noExecution:true,noPermissionCreated:true,noSizing:true,
