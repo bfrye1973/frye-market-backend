@@ -4,12 +4,18 @@ import {PROPOSED_MICRO_ANCHORS,auditProposedStructuralDegrees} from "./proposedS
 import {buildSubmicroMigrationCandidate} from "./buildSubmicroMigrationCandidate.js";
 import {reviewMicroW4Overlap} from "./reviewMicroW4Overlap.js";
 import {validateSevenDegreeCanonicalPublication} from "./validateSevenDegreeCanonicalPublication.js";
+import {verifyProposedMicroAnchorsAgainstBars} from "./verifyProposedMicroAnchorsAgainstBars.js";
 export function buildSevenDegreeMigrationPreflight({
  legacyMicroCanonicalState=null, parentMicroCountId=null, completed4hBars=[],
+ historicalAnchorBars=[],historicalSourceIdentity=null,historicalTimeZoneVerified=false,
  managerImplementationApproved=false, historicalBarsValidated=false,
  replayValidated=false, microExecutionContext=null
 }={}) {
  const reviewed=auditProposedStructuralDegrees();
+ const historicalAnchorProof=verifyProposedMicroAnchorsAgainstBars({
+  bars:historicalAnchorBars,sourceIdentity:historicalSourceIdentity,
+  timeZoneVerified:historicalTimeZoneVerified
+ });
  const marks=PROPOSED_MICRO_ANCHORS.marks;
  const overlap=reviewMicroW4Overlap({w1High:marks.w1High.price,
    w4Low:marks.w4Low.price,completed4hBars});
@@ -23,9 +29,11 @@ export function buildSevenDegreeMigrationPreflight({
    micro:proposedMicro,submicro:submicro.ok?{
      ...submicro.candidate,parentDegree:submicro.candidate.parentContext.degree
    }:null,managerImplementationApproved,
-   historicalBarsValidated,replayValidated,executionContext:microExecutionContext
+   historicalBarsValidated:historicalBarsValidated && historicalAnchorProof.verified,
+   replayValidated,executionContext:microExecutionContext
  });
  const blockers=[...new Set([...gate.reasonCodes,
+   ...historicalAnchorProof.reasonCodes,
    ...(!submicro.ok?submicro.reasonCodes:[]),
    ...(overlap.classification==="STANDARD_IMPULSE_OVERLAP_REVIEW_REQUIRED"
      ?["MICRO_W1_W4_OVERLAP_REQUIRES_APPROVED_ALTERNATE_CLASSIFICATION"]:[])
@@ -34,7 +42,7 @@ export function buildSevenDegreeMigrationPreflight({
    schema:"engine22.sevenDegreeMigrationPreflight.v1",
    status:blockers.length?"BLOCKED":"READY_FOR_MANAGER_REVIEW",
    publicationEligible:false, // Never grants publication, even if external flags are passed.
-   reasonCodes:blockers,overlap,
+   reasonCodes:blockers,overlap,historicalAnchorProof,
    proposedMicro:PROPOSED_MICRO_ANCHORS,
    submicroCandidate:submicro.ok?submicro.candidate:null,
    preliminaryAudit:reviewed,
