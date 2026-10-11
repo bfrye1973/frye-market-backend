@@ -171,3 +171,20 @@ test("marks and fib levels expose distinct availability", () => {
   assert.equal(block.componentAvailability.fibLevels,false);
   assert.equal(block.model.active,false);
 });
+
+test("missing ES intraday structural lane does not silently borrow different strategy wave counts", () => {
+  const data=mock();
+  data.strategies["minor_swing@1h"]={engine22WaveStrategy:data.strategies["intraday_scalp@10m"].engine22WaveStrategy};
+  delete data.strategies["intraday_scalp@10m"];
+  const result=buildEngine2ChartOverlayV1(data);
+  assert.equal(result.degrees.primary.drawable,false);
+  assert.equal(result.degrees.micro.drawable,false);
+  assert.equal(result.degrees.micro.reason,"CANONICAL_DEGREE_UNAVAILABLE");
+});
+test("Micro current-wavelength display conflict and source mode are explicitly disclosed", () => {
+  const data=mock();
+  data.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.sourceMode="OVERRIDE_DISPLAY_INTELLIGENCE";
+  const micro=buildEngine2ChartOverlayV1(data).degrees.micro;
+  assert.equal(micro.wave.authorityConflict,true);
+  assert.equal(micro.provenance.sourceMode,"OVERRIDE_DISPLAY_INTELLIGENCE");
+});
