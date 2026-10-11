@@ -1,0 +1,25 @@
+name: Engine22 V3 Canonical Foundation
+on:
+  push:
+    branches: [engine22-v3-canonical-foundation-20261011]
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/v3/**"
+      - "services/core/tests/engine22V3*.test.js"
+permissions:
+  contents: read
+jobs:
+  canonical-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check syntax
+        run: |
+          node --check services/core/logic/engine22/v3/canonicalStructure.js
+          node --check services/core/logic/engine22/v3/proposeSubmicroMigration.js
+          node --check services/core/logic/engine22/v3/evaluateWaveTransition.js
+      - name: Run V3 isolated unit tests
+        run: node --test services/core/tests/engine22V3*.test.js
