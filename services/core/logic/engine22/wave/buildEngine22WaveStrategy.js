@@ -2000,6 +2000,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   if (
     context.marketType === "FUTURES" &&
     normalizeSymbol(context.symbol) === "ES" &&
+    process.env.ENGINE22_ISOLATION_SKIP_MICRO_SHADOW !== "1" &&
     currentWavelength?.degrees?.micro?.microSequence
   ) {
     const existingCanonicalMicro =
