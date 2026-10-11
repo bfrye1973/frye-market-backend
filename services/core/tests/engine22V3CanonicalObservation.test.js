@@ -47,9 +47,22 @@ test("bound wave-completion proof produces an auditable proposal only",()=>{
  const e={...evidence(),completionCandidate:false,completionConfirmed:true,structuralRuleId:"RULE-W1",independentConfirmation:true};
  e.structuralProof={countId:base.degrees.MICRO.countId,degreeId:"MICRO",
   activeWave:"W1",sourceBarId:e.sourceBarId,sourceTimestamp:e.sourceTimestamp,
-  ruleId:e.structuralRuleId,validated:true};
+  ruleId:e.structuralRuleId,validated:true,anchorKey:"W1_HIGH",
+  anchor:{price:7852.75,time:"2026-10-11T12:03:00Z"}};
  const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
  assert.equal(r.ok,true);
  assert.equal(r.proposedCanonical.degrees.MICRO.activeWave,"W2");
+ assert.equal(r.proposedCanonical.degrees.MICRO.anchors.W1_HIGH.price,7852.75);
+ assert.equal(r.proposedCanonical.degrees.MICRO.anchors.W1_HIGH.status,"CONFIRMED");
  assert.equal(r.publishAuthorized,false);
+});
+
+test("completion evidence without a confirmed structural endpoint is rejected",()=>{
+ const base=make();base.degrees.MICRO.lifecycle="COMPLETION_CANDIDATE";
+ const e={...evidence(),completionCandidate:false,completionConfirmed:true,structuralRuleId:"RULE-W1",independentConfirmation:true};
+ e.structuralProof={countId:base.degrees.MICRO.countId,degreeId:"MICRO",activeWave:"W1",
+ sourceBarId:e.sourceBarId,sourceTimestamp:e.sourceTimestamp,ruleId:e.structuralRuleId,validated:true};
+ const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
+ assert.equal(r.ok,false);
+ assert.ok(r.reasonCodes.includes("UNBOUND_COMPLETION_PROOF"));
 });
