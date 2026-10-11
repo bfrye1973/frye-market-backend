@@ -24,6 +24,11 @@ for(const degree of ["primary","intermediate","minor","minute","micro"]) {
       .map(v=>typeof v==="object"?Number(v.price):Number(v)).filter(Number.isFinite);
     for(const line of block.lines.filter(l=>l.kind==="FIB"))
       assert.ok(levelPrices.includes(line.price),"Unpublished Micro fib price in chart: "+line.price);
+    const referencePrices=[...(source.microSequence?.projectedW1||[]),...(source.microSequence?.projectedW2||[])]
+      .map(v=>Number(v?.price)).filter(Number.isFinite);
+    for(const line of block.lines.filter(l=>l.kind==="FIB_CONTEXT"))
+      assert.ok(line.referenceOnly===true && referencePrices.includes(line.price),
+        "Unpublished or misidentified Micro historical reference: "+line.price);
     assert.match(block.provenance.structuralSource,/currentWavelength.degrees.micro/);
   } else {
     const active = source.activeFibModel?.active===true ? source.activeFibModel : null;
@@ -34,6 +39,7 @@ for(const degree of ["primary","intermediate","minor","minute","micro"]) {
   }
   records.push({degree,sourceAvailable:true,drawable:block.drawable,
     marks:block.marks.length,levels:block.lines.filter(l=>l.kind==="FIB").length,
+    historicalFibReferences:block.lines.filter(l=>l.kind==="FIB_CONTEXT").length,
     reason:block.reason||null,
     activeWave:source.activeWave||null,
     activeFibActive:source.activeFibModel?.active ?? null,
