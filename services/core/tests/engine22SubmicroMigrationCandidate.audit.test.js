@@ -25,3 +25,20 @@ test("migration fails closed if source is invalid or new parent missing",()=>{
  assert.equal(buildSubmicroMigrationCandidate({sourceMicroState:{},parentMicroCountId:"parent"}).ok,false);
  assert.deepEqual(buildSubmicroMigrationCandidate({sourceMicroState:state()}).reasonCodes,["PARENT_MICRO_COUNT_ID_REQUIRED"]);
 });
+
+test("migration refuses new Micro parent identical to old source count",()=>{
+ const original=state();
+ const r=buildSubmicroMigrationCandidate({sourceMicroState:original,parentMicroCountId:original.countId});
+ assert.equal(r.ok,false);
+ assert.deepEqual(r.reasonCodes,["COUNT_ID_COLLISION"]);
+});
+test("migration-generated identifier is path-safe and deterministic",()=>{
+ const original=state();
+ original.countId="OLD/MICRO/ES";
+ original.sequenceId="OLD/SEQ/ES";
+ const a=buildSubmicroMigrationCandidate({sourceMicroState:original,parentMicroCountId:"NEW-MICRO"});
+ const b=buildSubmicroMigrationCandidate({sourceMicroState:original,parentMicroCountId:"NEW-MICRO"});
+ assert.equal(a.ok,true);
+ assert.equal(a.candidate.countId,b.candidate.countId);
+ assert.doesNotMatch(a.candidate.countId,/\\//);
+});
