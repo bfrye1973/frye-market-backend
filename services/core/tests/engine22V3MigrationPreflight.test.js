@@ -1,0 +1,26 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { preflightEngine22V3Migration } from "../logic/engine22/v3/preflightMigration.js";
+const high={activeWave:"W3",stage:"DEVELOPING",marks:{W1:{low:{price:100,time:"2026-01-01"},high:{price:120,time:"2026-01-02"},status:"CONFIRMED"}}};
+const active=()=>({symbol:"ES",updatedAt:"2026-09-28 08:55",schema:"legacy-v9",
+ activeStructures:Object.fromEntries(["primary","intermediate","minor","minute","subminute"].map(d=>[d,structuredClone(high)]))});
+test("missing smaller degree sources fail closed rather than become placeholders",()=>{
+ const r=preflightEngine22V3Migration({activeWaveState:active()});
+ assert.equal(r.ready,false);
+ assert.ok(r.blockers.includes("MICRO_CANONICAL_SOURCE_MISSING"));
+ assert.ok(r.blockers.includes("INTRADAY_SUBMICRO_CANONICAL_SOURCE_MISSING"));
+ assert.equal(r.canonical,null);
+});
+test("preflight does not modify original manual structure",()=>{
+ const src=active(),saved=structuredClone(src);
+ preflightEngine22V3Migration({activeWaveState:src});
+ assert.deepEqual(src,saved);
+});
+test("all seven degrees require real identities and parent relationships",()=>{
+ const src=active();
+ const r=preflightEngine22V3Migration({activeWaveState:src,
+  micro:{activeWave:"W5",anchors:{}},submicro:{activeWave:"W2",anchors:{}}});
+ assert.equal(r.ready,false);
+ assert.ok(r.blockers.includes("MICRO_IDENTITY_UNRESOLVED"));
+ assert.ok(r.blockers.includes("INTRADAY_SUBMICRO_PARENT_WAVE_UNRESOLVED"));
+});
