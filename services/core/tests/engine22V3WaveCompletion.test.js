@@ -50,3 +50,11 @@ test("reversal bar must equal independently claimed confirmation bar",()=>{
  assert.equal(r.verified,false);
  assert.ok(r.reasonCodes.includes("CONFIRMATION_BAR_NOT_REVERSAL_BAR"));
 });
+
+test("W2 correction may not be confirmed using a bullish high pivot",()=>{
+ const s=state();s.activeWave="W2";s.confirmationRule.wave="W2";
+ const candidateHigh=candidate();candidateHigh.activeWave="W2";
+ const r=verify({degreeState:s,candidate:candidateHigh,bars});
+ assert.equal(r.verified,false);
+ assert.ok(r.reasonCodes.includes("WAVE_PIVOT_SIDE_MISMATCH"));
+});
