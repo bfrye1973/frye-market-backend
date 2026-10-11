@@ -40,7 +40,7 @@ export function buildEngine22V3CompatibilityPreview({legacy=null,shadow=null}={}
  // Legacy degreeStates is a flat map, whereas V3 shadow degreeStates has a
  // nested "degrees" map. Preserving old outputs is necessary, but it is NOT
  // evidence that projection wiring or the live consumer mapping is finished.
- const mappingReady=Boolean(hasSevenIndependentDegrees) &&
+ const mappingReady=Boolean(Boolean(hasSevenIndependentDegrees) &&
   shadow.currentWavelength?.degrees &&
   shadow.engine22Display?.degrees &&
   ["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"]
@@ -49,7 +49,7 @@ export function buildEngine22V3CompatibilityPreview({legacy=null,shadow=null}={}
       return typeof identity==="string" && identity.length>0 &&
        shadow.currentWavelength.degrees[key]?.sourceCountId===identity &&
        shadow.engine22Display.degrees[key]?.degree===key;
-    });
+    }));
  return {available:true,shadowOnly:true,
   pass:comparison.pass && mappingReady,
   protectedContractsUnchanged:comparison.pass,
