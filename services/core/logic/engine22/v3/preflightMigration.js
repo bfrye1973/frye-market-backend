@@ -36,6 +36,15 @@ export function preflightEngine22V3Migration({
           source.publicationEligible !== false)
         blockers.push("SUBMICRO_MIGRATION_PROVENANCE_INVALID");
     }
+    if (degree === "INTRADAY_SUBMICRO" && source.schema === "engine22.v3.migrationCandidate.v1") {
+      for(const [wave,record] of Object.entries(source.preservedAnchors ?? {})){
+        if(record?.lifecycle !== "LOCKED")continue;
+        const lock=source.preservedLocks?.[wave];
+        if(!lock || lock.lockedAnchor !== record.lockedAnchor ||
+           lock.lockedAt !== record.lockedAt)
+          blockers.push("SUBMICRO_LOCK_MIGRATION_MISMATCH_"+wave);
+      }
+    }
     const identity = degreeIdentities[degree] || {};
     if (degree === "INTRADAY_SUBMICRO" && source.countId && identity.countId && source.countId !== identity.countId)
       blockers.push("SUBMICRO_MIGRATED_COUNT_ID_MISMATCH");
