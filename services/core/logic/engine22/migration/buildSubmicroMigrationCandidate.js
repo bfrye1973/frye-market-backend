@@ -4,15 +4,17 @@
 import {validateCanonicalMicroState} from "../microV2/canonicalMicroState.js";
 export const SUBMICRO_MIGRATION_SCHEMA="engine22.submicroMigrationCandidate.v1";
 const clone=x=>JSON.parse(JSON.stringify(x));
+const safeIdentity=x=>String(x||"").trim().replace(/[^A-Za-z0-9._-]/g,"_");
 export function buildSubmicroMigrationCandidate({sourceMicroState=null,parentMicroCountId=null}={}){
  const v=validateCanonicalMicroState(sourceMicroState);
  if(!v.ok) return {ok:false,reasonCodes:["INVALID_SOURCE_MICRO_CANONICAL_STATE",...v.errors]};
  const parent=String(parentMicroCountId||"").trim();
  if(!parent) return {ok:false,reasonCodes:["PARENT_MICRO_COUNT_ID_REQUIRED"]};
  const sourceId=sourceMicroState.countId;
- const id=`ES-SUBMICRO-MIGRATED-FROM-${sourceId}`;
- const seq=`ES-SUBMICRO-SEQ-FROM-${sourceMicroState.sequenceId}`;
- if(id===sourceId||seq===sourceMicroState.sequenceId||parent===id)
+ // Stable deterministic migration IDs; path-safe and derived from source identity.
+ const id=`ES-SUBMICRO-MIGRATED-FROM-${safeIdentity(sourceId)}`;
+ const seq=`ES-SUBMICRO-SEQ-FROM-${safeIdentity(sourceMicroState.sequenceId)}`;
+ if(id===sourceId||seq===sourceMicroState.sequenceId||parent===id || parent===sourceId)
    return {ok:false,reasonCodes:["COUNT_ID_COLLISION"]};
  const candidate={
    schema:SUBMICRO_MIGRATION_SCHEMA,degree:"SUBMICRO",countId:id,sequenceId:seq,
