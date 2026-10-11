@@ -27,7 +27,7 @@ export function assessEngine22V3ImpulseGeometry({anchors=null,direction="UP",cla
  const overlap=b&&e&&sign*(b.price-e.price)>0;
  if(overlap&&classification==="IMPULSE")errors.push("W1_W4_OVERLAP_STANDARD_IMPULSE");
  if(e&&f&&sign*(f.price-e.price)<=0)errors.push("W5_DIRECTION_INVALID");
- if(b&&d&&f&&sign*(d.price-b.price)>0&&sign*(f.price-d.price)>0){
+ if(a&&b&&c&&d&&e&&f&&sign*(d.price-b.price)>0&&sign*(f.price-d.price)>0){
   const w1=Math.abs(b.price-a.price),w3=Math.abs(d.price-c.price),w5=Math.abs(f.price-e.price);
   if(w3<Math.min(w1,w5))errors.push("W3_SHORTEST_IMPULSE");
  }
