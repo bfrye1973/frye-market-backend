@@ -10,7 +10,7 @@ for(const [label,partial] of contexts){
  waveFibState:{activeSetup:partial.activeSetup,activeTradingDegree:"minute",
  degrees:{minute:{direction:"UP",phase:"IN_W2",timing:"EARLY",w4Levels:{w4Low:7770,w3High:7860},fibPressure:{chaseRisk:"LOW"}}}}},
  engine25Context:{ok:true,freshnessStatus:"FRESH",score:82,regime:"CONSTRUCTIVE"},
- marketRegime:{directionBias:"BULLISH",strictness:"NORMAL"}};
+ marketRegime:{directionBias:"LONG",strictness:"MEDIUM"}};
  const runs=[["ready",{readiness:"READY"}],["missing",null],["not_ready",{readiness:"WAIT"}]];
  for(const [condition,e16] of runs){
   try{const o=buildWaveOpportunity({...opts,engine16:e16});console.log("E22_OPPORTUNITY_ISOLATION="+JSON.stringify({label,condition,setup:o.setupType,readiness:o.readiness,timing:o.timing,reasonCodes:o.armingReasonCodes,supportive:o.supportiveContext,blocked:o.reclaimContext?.reclaimBlockedReasonCodes}));}
