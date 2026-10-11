@@ -50,7 +50,7 @@ function microMarks(state, source) {
   const originPrice = finite(origin?.price ?? seq.origin ?? state.origin);
   if (originPrice != null && origin?.timestamp) out.push({
     id: "MICRO_ORIGIN", label: "ORIGIN", price: originPrice, time: origin.timestamp,
-    status: origin?.source?.includes?.("LOCKED") ? "LOCKED" : "SOURCE_ANCHOR", sourcePath: source + ".microSequence.anchorProvenance"
+    status: "SOURCE_ANCHOR", sourcePath: source + ".microSequence.anchorProvenance"
   });
   const w1Price = finite(seq.w1Completion?.anchor ?? seq.confirmedW1High ?? seq.candidateW1High);
   const w1Time = seq.w1Completion?.evidence?.sourceTimestamp ?? seq.w1ConfirmedAtBarTime ?? null;
@@ -112,8 +112,8 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
         confirmationStatus: state.confirmationStatus || null,
         status: state.stage || state.state || null, role: state.role || null },
       marks, lines, zones: [], provenance: { structuralSource: source, sourcesChecked: [source],
-        sourceCountId: micro ? wavelength?.microCanonicalRef?.sourceCountId || null : null,
-        microCanonicalRef: micro ? (wavelength?.microCanonicalRef || null) : null,
+        sourceCountId: null,
+        shadowMicroCanonicalRef: micro ? (wavelength?.microCanonicalRef || null) : null,
         shadowAuthority: micro ? "MICRO_V2_SHADOW_ONLY_NOT_USED" : null,
         fallbackUsed: false } };
   }
