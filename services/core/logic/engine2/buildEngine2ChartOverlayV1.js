@@ -16,11 +16,11 @@ const normalizeTime = (input) => {
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 };
 const safeArray = (v) => Array.isArray(v) ? v : [];
-function addLine(lines, id, key, rawPrice, kind, sourcePath, status = null) {
+function addLine(lines, id, key, rawPrice, kind, sourcePath, status = null, displayLabel = null) {
   const price = finite(rawPrice);
   if (price == null || price <= 0) return;
   if (lines.some((x) => x.id === id)) return;
-  lines.push({ id, key, price, kind, label: key.toUpperCase(), status, sourcePath });
+  lines.push({ id, key, price, kind, label: displayLabel || key.toUpperCase(), status, sourcePath });
 }
 function levelArray(levels, path) {
   const out = [];
@@ -33,8 +33,8 @@ function levelArray(levels, path) {
   } else if (levels && typeof levels === "object") {
     for (const [key, value] of Object.entries(levels)) {
       if (value && typeof value === "object" && !Array.isArray(value)) {
-        addLine(out, key, String(value.label || key), value.price, value.kind || "FIB",
-          path + "." + key, value.status || null);
+        addLine(out, key, key, value.price, value.kind || "FIB",
+          path + "." + key, value.status || null, String(value.label || key));
         continue;
       }
       if (typeof value !== "number" && typeof value !== "string") continue;
