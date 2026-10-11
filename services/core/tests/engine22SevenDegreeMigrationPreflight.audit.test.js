@@ -31,3 +31,15 @@ test("invalid source cannot turn into a Submicro count",()=>{
  assert.equal(a.submicroCandidate,null);
  assert.ok(a.reasonCodes.includes("INVALID_SOURCE_MICRO_CANONICAL_STATE"));
 });
+
+test("manual true historical flag cannot bypass missing identified OHLC proof",()=>{
+ const legacy=createCanonicalMicroState({countId:"OLD",sequenceId:"OLDSEQ",
+ sequenceDirection:"UP",origin:{price:7782.75}});
+ const p=buildSevenDegreeMigrationPreflight({legacyMicroCanonicalState:legacy,
+ parentMicroCountId:"NEW",historicalBarsValidated:true,replayValidated:true,
+ managerImplementationApproved:true});
+ assert.equal(p.historicalAnchorProof.verified,false);
+ assert.ok(p.reasonCodes.includes("HISTORICAL_BARS_MISSING"));
+ assert.ok(p.reasonCodes.includes("HISTORICAL_OHLC_VALIDATION_REQUIRED"));
+ assert.equal(p.publicationEligible,false);
+});
