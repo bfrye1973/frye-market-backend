@@ -13,12 +13,21 @@ function snapshot({
   minute = "UP",
   subminute = "UP",
   micro = "UP",
+  submicro = "UP",
 } = {}) {
   return {
     now: "2026-10-10T19:30:00.000Z",
     strategies: {
       "intraday_scalp@10m": {
         engine22WaveStrategy: {
+          submicroExecutionContext: {
+            activeWave: "W3",
+            waveDirection: submicro,
+            lifecycle: "DEVELOPING",
+            microTimingState: "TRANSITION_CONFIRMING",
+            sourceCountId: "SUBMICRO-1",
+            revision: 4,
+          },
           microExecutionContext: {
             activeWave: "W3",
             waveDirection: micro,
@@ -40,7 +49,7 @@ function snapshot({
   };
 }
 
-test("Subminute entry freezes all six canonical Elliott degrees", () => {
+test("Subminute entry freezes all seven canonical Elliott degrees", () => {
   const entry = buildStructuralContextAtEntry({
     strategySnapshot: snapshot(),
     brokerAccountLabel: "SCHWAB_0747",
@@ -53,7 +62,7 @@ test("Subminute entry freezes all six canonical Elliott degrees", () => {
   assert.equal(entry.accountRole, "SUBMINUTE");
   assert.equal(entry.ownerDegree, "subminute");
   assert.equal(entry.ownerState.direction, "UP");
-  assert.deepEqual(Object.keys(entry.degrees), ["micro", "subminute", "minute", "minor", "intermediate", "primary"]);
+  assert.deepEqual(Object.keys(entry.degrees), ["submicro", "micro", "subminute", "minute", "minor", "intermediate", "primary"]);
   assert.equal(entry.immutable, true);
   assert.equal(entry.historicalBackfill, false);
   assert.equal(entry.captureTiming, "LIVE_SNAPSHOT_AT_ENGINE10_INGEST");
