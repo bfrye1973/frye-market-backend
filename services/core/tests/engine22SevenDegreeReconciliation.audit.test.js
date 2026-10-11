@@ -9,9 +9,9 @@ test("proposed Micro handwritten anchors are distinct, ES-tick-aligned and order
  assert.equal(audit.proposedImpulseAnchorOrderValid,true);
  assert.equal(audit.classicImpulseNoOverlap,false);
  assert.equal(audit.w4OverlapsW1Territory,true);
- assert.equal(PROPOSED_MICRO_ANCHORS.marks.w1High.price-PROPOSED_MICRO_ANCHORS.marks.w4Low.price,20.75);
- assert.equal(PROPOSED_MICRO_ANCHORS.marks.w1High.price,7808.75);
- assert.equal(PROPOSED_MICRO_ANCHORS.marks.w4Low.price,7788);
+ assert.equal(PROPOSED_MICRO_ANCHORS.marks.w1High.price-PROPOSED_MICRO_ANCHORS.marks.w4Low.price,22.25);
+ assert.equal(PROPOSED_MICRO_ANCHORS.marks.w1High.price,7805);
+ assert.equal(PROPOSED_MICRO_ANCHORS.marks.w4Low.price,7782.75);
  assert.equal(PROPOSED_MICRO_ANCHORS.activeWaveCandidate,"W5");
  assert.equal(audit.lockedAnchorsPublished,false);
 });
