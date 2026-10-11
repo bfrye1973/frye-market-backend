@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {proposeEngine22V3SubmicroMigration} from "../logic/engine22/v3/proposeSubmicroMigration.js";
 const args=()=>({
   originalMicro:{countId:"LEGACY-1",sequenceId:"SEQ-1",revision:4,
-    waves:{W1:{status:"LOCKED",price:7852.75}},
+    waves:{W1:{lifecycle:"LOCKED",lockedAnchor:7852.75,lockedAt:"2026-10-09T20:00:00Z",completionEvidence:{bar:"5m-1"}}},
     history:[{event:"W1_LOCKED",id:1}],sourceTimestamp:"2026-10-09T20:00:00Z"},
   parentMicroCountId:"MICRO-PARENT-1",
   managerApprovalId:"MANAGER-TEST-1",
@@ -26,4 +26,20 @@ test("requires reviewed migration approval and parent",()=>{
   assert.equal(r.ok,false);
   assert.ok(r.errors.includes("MANAGER_APPROVAL_ID_REQUIRED"));
   assert.ok(r.errors.includes("PARENT_MICRO_ID_REQUIRED"));
+});
+
+test("a locked Micro wave and its evidence survive migration unchanged",()=>{
+ const a=args();const r=proposeEngine22V3SubmicroMigration(a);
+ assert.equal(r.ok,true);
+ assert.equal(r.candidate.preservedLocks.W1.lockedAnchor,7852.75);
+ assert.equal(r.candidate.preservedLocks.W1.lockedAt,"2026-10-09T20:00:00Z");
+ assert.deepEqual(r.candidate.preservedAnchors.W1,a.originalMicro.waves.W1);
+ assert.equal(r.candidate.managerApprovalRequired,true);
+ assert.ok(r.candidate.migrationId);
+});
+test("incomplete locked-wave provenance stops migration",()=>{
+ const a=args();delete a.originalMicro.waves.W1.lockedAt;
+ const r=proposeEngine22V3SubmicroMigration(a);
+ assert.equal(r.ok,false);
+ assert.ok(r.errors.includes("LOCKED_WAVE_PROVENANCE_INCOMPLETE_W1"));
 });
