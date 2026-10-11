@@ -33,10 +33,15 @@ export function preflightEngine22V3Migration({
     const parentWave = parent ? parentWaves[degree] : null;
     if (parent && !str(parentWave)) blockers.push(degree + "_PARENT_WAVE_UNRESOLVED");
     // Do not synthesize structural anchors from projections or timestamp-less marks.
+    if (!Array.isArray(source.history)) blockers.push(degree + "_HISTORY_SOURCE_REQUIRED");
+    if (source.history?.some(event => event == null || typeof event !== "object"))
+      blockers.push(degree + "_HISTORY_INVALID");
     const raw = source.anchors ?? source.marks ?? {};
     const anchors = {};
     for (const [wave, value] of Object.entries(raw)) {
       if (!value || typeof value !== "object") continue;
+      if (value.status === "LOCKED" && !str(value.lockApprovalId))
+        blockers.push(degree + "_LOCK_PROVENANCE_MISSING_" + wave);
       if (value.price !== undefined) {
         anchors[wave] = {
           price:value.price ?? null,time:value.time ?? null,
@@ -47,9 +52,13 @@ export function preflightEngine22V3Migration({
       } else if (value.low || value.high) {
         for (const side of ["low","high"]) {
           if (!value[side]) continue;
+          if (value.status === "LOCKED" && !str(value.lockApprovalId))
+            blockers.push(degree + "_LOCK_PROVENANCE_MISSING_" + wave + "_" + side.toUpperCase());
           anchors[wave+"_"+side.toUpperCase()] = {
             price:value[side].price ?? null,time:value[side].time ?? null,
-            status:value.status === "CONFIRMED" ? "CONFIRMED" : "DEVELOPING",
+            status:value.status === "LOCKED" ? "LOCKED" :
+              value.status === "CONFIRMED" ? "CONFIRMED" : "DEVELOPING",
+            ...(value.status === "LOCKED" ? {lockApprovalId:value.lockApprovalId} : {}),
           };
         }
       }
@@ -59,7 +68,7 @@ export function preflightEngine22V3Migration({
       parentDegree:parent,parentWave:parentWave || null,
       activeWave:source.activeWave ?? null,
       lifecycle:source.lifecycle ?? source.stage ?? "DEVELOPING",
-      anchors,history:clone(source.history ?? []),
+      anchors,history:Array.isArray(source.history) ? clone(source.history) : [],
       provenance:{
         originalDegree:degree,source:degree === "MICRO" ? "OWNER_REVIEW_MICRO" :
           degree === "INTRADAY_SUBMICRO" ? "APPROVED_LEGACY_MIGRATION" :
@@ -70,6 +79,7 @@ export function preflightEngine22V3Migration({
       },
       invalidation:clone(source.invalidation ?? {}),
       fibModel:{levels:[],source:"DERIVED_ONLY"},
+      legacyStructure:clone(source),
     };
   }
   if (!str(sourceTimestamp)) blockers.push("SOURCE_TIMESTAMP_REQUIRED");
