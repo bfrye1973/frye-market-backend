@@ -26,7 +26,19 @@ export function preflightEngine22V3Migration({
       blockers.push(degree + "_CANONICAL_SOURCE_MISSING");
       continue;
     }
+    if (degree === "INTRADAY_SUBMICRO" && source.schema === "engine22.v3.migrationCandidate.v1") {
+      if (source.degreeId !== "INTRADAY_SUBMICRO" ||
+          source.parentDegree !== "MICRO" ||
+          !str(source.managerApprovalId) ||
+          source.priorIdentity?.degreeId !== "MICRO" ||
+          source.newIdentity?.countId !== source.countId ||
+          source.newIdentity?.sequenceId !== source.sequenceId ||
+          source.publicationEligible !== false)
+        blockers.push("SUBMICRO_MIGRATION_PROVENANCE_INVALID");
+    }
     const identity = degreeIdentities[degree] || {};
+    if (degree === "INTRADAY_SUBMICRO" && source.countId && identity.countId && source.countId !== identity.countId)
+      blockers.push("SUBMICRO_MIGRATED_COUNT_ID_MISMATCH");
     if (!str(identity.countId) || !str(identity.sequenceId))
       blockers.push(degree + "_IDENTITY_UNRESOLVED");
     const parent = ENGINE22_V3_PARENT[degree];
@@ -34,11 +46,13 @@ export function preflightEngine22V3Migration({
     if (parent && !str(parentWave)) blockers.push(degree + "_PARENT_WAVE_UNRESOLVED");
     // Do not synthesize structural anchors from projections or timestamp-less marks.
     const legacyManualDegree = degree !== "MICRO" && degree !== "INTRADAY_SUBMICRO";
-    if ((!Array.isArray(source.history) || source.history.length === 0) && !legacyManualDegree)
+    const sourcedHistory=degree==="INTRADAY_SUBMICRO" && source.schema==="engine22.v3.migrationCandidate.v1"
+      ? source.preservedHistory : source.history;
+    if ((!Array.isArray(sourcedHistory) || sourcedHistory.length === 0) && !legacyManualDegree)
       blockers.push(degree + "_HISTORY_SOURCE_REQUIRED");
-    if (source.history?.some(event => event == null || typeof event !== "object"))
+    if (sourcedHistory?.some(event => event == null || typeof event !== "object"))
       blockers.push(degree + "_HISTORY_INVALID");
-    const raw = source.anchors ?? source.marks ?? {};
+    const raw = source.anchors ?? source.marks ?? source.preservedAnchors ?? {};
     const anchors = {};
     for (const [wave, value] of Object.entries(raw)) {
       if (!value || typeof value !== "object") continue;
@@ -71,7 +85,7 @@ export function preflightEngine22V3Migration({
       activeWave:source.activeWave ?? null,
       lifecycle:source.lifecycle ?? source.stage ?? "DEVELOPING",
       anchors,
-      history:Array.isArray(source.history) ? clone(source.history) :
+      history:Array.isArray(sourcedHistory) ? clone(sourcedHistory) :
         [{
           event:"LEGACY_SOURCE_BASELINE_IMPORTED",
           source:"ACTIVE_WAVE_STATE_ES",
@@ -89,6 +103,8 @@ export function preflightEngine22V3Migration({
         priorStateSchema:activeWaveState.schema,
         priorUpdatedAt:activeWaveState.updatedAt ?? null,
         priorCountId:source.priorIdentity?.countId ?? null,
+        migrationApprovalId:source.managerApprovalId ?? null,
+        migrationReason:source.migrationReason ?? null,
       },
       invalidation:clone(source.invalidation ?? {}),
       fibModel:{levels:[],source:"DERIVED_ONLY"},
