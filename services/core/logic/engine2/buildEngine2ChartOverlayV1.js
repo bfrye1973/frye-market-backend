@@ -6,12 +6,12 @@ const normalizeTime = (input) => {
   if (typeof input === "number" && Number.isFinite(input)) return input > 1e12 ? Math.floor(input / 1000) : Math.floor(input);
   if (typeof input !== "string" || !input.trim()) return null;
   const raw = input.trim();
-  if (/^\\d{10,13}$/.test(raw)) return normalizeTime(Number(raw));
+  if (/^\d{10,13}$/.test(raw)) return normalizeTime(Number(raw));
   // Published timezone-naive Engine22 timestamps are Phoenix local by current convention.
   // Calendar date without time represents a day, not a verified intraday anchor.
   const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
-  if (!/T\\d{2}:\\d{2}/.test(normalized)) return null;
-  const zoned = /(?:Z|[+-]\\d{2}:\\d{2})$/.test(normalized) ? normalized : normalized + "-07:00";
+  if (!/T\d{2}:\d{2}/.test(normalized)) return null;
+  const zoned = /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : normalized + "-07:00";
   const ms = Date.parse(zoned);
   return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
 };
