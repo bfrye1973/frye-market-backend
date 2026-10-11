@@ -1,6 +1,7 @@
 import { resolveStrategyAccountRole } from "./strategyAccountRegistry.js";
 
 const DEGREE_ORDER = Object.freeze([
+  "submicro",
   "micro",
   "subminute",
   "minute",
@@ -33,6 +34,24 @@ function normalizeDirection(value) {
 
 function degreeState(engine22WaveStrategy, degree) {
   if (!engine22WaveStrategy) return null;
+
+  if (degree === "submicro") {
+    const submicro = engine22WaveStrategy?.submicroExecutionContext || null;
+    if (!submicro) return null;
+    return {
+      degree: "submicro",
+      source: "engine22WaveStrategy.submicroExecutionContext",
+      activeWave: text(submicro?.activeWave),
+      direction: normalizeDirection(submicro?.waveDirection ?? submicro?.direction),
+      lifecycle: text(submicro?.lifecycle),
+      stage: text(submicro?.microTimingState ?? submicro?.stage),
+      countStatus: text(submicro?.countStatus),
+      countId: text(submicro?.sourceCountId ?? submicro?.countId),
+      revision: Number.isFinite(Number(submicro?.revision)) ? Number(submicro.revision) : null,
+      sourceTimestamp: text(submicro?.sourceTimestamp),
+      invalidation: clone(submicro?.invalidation ?? null),
+    };
+  }
 
   if (degree === "micro") {
     const micro = engine22WaveStrategy?.microExecutionContext || null;
