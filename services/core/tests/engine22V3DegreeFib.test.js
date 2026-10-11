@@ -35,3 +35,25 @@ test("provisional anchors are clearly labeled",()=>{
  assert.equal(r.available,true);
  assert.equal(r.provisional,true);
 });
+
+test("owner-confirmed Submicro anchors project W3 independently while W3 develops",()=>{
+ const s=make();
+ s.degrees.INTRADAY_SUBMICRO.anchors={
+  W1_LOW:anchor(7782.50,"2026-10-08 10:00"),
+  W1_HIGH:anchor(7853.75,"2026-10-09 05:00"),
+  W2_LOW:anchor(7826.25,"2026-10-09 06:00"),
+ };
+ // Test fixture only: does not construct/approve a migrated production count.
+ const r=projectEngine22V3DegreeFib({canonical:s,degree:"INTRADAY_SUBMICRO"});
+ assert.equal(r.available,true);
+ assert.equal(r.wave1Length,71.25);
+ assert.equal(r.projectionBase,7826.25);
+ assert.equal(r.levels.find(x=>x.key==="e1000").price,7897.50);
+ assert.equal(r.levels.find(x=>x.key==="e1272").price,7916.75);
+ assert.equal(r.levels.find(x=>x.key==="e1618").price,7941.50);
+ assert.equal(r.levels.find(x=>x.key==="e2000").price,7968.75);
+ assert.equal(r.noExecution,true);
+ assert.ok(r.levels.every(x=>x.status==="WATCH"));
+ assert.equal(s.degrees.INTRADAY_SUBMICRO.lifecycle,"DEVELOPING");
+ assert.deepEqual(s.degrees.MICRO.anchors.W1_LOW,anchor(7675,"2026-10-01 07:00"));
+});
