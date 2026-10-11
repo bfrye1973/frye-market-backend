@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import {fileURLToPath} from "node:url";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { preflightEngine22V3Migration } from "../logic/engine22/v3/preflightMigration.js";
@@ -36,4 +38,16 @@ test("legacy structures without durable history cannot be silently promoted",()=
  });
  assert.ok(r.blockers.includes("MINUTE_HISTORY_SOURCE_REQUIRED"));
  assert.equal(r.ready,false);
+});
+
+test("real September active wave source must not be promoted with missing Micro history",()=>{
+ const filename=fileURLToPath(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url));
+ const source=JSON.parse(fs.readFileSync(filename,"utf8"));
+ const before=structuredClone(source);
+ const result=preflightEngine22V3Migration({activeWaveState:source});
+ assert.equal(result.ready,false);
+ assert.equal(result.canonical,null);
+ assert.ok(result.blockers.includes("MICRO_CANONICAL_SOURCE_MISSING"));
+ assert.ok(result.blockers.includes("INTRADAY_SUBMICRO_CANONICAL_SOURCE_MISSING"));
+ assert.deepEqual(source,before);
 });
