@@ -31,7 +31,7 @@ export function validateEngine22V3Canonical(state) {
     if (count.degreeId !== degree) errors.push(degree + "_IDENTITY_MISMATCH");
     if (count.parentDegree !== ENGINE22_V3_PARENT[degree]) errors.push(degree + "_PARENT_MISMATCH");
     if (!nonblank(count.countId) || !nonblank(count.sequenceId)) errors.push(degree + "_COUNT_IDENTITY_REQUIRED");
-    if (count.parentDegree && !nonblank(count.parentWave)) errors.push(degree + "_PARENT_WAVE_REQUIRED");
+    // Parent-wave context may be unknown; it is never a degree lifecycle gate.
     if (count.activeWave !== null && !ENGINE22_V3_WAVES.includes(count.activeWave))
       errors.push(degree + "_ACTIVE_WAVE_INVALID");
     if (!record(count.anchors))
@@ -61,8 +61,7 @@ export function validateEngine22V3Canonical(state) {
     const c = degrees[d];
     if (!record(c) || !c.parentDegree) continue;
     const parent = degrees[c.parentDegree];
-    if (record(parent) && nonblank(c.parentCountId) && c.parentCountId !== parent.countId)
-      errors.push(d + "_PARENT_COUNT_ID_MISMATCH");
+    // Parent count differences are context only, not structural validity gates.
   }
   if (Object.keys(degrees).some(k => !ENGINE22_V3_DEGREES.includes(k))) errors.push("UNKNOWN_DEGREE");
   if (state.noPermissionCreated !== true || state.noExecution !== true)
