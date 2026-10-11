@@ -1,3 +1,4 @@
+import { writeFileSync as writeEngine22AuditFile } from "node:fs";
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
 // Engine 22G — Clean Wave Strategy Wrapper
 //
@@ -1661,6 +1662,13 @@ function buildCanonicalDegreeStateMirror({
 
 
 export function buildEngine22WaveStrategy(input = {}) {
+  if (process.env.ENGINE22_ISOLATION_CAPTURE === "1" &&
+      String(input?.symbol).toUpperCase() === "ES" &&
+      input?.strategyId === "intraday_scalp@10m") {
+    writeEngine22AuditFile("/tmp/engine22-audit-real-input.json",
+      JSON.stringify(input));
+  }
+
   const symbol = normalizeSymbol(input?.symbol || "SPY");
   const marketType = isFuturesSymbol(symbol, input?.marketType)
     ? "FUTURES"
