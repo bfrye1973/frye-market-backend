@@ -6,7 +6,7 @@ const mock = (micro = { activeWave: "W2", levels: [{ key: "e1272", label: "1.272
   symbol: "ES",
   strategies: { "intraday_scalp@10m": { engine22WaveStrategy: {
     degreeStates: {
-      primary: { activeWave: "W5", marks: { W2: { price: 7600, time: "2026-10-01" } }, targetModel: { levels: { e1618: 8100 } } },
+      primary: { activeWave: "W5", marks: { W2: { price: 7600, time: "2026-10-01" } }, activeFibModel: { active: true, levels: { e1618: 8100 } } },
       intermediate: {}, minor: {}, minute: {},
       subminute: { targetModel: { levels: { e100: 9999 } }, marks: { W1: { price: 9999, time: "2026-10-01" } } }
     },
@@ -54,4 +54,22 @@ test("Micro W1 completion without reliable time must not fabricate an anchor tim
   const result = buildEngine2ChartOverlayV1(mock(micro));
   assert.equal(result.degrees.micro.marks.length,0);
   assert.equal(result.degrees.micro.drawable,false);
+});
+
+test("inactive fib model does not silently substitute historical targetModel", () => {
+  const data = mock();
+  const primary = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
+  primary.activeFibModel = { active: false, levels: { e1618: 8300 } };
+  primary.targetModel = { levels: { e1618: 8200 } };
+  const r = buildEngine2ChartOverlayV1(data);
+  assert.equal(r.degrees.primary.lines.length, 0);
+  assert.equal(r.degrees.primary.marks.length, 1);
+  assert.equal(r.degrees.primary.drawable, true);
+});
+test("wave anchor status inherits parent mark maturity", () => {
+  const data = mock();
+  const primary = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
+  primary.marks.W1 = { low: {price: 7500,time:"2026-09-28"}, high: {price: 7600,time:"2026-09-29"},status:"COMPLETED_CANDIDATE" };
+  const r = buildEngine2ChartOverlayV1(data);
+  assert.equal(r.degrees.primary.marks.find(m=>m.id==="W1_HIGH").status,"COMPLETED_CANDIDATE");
 });
