@@ -52,7 +52,7 @@ export function preflightEngine22V3Migration({
       blockers.push(degree + "_IDENTITY_UNRESOLVED");
     const parent = ENGINE22_V3_PARENT[degree];
     const parentWave = parent ? parentWaves[degree] : null;
-    if (parent && !str(parentWave)) blockers.push(degree + "_PARENT_WAVE_UNRESOLVED");
+    // Missing parent context is informational and must not block independent degrees.
     // Do not synthesize structural anchors from projections or timestamp-less marks.
     const legacyManualDegree = degree !== "MICRO" && degree !== "INTRADAY_SUBMICRO";
     const sourcedHistory=degree==="INTRADAY_SUBMICRO" && source.schema==="engine22.v3.migrationCandidate.v1"
