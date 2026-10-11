@@ -24,6 +24,12 @@ export function proposeEngine22V3WaveCandidate({
  const eligible=pivots.candidates.filter(p=>Date.parse(p.sourceTimestamp)>Date.parse(baseTime));
  const pivot=eligible.at(-1);
  if(!pivot)return {available:false,reasonCodes:["NO_COMPLETED_SWING_CANDIDATE"],candidate:null};
+ // A candidate needs a new bar identity; repeated snapshots cannot reissue it.
+ if(degreeState.lastCandidateEvidenceId===pivot.sourceBarId)
+   return {available:false,reasonCodes:["ALREADY_OBSERVED_CANDIDATE"],candidate:null};
+ if(degreeState.lastEvaluatedEvidenceTimestamp &&
+    Date.parse(pivot.confirmationTimestamp)<=Date.parse(degreeState.lastEvaluatedEvidenceTimestamp))
+   return {available:false,reasonCodes:["CANDIDATE_EVIDENCE_NOT_NEWER"],candidate:null};
  return {available:true,reasonCodes:["PIVOT_CANDIDATE_ONLY_NOT_WAVE_COMPLETION"],candidate:{
    degreeId:degreeState.degreeId,countId:degreeState.countId,
    activeWave:wave,sequenceDirection:dir,side,
