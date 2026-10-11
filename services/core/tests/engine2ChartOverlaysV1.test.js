@@ -147,3 +147,27 @@ test("active false without marks emits explicit no-draw instead of historical fi
   assert.equal(result.reason,"NO_DRAWABLE_CANONICAL_STRUCTURE");
   assert.deepEqual(result.lines,[]);
 });
+
+test("object-valued canonical fib levels preserve price, label and touch status without confirming wave", () => {
+  const data=mock({activeWave:"W1",confirmationStatus:"W1_COMPLETION_NOT_CONFIRMED",levels:[]});
+  const primary=data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
+  primary.activeFibModel={active:true,modelType:"RETRACEMENT_MAP",levels:{
+    r618:{price:7712.25,label:"0.618",status:"TOUCHED"},
+    r786:{price:null,label:"0.786",status:"WATCH"}
+  }};
+  const block=buildEngine2ChartOverlayV1(data).degrees.primary;
+  assert.equal(block.lines.find(x=>x.key==="r618").price,7712.25);
+  assert.equal(block.lines.find(x=>x.key==="r618").status,"TOUCHED");
+  assert.equal(block.lines.some(x=>x.key==="r786"),false);
+  assert.equal(block.model.type,"RETRACEMENT_MAP");
+  assert.equal(block.componentAvailability.fibLevels,true);
+});
+test("marks and fib levels expose distinct availability", () => {
+  const data=mock();
+  const primary=data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
+  primary.activeFibModel={active:false,levels:{e1618:8100}};
+  const block=buildEngine2ChartOverlayV1(data).degrees.primary;
+  assert.equal(block.componentAvailability.waveMarks,true);
+  assert.equal(block.componentAvailability.fibLevels,false);
+  assert.equal(block.model.active,false);
+});
