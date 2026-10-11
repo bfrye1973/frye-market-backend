@@ -73,3 +73,24 @@ test("each degree validates with unknown parent wave context",()=>{
  const a=state();for(const degree of ENGINE22_V3_DEGREES){a.degrees[degree].parentWave=null;}
  assert.equal(validateEngine22V3Canonical(a).ok,true);
 });
+
+test("independent Submicro transition never mutates other degree counts",()=>{
+ const before=state(),after=structuredClone(before);
+ after.degrees.INTRADAY_SUBMICRO.activeWave="W3";
+ after.degrees.INTRADAY_SUBMICRO.lifecycle="CONFIRMED";
+ after.degrees.INTRADAY_SUBMICRO.history.push({event:"OWN_EVIDENCE"});
+ after.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW={price:7826.25,time:"2026-10-09 06:00",status:"CONFIRMED"};
+ assert.equal(validateEngine22V3Transition(before,after).ok,true);
+ for(const d of ENGINE22_V3_DEGREES.filter(d=>d!=="INTRADAY_SUBMICRO"))
+  assert.deepEqual(after.degrees[d],before.degrees[d]);
+});
+test("unavailable Micro parent cannot block Submicro projection",()=>{
+ const s=state();
+ s.degrees.MICRO.activeWave=null;
+ s.degrees.MICRO.lifecycle="RECOUNT_REQUIRED";
+ s.degrees.INTRADAY_SUBMICRO.parentWave=null;
+ assert.equal(validateEngine22V3Canonical(s).ok,true);
+ const projected=buildEngine22V3DegreeProjection(s);
+ assert.equal(projected.available,true);
+ assert.equal(projected.degrees.intraday_submicro.activeWave,"W1");
+});
