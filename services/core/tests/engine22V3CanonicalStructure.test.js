@@ -64,7 +64,12 @@ test("blank recount IDs never authorize count replacement",()=>{
  const r=validateEngine22V3Transition(a,b,{approvedRecountIds:[""]});
  assert.ok(r.errors.includes("MICRO_UNAUTHORIZED_RECOUNT"));
 });
-test("reject inconsistent parent count identity",()=>{
+test("parent count identity is advisory, never a lifecycle gate",()=>{
  const a=state();a.degrees.INTRADAY_SUBMICRO.parentCountId="WRONG-PARENT";
- assert.ok(validateEngine22V3Canonical(a).errors.includes("INTRADAY_SUBMICRO_PARENT_COUNT_ID_MISMATCH"));
+ assert.equal(validateEngine22V3Canonical(a).ok,true);
+});
+
+test("each degree validates with unknown parent wave context",()=>{
+ const a=state();for(const degree of ENGINE22_V3_DEGREES){a.degrees[degree].parentWave=null;}
+ assert.equal(validateEngine22V3Canonical(a).ok,true);
 });
