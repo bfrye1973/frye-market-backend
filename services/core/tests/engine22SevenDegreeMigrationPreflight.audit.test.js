@@ -43,3 +43,14 @@ test("manual true historical flag cannot bypass missing identified OHLC proof",(
  assert.ok(p.reasonCodes.includes("HISTORICAL_OHLC_VALIDATION_REQUIRED"));
  assert.equal(p.publicationEligible,false);
 });
+
+test("owner accepts overlap as provisional while standard impulse remains invalid",()=>{
+ const legacy=createCanonicalMicroState({countId:"OLD-MICRO",sequenceId:"OLD-SEQ",
+ sequenceDirection:"UP",origin:{price:7782.75}});
+ const p=buildSevenDegreeMigrationPreflight({legacyMicroCanonicalState:legacy,
+ parentMicroCountId:"NEW-MICRO",ownerAcceptsOverlap:true});
+ assert.equal(p.ownerOverlapDisposition,"ACCEPTED_FOR_PROVISIONAL_REVIEW_NOT_STANDARD_IMPULSE");
+ assert.equal(p.overlap.acceptedAsStandardImpulse,false);
+ assert.equal(p.reasonCodes.includes("MICRO_W1_W4_OVERLAP_REQUIRES_APPROVED_ALTERNATE_CLASSIFICATION"),false);
+ assert.equal(p.publicationEligible,false);
+});
