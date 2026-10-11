@@ -29,3 +29,34 @@ test("seven-degree projections share the exact canonical count identity",()=>{
 test("no canonical state leads to no projection",()=>{
  assert.equal(buildEngine22V3ShadowSnapshot().available,false);
 });
+
+test("completed market evidence changes shadow canonical lifecycle and all projections together",()=>{
+ const canonical=state();
+ canonical.degrees.MICRO.lastEvaluatedEvidenceTimestamp="2026-10-11T12:00:00Z";
+ const before=structuredClone(canonical);
+ const r=buildEngine22V3ShadowSnapshot({
+   canonical,evidenceByDegree:{MICRO:{
+     completed:true,sourceTimestamp:"2026-10-11T12:05:00Z",
+     sourceBarId:"ES-5m-100",sourceTimeframe:"5m",completionCandidate:true,
+   }},
+ });
+ assert.equal(r.available,true);
+ assert.equal(r.degreeStates.degrees.micro.lifecycle,"COMPLETION_CANDIDATE");
+ assert.equal(r.currentWavelength.degrees.micro.lifecycle,"COMPLETION_CANDIDATE");
+ assert.equal(r.engine22Display.degrees.micro.badge,"COMPLETION_CANDIDATE");
+ assert.equal(r.crossDegreeWatch.alerts.some(x=>x.sourceDegree==="MICRO"),true);
+ assert.deepEqual(canonical,before);
+ assert.equal(r.microExecutionContext,null);
+ assert.equal(r.noExecution,true);
+});
+test("stale market evidence blocks all seven shadow outputs",()=>{
+ const canonical=state();
+ canonical.degrees.MICRO.lastEvaluatedEvidenceTimestamp="2026-10-11T12:05:00Z";
+ const r=buildEngine22V3ShadowSnapshot({
+ canonical,evidenceByDegree:{MICRO:{
+ completed:true,sourceTimestamp:"2026-10-11T12:05:00Z",
+ sourceBarId:"ES-5m-100",sourceTimeframe:"5m",completionCandidate:true,
+ }}});
+ assert.equal(r.available,false);
+ assert.ok(r.reasonCodes.includes("DUPLICATE_OR_OLDER_OBSERVATION"));
+});
