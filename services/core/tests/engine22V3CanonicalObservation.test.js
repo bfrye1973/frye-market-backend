@@ -40,9 +40,9 @@ test("reject a wave-completion claim without count-bound proof",()=>{
  const e={...evidence(),completionCandidate:false,completionConfirmed:true,structuralRuleId:"RULE-W1",independentConfirmation:true};
  const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
  assert.equal(r.ok,false);
- assert.ok(r.reasonCodes.includes("UNBOUND_COMPLETION_PROOF"));
+ assert.ok(r.reasonCodes.includes("MARKET_EVIDENCE_REQUIRED_FOR_COMPLETION"));
 });
-test("bound wave-completion proof produces an auditable proposal only",()=>{
+test("caller-supplied verified proof cannot bypass candle verification",()=>{
  const base=make();base.degrees.MICRO.lifecycle="COMPLETION_CANDIDATE";
  const e={...evidence(),completionCandidate:false,completionConfirmed:true,structuralRuleId:"RULE-W1",independentConfirmation:true};
  e.structuralProof={countId:base.degrees.MICRO.countId,degreeId:"MICRO",
@@ -50,11 +50,8 @@ test("bound wave-completion proof produces an auditable proposal only",()=>{
   ruleId:e.structuralRuleId,validated:true,anchorKey:"W1_HIGH",
   anchor:{price:7852.75,time:"2026-10-11T12:03:00Z"}};
  const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
- assert.equal(r.ok,true);
- assert.equal(r.proposedCanonical.degrees.MICRO.activeWave,"W2");
- assert.equal(r.proposedCanonical.degrees.MICRO.anchors.W1_HIGH.price,7852.75);
- assert.equal(r.proposedCanonical.degrees.MICRO.anchors.W1_HIGH.status,"CONFIRMED");
- assert.equal(r.publishAuthorized,false);
+ assert.equal(r.ok,false);
+ assert.ok(r.reasonCodes.includes("MARKET_EVIDENCE_REQUIRED_FOR_COMPLETION"));
 });
 
 test("completion evidence without a confirmed structural endpoint is rejected",()=>{
@@ -64,7 +61,7 @@ test("completion evidence without a confirmed structural endpoint is rejected",(
  sourceBarId:e.sourceBarId,sourceTimestamp:e.sourceTimestamp,ruleId:e.structuralRuleId,validated:true};
  const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
  assert.equal(r.ok,false);
- assert.ok(r.reasonCodes.includes("UNBOUND_COMPLETION_PROOF"));
+ assert.ok(r.reasonCodes.includes("MARKET_EVIDENCE_REQUIRED_FOR_COMPLETION"));
 });
 
 test("canonical proposal records source pivot identity for deduplication",()=>{
