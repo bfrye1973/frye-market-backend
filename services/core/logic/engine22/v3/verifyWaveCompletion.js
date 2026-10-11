@@ -16,6 +16,10 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
  if(!Number.isFinite(candidate.price)||candidate.price<=0)errors.push("CANDIDATE_PRICE_INVALID");
  if(errors.length)return {verified:false,reasonCodes:errors,proof:null};
  const pivot=bars.find(b=>b.sourceBarId===candidate.sourceBarId);
+ if(bars.some(b=>b.timeframe!==candidate.sourceTimeframe))
+   errors.push("MIXED_TIMEFRAME_EVIDENCE");
+ if(bars.some((b,i)=>i>0&&Date.parse(b.sourceTimestamp)<=Date.parse(bars[i-1].sourceTimestamp)))
+   errors.push("NON_MONOTONIC_EVIDENCE");
  const confirmed=bars.find(b=>b.sourceTimestamp===candidate.evidenceConfirmedAt);
  if(!pivot||!confirmed||pivot.closed!==true||confirmed.closed!==true||
     pivot.timeframe!==candidate.sourceTimeframe||
@@ -30,6 +34,8 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
     tickSize:degreeState.tickSize ?? 0.25,
  });
  if(!reversal.passed)errors.push(...reversal.reasonCodes);
+ if(reversal.passed && confirmed?.sourceBarId!==reversal.evidence.confirmingBarId)
+   errors.push("CONFIRMATION_BAR_NOT_REVERSAL_BAR");
  const wave=degreeState.activeWave;
  const key={W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"}[wave];
  // Confirmed swing evidence alone is insufficient for Elliott completion:
