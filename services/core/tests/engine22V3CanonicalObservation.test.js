@@ -66,3 +66,10 @@ test("completion evidence without a confirmed structural endpoint is rejected",(
  assert.equal(r.ok,false);
  assert.ok(r.reasonCodes.includes("UNBOUND_COMPLETION_PROOF"));
 });
+
+test("canonical proposal records source pivot identity for deduplication",()=>{
+ const base=make();const e=evidence();e.candidatePivotBarId="pivot-42";
+ const r=proposeEngine22V3CanonicalObservation({canonical:base,degree:"MICRO",evidence:e});
+ assert.equal(r.ok,true);
+ assert.equal(r.proposedCanonical.degrees.MICRO.lastCandidateEvidenceId,"pivot-42");
+});
