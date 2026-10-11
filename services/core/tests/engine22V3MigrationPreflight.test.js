@@ -63,3 +63,19 @@ test("missing operational Micro history still blocks migration",()=>{
  });
  assert.ok(r.blockers.includes("MICRO_HISTORY_SOURCE_REQUIRED"));
 });
+
+test("documented Submicro migration identity cannot disagree with canonical identity",()=>{
+ const src=active(), identities=Object.fromEntries(
+ ["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]
+ .map((d,i)=>[d,{countId:"C"+i,sequenceId:"S"+i}]));
+ const parentWaves=Object.fromEntries(Object.keys(identities).filter(x=>x!=="PRIMARY").map(x=>[x,"W3"]));
+ const migrated={schema:"engine22.v3.migrationCandidate.v1",degreeId:"INTRADAY_SUBMICRO",
+  parentDegree:"MICRO",managerApprovalId:"MANAGER-1",priorIdentity:{degreeId:"MICRO",countId:"OLD"},
+  countId:"DIFFERENT",sequenceId:"S0",newIdentity:{countId:"DIFFERENT",sequenceId:"S0"},
+  publicationEligible:false,preservedHistory:[{event:"LOCKED"}],preservedAnchors:{}};
+ const r=preflightEngine22V3Migration({activeWaveState:src,micro:{...high,history:[{event:"START"}]},
+  submicro:migrated,degreeIdentities:identities,parentWaves,
+  sourceTimestamp:"2026-10-11T00:00:00Z"});
+ assert.equal(r.ready,false);
+ assert.ok(r.blockers.includes("SUBMICRO_MIGRATED_COUNT_ID_MISMATCH"));
+});
