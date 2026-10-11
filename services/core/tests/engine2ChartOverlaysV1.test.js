@@ -6,9 +6,9 @@ const mock = (micro = { activeWave: "W2", levels: [{ key: "e1272", label: "1.272
   symbol: "ES",
   strategies: { "intraday_scalp@10m": { engine22WaveStrategy: {
     degreeStates: {
-      primary: { activeWave: "W5", marks: { W2: { price: 7600, time: "2026-10-01" } }, activeFibModel: { active: true, levels: { e1618: 8100 } } },
+      primary: { activeWave: "W5", marks: { W2: { price: 7600, time: "2026-10-01 09:30" } }, activeFibModel: { active: true, levels: { e1618: 8100 } } },
       intermediate: {}, minor: {}, minute: {},
-      subminute: { targetModel: { levels: { e100: 9999 } }, marks: { W1: { price: 9999, time: "2026-10-01" } } }
+      subminute: { targetModel: { levels: { e100: 9999 } }, marks: { W1: { price: 9999, time: "2026-10-01 09:30" } } }
     },
     currentWavelength: { canonicalWaveStateConflict: true, degrees: { micro } }
   } } }
@@ -69,7 +69,7 @@ test("inactive fib model does not silently substitute historical targetModel", (
 test("wave anchor status inherits parent mark maturity", () => {
   const data = mock();
   const primary = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
-  primary.marks.W1 = { low: {price: 7500,time:"2026-09-28"}, high: {price: 7600,time:"2026-09-29"},status:"COMPLETED_CANDIDATE" };
+  primary.marks.W1 = { low: {price: 7500,time:"2026-09-28 09:30"}, high: {price: 7600,time:"2026-09-29 09:30"},status:"COMPLETED_CANDIDATE" };
   const r = buildEngine2ChartOverlayV1(data);
   assert.equal(r.degrees.primary.marks.find(m=>m.id==="W1_HIGH").status,"COMPLETED_CANDIDATE");
 });
@@ -98,4 +98,17 @@ test("Fib touch is not a wave completion", () => {
   assert.equal(micro.lines[0].status, "TOUCHED");
   assert.equal(micro.wave.confirmationStatus, "W1_COMPLETION_NOT_CONFIRMED");
   assert.equal(micro.marks.length, 0);
+});
+
+test("backend normalizes local Phoenix source times, preserves UTC and never invents date-only intraday anchors", () => {
+  const data = mock();
+  const primary = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.primary;
+  primary.marks.W2 = { price: 7600, time: "2026-10-01 09:30", status:"COMPLETED_CANDIDATE" };
+  primary.marks.W3 = { price: 7700, time: "2026-10-02", status:"CONFIRMED" };
+  primary.marks.W4 = { price: 7500, time: "2026-10-03T16:00:00Z", status:"CONFIRMED" };
+  const marks = buildEngine2ChartOverlayV1(data).degrees.primary.marks;
+  assert.equal(marks.find(m=>m.id==="W2").time, Date.parse("2026-10-01T09:30:00-07:00")/1000);
+  assert.equal(marks.find(m=>m.id==="W4").time, Date.parse("2026-10-03T16:00:00Z")/1000);
+  assert.equal(marks.find(m=>m.id==="W3"), undefined);
+  assert.equal(marks.find(m=>m.id==="W2").status, "COMPLETED_CANDIDATE");
 });
