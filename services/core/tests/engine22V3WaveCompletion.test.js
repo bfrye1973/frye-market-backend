@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {verifyEngine22V3WaveCompletion as verify} from "../logic/engine22/v3/verifyWaveCompletion.js";
 const bars=[{sourceBarId:"a",sourceTimestamp:"2026-10-11T12:00:00Z",timeframe:"5m",closed:true,high:13,low:9,close:11},
 {sourceBarId:"pivot",sourceTimestamp:"2026-10-11T12:05:00Z",timeframe:"5m",closed:true,high:16,low:10,close:15},
-{sourceBarId:"confirm",sourceTimestamp:"2026-10-11T12:10:00Z",timeframe:"5m",closed:true,high:14,low:8,close:13}];
+{sourceBarId:"confirm",sourceTimestamp:"2026-10-11T12:10:00Z",timeframe:"5m",closed:true,high:14,low:8,close:13},
+{sourceBarId:"follow",sourceTimestamp:"2026-10-11T12:15:00Z",timeframe:"5m",closed:true,high:13,low:9,close:11}];
 const state=()=>({countId:"COUNT-1",degreeId:"MICRO",activeWave:"W1",sequenceDirection:"UP",
  confirmationRule:{id:"STRUCTURE-W1",passed:true,countId:"COUNT-1",wave:"W1",evidenceBarId:"confirm",reversalBarId:"confirm"}});
 const candidate=()=>({countId:"COUNT-1",degreeId:"MICRO",activeWave:"W1",sequenceDirection:"UP",
