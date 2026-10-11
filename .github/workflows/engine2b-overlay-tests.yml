@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install backend dependencies for route tests
-        run: npm ci --ignore-scripts
+        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
       - name: Syntax checks
         run: |
           node --check services/core/logic/engine2/buildEngine2ChartOverlayV1.js
