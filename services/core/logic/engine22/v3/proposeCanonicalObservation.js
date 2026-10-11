@@ -3,10 +3,11 @@
 // unique structural evidence identity and monotonic observation.
 import {validateEngine22V3Canonical,validateEngine22V3Transition} from "./canonicalStructure.js";
 import {evaluateEngine22V3WaveTransition} from "./evaluateWaveTransition.js";
+import {verifyEngine22V3WaveCompletion} from "./verifyWaveCompletion.js";
 const clone=x=>structuredClone(x);
 const valid=x=>typeof x==="string"&&x.trim().length>0;
 export function proposeEngine22V3CanonicalObservation({
- canonical=null,degree=null,evidence=null,approvedRecountIds=[],
+ canonical=null,degree=null,evidence=null,marketBars=null,waveCandidate=null,approvedRecountIds=[],
 }={}){
  const check=validateEngine22V3Canonical(canonical);
  if(!check.ok)return {ok:false,reasonCodes:check.errors,proposedCanonical:null};
@@ -15,6 +16,19 @@ export function proposeEngine22V3CanonicalObservation({
  if(!evidence || !valid(evidence.sourceTimestamp)||!valid(evidence.sourceBarId)||
     !valid(evidence.sourceTimeframe)||evidence.completed!==true)
   return {ok:false,reasonCodes:["COMPLETE_UNIQUE_SOURCE_EVIDENCE_REQUIRED"],proposedCanonical:null};
+ // If market bars are provided, derive the proof from them instead of
+ // accepting a caller-provided proof. No structural confirmation is possible
+ // without a matching closed-bar pivot and a passed structural rule.
+ if(evidence.completionConfirmed===true && (marketBars!==null || waveCandidate!==null)) {
+   if(!Array.isArray(marketBars)||!waveCandidate)
+     return {ok:false,reasonCodes:["MARKET_EVIDENCE_INCOMPLETE"],proposedCanonical:null};
+   const assessment=verifyEngine22V3WaveCompletion({
+     degreeState:{...source,degreeId:degree},candidate:waveCandidate,bars:marketBars,
+   });
+   if(!assessment.verified)
+     return {ok:false,reasonCodes:assessment.reasonCodes,proposedCanonical:null};
+   evidence={...evidence,structuralProof:assessment.proof};
+ }
  const COMPLETION_ANCHORS={W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"};
  // The observer is only allowed to assess independently sourced market evidence.
  // Its structural rule must be bound to this exact degree/count/wave rather
