@@ -74,18 +74,18 @@ function structuralViewForRole({ role, engine22WaveStrategy }) {
   if (!engine22WaveStrategy) return null;
 
   if (role === "INTRADAY") {
-    const micro = engine22WaveStrategy?.microExecutionContext || null;
-    return micro
+    const submicro = engine22WaveStrategy?.submicroExecutionContext || null;
+    return submicro
       ? {
-          degree: "micro",
-          source: "microExecutionContext",
-          activeWave: micro?.activeWave ?? null,
-          direction: micro?.waveDirection ?? null,
-          lifecycle: micro?.lifecycle ?? null,
-          timingState: micro?.microTimingState ?? null,
-          countStatus: micro?.countStatus ?? null,
-          sourceCountId: micro?.sourceCountId ?? null,
-          revision: micro?.revision ?? null,
+          degree: "submicro",
+          source: "submicroExecutionContext",
+          activeWave: submicro?.activeWave ?? null,
+          direction: submicro?.waveDirection ?? null,
+          lifecycle: submicro?.lifecycle ?? null,
+          timingState: submicro?.microTimingState ?? null,
+          countStatus: submicro?.countStatus ?? null,
+          sourceCountId: submicro?.sourceCountId ?? null,
+          revision: submicro?.revision ?? null,
         }
       : null;
   }
