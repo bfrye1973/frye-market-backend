@@ -2048,7 +2048,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   const submicroMigrationCandidate = legacyMicroForSubmicro
     ? buildSubmicroMigrationCandidate({
         sourceMicroState: legacyMicroForSubmicro,
-        parentMicroCountId: "ENGINE22_NEW_MICRO_PARENT_PENDING_VALIDATION",
+        parentMicroCountId: null, // Parent unknown until independently verified.
       })
     : null;
   const sevenDegreeMigrationShadow = buildSevenDegreeShadowProjection({
