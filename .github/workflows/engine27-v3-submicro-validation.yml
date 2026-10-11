@@ -1,0 +1,43 @@
+name: Engine27 V3 Submicro Validation
+
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/v3/**"
+      - "services/core/logic/engine27/buildEngine27Strategies.js"
+      - "services/core/tests/engine27TraderIntelligenceV3.test.js"
+      - "docs/engine27-v3-submicro-architecture.md"
+      - ".github/workflows/engine27-v3-submicro-validation.yml"
+  push:
+    branches:
+      - "engine27-submicro-degree-foundation-v1"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install core dependencies
+        run: npm ci
+
+      - name: Syntax
+        run: |
+          node --check logic/engine27/v3/buildTraderIntelligenceV3.js
+          node --check logic/engine27/buildEngine27Strategies.js
+
+      - name: V3 contract tests
+        run: node --test tests/engine27TraderIntelligenceV3.test.js
+
+      - name: V2 regression
+        run: node --test tests/engine27TraderIntelligenceV2.test.js
