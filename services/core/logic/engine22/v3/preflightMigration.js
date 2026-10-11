@@ -53,6 +53,13 @@ export function preflightEngine22V3Migration({
     if (sourcedHistory?.some(event => event == null || typeof event !== "object"))
       blockers.push(degree + "_HISTORY_INVALID");
     const raw = source.anchors ?? source.marks ?? source.preservedAnchors ?? {};
+    if (degree === "INTRADAY_SUBMICRO" && source.schema === "engine22.v3.migrationCandidate.v1" &&
+        Object.values(raw).some(w => w && typeof w === "object" &&
+          w.price === undefined && !w.low && !w.high))
+      blockers.push("SUBMICRO_WAVE_RECORD_CONVERSION_REQUIRED");
+    if (degree === "MICRO" && !str(source.provenance?.managerApprovalId) &&
+        !str(source.managerApprovalId))
+      blockers.push("LARGER_MICRO_OWNER_ANCHOR_APPROVAL_REQUIRED");
     const anchors = {};
     for (const [wave, value] of Object.entries(raw)) {
       if (!value || typeof value !== "object") continue;
