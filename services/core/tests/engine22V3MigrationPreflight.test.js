@@ -99,3 +99,23 @@ test("Micro V2 nested wave records cannot be silently discarded during migration
  assert.equal(r.ready,false);
  assert.ok(r.blockers.includes("SUBMICRO_WAVE_RECORD_CONVERSION_REQUIRED"));
 });
+
+test("preserved legacy Micro locks must agree with Submicro migration lock inventory",()=>{
+ const src=active(),identities=Object.fromEntries(
+ ["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]
+ .map((d,i)=>[d,{countId:"C"+i,sequenceId:"S"+i}]));
+ const parentWaves=Object.fromEntries(Object.keys(identities).filter(x=>x!=="PRIMARY").map(x=>[x,"W3"]));
+ const migrated={schema:"engine22.v3.migrationCandidate.v1",degreeId:"INTRADAY_SUBMICRO",
+  parentDegree:"MICRO",managerApprovalId:"MGR-1",
+  priorIdentity:{degreeId:"MICRO",countId:"OLD"},
+  countId:"C0",sequenceId:"S0",newIdentity:{countId:"C0",sequenceId:"S0"},
+  publicationEligible:false,preservedHistory:[{event:"W1_LOCKED"}],
+  preservedAnchors:{W1:{lifecycle:"LOCKED",lockedAnchor:7852.75,lockedAt:"2026-10-09T20:00:00Z"}},
+  preservedLocks:{W1:{lockedAnchor:7853.0,lockedAt:"2026-10-09T20:00:00Z"}}};
+ const result=preflightEngine22V3Migration({activeWaveState:src,
+  micro:{...high,history:[{event:"START"}],managerApprovalId:"MGR-1"},
+  submicro:migrated,degreeIdentities:identities,parentWaves,
+  sourceTimestamp:"2026-10-11T00:00:00Z"});
+ assert.equal(result.ready,false);
+ assert.ok(result.blockers.includes("SUBMICRO_LOCK_MIGRATION_MISMATCH_W1"));
+});
