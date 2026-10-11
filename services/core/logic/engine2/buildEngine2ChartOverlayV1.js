@@ -155,4 +155,32 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
       authorityConflict: wavelength?.canonicalWaveStateConflict === true },
     degrees, diagnostics: { failedDegrees: DEGREE_NAMES.filter((d) => !degrees[d].drawable) } };
 }
+export function validateEngine2ChartOverlayV1(payload) {
+  const errors = [];
+  if (!payload || payload.ok !== true || payload.schemaVersion !== "engine2.chartOverlays.v1" ||
+      payload.symbol !== "ES") errors.push("INVALID_ENVELOPE");
+  for (const degree of DEGREE_NAMES) {
+    const d = payload?.degrees?.[degree];
+    if (!d || d.degree !== degree || typeof d.drawable !== "boolean" ||
+        !Array.isArray(d.lines) || !Array.isArray(d.marks)) {
+      errors.push("INVALID_DEGREE_" + degree.toUpperCase());
+      continue;
+    }
+    if (d.drawable !== (d.lines.length + d.marks.length > 0))
+      errors.push("DRAWABLE_MISMATCH_" + degree.toUpperCase());
+    for (const line of d.lines) {
+      if (typeof line.id !== "string" || !Number.isFinite(line.price) ||
+          line.price <= 0 || typeof line.sourcePath !== "string")
+        errors.push("INVALID_LINE_" + degree.toUpperCase());
+    }
+    for (const mark of d.marks) {
+      if (typeof mark.id !== "string" || !Number.isFinite(mark.price) ||
+          !Number.isInteger(mark.time) || typeof mark.sourcePath !== "string")
+        errors.push("INVALID_MARK_" + degree.toUpperCase());
+    }
+    if (degree === "micro" && d.sourceDegree !== "micro")
+      errors.push("MICRO_IDENTITY_MISMATCH");
+  }
+  return { ok: errors.length === 0, errors };
+}
 export default buildEngine2ChartOverlayV1;
