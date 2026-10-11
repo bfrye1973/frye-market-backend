@@ -1,0 +1,19 @@
+name: Engine22 Engine15 Engine16 Isolation Audit
+on:
+  push:
+    branches: [audit-engine22-engine15-16-isolation-20261010]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Engine22 isolation diagnostic
+        run: |
+          node --test services/core/tests/engine22Engine15Engine16Isolation.audit.test.js
