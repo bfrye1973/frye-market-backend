@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {compareEngine22V3ProtectedOutputs as compare} from "../logic/engine22/v3/compareProtectedContracts.js";
+import {compareEngine22V3ProtectedOutputs as compare,buildEngine22V3CompatibilityPreview} from "../logic/engine22/v3/compareProtectedContracts.js";
 const source=()=>({degreeStates:{minute:{activeWave:"W3"}},currentWavelength:{symbol:"ES"},
  microExecutionContext:{automationEligible:false},engine22Display:{degrees:{}},
  waveOpportunity:{},currentLifecycleState:{},activeFibModel:{},
@@ -34,4 +34,28 @@ test("downstream consumers cannot change during Engine22 shadow work",()=>{
  const r=compare({legacy:a,candidate:b});
  assert.equal(r.pass,false);
  assert.deepEqual(r.protectedChanges,["engine27Strategies"]);
+});
+
+test("seven-degree shadow sidecar leaves all legacy contracts byte-identical",()=>{
+ const legacy=source();
+ legacy.microExecutionContext={sourceCountId:"OLD-OPERATIONAL-MICRO",activeWave:"W2"};
+ const before=structuredClone(legacy);
+ const shadow={available:true,shadowOnly:true,degreeStates:{degrees:{
+  intraday_submicro:{sourceCountId:"SUBMICRO-C"},
+  micro:{sourceCountId:"NEW-MICRO-C"},
+  subminute:{},minute:{},minor:{},intermediate:{},primary:{},
+ }}};
+ const preview=buildEngine22V3CompatibilityPreview({legacy,shadow});
+ assert.equal(preview.available,true);
+ assert.equal(preview.pass,true);
+ assert.equal(preview.publicationEligible,false);
+ assert.equal(preview.candidate.microExecutionContext.sourceCountId,"OLD-OPERATIONAL-MICRO");
+ assert.equal(preview.candidate.engine22V3Shadow.degreeStates.degrees.micro.sourceCountId,"NEW-MICRO-C");
+ assert.equal(preview.candidate.engine22V3Shadow.degreeStates.degrees.intraday_submicro.sourceCountId,"SUBMICRO-C");
+ const copy=structuredClone(preview.candidate);delete copy.engine22V3Shadow;
+ assert.deepEqual(copy,legacy);
+ assert.deepEqual(legacy,before);
+});
+test("compatibility preview rejects incomplete shadow and never fabricates mapping",()=>{
+ assert.equal(buildEngine22V3CompatibilityPreview({legacy:source(),shadow:null}).available,false);
 });
