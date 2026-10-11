@@ -40,6 +40,7 @@ import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildSubmicroMigrationCandidate } from "../migration/buildSubmicroMigrationCandidate.js";
 import { buildOwnerAuthorizedProvisionalMicroCount } from "../migration/buildOwnerAuthorizedProvisionalMicroCount.js";
 import { buildSevenDegreeShadowProjection } from "../migration/buildSevenDegreeShadowProjection.js";
+import { buildSevenDegreeReviewDisplay } from "../migration/buildSevenDegreeReviewDisplay.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
@@ -2074,10 +2075,11 @@ export function buildEngine22WaveStrategy(input = {}) {
       ? microProjectionBundle.currentWavelength
       : currentWavelength;
 
-  const publishedEngine22Display =
-    microProjectionBundle?.available === true
-      ? microProjectionBundle.engine22Display
-      : engine22Display;
+  const publishedEngine22Display = buildSevenDegreeReviewDisplay({
+    legacyDisplay: microProjectionBundle?.available === true
+      ? microProjectionBundle.engine22Display : engine22Display,
+    shadow: sevenDegreeMigrationShadow,
+  });
 
   const microExecutionContext =
     microProjectionBundle?.available === true
