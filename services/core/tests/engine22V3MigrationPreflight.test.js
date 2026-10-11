@@ -79,3 +79,23 @@ test("documented Submicro migration identity cannot disagree with canonical iden
  assert.equal(r.ready,false);
  assert.ok(r.blockers.includes("SUBMICRO_MIGRATED_COUNT_ID_MISMATCH"));
 });
+
+test("Micro V2 nested wave records cannot be silently discarded during migration",()=>{
+ const src=active(), identities=Object.fromEntries(
+ ["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]
+ .map((d,i)=>[d,{countId:"C"+i,sequenceId:"S"+i}]));
+ const parentWaves=Object.fromEntries(Object.keys(identities).filter(x=>x!=="PRIMARY").map(x=>[x,"W3"]));
+ const migrated={
+  schema:"engine22.v3.migrationCandidate.v1",degreeId:"INTRADAY_SUBMICRO",
+  parentDegree:"MICRO",managerApprovalId:"MANAGER-1",priorIdentity:{degreeId:"MICRO",countId:"OLD"},
+  countId:"C0",sequenceId:"S0",newIdentity:{countId:"C0",sequenceId:"S0"},
+  publicationEligible:false,preservedHistory:[{event:"LOCKED"}],
+  preservedAnchors:{W1:{completion:{state:"LOCKED"},lockedHigh:7852.75}},
+ };
+ const r=preflightEngine22V3Migration({activeWaveState:src,
+  micro:{...high,history:[{event:"START"}],managerApprovalId:"MANAGER-1"},
+  submicro:migrated,degreeIdentities:identities,parentWaves,
+  sourceTimestamp:"2026-10-11T00:00:00Z"});
+ assert.equal(r.ready,false);
+ assert.ok(r.blockers.includes("SUBMICRO_WAVE_RECORD_CONVERSION_REQUIRED"));
+});
