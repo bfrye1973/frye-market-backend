@@ -9,7 +9,7 @@ export function buildSevenDegreeMigrationPreflight({
  legacyMicroCanonicalState=null, parentMicroCountId=null, completed4hBars=[],
  historicalAnchorBars=[],historicalSourceIdentity=null,historicalTimeZoneVerified=false,
  managerImplementationApproved=false, historicalBarsValidated=false,
- replayValidated=false, microExecutionContext=null
+ replayValidated=false, ownerAcceptsOverlap=false, microExecutionContext=null
 }={}) {
  const reviewed=auditProposedStructuralDegrees();
  const historicalAnchorProof=verifyProposedMicroAnchorsAgainstBars({
@@ -35,7 +35,7 @@ export function buildSevenDegreeMigrationPreflight({
  const blockers=[...new Set([...gate.reasonCodes,
    ...historicalAnchorProof.reasonCodes,
    ...(!submicro.ok?submicro.reasonCodes:[]),
-   ...(overlap.classification==="STANDARD_IMPULSE_OVERLAP_REVIEW_REQUIRED"
+   ...(overlap.classification==="STANDARD_IMPULSE_OVERLAP_REVIEW_REQUIRED" && !ownerAcceptsOverlap
      ?["MICRO_W1_W4_OVERLAP_REQUIRES_APPROVED_ALTERNATE_CLASSIFICATION"]:[])
  ])];
  return {
@@ -43,6 +43,7 @@ export function buildSevenDegreeMigrationPreflight({
    status:blockers.length?"BLOCKED":"READY_FOR_MANAGER_REVIEW",
    publicationEligible:false, // Never grants publication, even if external flags are passed.
    reasonCodes:blockers,overlap,historicalAnchorProof,
+   ownerOverlapDisposition:ownerAcceptsOverlap?"ACCEPTED_FOR_PROVISIONAL_REVIEW_NOT_STANDARD_IMPULSE":"REVIEW_REQUIRED",
    proposedMicro:PROPOSED_MICRO_ANCHORS,
    submicroCandidate:submicro.ok?submicro.candidate:null,
    preliminaryAudit:reviewed,
