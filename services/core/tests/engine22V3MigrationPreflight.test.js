@@ -36,7 +36,7 @@ test("legacy structures without durable history cannot be silently promoted",()=
   activeWaveState:src,micro:{...high,history:[]},submicro:{...high,history:[]},
   degreeIdentities:identities,parentWaves,sourceTimestamp:"2026-10-11T00:00:00Z"
  });
- assert.ok(r.blockers.includes("MINUTE_HISTORY_SOURCE_REQUIRED"));
+ assert.equal(r.blockers.includes("MINUTE_HISTORY_SOURCE_REQUIRED"),false);
  assert.equal(r.ready,false);
 });
 
@@ -50,4 +50,16 @@ test("real September active wave source must not be promoted with missing Micro 
  assert.ok(result.blockers.includes("MICRO_CANONICAL_SOURCE_MISSING"));
  assert.ok(result.blockers.includes("INTRADAY_SUBMICRO_CANONICAL_SOURCE_MISSING"));
  assert.deepEqual(source,before);
+});
+
+test("missing operational Micro history still blocks migration",()=>{
+ const src=active(),identities=Object.fromEntries(
+ ["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]
+ .map((d,i)=>[d,{countId:"C"+i,sequenceId:"S"+i}]));
+ const parentWaves=Object.fromEntries(Object.keys(identities).filter(x=>x!=="PRIMARY").map(x=>[x,"W3"]));
+ const r=preflightEngine22V3Migration({
+  activeWaveState:src,micro:{...high},submicro:{...high,history:[]},
+  degreeIdentities:identities,parentWaves,sourceTimestamp:"2026-10-11T00:00:00Z"
+ });
+ assert.ok(r.blockers.includes("MICRO_HISTORY_SOURCE_REQUIRED"));
 });
