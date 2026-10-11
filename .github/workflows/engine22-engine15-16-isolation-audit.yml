@@ -17,3 +17,23 @@ jobs:
       - name: Engine22 isolation diagnostic
         run: |
           node --test services/core/tests/engine22Engine15Engine16Isolation.audit.test.js
+      - name: Install isolated backend deps
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund
+      - name: Capture real ES Engine22 strategy inputs
+        working-directory: services/core
+        env:
+          SYMBOL: ES
+          NODE_ENV: test
+          ENGINE22_ISOLATION_CAPTURE: "1"
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: |
+          if [ -z "$POLYGON_API_KEY" ] && [ -n "$POLY_KEY" ]; then export POLYGON_API_KEY="$POLY_KEY"; fi
+          test -n "$POLYGON_API_KEY"
+          node jobs/buildStrategySnapshot.js
+          test -s /tmp/engine22-audit-real-input.json
+      - name: Replay same ES input with Engine15 and Engine16 individually null
+        working-directory: services/core
+        env:
+          NODE_ENV: test
+        run: node tests/engine22RealSnapshotIsolation.audit.mjs
