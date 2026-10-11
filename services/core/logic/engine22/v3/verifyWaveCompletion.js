@@ -1,3 +1,4 @@
+import {evaluateEngine22V3ReversalRule} from "./evaluateReversalRule.js";
 // Engine22 V3: independent structural completion verifier for a confirmed
 // closed-bar pivot. This is the evidence gate, not a trade signal.
 const validTime=t=>typeof t==="string"&&Number.isFinite(Date.parse(t));
@@ -24,6 +25,11 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
    errors.push("PIVOT_PRICE_MISMATCH");
  if(!errors.length && Date.parse(confirmed.sourceTimestamp)<=Date.parse(pivot.sourceTimestamp))
    errors.push("CONFIRMATION_NOT_AFTER_PIVOT");
+ const reversal=evaluateEngine22V3ReversalRule({
+    candidate,bars,minimumReversalTicks:degreeState.minimumReversalTicks ?? 8,
+    tickSize:degreeState.tickSize ?? 0.25,
+ });
+ if(!reversal.passed)errors.push(...reversal.reasonCodes);
  const wave=degreeState.activeWave;
  const key={W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"}[wave];
  // Confirmed swing evidence alone is insufficient for Elliott completion:
@@ -31,7 +37,8 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
  const rule=degreeState.confirmationRule;
  if(!rule||typeof rule.id!=="string"||rule.passed!==true||
     rule.countId!==degreeState.countId||rule.wave!==wave||
-    rule.evidenceBarId!==confirmed?.sourceBarId)
+    rule.evidenceBarId!==confirmed?.sourceBarId ||
+    rule.reversalBarId!==reversal.evidence?.confirmingBarId)
    errors.push("STRUCTURAL_CONFIRMATION_RULE_NOT_MET");
  if(errors.length)return {verified:false,reasonCodes:errors,proof:null};
  return {verified:true,reasonCodes:["STRUCTURAL_COMPLETION_VERIFIED"],proof:{
@@ -39,5 +46,6 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
    activeWave:wave,ruleId:rule.id,anchorKey:key,
    anchor:{price:candidate.price,time:candidate.sourceTimestamp},
    sourceBarId:confirmed.sourceBarId,sourceTimestamp:confirmed.sourceTimestamp,
+   reversalEvidence:reversal.evidence,
  }};
 }
