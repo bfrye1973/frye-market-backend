@@ -15,6 +15,7 @@ export function proposeEngine22V3CanonicalObservation({
  if(!evidence || !valid(evidence.sourceTimestamp)||!valid(evidence.sourceBarId)||
     !valid(evidence.sourceTimeframe)||evidence.completed!==true)
   return {ok:false,reasonCodes:["COMPLETE_UNIQUE_SOURCE_EVIDENCE_REQUIRED"],proposedCanonical:null};
+ const COMPLETION_ANCHORS={W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"};
  // The observer is only allowed to assess independently sourced market evidence.
  // Its structural rule must be bound to this exact degree/count/wave rather
  // than merely accepting an arbitrary confirmation boolean.
@@ -25,13 +26,33 @@ export function proposeEngine22V3CanonicalObservation({
       proof.sourceBarId!==evidence.sourceBarId ||
       proof.sourceTimestamp!==evidence.sourceTimestamp ||
       proof.ruleId!==evidence.structuralRuleId ||
-      proof.validated!==true)
+      proof.validated!==true || proof.anchorKey!==COMPLETION_ANCHORS[source.activeWave] ||
+      !proof.anchor || !Number.isFinite(proof.anchor.price) || proof.anchor.price<=0 ||
+      Math.abs(proof.anchor.price/0.25-Math.round(proof.anchor.price/0.25))>1e-8 ||
+      !valid(proof.anchor.time) || !Number.isFinite(Date.parse(proof.anchor.time)) ||
+      Date.parse(proof.anchor.time)>Date.parse(evidence.sourceTimestamp))
      return {ok:false,reasonCodes:["UNBOUND_COMPLETION_PROOF"],proposedCanonical:null};
  }
  const transition=evaluateEngine22V3WaveTransition({degreeState:source,evidence});
  if(!transition.ok)return {ok:false,reasonCodes:transition.reasonCodes,proposedCanonical:null};
  const proposed=clone(canonical);
  proposed.degrees[degree]={...proposed.degrees[degree],...transition.proposal};
+ if(evidence.completionConfirmed===true && transition.ok &&
+    (transition.advanceProposed===true ||
+     transition.reasonCodes.includes("W5_CONFIRMED_PARENT_REVIEW_REQUIRED"))) {
+   const proof=evidence.structuralProof;
+   const key=proof.anchorKey;
+   const priorAnchor=source.anchors[key];
+   if(priorAnchor?.status==="LOCKED") {
+     if(priorAnchor.price!==proof.anchor.price || priorAnchor.time!==proof.anchor.time)
+       return {ok:false,reasonCodes:["LOCKED_COMPLETION_ANCHOR_CONFLICT"],proposedCanonical:null};
+   } else {
+     proposed.degrees[degree].anchors[key]={
+       price:proof.anchor.price,time:proof.anchor.time,status:"CONFIRMED",
+       evidenceId:evidence.sourceBarId,structuralRuleId:proof.ruleId,
+     };
+   }
+ }
  // Every accepted observation has an immutable audit entry. Never silently
  // rewrite historical context when a pivot is merely proposed.
  const entry={
