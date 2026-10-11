@@ -40,5 +40,5 @@ test("migration-generated identifier is path-safe and deterministic",()=>{
  const b=buildSubmicroMigrationCandidate({sourceMicroState:original,parentMicroCountId:"NEW-MICRO"});
  assert.equal(a.ok,true);
  assert.equal(a.candidate.countId,b.candidate.countId);
- assert.doesNotMatch(a.candidate.countId,/\\//);
+ assert.equal(a.candidate.countId.includes("/"),false);
 });
