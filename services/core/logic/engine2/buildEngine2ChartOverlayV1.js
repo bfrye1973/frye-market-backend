@@ -1,7 +1,20 @@
 // Engine 2B v1 — read-only published-structure chart adapter.
 // Never computes Fibonacci levels, changes engine state, or falls back from Micro to Subminute.
 const DEGREE_NAMES = ["primary", "intermediate", "minor", "minute", "micro"];
-const finite = (value) => value == null || value === "" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+const finite = (value) => value == null || value === "" || typeof value === "boolean" ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+const normalizeTime = (input) => {
+  if (typeof input === "number" && Number.isFinite(input)) return input > 1e12 ? Math.floor(input / 1000) : Math.floor(input);
+  if (typeof input !== "string" || !input.trim()) return null;
+  const raw = input.trim();
+  if (/^\\d{10,13}$/.test(raw)) return normalizeTime(Number(raw));
+  // Published timezone-naive Engine22 timestamps are Phoenix local by current convention.
+  // Calendar date without time represents a day, not a verified intraday anchor.
+  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
+  if (!/T\\d{2}:\\d{2}/.test(normalized)) return null;
+  const zoned = /(?:Z|[+-]\\d{2}:\\d{2})$/.test(normalized) ? normalized : normalized + "-07:00";
+  const ms = Date.parse(zoned);
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+};
 const safeArray = (v) => Array.isArray(v) ? v : [];
 function addLine(lines, id, key, rawPrice, kind, sourcePath, status = null) {
   const price = finite(rawPrice);
@@ -30,7 +43,8 @@ function markArray(marks, path) {
   if (!marks || typeof marks !== "object") return out;
   const add = (name, node, source, parentStatus = null) => {
     const price = finite(node?.price ?? node?.p);
-    const time = node?.time ?? node?.timestamp ?? null;
+    const rawTime = node?.time ?? node?.timestamp ?? null;
+    const time = normalizeTime(rawTime);
     if (price == null || price <= 0 || time == null) return;
     out.push({ id: name, label: name, price, time, status: node.status || parentStatus || null, sourcePath: source });
   };
@@ -48,19 +62,19 @@ function microMarks(state, source) {
   const out = [];
   const origin = seq.anchorProvenance || state.anchorProvenance || null;
   const originPrice = finite(origin?.price ?? seq.origin ?? state.origin);
-  if (originPrice != null && origin?.timestamp) out.push({
-    id: "MICRO_ORIGIN", label: "ORIGIN", price: originPrice, time: origin.timestamp,
+  if (originPrice != null && normalizeTime(origin?.timestamp) != null) out.push({
+    id: "MICRO_ORIGIN", label: "ORIGIN", price: originPrice, time: normalizeTime(origin.timestamp),
     status: "SOURCE_ANCHOR", sourcePath: source + ".microSequence.anchorProvenance"
   });
   const w1Price = finite(seq.w1Completion?.anchor ?? seq.confirmedW1High ?? seq.candidateW1High);
-  const w1Time = seq.w1Completion?.evidence?.sourceTimestamp ?? seq.w1ConfirmedAtBarTime ?? null;
+  const w1Time = normalizeTime(seq.w1Completion?.evidence?.sourceTimestamp ?? seq.w1ConfirmedAtBarTime ?? null);
   if (w1Price != null && w1Time != null) out.push({
     id: "MICRO_W1_HIGH", label: "W1", price: w1Price, time: w1Time,
     status: seq.w1Completion?.state || "CANDIDATE",
     sourcePath: source + ".microSequence.w1Completion"
   });
   const w2Price = finite(seq.w2Completion?.anchor ?? seq.confirmedW2Low);
-  const w2Time = seq.w2Completion?.evidence?.sourceTimestamp ?? null;
+  const w2Time = normalizeTime(seq.w2Completion?.evidence?.sourceTimestamp ?? null);
   if (w2Price != null && w2Time != null) out.push({
     id: "MICRO_W2_LOW", label: "W2", price: w2Price, time: w2Time,
     status: seq.w2Completion?.state || "CANDIDATE",
