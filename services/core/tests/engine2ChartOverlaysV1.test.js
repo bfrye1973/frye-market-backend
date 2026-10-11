@@ -200,3 +200,19 @@ test("versioned API rejects aliasing Micro to Subminute", () => {
   output.degrees.micro.sourceDegree="subminute";
   assert.ok(validateEngine2ChartOverlayV1(output).errors.includes("MICRO_IDENTITY_MISMATCH"));
 });
+
+test("Micro W3 watch may show prior W1/W2 reference ladders but never as current Fib", () => {
+  const data=mock({activeWave:"W3_WATCH",levels:[],microSequence:{
+    projectedW1:[{key:"e618",label:"0.618",price:7863.0,status:"TOUCHED"}],
+    projectedW2:[{key:"r500",label:"0.500",price:7812.25,status:"WATCH"}]
+  }});
+  const micro=buildEngine2ChartOverlayV1(data).degrees.micro;
+  assert.equal(micro.drawable,true);
+  assert.equal(micro.componentAvailability.fibLevels,false);
+  assert.equal(micro.componentAvailability.historicalFibReferences,true);
+  assert.equal(micro.lines.length,2);
+  assert.ok(micro.lines.every(l=>l.kind==="FIB_CONTEXT"&&l.referenceOnly===true));
+  assert.ok(micro.lines.some(l=>l.label.startsWith("PRIOR W1")));
+  assert.ok(micro.lines.some(l=>l.label.startsWith("PRIOR W2")));
+  assert.ok(micro.lines.some(l=>l.status==="TOUCHED"));
+});
