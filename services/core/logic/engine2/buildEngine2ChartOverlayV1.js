@@ -32,6 +32,11 @@ function levelArray(levels, path) {
     }
   } else if (levels && typeof levels === "object") {
     for (const [key, value] of Object.entries(levels)) {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        addLine(out, key, String(value.label || key), value.price, value.kind || "FIB",
+          path + "." + key, value.status || null);
+        continue;
+      }
       if (typeof value !== "number" && typeof value !== "string") continue;
       addLine(out, key, key, value, "FIB", path + "." + key);
     }
@@ -120,12 +125,20 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
     for (const [i, price] of safeArray(state.confirmationLevels).entries())
       addLine(lines, "confirmation_" + i, "confirmation " + (i + 1), price, "CONFIRMATION", source + ".confirmationLevels[" + i + "]");
     const reason = lines.length || marks.length ? null : (micro ? "NO_CANONICAL_MICRO_LEVELS" : "NO_DRAWABLE_CANONICAL_STRUCTURE");
+    const componentAvailability = {
+      waveMarks: marks.length > 0,
+      fibLevels: lines.some(line => line.kind === "FIB"),
+      structuralLines: lines.some(line => line.kind !== "FIB"),
+    };
     degrees[degree] = { degree, sourceDegree: degree, parentDegree: micro ? (wavelength?.degrees?.micro?.parentDegree || "subminute") : (state.parentDegree || null),
       drawable: reason == null, reason, severity: reason ? "blocking" : null, reasonCodes: reason ? [reason] : [],
       wave: { current: state.activeWave || null, direction: state.direction || state.microSequence?.direction || null,
         confirmationStatus: state.confirmationStatus || null,
         status: state.stage || state.state || null, role: state.role || null },
-      marks, lines, zones: [], provenance: { structuralSource: source, sourcesChecked: [source],
+      marks, lines, zones: [], componentAvailability,
+      model: micro ? { type: "MICRO_SEQUENTIAL", active: true } :
+        { type: activeFib?.modelType || null, active: !!activeFib },
+      provenance: { structuralSource: source, sourcesChecked: [source],
         sourceCountId: null,
         shadowMicroCanonicalRef: micro ? (wavelength?.microCanonicalRef || null) : null,
         shadowAuthority: micro ? "MICRO_V2_SHADOW_ONLY_NOT_USED" : null,
