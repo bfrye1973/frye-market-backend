@@ -37,6 +37,8 @@ import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
+import { buildSubmicroMigrationCandidate } from "../migration/buildSubmicroMigrationCandidate.js";
+import { buildSevenDegreeShadowProjection } from "../migration/buildSevenDegreeShadowProjection.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
@@ -2040,6 +2042,22 @@ export function buildEngine22WaveStrategy(input = {}) {
     }
   }
 
+  // Additive, non-authoritative seven-degree preview. No new parent Micro count is
+  // fabricated: without independently verified parent identity, preview is incomplete.
+  const legacyMicroForSubmicro = microV2Migration?.canonicalState ?? null;
+  const submicroMigrationCandidate = legacyMicroForSubmicro
+    ? buildSubmicroMigrationCandidate({
+        sourceMicroState: legacyMicroForSubmicro,
+        parentMicroCountId: "ENGINE22_NEW_MICRO_PARENT_PENDING_VALIDATION",
+      })
+    : null;
+  const sevenDegreeMigrationShadow = buildSevenDegreeShadowProjection({
+    legacyDegreeStates: degreeStates,
+    microCount: null, // Do not represent the old operating Micro as its new parent.
+    submicroCandidate: submicroMigrationCandidate?.ok
+      ? submicroMigrationCandidate.candidate : null,
+  });
+
   const publishedDegreeStates =
     microProjectionBundle?.available === true
       ? microProjectionBundle.degreeStates
@@ -2286,6 +2304,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
     microExecutionContext,
+    sevenDegreeMigrationShadow,
     microW2W3TransitionFibs,
     microV2Migration: microV2Migration
       ? {
