@@ -33,7 +33,9 @@ export function preflightEngine22V3Migration({
     const parentWave = parent ? parentWaves[degree] : null;
     if (parent && !str(parentWave)) blockers.push(degree + "_PARENT_WAVE_UNRESOLVED");
     // Do not synthesize structural anchors from projections or timestamp-less marks.
-    if (!Array.isArray(source.history)) blockers.push(degree + "_HISTORY_SOURCE_REQUIRED");
+    const legacyManualDegree = degree !== "MICRO" && degree !== "INTRADAY_SUBMICRO";
+    if (!Array.isArray(source.history) && !legacyManualDegree)
+      blockers.push(degree + "_HISTORY_SOURCE_REQUIRED");
     if (source.history?.some(event => event == null || typeof event !== "object"))
       blockers.push(degree + "_HISTORY_INVALID");
     const raw = source.anchors ?? source.marks ?? {};
@@ -68,7 +70,18 @@ export function preflightEngine22V3Migration({
       parentDegree:parent,parentWave:parentWave || null,
       activeWave:source.activeWave ?? null,
       lifecycle:source.lifecycle ?? source.stage ?? "DEVELOPING",
-      anchors,history:Array.isArray(source.history) ? clone(source.history) : [],
+      anchors,
+      history:Array.isArray(source.history) ? clone(source.history) :
+        [{
+          event:"LEGACY_SOURCE_BASELINE_IMPORTED",
+          source:"ACTIVE_WAVE_STATE_ES",
+          sourceUpdatedAt:activeWaveState.updatedAt ?? null,
+          importedAt:sourceTimestamp,
+          originalDegree:degree,
+          // A snapshot at migration is not claimed to be historical transition evidence.
+          historicalTransitionsKnown:false,
+          legacySourceSnapshot:clone(source),
+        }],
       provenance:{
         originalDegree:degree,source:degree === "MICRO" ? "OWNER_REVIEW_MICRO" :
           degree === "INTRADAY_SUBMICRO" ? "APPROVED_LEGACY_MIGRATION" :
