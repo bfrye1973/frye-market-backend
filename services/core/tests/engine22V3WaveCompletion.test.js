@@ -36,3 +36,17 @@ test("unbound reversal bar cannot claim completion",()=>{
  const s=state();s.confirmationRule.reversalBarId="different-bar";
  assert.equal(verify({degreeState:s,candidate:candidate(),bars}).verified,false);
 });
+
+test("mixed timeframes cannot validate the same wave completion",()=>{
+ const data=structuredClone(bars);data[3].timeframe="10m";
+ const r=verify({degreeState:state(),candidate:candidate(),bars:data});
+ assert.equal(r.verified,false);
+ assert.ok(r.reasonCodes.includes("MIXED_TIMEFRAME_EVIDENCE"));
+});
+test("reversal bar must equal independently claimed confirmation bar",()=>{
+ const s=state();s.confirmationRule.evidenceBarId="follow";
+ const c=candidate();c.evidenceConfirmedAt=bars[3].sourceTimestamp;
+ const r=verify({degreeState:s,candidate:c,bars});
+ assert.equal(r.verified,false);
+ assert.ok(r.reasonCodes.includes("CONFIRMATION_BAR_NOT_REVERSAL_BAR"));
+});
