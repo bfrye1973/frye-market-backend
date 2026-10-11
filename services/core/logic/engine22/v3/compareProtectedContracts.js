@@ -33,7 +33,20 @@ export function buildEngine22V3CompatibilityPreview({legacy=null,shadow=null}={}
  const candidate=clone(legacy);
  candidate.engine22V3Shadow=clone(shadow);
  const comparison=compareEngine22V3ProtectedOutputs({legacy,candidate});
- return {available:true,shadowOnly:true,pass:comparison.pass,
+ const shadowDegrees=shadow.degreeStates?.degrees;
+ const hasSevenIndependentDegrees=shadowDegrees &&
+  ["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"]
+    .every(key=>shadowDegrees[key] && typeof shadowDegrees[key]==="object");
+ // Legacy degreeStates is a flat map, whereas V3 shadow degreeStates has a
+ // nested "degrees" map. Preserving old outputs is necessary, but it is NOT
+ // evidence that projection wiring or the live consumer mapping is finished.
+ const mappingReady=false;
+ return {available:true,shadowOnly:true,
+  pass:comparison.pass && mappingReady,
+  protectedContractsUnchanged:comparison.pass,
+  hasSevenIndependentDegrees:Boolean(hasSevenIndependentDegrees),
+  mappingReady,
+  reasonCodes:["LEGACY_V3_PROJECTION_MAPPING_NOT_WIRED"],
   protectedContractComparison:comparison,candidate,
   publicationEligible:false,noExecution:true,noPermissionCreated:true};
 }
