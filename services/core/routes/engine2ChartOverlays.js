@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
-import { buildEngine2ChartOverlayV1 } from "../logic/engine2/buildEngine2ChartOverlayV1.js";
+import { buildEngine2ChartOverlayV1, validateEngine2ChartOverlayV1 } from "../logic/engine2/buildEngine2ChartOverlayV1.js";
 const router = Router();
 const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../data/strategy-snapshot-es.json");
 router.get("/engine2/chart-overlays/v1", (req, res) => {
@@ -16,6 +16,8 @@ router.get("/engine2/chart-overlays/v1", (req, res) => {
     if (snapshot?.symbol && String(snapshot.symbol).toUpperCase() !== "ES")
       return res.status(503).json({ ok: false, error: "SNAPSHOT_SYMBOL_MISMATCH" });
     const payload = buildEngine2ChartOverlayV1(snapshot, symbol);
+    const validation = validateEngine2ChartOverlayV1(payload);
+    if (!validation.ok) return res.status(503).json({ ok: false, error: "OVERLAY_CONTRACT_INVALID", reasonCodes: validation.errors });
     const body = JSON.stringify(payload);
     const etag = '"' + createHash("sha256").update(body).digest("hex") + '"';
     res.setHeader("ETag", etag);
