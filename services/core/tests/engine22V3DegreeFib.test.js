@@ -49,7 +49,7 @@ test("owner-confirmed Submicro anchors project W3 independently while W3 develop
  assert.equal(r.wave1Length,71.25);
  assert.equal(r.projectionBase,7826.25);
  assert.equal(r.levels.find(x=>x.key==="e1000").price,7897.50);
- assert.equal(r.levels.find(x=>x.key==="e1272").price,7916.75);
+ assert.equal(r.levels.find(x=>x.key==="e1272").price,7917.00);
  assert.equal(r.levels.find(x=>x.key==="e1618").price,7941.50);
  assert.equal(r.levels.find(x=>x.key==="e2000").price,7968.75);
  assert.equal(r.noExecution,true);
