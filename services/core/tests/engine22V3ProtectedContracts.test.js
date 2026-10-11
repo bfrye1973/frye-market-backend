@@ -18,3 +18,20 @@ test("execution-adjacent drift is also rejected",()=>{
  const r=compare({legacy:a,candidate:b});
  assert.deepEqual(r.protectedChanges,["tradeDecision"]);
 });
+
+test("legacy Micro consumer identity must never silently switch to larger V3 Micro",()=>{
+ const a=source(),b=structuredClone(a);
+ a.microExecutionContext={sourceCountId:"LEGACY-MICRO",activeWave:"W2",automationEligible:false};
+ b.microExecutionContext={sourceCountId:"LARGER-MICRO",activeWave:"W5",automationEligible:false};
+ const result=compare({legacy:a,candidate:b});
+ assert.equal(result.pass,false);
+ assert.ok(result.differences.some(x=>x.key==="microExecutionContext"));
+});
+test("downstream consumers cannot change during Engine22 shadow work",()=>{
+ const a=source(),b=structuredClone(a);
+ a.engine27Strategies={degree:"MICRO",countId:"old"};
+ b.engine27Strategies={degree:"INTRADAY_SUBMICRO",countId:"new"};
+ const r=compare({legacy:a,candidate:b});
+ assert.equal(r.pass,false);
+ assert.deepEqual(r.protectedChanges,["engine27Strategies"]);
+});
