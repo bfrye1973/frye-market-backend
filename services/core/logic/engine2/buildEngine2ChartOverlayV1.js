@@ -94,8 +94,9 @@ function empty(degree, source, reason) {
 }
 export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
   if (symbol !== "ES") return { ok: false, schemaVersion: "engine2.chartOverlays.v1", symbol, error: "UNSUPPORTED_SYMBOL" };
-  const strategy = snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy ||
-    snapshot?.strategies?.["minor_swing@1h"]?.engine22WaveStrategy || null;
+  // Never combine structural degrees from different strategy snapshots.
+  // The ES intraday lane is the published composite used by Engine 27.
+  const strategy = snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy || null;
   const degrees = {};
   const published = strategy?.degreeStates || {};
   const wavelength = strategy?.currentWavelength || null;
@@ -109,6 +110,8 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
       markArray(state.marks, source + ".marks");
     // For Micro only published currentWavelength levels are authoritative. Never substitute subminute.
     const activeFib = !micro && state.activeFibModel?.active === true ? state.activeFibModel : null;
+    const structuralConflict = micro && wavelength?.canonicalWaveStateConflict === true;
+    // Conflict is disclosed, not silently interpreted as confirmed evidence.
     // Inactive fibs must never be replaced with historical targetModel under an "active" label.
     let lines = micro ? levelArray(state.levels, source + ".levels") :
       activeFib ? levelArray(activeFib.levels ?? activeFib.displayLevels, source + ".activeFibModel") : [];
@@ -134,6 +137,7 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
       drawable: reason == null, reason, severity: reason ? "blocking" : null, reasonCodes: reason ? [reason] : [],
       wave: { current: state.activeWave || null, direction: state.direction || state.microSequence?.direction || null,
         confirmationStatus: state.confirmationStatus || null,
+        authorityConflict: structuralConflict,
         status: state.stage || state.state || null, role: state.role || null },
       marks, lines, zones: [], componentAvailability,
       model: micro ? { type: "MICRO_SEQUENTIAL", active: true } :
@@ -142,6 +146,7 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
         sourceCountId: null,
         shadowMicroCanonicalRef: micro ? (wavelength?.microCanonicalRef || null) : null,
         shadowAuthority: micro ? "MICRO_V2_SHADOW_ONLY_NOT_USED" : null,
+        sourceMode: micro ? (wavelength?.sourceMode || null) : null,
         fallbackUsed: false } };
   }
   return { ok: true, schemaVersion: "engine2.chartOverlays.v1", symbol: "ES", priceBasis: "ES_INDEX_POINTS",
