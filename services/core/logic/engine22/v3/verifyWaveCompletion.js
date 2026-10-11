@@ -7,6 +7,9 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
  if(!degreeState||!candidate||degreeState.countId!==candidate.countId||
     degreeState.degreeId!==candidate.degreeId||degreeState.activeWave!==candidate.activeWave)
    return {verified:false,reasonCodes:["COUNT_DEGREE_WAVE_IDENTITY_MISMATCH"],proof:null};
+ const expectedSide=(["W1","W3","W5"].includes(degreeState.activeWave)) ===
+   (degreeState.sequenceDirection==="UP") ? "HIGH" : "LOW";
+ if(candidate.side!==expectedSide)errors.push("WAVE_PIVOT_SIDE_MISMATCH");
  if(!["UP","DOWN"].includes(degreeState.sequenceDirection) ||
     candidate.sequenceDirection!==degreeState.sequenceDirection)
    errors.push("DIRECTION_MISMATCH");
