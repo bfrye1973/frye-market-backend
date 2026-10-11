@@ -57,3 +57,29 @@ test("owner-confirmed Submicro anchors project W3 independently while W3 develop
  assert.equal(s.degrees.INTRADAY_SUBMICRO.lifecycle,"DEVELOPING");
  assert.deepEqual(s.degrees.MICRO.anchors.W1_LOW,anchor(7675,"2026-10-01 07:00"));
 });
+
+test("new larger Micro W1-W4 owner anchors remain separate from developing Submicro W3",()=>{
+ const s=make();
+ s.degrees.MICRO.anchors.W3_HIGH=anchor(7897.75,"2026-10-06 07:00");
+ s.degrees.MICRO.anchors.W4_LOW=anchor(7782.75,"2026-10-08 07:00");
+ s.degrees.MICRO.activeWave="W5";
+ s.degrees.MICRO.lifecycle="DEVELOPING";
+ s.degrees.INTRADAY_SUBMICRO.anchors={
+  W1_LOW:anchor(7782.50,"2026-10-08 10:00"),
+  W1_HIGH:anchor(7853.75,"2026-10-09 05:00"),
+  W2_LOW:anchor(7826.25,"2026-10-09 06:00"),
+ };
+ const micro=projectEngine22V3DegreeFib({canonical:s,degree:"MICRO"});
+ const submicro=projectEngine22V3DegreeFib({canonical:s,degree:"INTRADAY_SUBMICRO"});
+ assert.equal(micro.available,true);
+ assert.equal(submicro.available,true);
+ assert.equal(micro.wave1Length,130);
+ assert.equal(submicro.wave1Length,71.25);
+ assert.equal(s.degrees.MICRO.anchors.W3_HIGH.price,7897.75);
+ assert.equal(s.degrees.MICRO.anchors.W4_LOW.price,7782.75);
+ assert.equal(s.degrees.MICRO.anchors.W5_HIGH,undefined);
+ assert.equal(s.degrees.MICRO.lifecycle,"DEVELOPING");
+ assert.equal(s.degrees.INTRADAY_SUBMICRO.activeWave,"W3");
+ assert.equal(submicro.levels.find(x=>x.key==="e1618").price,7941.50);
+ assert.notEqual(micro.sourceCountId,submicro.sourceCountId);
+});
