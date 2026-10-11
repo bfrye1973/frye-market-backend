@@ -37,6 +37,10 @@ export function proposeEngine22V3CanonicalObservation({
  if(!transition.ok)return {ok:false,reasonCodes:transition.reasonCodes,proposedCanonical:null};
  const proposed=clone(canonical);
  proposed.degrees[degree]={...proposed.degrees[degree],...transition.proposal};
+ if(evidence.completionCandidate===true && transition.reasonCodes.includes("COMPLETION_CANDIDATE_OBSERVED")) {
+   proposed.degrees[degree].lastCandidateEvidenceId=evidence.candidatePivotBarId ?? evidence.sourceBarId;
+ }
+
  if(evidence.completionConfirmed===true && transition.ok &&
     (transition.advanceProposed===true ||
      transition.reasonCodes.includes("W5_CONFIRMED_PARENT_REVIEW_REQUIRED"))) {
