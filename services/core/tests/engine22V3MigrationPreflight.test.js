@@ -24,3 +24,16 @@ test("all seven degrees require real identities and parent relationships",()=>{
  assert.ok(r.blockers.includes("MICRO_IDENTITY_UNRESOLVED"));
  assert.ok(r.blockers.includes("INTRADAY_SUBMICRO_PARENT_WAVE_UNRESOLVED"));
 });
+
+test("legacy structures without durable history cannot be silently promoted",()=>{
+ const src=active(), identities=Object.fromEntries(
+ ["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]
+ .map((d,i)=>[d,{countId:"C"+i,sequenceId:"S"+i}]));
+ const parentWaves=Object.fromEntries(Object.keys(identities).filter(x=>x!=="PRIMARY").map(x=>[x,"W3"]));
+ const r=preflightEngine22V3Migration({
+  activeWaveState:src,micro:{...high,history:[]},submicro:{...high,history:[]},
+  degreeIdentities:identities,parentWaves,sourceTimestamp:"2026-10-11T00:00:00Z"
+ });
+ assert.ok(r.blockers.includes("MINUTE_HISTORY_SOURCE_REQUIRED"));
+ assert.equal(r.ready,false);
+});
