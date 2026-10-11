@@ -28,17 +28,17 @@ function levelArray(levels, path) {
 function markArray(marks, path) {
   const out = [];
   if (!marks || typeof marks !== "object") return out;
-  const add = (name, node, source) => {
+  const add = (name, node, source, parentStatus = null) => {
     const price = finite(node?.price ?? node?.p);
     const time = node?.time ?? node?.timestamp ?? null;
     if (price == null || price <= 0 || time == null) return;
-    out.push({ id: name, label: name, price, time, status: node.status || null, sourcePath: source });
+    out.push({ id: name, label: name, price, time, status: node.status || parentStatus || null, sourcePath: source });
   };
   for (const [name, node] of Object.entries(marks)) {
     if (!node || typeof node !== "object") continue;
     if (node.low || node.high) {
-      if (node.low) add(name + "_LOW", node.low, path + "." + name + ".low");
-      if (node.high) add(name + "_HIGH", node.high, path + "." + name + ".high");
+      if (node.low) add(name + "_LOW", node.low, path + "." + name + ".low", node.status);
+      if (node.high) add(name + "_HIGH", node.high, path + "." + name + ".high", node.status);
     } else add(name, node, path + "." + name);
   }
   return out;
@@ -50,7 +50,7 @@ function microMarks(state, source) {
   const originPrice = finite(origin?.price ?? seq.origin ?? state.origin);
   if (originPrice != null && origin?.timestamp) out.push({
     id: "MICRO_ORIGIN", label: "ORIGIN", price: originPrice, time: origin.timestamp,
-    status: "LOCKED", sourcePath: source + ".microSequence.anchorProvenance"
+    status: origin?.source?.includes?.("LOCKED") ? "LOCKED" : "SOURCE_ANCHOR", sourcePath: source + ".microSequence.anchorProvenance"
   });
   const w1Price = finite(seq.w1Completion?.anchor ?? seq.confirmedW1High ?? seq.candidateW1High);
   const w1Time = seq.w1Completion?.evidence?.sourceTimestamp ?? seq.w1ConfirmedAtBarTime ?? null;
@@ -89,9 +89,14 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
     const marks = micro ? microMarks(state, source) :
       markArray(state.marks, source + ".marks");
     // For Micro only published currentWavelength levels are authoritative. Never substitute subminute.
+    const activeFib = !micro && state.activeFibModel?.active === true ? state.activeFibModel : null;
+    // Inactive fibs must never be replaced with historical targetModel under an "active" label.
     let lines = micro ? levelArray(state.levels, source + ".levels") :
-      levelArray(state.activeFibModel?.displayLevels ?? state.activeFibModel?.levels ??
-        state.targetModel?.displayLevels ?? state.targetModel?.levels, source + ".activeFibModel");
+      activeFib ? levelArray(activeFib.levels ?? activeFib.displayLevels, source + ".activeFibModel") : [];
+    if (!micro && activeFib) {
+      addLine(lines, "active_fib_invalidation", "active fib invalidation",
+        activeFib.invalidationLevel, "INVALIDATION", source + ".activeFibModel.invalidationLevel");
+    }
     const structuralLevels = [
       ["confirmation", state.confirmation, "CONFIRMATION"],
       ["invalidation", state.invalidation, "INVALIDATION"],
@@ -101,12 +106,16 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
     for (const [i, price] of safeArray(state.confirmationLevels).entries())
       addLine(lines, "confirmation_" + i, "confirmation " + (i + 1), price, "CONFIRMATION", source + ".confirmationLevels[" + i + "]");
     const reason = lines.length || marks.length ? null : (micro ? "NO_CANONICAL_MICRO_LEVELS" : "NO_DRAWABLE_CANONICAL_STRUCTURE");
-    degrees[degree] = { degree, sourceDegree: degree, parentDegree: micro ? "subminute" : (state.parentDegree || null),
+    degrees[degree] = { degree, sourceDegree: degree, parentDegree: micro ? (wavelength?.degrees?.micro?.parentDegree || "subminute") : (state.parentDegree || null),
       drawable: reason == null, reason, severity: reason ? "blocking" : null, reasonCodes: reason ? [reason] : [],
       wave: { current: state.activeWave || null, direction: state.direction || state.microSequence?.direction || null,
+        confirmationStatus: state.confirmationStatus || null,
         status: state.stage || state.state || null, role: state.role || null },
       marks, lines, zones: [], provenance: { structuralSource: source, sourcesChecked: [source],
-        sourceCountId: micro ? wavelength?.microCanonicalRef?.sourceCountId || null : null, fallbackUsed: false } };
+        sourceCountId: micro ? wavelength?.microCanonicalRef?.sourceCountId || null : null,
+        microCanonicalRef: micro ? (wavelength?.microCanonicalRef || null) : null,
+        shadowAuthority: micro ? "MICRO_V2_SHADOW_ONLY_NOT_USED" : null,
+        fallbackUsed: false } };
   }
   return { ok: true, schemaVersion: "engine2.chartOverlays.v1", symbol: "ES", priceBasis: "ES_INDEX_POINTS",
     snapshot: { generatedAt: snapshot?.generatedAt || snapshot?.generated_at_utc || null,
