@@ -73,3 +73,29 @@ test("wave anchor status inherits parent mark maturity", () => {
   const r = buildEngine2ChartOverlayV1(data);
   assert.equal(r.degrees.primary.marks.find(m=>m.id==="W1_HIGH").status,"COMPLETED_CANDIDATE");
 });
+
+test("Micro provenance never promotes shadow count ID to production identity", () => {
+  const data = mock({ activeWave: "W1", levels: [{ key: "e382", price: 7810 }] });
+  const wavelength = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength;
+  wavelength.microCanonicalRef = { sourceCountId: "shadow-v2-123", revision: 7 };
+  const micro = buildEngine2ChartOverlayV1(data).degrees.micro;
+  assert.equal(micro.provenance.sourceCountId, null);
+  assert.equal(micro.provenance.shadowMicroCanonicalRef.sourceCountId, "shadow-v2-123");
+  assert.equal(micro.provenance.shadowAuthority, "MICRO_V2_SHADOW_ONLY_NOT_USED");
+});
+test("Micro origin provenance alone does not assert locked completion", () => {
+  const data = mock({ activeWave: "W1", levels: [],
+    microSequence: { anchorProvenance: { price: 7782.75, timestamp: "2026-10-08 07:00", source: "MANAGER_LOCKED_MICRO_W4_LOW" } } });
+  const mark = buildEngine2ChartOverlayV1(data).degrees.micro.marks[0];
+  assert.equal(mark.status, "SOURCE_ANCHOR");
+  assert.notEqual(mark.status, "CONFIRMED");
+  assert.notEqual(mark.status, "LOCKED");
+});
+test("Fib touch is not a wave completion", () => {
+  const data = mock({ activeWave: "W1", confirmationStatus: "W1_COMPLETION_NOT_CONFIRMED",
+    levels: [{ key: "e382", price: 7832.5, status: "TOUCHED" }] });
+  const micro = buildEngine2ChartOverlayV1(data).degrees.micro;
+  assert.equal(micro.lines[0].status, "TOUCHED");
+  assert.equal(micro.wave.confirmationStatus, "W1_COMPLETION_NOT_CONFIRMED");
+  assert.equal(micro.marks.length, 0);
+});
