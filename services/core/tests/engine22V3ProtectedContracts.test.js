@@ -62,3 +62,23 @@ test("seven-degree shadow sidecar leaves all legacy contracts byte-identical",()
 test("compatibility preview rejects incomplete shadow and never fabricates mapping",()=>{
  assert.equal(buildEngine22V3CompatibilityPreview({legacy:source(),shadow:null}).available,false);
 });
+
+test("all seven independent V3 projections map to one identity per degree without legacy contract changes",()=>{
+ const legacy=source(),degrees={};
+ const names=["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"];
+ for(const [i,name] of names.entries())degrees[name]={sourceCountId:"V3-"+i,activeWave:"W3"};
+ const shadow={available:true,shadowOnly:true,degreeStates:{degrees},
+  currentWavelength:{degrees:Object.fromEntries(names.map(n=>[n,{sourceCountId:degrees[n].sourceCountId}]))},
+  engine22Display:{degrees:Object.fromEntries(names.map(n=>[n,{degree:n}]))}};
+ const result=buildEngine22V3CompatibilityPreview({legacy,shadow});
+ assert.equal(result.mappingReady,true);
+ assert.equal(result.protectedContractsUnchanged,true);
+ assert.equal(result.pass,true);
+ assert.equal(result.publicationEligible,false);
+ assert.ok(result.reasonCodes.includes("V3_SHADOW_PROJECTIONS_MAPPED_NOT_LIVE_WIRED"));
+ assert.deepEqual(Object.fromEntries(Object.entries(result.candidate).filter(([k])=>k!=="engine22V3Shadow")),legacy);
+ shadow.currentWavelength.degrees.micro.sourceCountId="WRONG";
+ const bad=buildEngine22V3CompatibilityPreview({legacy,shadow});
+ assert.equal(bad.mappingReady,false);
+ assert.equal(bad.pass,false);
+});
