@@ -73,3 +73,43 @@ test("canonical proposal records source pivot identity for deduplication",()=>{
  assert.equal(r.ok,true);
  assert.equal(r.proposedCanonical.degrees.MICRO.lastCandidateEvidenceId,"pivot-42");
 });
+
+test("market candles can independently supply bound completion proof to canonical proposal",()=>{
+ const base=make(),degree=base.degrees.MICRO;
+ degree.lifecycle="COMPLETION_CANDIDATE";
+ degree.sequenceDirection="UP";
+ degree.minimumReversalTicks=8;
+ degree.confirmationRule={
+  id:"W1-CONFIRM",passed:true,countId:degree.countId,wave:"W1",
+  evidenceBarId:"confirm",reversalBarId:"confirm"
+ };
+ const bars=[
+  {sourceBarId:"before",sourceTimestamp:"2026-10-11T12:00:00Z",timeframe:"5m",closed:true,high:13,low:9,close:11},
+  {sourceBarId:"pivot",sourceTimestamp:"2026-10-11T12:05:00Z",timeframe:"5m",closed:true,high:16,low:10,close:15},
+  {sourceBarId:"confirm",sourceTimestamp:"2026-10-11T12:10:00Z",timeframe:"5m",closed:true,high:14,low:8,close:13},
+  {sourceBarId:"after",sourceTimestamp:"2026-10-11T12:15:00Z",timeframe:"5m",closed:true,high:13,low:9,close:11}
+ ];
+ const waveCandidate={
+  countId:degree.countId,degreeId:"MICRO",activeWave:"W1",sequenceDirection:"UP",
+  side:"HIGH",price:16,sourceBarId:"pivot",sourceTimeframe:"5m",
+  sourceTimestamp:bars[1].sourceTimestamp,evidenceConfirmedAt:bars[2].sourceTimestamp,
+ };
+ const evidence={completed:true,sourceTimestamp:bars[2].sourceTimestamp,
+  sourceBarId:"confirm",sourceTimeframe:"5m",completionConfirmed:true,
+  structuralRuleId:"W1-CONFIRM",independentConfirmation:true};
+ const r=proposeEngine22V3CanonicalObservation({
+  canonical:base,degree:"MICRO",evidence,marketBars:bars,waveCandidate
+ });
+ assert.equal(r.ok,true,JSON.stringify(r.reasonCodes));
+ assert.equal(r.proposedCanonical.degrees.MICRO.activeWave,"W2");
+ assert.equal(r.proposedCanonical.degrees.MICRO.anchors.W1_HIGH.price,16);
+ assert.equal(r.publishAuthorized,false);
+ const noReversal=structuredClone(bars);
+ noReversal[2].high=16;noReversal[2].close=15;
+ noReversal[3].high=16;noReversal[3].close=15;
+ const invalid=proposeEngine22V3CanonicalObservation({
+  canonical:base,degree:"MICRO",evidence,marketBars:noReversal,waveCandidate
+ });
+ assert.equal(invalid.ok,false);
+ assert.ok(invalid.reasonCodes.includes("MINIMUM_REVERSAL_NOT_CONFIRMED"));
+});
