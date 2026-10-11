@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildEngine2ChartOverlayV1 } from "../logic/engine2/buildEngine2ChartOverlayV1.js";
+import { buildEngine2ChartOverlayV1, validateEngine2ChartOverlayV1 } from "../logic/engine2/buildEngine2ChartOverlayV1.js";
 
 const mock = (micro = { activeWave: "W2", levels: [{ key: "e1272", label: "1.272", price: 7900.25 }] }) => ({
   symbol: "ES",
@@ -187,4 +187,16 @@ test("Micro current-wavelength display conflict and source mode are explicitly d
   const micro=buildEngine2ChartOverlayV1(data).degrees.micro;
   assert.equal(micro.wave.authorityConflict,true);
   assert.equal(micro.provenance.sourceMode,"OVERRIDE_DISPLAY_INTELLIGENCE");
+});
+
+test("versioned API validates canonical degree shapes and rejects malformed price/time", () => {
+  const output=buildEngine2ChartOverlayV1(mock());
+  assert.equal(validateEngine2ChartOverlayV1(output).ok,true);
+  output.degrees.micro.lines[0].price=Number.NaN;
+  assert.ok(validateEngine2ChartOverlayV1(output).errors.includes("INVALID_LINE_MICRO"));
+});
+test("versioned API rejects aliasing Micro to Subminute", () => {
+  const output=buildEngine2ChartOverlayV1(mock());
+  output.degrees.micro.sourceDegree="subminute";
+  assert.ok(validateEngine2ChartOverlayV1(output).errors.includes("MICRO_IDENTITY_MISMATCH"));
 });
