@@ -38,18 +38,21 @@ export function auditProposedStructuralDegrees({ micro = PROPOSED_MICRO_ANCHORS,
   const impulseOrder=m.w1Low.price<m.w1High.price &&
     m.w2Low.price>m.w1Low.price &&
     m.w3High.price>m.w1High.price &&
-    m.w4Low.price>m.w1High.price &&
     m.w4Low.price<m.w3High.price;
+  const classicImpulseNoOverlap=m.w4Low.price>m.w1High.price;
   return Object.freeze({
     ok:onEsTicks&&impulseOrder&&micro.degree==="MICRO"&&
       submicro.degree==="SUBMICRO"&&
       micro.parentDegree==="SUBMINUTE"&&submicro.parentDegree==="MICRO",
     priceTicksValid:onEsTicks, proposedImpulseAnchorOrderValid:impulseOrder,
+    classicImpulseNoOverlap,
+    w4OverlapsW1Territory:!classicImpulseNoOverlap,
     historicalBarsVerified:false,
     lockedAnchorsPublished:false,
     sourceCountIdsIndependent:false,
     replayEquivalenceVerified:false,
     reasonCodes:["HANDWRITTEN_ANCHORS_PENDING_HISTORICAL_BAR_VALIDATION",
+      "MICRO_W4_OVERLAPS_W1_TERRITORY_REQUIRES_STRUCTURAL_REVIEW",
       "SUBMICRO_COUNT_ID_PENDING_CONTROLLED_MIGRATION",
       "NO_STRUCTURAL_PRICES_MIGRATED_IN_PRODUCTION"],
   });
