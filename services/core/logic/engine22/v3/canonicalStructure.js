@@ -14,7 +14,6 @@ export const ENGINE22_V3_ANCHOR_STATES = Object.freeze([
   "UNKNOWN", "DEVELOPING", "COMPLETION_CANDIDATE", "CONFIRMED",
   "LOCKED", "INVALIDATED", "RECOUNT_REQUIRED",
 ]);
-const own = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const record = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const validPrice = value => typeof value === "number" && Number.isFinite(value) && value > 0;
 const nonblank = value => typeof value === "string" && value.trim().length > 0;
@@ -35,7 +34,7 @@ export function validateEngine22V3Canonical(state) {
     if (count.parentDegree && !nonblank(count.parentWave)) errors.push(degree + "_PARENT_WAVE_REQUIRED");
     if (count.activeWave !== null && !ENGINE22_V3_WAVES.includes(count.activeWave))
       errors.push(degree + "_ACTIVE_WAVE_INVALID");
-    if (!record(count.anchors) || !record(count.history) && !Array.isArray(count.history))
+    if (!record(count.anchors))
       errors.push(degree + "_ANCHORS_OR_HISTORY_INVALID");
     if (!Array.isArray(count.history)) errors.push(degree + "_HISTORY_REQUIRED");
     if (!record(count.provenance)) errors.push(degree + "_PROVENANCE_REQUIRED");
@@ -58,6 +57,13 @@ export function validateEngine22V3Canonical(state) {
   const sequenceIds = ENGINE22_V3_DEGREES.map(d => degrees[d]?.sequenceId).filter(nonblank);
   if (new Set(countIds).size !== countIds.length) errors.push("DUPLICATE_COUNT_ID");
   if (new Set(sequenceIds).size !== sequenceIds.length) errors.push("DUPLICATE_SEQUENCE_ID");
+  for (const d of ENGINE22_V3_DEGREES) {
+    const c = degrees[d];
+    if (!record(c) || !c.parentDegree) continue;
+    const parent = degrees[c.parentDegree];
+    if (record(parent) && nonblank(c.parentCountId) && c.parentCountId !== parent.countId)
+      errors.push(d + "_PARENT_COUNT_ID_MISMATCH");
+  }
   if (Object.keys(degrees).some(k => !ENGINE22_V3_DEGREES.includes(k))) errors.push("UNKNOWN_DEGREE");
   if (state.noPermissionCreated !== true || state.noExecution !== true)
     errors.push("STRUCTURAL_AUTHORITY_ONLY");
@@ -74,7 +80,8 @@ export function validateEngine22V3Transition(before, after, { approvedRecountIds
   for (const d of ENGINE22_V3_DEGREES) {
     const oldCount = before.degrees[d], newCount = after.degrees[d];
     const changedCount = oldCount.countId !== newCount.countId;
-    const approved = changedCount && approvedRecountIds.includes(newCount.provenance?.managerApprovalId);
+    const approvalId = newCount.provenance?.managerApprovalId;
+    const approved = changedCount && nonblank(approvalId) && approvedRecountIds.includes(approvalId);
     if (changedCount && !approved) errors.push(d + "_UNAUTHORIZED_RECOUNT");
     for (const [key,oldAnchor] of Object.entries(oldCount.anchors)) {
       if (oldAnchor?.status !== "LOCKED") continue;
@@ -84,6 +91,8 @@ export function validateEngine22V3Transition(before, after, { approvedRecountIds
         errors.push(d + "_LOCKED_ANCHOR_CHANGED_" + key);
     }
     if (newCount.history.length < oldCount.history.length) errors.push(d + "_HISTORY_TRUNCATED");
+    else if (oldCount.history.some((event,i) => JSON.stringify(event) !== JSON.stringify(newCount.history[i])))
+      errors.push(d + "_HISTORY_REWRITTEN");
   }
   return {ok:errors.length===0,errors};
 }
