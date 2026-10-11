@@ -112,3 +112,38 @@ test("backend normalizes local Phoenix source times, preserves UTC and never inv
   assert.equal(marks.find(m=>m.id==="W3"), undefined);
   assert.equal(marks.find(m=>m.id==="W2").status, "COMPLETED_CANDIDATE");
 });
+
+test("all five selected degrees render independently from Engine22 published contracts", () => {
+  const data = mock({
+    activeWave:"W1",
+    confirmationStatus:"W1_COMPLETION_NOT_CONFIRMED",
+    levels:[{key:"e382",label:"0.382",price:7832.5,status:"WATCH"}],
+    microSequence:{anchorProvenance:{price:7782.75,timestamp:"2026-10-08 07:00"}}
+  });
+  const states = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates;
+  const expected = {primary:8100,intermediate:8200,minor:8300,minute:8400};
+  for (const [degree,price] of Object.entries(expected)) {
+    states[degree].activeFibModel = {active:true,modelType:"EXTENSION",levels:{e1618:price}};
+  }
+  const response = buildEngine2ChartOverlayV1(data);
+  assert.deepEqual(Object.keys(response.degrees),["primary","intermediate","minor","minute","micro"]);
+  for (const [degree,price] of Object.entries(expected)) {
+    assert.equal(response.degrees[degree].drawable,true);
+    assert.equal(response.degrees[degree].lines.find(x=>x.key==="e1618").price,price);
+    assert.match(response.degrees[degree].provenance.structuralSource,/degreeStates/);
+  }
+  assert.equal(response.degrees.micro.lines[0].price,7832.5);
+  assert.match(response.degrees.micro.provenance.structuralSource,/currentWavelength/);
+  assert.equal(response.degrees.micro.wave.confirmationStatus,"W1_COMPLETION_NOT_CONFIRMED");
+  assert.notEqual(response.degrees.micro.lines[0].price,states.subminute.targetModel.levels.e100);
+});
+test("active false without marks emits explicit no-draw instead of historical fib", () => {
+  const data = mock();
+  const intermediate = data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.intermediate;
+  intermediate.activeFibModel={active:false,levels:{e1618:8100}};
+  intermediate.targetModel={levels:{e1618:8200}};
+  const result=buildEngine2ChartOverlayV1(data).degrees.intermediate;
+  assert.equal(result.drawable,false);
+  assert.equal(result.reason,"NO_DRAWABLE_CANONICAL_STRUCTURE");
+  assert.deepEqual(result.lines,[]);
+});
