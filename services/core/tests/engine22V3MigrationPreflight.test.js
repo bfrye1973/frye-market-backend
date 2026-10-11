@@ -119,3 +119,19 @@ test("preserved legacy Micro locks must agree with Submicro migration lock inven
  assert.equal(result.ready,false);
  assert.ok(result.blockers.includes("SUBMICRO_LOCK_MIGRATION_MISMATCH_W1"));
 });
+
+test("owner-confirmed October Submicro anchors are not mistaken for recovered durable history",()=>{
+ // Owner observation only, NOT legacy durable history, locks, or an approved countId.
+ // Times are retained as supplied local wall-clock times; timezone is not inferred.
+ const ownerSubmicro={activeWave:"W2",anchors:{
+  W1_LOW:{price:7782.50,time:"2026-10-08 10:00",status:"CONFIRMED"},
+  W1_HIGH:{price:7853.75,time:"2026-10-09 05:00",status:"CONFIRMED"},
+  W2_LOW:{price:7826.25,time:"2026-10-09 06:00",status:"CONFIRMED"},
+ }};
+ const original=structuredClone(ownerSubmicro);
+ const result=preflightEngine22V3Migration({activeWaveState:active(),submicro:ownerSubmicro});
+ assert.equal(result.ready,false);
+ assert.ok(result.blockers.includes("INTRADAY_SUBMICRO_HISTORY_SOURCE_REQUIRED"));
+ assert.equal(result.canonical,null);
+ assert.deepEqual(ownerSubmicro,original);
+});
