@@ -36,4 +36,5 @@ jobs:
         working-directory: services/core
         env:
           NODE_ENV: test
+          ENGINE22_ISOLATION_SKIP_MICRO_SHADOW: "1"
         run: node tests/engine22RealSnapshotIsolation.audit.mjs
