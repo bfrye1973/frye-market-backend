@@ -27,6 +27,7 @@ test("different count cannot reuse proof",()=>{
 test("external passed flag cannot override insufficient price reversal",()=>{
  const altered=structuredClone(bars);
  altered[2].close=14.5;
+ altered[3].high=16;altered[3].close=15;
  const r=verify({degreeState:state(),candidate:candidate(),bars:altered});
  assert.equal(r.verified,false);
  assert.ok(r.reasonCodes.includes("MINIMUM_REVERSAL_NOT_CONFIRMED"));
