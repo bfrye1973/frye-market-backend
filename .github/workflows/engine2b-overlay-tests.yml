@@ -1,0 +1,29 @@
+name: Engine 2B Overlay Contract Tests
+on:
+  push:
+    branches: [engine2b-chart-overlays-v1]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine2/**'
+      - 'services/core/routes/engine2ChartOverlays.js'
+      - 'services/core/tests/engine2ChartOverlaysV1.test.js'
+      - '.github/workflows/engine2b-overlay-tests.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine2/buildEngine2ChartOverlayV1.js
+          node --check services/core/routes/engine2ChartOverlays.js
+          node --check services/core/server.js
+      - name: Engine 2B regression tests
+        run: node --test services/core/tests/engine2ChartOverlaysV1.test.js
