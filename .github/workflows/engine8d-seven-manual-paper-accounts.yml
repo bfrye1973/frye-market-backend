@@ -1,0 +1,32 @@
+name: Engine 8D Seven Manual PAPER Accounts
+on:
+  push:
+    branches: [engine8d-seven-manual-paper-accounts-v1]
+  pull_request:
+    paths:
+      - "services/core/logic/trading/manualPaperAccount*.js"
+      - "services/core/tests/engine8DSevenManualAccounts.test.js"
+      - "services/core/routes/trading.js"
+      - ".github/workflows/engine8d-seven-manual-paper-accounts.yml"
+permissions:
+  contents: read
+jobs:
+  simulated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax
+        run: |
+          node --check services/core/logic/trading/manualPaperAccountRegistry.js
+          node --check services/core/logic/trading/manualPaperAccountStore.js
+          node --check services/core/routes/trading.js
+      - name: Seven simulated accounts
+        run: node --test services/core/tests/engine8DSevenManualAccounts.test.js
+      - name: Existing foundation regression
+        run: |
+          node --test services/core/tests/engine8PaperDurableStore.test.js
+          node --test services/core/tests/engine8DCrossProcessLock.test.js
