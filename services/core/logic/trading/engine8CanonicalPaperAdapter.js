@@ -211,7 +211,7 @@ function buildStrategy1Provenance(engine7, engine9) {
 
   return {
     contractVersion: "strategy1.provenance.v1",
-    source: "ENGINE7_FINAL_SIZING",
+    source: "ENGINE7B_FINAL_SIZING",
 
     laneId: engine7?.laneId ?? engine9?.laneId ?? null,
     strategyId: engine7?.strategyId ?? engine9?.strategyId ?? null,
@@ -370,7 +370,7 @@ function buildBaseOutput({
         engine9?.official === true,
     },
 
-    engine7: {
+    engine7B: {
       status: engine7?.status ?? null,
       allowed: engine7?.allowed === true,
       executableSizing:
@@ -1063,7 +1063,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
         ),
       ],
       reasonCodes: [
-        "ENGINE9_ENGINE7_GEOMETRY_NOT_EQUAL",
+        "ENGINE9_ENGINE7B_GEOMETRY_NOT_EQUAL",
         "NO_ORDER_CREATED",
       ],
     });
