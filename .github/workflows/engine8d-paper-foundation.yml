@@ -21,6 +21,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
+      - name: Isolate simulated Journal files
+        run: echo "TRADE_JOURNAL_DIR=${{ runner.temp }}/engine8d-journal" >> "$GITHUB_ENV"
       - name: Dependencies
         run: npm install --ignore-scripts
       - name: Syntax
