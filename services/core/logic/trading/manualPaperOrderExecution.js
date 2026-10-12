@@ -8,7 +8,7 @@ import {getManualPaperAccounts} from "./manualPaperAccountStore.js";
 import {validateManualPaperInstruction} from "./validateManualPaperInstruction.js";
 import {getManualPaperRiskPolicy} from "./manualPaperAccountRegistry.js";
 import {
-  readEngine10ManualPaperAccounts,applyEngine10ManualPaperFill
+  readEngine10ManualPaperAccounts,readEngine10ManualPaperJournal,applyEngine10ManualPaperFill
 } from "../journal/manualPaperAccountJournal.js";
 
 const FILE=path.join(PAPER_DATA_DIR,"manual-paper-instructions-v1.json");
@@ -23,6 +23,11 @@ function delivery(fill){
     : applyEngine10ManualPaperFill(fill);
 }
 const clone=x=>JSON.parse(JSON.stringify(x));
+function testHardCrash(stage){
+  if(process.env.NODE_ENV==="test" && process.env.ENGINE8_MANUAL_TEST_CRASH_AT===stage)
+    process.exit(93);
+}
+
 function load(){
   if(!fs.existsSync(FILE))return {version:1,requests:{}};
   const raw=JSON.parse(fs.readFileSync(FILE,"utf8"));
@@ -75,6 +80,7 @@ export async function executeManualPaperInstruction(instruction) {
     if(account.tradingBlocked)return reject("ACCOUNT_JOURNAL_RECONCILIATION_REQUIRED");
     const v=validateManualPaperInstruction(instruction,account);
     if(!v.ok)return v;
+    testHardCrash("BEFORE_RESERVATION");
     const executionId="MPE-"+crypto.randomUUID();
     const orderId="MPO-"+crypto.randomUUID();
     const fill={accountId:v.accountId,idempotencyKey:key,executionId,orderId,
@@ -85,12 +91,15 @@ export async function executeManualPaperInstruction(instruction) {
     state.requests[key]={idempotencyKey:key,accountId:v.accountId,
       orderId,executionId,fill,status:"RESERVED",createdAt:new Date().toISOString()};
     save(state);
+    testHardCrash("AFTER_RESERVATION");
     // This commits ONE original simulated fill envelope before Engine 10.
     state.requests[key].status="JOURNAL_PENDING";
     save(state);
+    testHardCrash("AFTER_FILL_ENVELOPE");
     try{
       const result=await delivery(clone(fill));
       if(!result?.ok||!result.tradeId)throw Error("ENGINE10_ACKNOWLEDGMENT_MISSING");
+      testHardCrash("AFTER_ENGINE10_ACK");
       const current=load();
       if(current.requests[key]?.executionId!==executionId)
         throw Error("ORIGINAL_EXECUTION_IDENTITY_CHANGED");
@@ -139,4 +148,24 @@ export async function retryManualPaperJournalOnly({idempotencyKey}={}){
         reason:"ENGINE10_JOURNAL_ACK_PENDING",executionId:original.executionId};
     }
   });
+}
+
+/** Read-only status after an ambiguous execution, never creates another fill. */
+export function inspectManualPaperInstruction({idempotencyKey}={}){
+  const key=String(idempotencyKey||"").trim();
+  if(!key)return reject("MISSING_MANUAL_REQUEST_ID");
+  const state=load(),record=state.requests[key]||null;
+  if(!record)return {ok:true,idempotencyKey:key,status:"NOT_FOUND",mayExecuteNewFill:false};
+  const journal=readEngine10ManualPaperJournal();
+  const events=journal?.accounts?.[record.accountId]?.executions||[];
+  const original=events.find(e=>e.idempotencyKey===key);
+  const identitiesAgree=Boolean(original && original.executionId===record.executionId &&
+    original.orderId===record.orderId);
+  return {ok:true,idempotencyKey:key,accountId:record.accountId,
+    orderId:record.orderId,executionId:record.executionId,
+    status:record.status,engine10Acknowledged:identitiesAgree,
+    tradeId:identitiesAgree?original.tradeId:record.tradeId||null,
+    journalOnlyRetryAllowed:record.status==="JOURNAL_PENDING" && Boolean(record.fill),
+    requiresOperatorReconciliation:record.status!=="JOURNAL_COMPLETE",
+    mayExecuteNewFill:false};
 }
