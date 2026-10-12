@@ -135,3 +135,39 @@ test("owner-confirmed October Submicro anchors are not mistaken for recovered du
  assert.equal(result.canonical,null);
  assert.deepEqual(ownerSubmicro,original);
 });
+
+test("read-only seven-degree initialization preview uses owner marks and real manual source",()=>{
+ const filename=fileURLToPath(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url));
+ const source=JSON.parse(fs.readFileSync(filename,"utf8"));
+ const original=structuredClone(source);
+ // Distinct candidate-only identities. Never persisted or treated as existing historical IDs.
+ const names=["INTRADAY_SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"];
+ const degreeIdentities=Object.fromEntries(names.map(d=>[d,{
+  countId:"PREVIEW-ONLY-"+d,sequenceId:"PREVIEW-ONLY-SEQ-"+d
+ }]));
+ const micro={activeWave:"W5",lifecycle:"DEVELOPING",
+  managerApprovalId:"OWNER_ANCHORS_REVIEW_ONLY_NOT_MIGRATION_APPROVAL",
+  anchors:{
+   W1_LOW:{price:7675,time:"2026-10-01 07:00",status:"CONFIRMED"},
+   W1_HIGH:{price:7805,time:"2026-10-02 07:00",status:"CONFIRMED"},
+   W2_LOW:{price:7757.75,time:"2026-10-05 03:00",status:"CONFIRMED"},
+   W3_HIGH:{price:7897.75,time:"2026-10-06 07:00",status:"CONFIRMED"},
+   W4_LOW:{price:7782.75,time:"2026-10-08 07:00",status:"CONFIRMED"},
+  },history:[{event:"OWNER_OBSERVATIONS_BASELINE",historicalTransitionsKnown:false}],
+ };
+ const submicro={activeWave:"W3",lifecycle:"DEVELOPING",
+  anchors:{
+   W1_LOW:{price:7782.50,time:"2026-10-08 10:00",status:"CONFIRMED"},
+   W1_HIGH:{price:7853.75,time:"2026-10-09 05:00",status:"CONFIRMED"},
+   W2_LOW:{price:7826.25,time:"2026-10-09 06:00",status:"CONFIRMED"},
+  },history:[{event:"OWNER_OBSERVATIONS_BASELINE",historicalTransitionsKnown:false}],
+ };
+ const result=preflightEngine22V3Migration({activeWaveState:source,micro,submicro,
+  degreeIdentities,sourceTimestamp:"2026-10-11T00:00:00Z"});
+ assert.equal(result.ready,true,JSON.stringify(result.blockers));
+ assert.equal(Object.keys(result.canonical.degrees).length,7);
+ assert.equal(result.canonical.degrees.MICRO.anchors.W4_LOW.price,7782.75);
+ assert.equal(result.canonical.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW.price,7826.25);
+ assert.equal(result.canonical.degrees.INTRADAY_SUBMICRO.activeWave,"W3");
+ assert.deepEqual(source,original);
+});
