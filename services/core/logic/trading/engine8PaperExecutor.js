@@ -392,8 +392,6 @@ function resolveEngine7Sizing(
     engine8PaperOrder
       ?.engine7PositionSizing ||
     engine8PaperOrder
-      ?.engine7B ||
-    engine8PaperOrder
       ?.engine7 ||
     {};
 
