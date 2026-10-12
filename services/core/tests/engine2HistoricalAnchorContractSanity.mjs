@@ -12,7 +12,8 @@ const memo=new Map();
 async function getBars(contract,date){
  const k=contract+":"+date;if(memo.has(k))return memo.get(k);
  const u=new URL("https://api.polygon.io/futures/v1/aggs/"+contract);
- for(const [k,v] of Object.entries({resolution:"10min","window_start.gte":date,"window_start.lte":date,sort:"asc",limit:"50000",apiKey:key}))u.searchParams.set(k,v);
+ const nextDay=new Date(Date.parse(date+"T00:00:00Z")+86400000).toISOString().slice(0,10);
+ for(const [k,v] of Object.entries({resolution:"10min","window_start.gte":date,"window_start.lte":nextDay,sort:"asc",limit:"50000",apiKey:key}))u.searchParams.set(k,v);
  const r=await fetch(u,{signal:AbortSignal.timeout(25000)});
  if(!r.ok)throw Error(contract+" HTTP "+r.status);
  const d=await r.json();const bars=(d.results||[]).map(b=>({time:Number(b.window_start)/1e9,low:Number(b.low),high:Number(b.high)}));
