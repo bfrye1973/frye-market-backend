@@ -75,8 +75,9 @@ function toNumberOrNull(v) {
 
 function clampQty(qty) {
   const n = Number(qty);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.floor(n));
+  // Never silently round a manual quantity into a different instruction.
+  if (!Number.isSafeInteger(n) || n <= 0) return 0;
+  return n;
 }
 
 function normalizeAssetType(ticket) {
@@ -419,7 +420,11 @@ async function executeTradeTicketLocked(ticket) {
   }
 
   // This executor is intrinsically PAPER-only, regardless of environment flags.
-  if (ticket?.paper === false || ticket?.real === true || ticket?.live === true) {
+  if (
+    ticket?.paper === false || ticket?.real === true || ticket?.live === true ||
+    ["REAL", "LIVE"].includes(String(ticket?.accountMode || "").toUpperCase()) ||
+    ["REAL", "LIVE"].includes(String(ticket?.executionMode || ticket?.mode || "").toUpperCase())
+  ) {
     return {
       ok: false,
       rejected: true,
