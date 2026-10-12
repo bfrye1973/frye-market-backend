@@ -58,6 +58,7 @@ import engine28APipelineDoctorRouter from "./routes/engine28APipelineDoctor.js";
 import executionStateRouter from "./routes/executionState.js";
 import engine26ManualHardSignalRouter from "./routes/engine26ManualHardSignal.js";
 import futuresOhlcRouter from "./routes/futuresOhlc.js";
+import engine2HistoricalFuturesRouter from "./routes/engine2HistoricalFutures.js";
 import futuresMarketMeterRouter from "./routes/futuresMarketMeter.js";
 import esReactionScore from "./routes/esReactionScore.js";
 import { esVolumeBehaviorRouter } from "./routes/esVolumeBehavior.js";
@@ -143,6 +144,7 @@ app.get("/", (_req, res) => {
 // --- API routes ---
 app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
+app.use("/api/v1/engine2/historical-futures", engine2HistoricalFuturesRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter);
 app.use("/live", liveRouter);
 app.use("/api/v1/smz-levels", smzLevels);
