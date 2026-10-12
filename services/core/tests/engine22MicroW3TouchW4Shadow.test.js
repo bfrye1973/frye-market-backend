@@ -31,3 +31,29 @@ test("forming candle touching target is excluded",()=>{
  assert.equal(x.available,false);
  assert.equal(x.w3OneToOne,null);
 });
+
+test("uniquely price-matched confirmed W2 pivot is observational only, not canonical approval",()=>{
+ const locked={...transition,
+   anchors:{w2Low:7826.75},w2Down:{state:"LOCKED"}};
+ const prices=[7850,7842,7826.75,7837,7840,7860,7870,7888,7876,7860,7853];
+ const start=epoch-5*600000;
+ const candles=prices.map((close,i)=>({
+  time:(start+i*600000)/1000,high:close+1,
+  low:i===2?7826.75:close-1,close:i===2?7827.75:close
+ }));
+ const result=assess({transition:locked,bars:candles,
+   evaluationTimeMs:start+12*600000});
+ assert.equal(result.w3OneToOne.touched,true);
+ assert.equal(result.w3OneToOne.w2SourceQuality,"INFERRED_UNAPPROVED_PRICE_MATCHED_PIVOT");
+ assert.equal(result.w4DownCandidate,true);
+ assert.equal(result.noAnchorPromotion,true);
+});
+test("multiple confirmed W2 price-matched pivots fail closed rather than guessing",()=>{
+ const locked={...transition,anchors:{w2Low:7826.75},w2Down:{state:"LOCKED"}};
+ const lows=[7840,7835,7826.75,7835,7840,7835,7826.75,7835,7840,7887,7853,7840];
+ const candles=lows.map((v,i)=>({time:(epoch+i*600000)/1000,
+  high:v+2,low:v,close:v+1}));
+ const x=assess({transition:locked,bars:candles,evaluationTimeMs:epoch+15*600000});
+ assert.equal(x.available,false);
+ assert.ok(x.reasonCodes.includes("AMBIGUOUS_W2_PIVOT_IDENTITY"));
+});
