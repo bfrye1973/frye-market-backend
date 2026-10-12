@@ -8,3 +8,11 @@ console.log(JSON.stringify({snapshotTime:raw.now,topKeys:Object.keys(raw).slice(
   v3Present:!!e?.engine22V3Shadow, v3DegreeCount:Object.keys(e?.engine22V3Projection?.degreeStates||{}).length,
   v3NodeEvidencePresent:!!e?.engine22V3NodeEvidence,
   pathCandidates:Object.entries(raw).filter(([k])=>/market|candle|bar|ema/i.test(k)).map(([k,v])=>({key:k,keys:Object.keys(v||{}).slice(0,20)}))},null,2));
+
+const posture=raw.marketMeter?.layers?.emaPosture||raw.emaPosture||{};
+const series={tenMinute:posture.tenMinute,oneHour:posture.oneHour,fourHour:posture.fourHour,daily:posture.daily,
+  fiveMinute:raw.engine3DiagnosticBars?.fiveMinute};
+console.log("CANDLE_SOURCE_DETAIL",JSON.stringify(Object.fromEntries(Object.entries(series).map(([k,v])=>[k,{
+  present:!!v,keys:Object.keys(v||{}).slice(0,25),
+  bars:stats(v?.bars),timeframe:v?.timeframe||v?.tf||null
+}])),null,2));
