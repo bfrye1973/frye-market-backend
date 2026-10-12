@@ -216,3 +216,23 @@ test("Micro W3 watch may show prior W1/W2 reference ladders but never as current
   assert.ok(micro.lines.some(l=>l.label.startsWith("PRIOR W2")));
   assert.ok(micro.lines.some(l=>l.status==="TOUCHED"));
 });
+
+test("Minute W1 separate timed low and date-only candidate high retain honest provenance", () => {
+  const data=mock();
+  const minute=data.strategies["intraday_scalp@10m"].engine22WaveStrategy.degreeStates.minute;
+  minute.marks={
+    W1:{status:"COMPLETED_CANDIDATE",
+      low:{price:7591,time:"2026-09-16 12:30",status:"CONFIRMED"},
+      high:{price:7848.5,time:"2026-09-23",status:"COMPLETED_CANDIDATE"}},
+    W2:null,
+    W3:{price:7900,time:"2026-10-01 10:00",status:"INVALIDATED"},
+  };
+  const result=buildEngine2ChartOverlayV1(data).degrees.minute;
+  assert.equal(result.marks.find(x=>x.id==="W1_LOW").price,7591);
+  assert.equal(result.marks.some(x=>x.id==="W1_HIGH"),false);
+  assert.equal(result.marks.some(x=>x.id==="W3"),false);
+  assert.equal(result.unresolvedAnchors.length,1);
+  assert.deepEqual({id:result.unresolvedAnchors[0].id,price:result.unresolvedAnchors[0].price,
+    date:result.unresolvedAnchors[0].date,reason:result.unresolvedAnchors[0].reason},
+    {id:"W1_HIGH",price:7848.5,date:"2026-09-23",reason:"DATE_ONLY_NO_INTRADAY_SOURCE_TIME"});
+});
