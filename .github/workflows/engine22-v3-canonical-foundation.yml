@@ -31,3 +31,19 @@ jobs:
           name: engine22-v3-snapshot-proof
           path: ${{ runner.temp }}/engine22-v3-snapshot-proof.json
           if-no-files-found: error
+      - name: Checkout exact production baseline for comparison
+        uses: actions/checkout@v4
+        with:
+          ref: 9cee0f86682ea65e8182467c2049ec98b31643d0
+          path: _engine22_production_baseline
+      - name: Compare Engine22 outputs against exact production commit
+        env:
+          ENGINE22_BASE_CHECKOUT: ${{ github.workspace }}/_engine22_production_baseline
+        run: node services/core/tests/engine22V3ExactCommitCompare.js
+      - name: Preserve exact-commit comparison report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-exact-commit-compare
+          path: ${{ runner.temp }}/engine22-v3-exact-commit-compare.json
+          if-no-files-found: warn
