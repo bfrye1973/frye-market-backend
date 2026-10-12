@@ -46,3 +46,13 @@ Direct 1d `limit=1200&debug=1` probe: `resolvedContract=ESZ6`, `actualTf=1d`, `r
 - Preserve the existing first-five evidence proof, including standalone native 5m ES source in the draft build job.
 
 Audit source: GitHub Actions isolated read-only run `38269281369`; no production changes.
+
+## Continuous-history acceptance hardening (2026-10-12)
+
+Reviewed `services/core/logic/engine29/data/providers/futuresProductMarketData.js`: its data result explicitly declares `contractSpecificHistory:true` and `continuousHistory:false`. It cannot be treated as a verified multi-year ES continuous series.
+
+Draft-only validator `validateContinuousEsManifest.js` now requires: source and session-calendar identity, disclosed adjustment methodology, at least two distinct ES contract identities with documented roll evidence and date coverage, source contract and candle ID for each daily bar, and no contract/lineage mismatches. `aggregateValidatedDailyHistory.js` refuses weekly/monthly construction unless that validation passes. Synthetic regression fixtures prove valid aggregation under declared lineage and fail-closed rejection without it; **synthetic passing tests are not proof an actual continuous ES source exists**.
+
+GitHub Actions isolated Engine22 V3 Independent Nodes Shadow workflow run `38273406498`: passed. PR #97 remains draft/unmerged/undeployed; trading outputs, approved wave anchors and Fib levels unchanged.
+
+**Outstanding:** procure/assemble authentic continuous ES daily history across multiple contract rolls, verify genuine gap/session/adjustment provenance, and independently audit output. Until then 1w/1mo remain unverified sources.
