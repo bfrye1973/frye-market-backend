@@ -50,4 +50,29 @@ test("unknown PAPER storage path is rejected", () => {
   assert.throws(() => store.paperStorePath("../trade-journal.json"), /UNKNOWN_ENGINE8_PAPER_FILE/);
 });
 
+test("repeat migration retains original identities and manifest", () => {
+  const migrated = store.readPaperStore("paper-idempotency-ledger.json", {});
+  const repeated = store.readPaperStore("paper-idempotency-ledger.json", {});
+  assert.deepEqual(repeated, migrated);
+  assert.equal(repeated["OLD-ORDER"].orderId, "PAPER-HISTORICAL");
+  assert.ok(fs.existsSync(path.join(durable, ".migrated-paper-idempotency-ledger.json.json")));
+});
+
+test("ambiguous historical and durable coexistence fails closed", () => {
+  const oldOrders = path.join(old, "paper-orders.json");
+  fs.writeFileSync(oldOrders, JSON.stringify([{ orderId: "DIFFERENT-HISTORY" }]));
+  try {
+    assert.throws(() => store.readPaperStore("paper-orders.json", []), /PAPER_MIGRATION_AMBIGUOUS_DURABLE_AND_LEGACY/);
+  } finally { fs.unlinkSync(oldOrders); }
+});
+
+test("changed historical source after migration fails closed", () => {
+  const historyFile = path.join(old, "paper-idempotency-ledger.json");
+  const original = fs.readFileSync(historyFile);
+  fs.writeFileSync(historyFile, JSON.stringify({tampered:true}));
+  try {
+    assert.throws(() => store.readPaperStore("paper-idempotency-ledger.json", {}), /PAPER_MIGRATION_HISTORY_CHANGED/);
+  } finally { fs.writeFileSync(historyFile, original); }
+});
+
 process.on("exit", () => fs.rmSync(home, { recursive: true, force: true }));
