@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
+import { readPaperStore, writePaperStore, withPaperInstructionLock } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 import {
   createTradeJournalEntryFromEngine8Fill,
@@ -327,6 +327,12 @@ export async function cancelPaperOrder(body) {
 }
 
 export async function executeTradeTicket(ticket) {
+  const key = String(ticket?.idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  return withPaperInstructionLock(key, () => executeTradeTicketLocked(ticket));
+}
+
+async function executeTradeTicketLocked(ticket) {
   const c = cfg();
 
   const idempotencyKey = String(ticket?.idempotencyKey || "").trim();
@@ -712,6 +718,12 @@ const journalRetriesInFlight = new Set();
 // Admin route calls this ONLY for a pre-existing persisted fill.
 // No new order, execution, or fill is constructed during reconciliation.
 export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  return withPaperInstructionLock(key, () => retryPaperJournalDeliveryLocked(key));
+}
+
+async function retryPaperJournalDeliveryLocked(idempotencyKey) {
   const key = String(idempotencyKey || "").trim();
   if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
   if (journalRetriesInFlight.has(key)) {
