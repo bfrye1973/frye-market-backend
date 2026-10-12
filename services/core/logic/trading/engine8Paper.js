@@ -694,11 +694,15 @@ try {
   // A failed status write must not be reported as a completed delivery.
   const completed = result.journal?.ok === true && Boolean(result.journal?.tradeId);
   result.journalStatus = completed ? "JOURNAL_COMPLETE" : "JOURNAL_PENDING";
-  ledger[idempotencyKey] = {
+  const currentLedger = readJson(LEDGER_FILE, {});
+  if (currentLedger[idempotencyKey]?.orderId !== orderId) {
+    throw new Error("ENGINE8_PAPER_FILL_IDENTITY_LOST");
+  }
+  currentLedger[idempotencyKey] = {
     ...result,
     journalDelivery: completed ? null : { ticket, order, result: { ...result }, action },
   };
-  writeJson(LEDGER_FILE, ledger);
+  writeJson(LEDGER_FILE, currentLedger);
 
   return result;
 }
