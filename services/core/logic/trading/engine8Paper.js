@@ -8,6 +8,21 @@ import {
   applyEngine8ExecutionToJournal,
 } from "../journal/tradeJournalStore.js";
 
+
+// Test-only dependency injection. Disabled outside isolated NODE_ENV=test.
+let testJournalHooks = null;
+export function setPaperJournalHooksForTests(hooks) {
+  if (process.env.NODE_ENV !== "test") throw new Error("TEST_HOOKS_FORBIDDEN");
+  testJournalHooks = hooks;
+}
+function journalCreate(delivery) {
+  return (process.env.NODE_ENV === "test" && testJournalHooks?.create
+    ? testJournalHooks.create : createTradeJournalEntryFromEngine8Fill)(delivery);
+}
+function journalApply(delivery) {
+  return (process.env.NODE_ENV === "test" && testJournalHooks?.apply
+    ? testJournalHooks.apply : applyEngine8ExecutionToJournal)(delivery);
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -627,14 +642,14 @@ try {
 
   if (action === "NEW_ENTRY") {
     journalResult =
-      await createTradeJournalEntryFromEngine8Fill({
+      await journalCreate({
         ticket,
         order,
         result,
       });
   } else if (action === "REDUCE" || action === "EXIT") {
     journalResult =
-      await applyEngine8ExecutionToJournal({
+      await journalApply({
         ticket,
         order,
         result,
@@ -749,8 +764,8 @@ async function retryPaperJournalDeliveryLocked(idempotencyKey) {
   let journal;
   try {
     journal = delivery.action === "NEW_ENTRY"
-      ? await createTradeJournalEntryFromEngine8Fill(delivery)
-      : await applyEngine8ExecutionToJournal(delivery);
+      ? await journalCreate(delivery)
+      : await journalApply(delivery);
   } catch (error) {
     return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "JOURNAL_RETRY_FAILED" };
   }
