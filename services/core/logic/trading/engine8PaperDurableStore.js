@@ -50,3 +50,35 @@ export function writePaperStore(name, value) {
   const file = paperStorePath(name);
   atomicPaperWrite(file, value);
 }
+
+/**
+ * Exclusive cross-process instruction lock on the persistent filesystem.
+ * A crash leaves the lock in place; NEVER auto-expire it, because the fill
+ * may have been committed before the interrupted process exited.
+ * Operator reconciliation is required before removing a stranded lock.
+ */
+export async function withPaperInstructionLock(idempotencyKey, operation) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) throw new Error("MISSING_IDEMPOTENCY_KEY");
+  const lockParent = path.join(PAPER_DATA_DIR, ".instruction-locks");
+  fs.mkdirSync(lockParent, { recursive: true });
+  const hashed = crypto.createHash("sha256").update(key).digest("hex");
+  const lock = path.join(lockParent, hashed + ".lock");
+  try {
+    fs.mkdirSync(lock);
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      return { ok: false, rejected: true, duplicate: true,
+        reason: "PAPER_INSTRUCTION_LOCKED_RECONCILIATION_REQUIRED", idempotencyKey: key };
+    }
+    throw error;
+  }
+  try {
+    fs.writeFileSync(path.join(lock, "identity.json"),
+      JSON.stringify({ idempotencyKey: key, processId: process.pid, startedAt: new Date().toISOString() }));
+    return await operation();
+  } finally {
+    // This runs on handled exceptions; a hard crash leaves the lock intact.
+    fs.rmSync(lock, { recursive: true, force: true });
+  }
+}
