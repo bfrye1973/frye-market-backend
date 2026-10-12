@@ -6,7 +6,8 @@ import {evaluateEngine22V3WaveTransition} from "./evaluateWaveTransition.js";
 
 const clone = x => structuredClone(x);
 const WAVES = ["W1","W2","W3","W4","W5"];
-const KEY = {W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"};
+const KEY = {UP:{W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"},
+ DOWN:{W1:"W1_LOW",W2:"W2_HIGH",W3:"W3_LOW",W4:"W4_HIGH",W5:"W5_LOW"}};
 const fail = (reason,events=[]) => ({ok:false,reasonCodes:[reason],events,
   shadowOnly:true,publishAuthorized:false,noExecution:true,noPermissionCreated:true});
 export function replayConfirmedEngine22V3LifecycleShadow({
@@ -42,7 +43,7 @@ export function replayConfirmedEngine22V3LifecycleShadow({
          bars:history,
        });
        if (verified.verified) {
-         const key=KEY[wave],prior=state.anchors?.[key];
+         const key=KEY[state.sequenceDirection][wave],prior=state.anchors?.[key];
          const a=verified.proof.anchor;
          if (prior?.status==="LOCKED" &&
              (prior.price!==a.price || prior.time!==a.time)) {
