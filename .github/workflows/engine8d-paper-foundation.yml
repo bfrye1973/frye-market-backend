@@ -38,6 +38,8 @@ jobs:
         run: node --test services/core/tests/engine8PaperDurableStore.test.js
       - name: Cross-process instruction serialization and crash fail-closed
         run: node --test services/core/tests/engine8DCrossProcessLock.test.js
+      - name: Simulated Engine 10 outage, lost ack, restart and duplicate prevention
+        run: node --test services/core/tests/engine8DJournalRecovery.test.js
       - name: Canonical Engine 7 and Engine 10 provenance
         run: node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
       - name: Lifecycle replay
