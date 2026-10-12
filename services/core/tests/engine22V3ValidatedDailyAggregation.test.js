@@ -1,11 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {aggregateValidatedEsDailyHistory as aggregate} from "../logic/engine22/v3/aggregateValidatedDailyHistory.js";
-const provenance={symbol:"ES",continuousVerified:true,rolloverMethod:"TEST_VERIFIED_ROLLOVER",sessionCalendar:"TEST_WEEKDAYS",sourceId:"TEST_ONLY"};
+const provenance={symbol:"ES",continuousVerified:true,rolloverMethod:"TEST_VERIFIED_ROLLOVER",sessionCalendar:"TEST_WEEKDAYS",sourceId:"TEST_ONLY",priceAdjustmentMethod:"TEST_ADJUSTED",contractLineage:[{contract:"ESH6",from:"2026-01-01",to:"2026-04-30T23:59:59Z",sourceId:"TEST_A",rollEvidenceId:"TEST_ROLL_A"},{contract:"ESU6",from:"2026-05-01",to:"2026-09-30T23:59:59Z",sourceId:"TEST_B",rollEvidenceId:"TEST_ROLL_B"}]};
 const dates=[];
 for(let t=Date.UTC(2026,0,5);t<Date.UTC(2026,8,1);t+=86400000){
  const day=new Date(t).getUTCDay();if(day>0&&day<6)dates.push({
-  time:t/1000,open:100,high:106,low:96,close:101,volume:100,closed:true});
+  time:t/1000,open:100,high:106,low:96,close:101,volume:100,closed:true,sourceContract:t<Date.UTC(2026,4,1)?"ESH6":"ESU6",sourceCandleId:"TEST:"+t});
 }
 test("no weekly or monthly authority without continuous ES rollover provenance",()=>{
  assert.equal(aggregate({dailyBars:dates,timeframe:"1w"}).available,false);
@@ -29,4 +29,11 @@ test("historical gaps must block aggregation, never fill missing bars",()=>{
 });
 test("reject a single unverified live contract even with 159 daily candles",()=>{
  assert.equal(aggregate({dailyBars:dates,provenance:{...provenance,continuousVerified:false}}).available,false);
+});
+
+test("mere continuousVerified flag with no multi-contract lineage cannot authorize higher-degree waves",()=>{
+ const fake={...provenance,contractLineage:undefined};
+ const result=aggregate({dailyBars:dates,provenance:fake,timeframe:"1w",asOfMs:Date.UTC(2026,8,5)});
+ assert.equal(result.available,false);
+ assert.ok(result.reasonCodes.includes("MULTI_CONTRACT_LINEAGE_REQUIRED"));
 });
