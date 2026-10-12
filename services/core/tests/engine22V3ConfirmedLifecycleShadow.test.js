@@ -39,7 +39,7 @@ for(const direction of ["UP","DOWN"]){
    assert.equal(r.officialFibAuthorityChanged,false);assert.equal(r.noExecution,true);
    assert.deepEqual(state,original);
    const anchors=direction==="UP"?["W1_HIGH","W2_LOW","W3_HIGH","W4_LOW","W5_HIGH"]:
-     ["W1_HIGH","W2_LOW","W3_HIGH","W4_LOW","W5_HIGH"];
+     ["W1_LOW","W2_HIGH","W3_LOW","W4_HIGH","W5_LOW"];
    assert.equal(anchors.every(k=>r.finalState.anchors[k]?.status==="CONFIRMED"),true);
  });
 }
