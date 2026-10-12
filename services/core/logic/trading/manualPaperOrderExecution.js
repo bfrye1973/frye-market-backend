@@ -56,6 +56,7 @@ export async function executeManualPaperInstruction(instruction) {
   if(key.length<8)return reject("MISSING_MANUAL_REQUEST_ID");
   return exclusively(key,async()=>{
     if(process.env.ENGINE8_KILL_SWITCH==="1")return reject("KILL_SWITCH");
+    if(instruction?.ownerConfirmation!=="CONFIRM_PAPER")return reject("EXPLICIT_OWNER_CONFIRMATION_REQUIRED");
     const state=load();
     if(state.requests[key]){
       const prior=state.requests[key];
