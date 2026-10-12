@@ -2273,7 +2273,14 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive V3 read-only projection. Explicit supplied canonical data only.
   // Existing legacy execution/strategy contracts are never reassigned here.
   const engine22V3Shadow = input?.engine22V3Canonical
-    ? buildEngine22V3ShadowSnapshot({canonical:input.engine22V3Canonical})
+    ? buildEngine22V3ShadowSnapshot({
+        canonical:input.engine22V3Canonical,
+        barsByTf:input.barsByTf,
+        evaluationTimeMs:input.evaluationTimeMs,
+        sourceByDegree:input.engine22V3ValidatedSourceByDegree ?? null,
+        previousFibByDegree:input.engine22V3PreviousFibByDegree ?? null,
+        rulesByDegree:input.engine22V3StructuralRulesByDegree ?? null,
+      })
     : null;
 
   const engine22V3NodeEvidence = input?.engine22V3Canonical
