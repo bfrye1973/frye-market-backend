@@ -9,6 +9,7 @@ on:
       - 'services/core/tests/engine2ChartOverlaysV1.test.js'
       - 'services/core/tests/engine2ChartRealEngine22Builders.test.js'
       - 'services/core/tests/engine2LiveSnapshotParity.mjs'
+      - 'services/core/tests/engine2FrozenAnchorReconciliation.mjs'
       - 'services/core/tests/engine2ChartRouteCache.test.js'
       - '.github/workflows/engine2b-overlay-tests.yml'
   workflow_dispatch:
@@ -35,3 +36,6 @@ jobs:
 
       - name: Live ES snapshot read-only parity
         run: node services/core/tests/engine2LiveSnapshotParity.mjs
+
+      - name: Frozen Minor Minute anchor reconciliation (10m vs 1h)
+        run: node services/core/tests/engine2FrozenAnchorReconciliation.mjs
