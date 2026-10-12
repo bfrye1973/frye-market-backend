@@ -2089,7 +2089,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     transition: microW2W3TransitionFibs
       ? {...microW2W3TransitionFibs, anchors:{
           ...microW2W3TransitionFibs.anchors,
-          w2SourceTimestamp: microV2Migration?.canonicalState?.waves?.W3?.startedAt || null,
+          w2SourceTimestamp:
+            microV2Migration?.canonicalState?.waves?.W3?.startedAt ||
+            microV2Migration?.canonicalState?.waves?.W2?.structuralEvidence?.sourceTimestamp ||
+            microV2Migration?.canonicalState?.waves?.W2?.structuralEvidence?.confirmationTimestamp ||
+            null,
         }} : null,
     bars: input?.barsByTf?.["10m"] || [],
     evaluationTimeMs: input?.evaluationTimeMs,
