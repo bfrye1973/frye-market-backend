@@ -6,6 +6,7 @@ on:
       - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
       - 'services/core/tests/engine22V3IndependentNodeShadow.test.js'
       - '.github/workflows/engine22-v3-independent-nodes.yml'
+      - 'services/core/tests/engine22V3LiveEvidenceDiagnostic.js'
 permissions:
   contents: read
 jobs:
@@ -19,3 +20,10 @@ jobs:
       - name: Independent completed-candle tests
         working-directory: services/core
         run: node --test tests/engine22V3IndependentNodeShadow.test.js
+      - name: Inspect real production ES snapshot provenance read-only
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --max-time 40 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES')
+          echo "HTTP_STATUS=$status"
+          if [ "$status" != "200" ]; then cat "$RUNNER_TEMP/es.json"; exit 1; fi
+          node services/core/tests/engine22V3LiveEvidenceDiagnostic.js "$RUNNER_TEMP/es.json"
