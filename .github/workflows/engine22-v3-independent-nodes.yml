@@ -45,3 +45,4 @@ jobs:
                error:j.error??j.reasonCode??null,keys:Object.keys(j).slice(0,14),exampleBar:bars.at(-1)?Object.keys(bars.at(-1)):[],medianSpacingSec:bars.length>1?([...bars].slice(1).map((b,i)=>Number(b.time)-Number(bars[i].time)).sort((a,b)=>a-b)[Math.floor((bars.length-1)/2)]):null}));
             '
           done
+          node services/core/tests/engine22V3RealBarNodeProof.js "$RUNNER_TEMP/es.json" "$RUNNER_TEMP/5m.json"
