@@ -1,0 +1,21 @@
+name: Engine22 Micro W3 W4 Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/microV2/assessMicroW3TouchW4Shadow.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
+      - 'services/core/tests/engine22MicroW3TouchW4Shadow.test.js'
+      - '.github/workflows/engine22-micro-w3-w4-shadow.yml'
+permissions:
+  contents: read
+jobs:
+  shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run candidate evidence tests
+        working-directory: services/core
+        run: node --test tests/engine22MicroW3TouchW4Shadow.test.js
