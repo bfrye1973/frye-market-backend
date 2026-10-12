@@ -75,3 +75,25 @@ export const MANUAL_PAPER_RISK_POLICY = Object.freeze({
   maxContractsPerAccount:6,slippageModel:"MANUAL_EXPLICIT_FILL_PRICE",
   markPolicy:"NO_AUTOMATIC_MARKS",
 });
+
+function positiveEnv(name,fallback){
+  const raw=String(process.env[name]||"").trim();
+  if(!raw)return fallback;
+  const value=Number(raw);
+  if(!Number.isFinite(value)||value<=0)throw Error("INVALID_MANUAL_PAPER_POLICY_"+name);
+  return value;
+}
+export function getManualPaperRiskPolicy(){
+  return Object.freeze({
+    ...MANUAL_PAPER_RISK_POLICY,
+    simulatedInitialMargin:Object.freeze({
+      ES:positiveEnv("ENGINE8_MANUAL_PAPER_MARGIN_ES",15000),
+      MES:positiveEnv("ENGINE8_MANUAL_PAPER_MARGIN_MES",1500)
+    }),
+    feePerContractPerSide:Object.freeze({
+      ES:positiveEnv("ENGINE8_MANUAL_PAPER_FEE_ES",2.5),
+      MES:positiveEnv("ENGINE8_MANUAL_PAPER_FEE_MES",1.25)
+    }),
+    maxContractsPerAccount:Math.floor(positiveEnv("ENGINE8_MANUAL_PAPER_MAX_CONTRACTS",6)),
+  });
+}
