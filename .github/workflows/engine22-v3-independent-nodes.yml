@@ -27,3 +27,5 @@ jobs:
           echo "HTTP_STATUS=$status"
           if [ "$status" != "200" ]; then cat "$RUNNER_TEMP/es.json"; exit 1; fi
           node services/core/tests/engine22V3LiveEvidenceDiagnostic.js "$RUNNER_TEMP/es.json"
+
+# Live candle source depth confirmation.
