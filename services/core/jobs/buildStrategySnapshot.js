@@ -7901,7 +7901,8 @@ async function processStrategy(
   engine25Context = null,
   previousSnapshot = null,
   evaluationTimeMs = null,
-  engine3DiagnosticBars = null
+  engine3DiagnosticBars = null,
+  engine22V3FiveMinuteBars = []
 ) {
 
 let contextResp = null;
@@ -8427,7 +8428,7 @@ const strategy1TenMinuteEma10 =
         evaluationTimeMs,
         previousMicroSequence: previousSnapshot?.strategies?.[s.strategyId]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.microSequence || null,
         barsByTf: {
-          "5m": engine3DiagnosticBars?.fiveMinute?.ok === true ? (engine3DiagnosticBars.fiveMinute.bars || []) : [],
+          "5m": engine22V3FiveMinuteBars,
           "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
           "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
           "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
@@ -10424,6 +10425,23 @@ console.log("Engine21 alignment fetched");
   strategies: {},
 };
 
+  // Separate read-only Engine 22 V3 candle source; never borrow Engine 3's
+  // diagnostic classification or participation authority.
+  let engine22V3FiveMinuteBars = [];
+  if (String(symbol).toUpperCase() === "ES") {
+    const url = `${CORE_BASE}/api/v1/futures/ohlc?symbol=ES&timeframe=5m&limit=300`;
+    try {
+      const response = await fetchJson(url, 15000);
+      const payload = response?.json;
+      if (response?.ok === true) {
+        engine22V3FiveMinuteBars = Array.isArray(payload) ? payload :
+          Array.isArray(payload?.bars) ? payload.bars : [];
+      }
+    } catch (error) {
+      console.warn("[Engine22 V3 shadow] standalone 5m source unavailable:", String(error?.message || error));
+    }
+  }
+
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
   try {
@@ -10486,7 +10504,8 @@ console.log("Engine21 alignment fetched");
   engine25Context,
   previousSnapshot,
   evaluationTimeMs, 
-  engine3DiagnosticBars
+  engine3DiagnosticBars,
+  engine22V3FiveMinuteBars
 );
 
 const executionSymbol =

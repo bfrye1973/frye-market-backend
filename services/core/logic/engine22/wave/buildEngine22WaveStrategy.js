@@ -1,3 +1,4 @@
+import { buildEngine22V3IndependentNodeShadow } from "../v3/buildIndependentNodeShadow.js";
 import { buildEngine22V3ContractProjection } from "../v3/compareProtectedContracts.js";
 import { buildEngine22V3ShadowSnapshot } from "../v3/buildShadowSnapshot.js";
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
@@ -2275,7 +2276,16 @@ export function buildEngine22WaveStrategy(input = {}) {
     ? buildEngine22V3ShadowSnapshot({canonical:input.engine22V3Canonical})
     : null;
 
+  const engine22V3NodeEvidence = input?.engine22V3Canonical
+    ? buildEngine22V3IndependentNodeShadow({
+        canonical:input.engine22V3Canonical,
+        barsByTf:input.barsByTf,
+        evaluationTimeMs:input.evaluationTimeMs,
+      })
+    : null;
+
   return {
+    engine22V3NodeEvidence,
     engine22V3Shadow,
     engine22V3Projection: engine22V3Shadow?.available === true
       ? buildEngine22V3ContractProjection({shadow:engine22V3Shadow}) : null,
