@@ -103,8 +103,10 @@ export function projectEngine22V3ActiveWaveFibShadow({
   const observed=observations.find(b=>sign>0?b.high>=price:b.low<=price);
   const prior=compatible?previous.levels?.find(x=>x.key===key&&x.price===price):null;
   const touched=Boolean(observed)||prior?.status==="TOUCHED";
-  const touchedAt=observed?.sourceTimestamp||prior?.firstTouchedAt||null;
-  const touchedBarId=observed?.sourceBarId||prior?.firstTouchedBarId||null;
+  const preservePrior=prior?.status==="TOUCHED" && prior.firstTouchedAt &&
+    (!observed || Date.parse(prior.firstTouchedAt)<=stamp(observed));
+  const touchedAt=preservePrior?prior.firstTouchedAt:(observed?.sourceTimestamp||null);
+  const touchedBarId=preservePrior?prior.firstTouchedBarId:(observed?.sourceBarId||null);
   return {key,ratio,price,status:touched?"TOUCHED":"WATCH",
    firstTouchedAt:touchedAt,firstTouchedBarId:touchedBarId};
  });
