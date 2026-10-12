@@ -43,3 +43,5 @@ jobs:
 # Post PR96 publication verification: read-only.
 
 # Retry after production snapshot cadence.
+
+# Snapshot regeneration follow-up read.
