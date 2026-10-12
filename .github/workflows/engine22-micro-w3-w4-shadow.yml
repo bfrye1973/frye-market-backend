@@ -38,3 +38,26 @@ jobs:
              touchSourceId:first?"ES:10m:"+utc(first):null,
              readOnly:true,noAnchorPromotion:true},null,2));
           '
+      - name: Inspect live W2 candle lineage in read-only ES snapshot
+        shell: bash
+        run: |
+          curl -fsS --max-time 45 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES' -o "$RUNNER_TEMP/strategy.json"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const s=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/strategy.json","utf8"));
+            const w=s.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy;
+            const legacy=w?.currentWavelength?.degrees?.micro?.microSequence;
+            const v2=w?.microV2Migration;
+            const c=w?.microExecutionContext;
+            console.log("W2_LINEAGE_AUDIT",JSON.stringify({
+              snapshot:s.now,
+              legacyActiveWave:legacy?.activeWave??null,
+              legacyW2State:legacy?.w2Completion?.state??null,
+              legacyW2Evidence:legacy?.w2Completion?.evidence??null,
+              legacyW2ConfirmedAt:legacy?.w2ConfirmedAtBarTime??null,
+              legacyW2CandidateLow:legacy?.w2CandidateLow??null,
+              v2Available:v2?.available??null,
+              microExecutionContextAvailable:c?.available??null,
+              oldW3FibTarget:w?.microW2W3TransitionFibs?.w3Up?.levels?.find(l=>l.key==="e1000")?.price??null
+            },null,2));
+          '
