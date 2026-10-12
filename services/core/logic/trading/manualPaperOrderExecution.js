@@ -38,7 +38,9 @@ async function exclusively(key,op){
 }
 export function getManualPaperAccountsOverview(){
   const initialized=getManualPaperAccounts();
-  if(!initialized.ok)return initialized;
+  if(!initialized.ok) return {ok:true,initialized:false,accounts:[],
+    totalEquity:null,startingCapital:70000,reason:initialized.reason,
+    warning:"PAPER ACCOUNTS NOT INITIALIZED"};
   const journal=readEngine10ManualPaperAccounts();
   const saved=load();
   const accounts=initialized.accounts.map(def=>{
@@ -47,7 +49,7 @@ export function getManualPaperAccountsOverview(){
     return {...def,...journal.accounts[def.accountId],pendingJournalInstructions:pending.length,
       tradingBlocked:pending.length>0};
   });
-  return {ok:true,accountMode:"PAPER",riskPolicy:getManualPaperRiskPolicy(),accounts,
+  return {ok:true,initialized:true,accountMode:"PAPER",riskPolicy:getManualPaperRiskPolicy(),accounts,
     startingCapital:70000,totalEquity:accounts.reduce((n,a)=>n+a.equity,0),
     pendingJournalInstructions:accounts.reduce((n,a)=>n+a.pendingJournalInstructions,0),
     warning:"PAPER ONLY — NO REAL BROKER ORDERS"};
@@ -67,7 +69,7 @@ export async function executeManualPaperInstruction(instruction) {
         journalStatus:prior.status};
     }
     const overview=getManualPaperAccountsOverview();
-    if(!overview.ok)return reject(overview.reason);
+    if(!overview.ok||!overview.initialized)return reject("MANUAL_PAPER_ACCOUNTS_NOT_INITIALIZED");
     const account=overview.accounts.find(a=>a.accountId===instruction?.accountId);
     if(!account)return reject("UNKNOWN_MANUAL_PAPER_ACCOUNT");
     if(account.tradingBlocked)return reject("ACCOUNT_JOURNAL_RECONCILIATION_REQUIRED");
