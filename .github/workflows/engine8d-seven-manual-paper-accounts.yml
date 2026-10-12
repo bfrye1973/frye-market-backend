@@ -6,6 +6,7 @@ on:
     paths:
       - "services/core/logic/trading/manualPaperAccount*.js"
       - "services/core/tests/engine8DSevenManualAccounts.test.js"
+      - "services/core/tests/engine8DManualInstructionValidator.test.js"
       - "services/core/routes/trading.js"
       - ".github/workflows/engine8d-seven-manual-paper-accounts.yml"
 permissions:
@@ -23,9 +24,12 @@ jobs:
         run: |
           node --check services/core/logic/trading/manualPaperAccountRegistry.js
           node --check services/core/logic/trading/manualPaperAccountStore.js
+          node --check services/core/logic/trading/validateManualPaperInstruction.js
           node --check services/core/routes/trading.js
       - name: Seven simulated accounts
         run: node --test services/core/tests/engine8DSevenManualAccounts.test.js
+      - name: Manual trade validation
+        run: node --test services/core/tests/engine8DManualInstructionValidator.test.js
       - name: Existing foundation regression
         run: |
           node --test services/core/tests/engine8PaperDurableStore.test.js
