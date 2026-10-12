@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {compareEngine22V3ProtectedOutputs as compare,buildEngine22V3CompatibilityPreview} from "../logic/engine22/v3/compareProtectedContracts.js";
+import {compareEngine22V3ProtectedOutputs as compare,buildEngine22V3CompatibilityPreview,buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
 const source=()=>({degreeStates:{minute:{activeWave:"W3"}},currentWavelength:{symbol:"ES"},
  microExecutionContext:{automationEligible:false},engine22Display:{degrees:{}},
  waveOpportunity:{},currentLifecycleState:{},activeFibModel:{},
@@ -81,4 +81,33 @@ test("all seven independent V3 projections map to one identity per degree withou
  const bad=buildEngine22V3CompatibilityPreview({legacy,shadow});
  assert.equal(bad.mappingReady,false);
  assert.equal(bad.pass,false);
+});
+
+test("seven degree compatible view has flat independent identities and does not publish timing authority",()=>{
+ const names=["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"];
+ const states=Object.fromEntries(names.map((k,i)=>[k,{
+  sourceCountId:"COUNT-"+i,sequenceId:"SEQ-"+i,activeWave:"W3",
+  lifecycle:"DEVELOPING",parentDegree:null,parentWave:null,
+  anchors:{W1_LOW:{price:7700+i,time:"2026-10-11 10:00",status:"CONFIRMED"}},
+  invalidation:{},
+ }]));
+ const shadow={available:true,shadowOnly:true,
+  degreeStates:{degrees:states},
+  currentWavelength:{degrees:Object.fromEntries(names.map(k=>[k,{sourceCountId:states[k].sourceCountId,activeWave:"W3"}]))},
+  engine22Display:{degrees:Object.fromEntries(names.map(k=>[k,{degree:k,rows:[]}]))}};
+ const saved=structuredClone(shadow);
+ const projected=buildEngine22V3ContractProjection({shadow});
+ assert.equal(projected.available,true);
+ assert.deepEqual(Object.keys(projected.degreeStates),names);
+ assert.equal(projected.degreeStates.micro.sourceCountId,"COUNT-1");
+ assert.equal(projected.degreeStates.intraday_submicro.sourceCountId,"COUNT-0");
+ assert.equal(projected.degreeStates.micro.marks.W1_LOW.price,7701);
+ assert.equal(projected.degreeStates.intraday_submicro.marks.W1_LOW.price,7700);
+ assert.equal(projected.currentWavelength.degrees.micro.sourceCountId,"COUNT-1");
+ assert.equal(projected.engine22Display.degreeOrder.length,7);
+ assert.equal(projected.microExecutionContext,null);
+ assert.equal(projected.publicationEligible,false);
+ assert.deepEqual(shadow,saved);
+ shadow.currentWavelength.degrees.micro.sourceCountId="OTHER";
+ assert.equal(buildEngine22V3ContractProjection({shadow}).available,false);
 });
