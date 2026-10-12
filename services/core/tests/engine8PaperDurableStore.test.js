@@ -15,6 +15,18 @@ process.env.ENGINE8_PAPER_TEST_LEGACY_DIR = old;
 process.env.ENGINE8_PAPER_DATA_DIR = durable;
 const store = await import("../logic/trading/engine8PaperDurableStore.js");
 
+test("default PAPER store never falls back to legacy directory without Render metadata", () => {
+  const moduleUrl = new URL("../logic/trading/engine8PaperDurableStore.js", import.meta.url).href;
+  const env = { ...process.env };
+  delete env.ENGINE8_PAPER_DATA_DIR;
+  delete env.RENDER;
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e",
+    `import {PAPER_DATA_DIR} from ${JSON.stringify(moduleUrl)};console.log(PAPER_DATA_DIR)`],
+    { encoding:"utf8", env });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(child.stdout.trim(), "/var/data/replay/engine8-paper");
+});
+
 test("historical PAPER files are never read, copied, moved, or deleted", () => {
   const history = { "OLD-ORDER": { orderId: "PAPER-HISTORICAL", status: "filled" } };
   const oldFile = path.join(old, "paper-idempotency-ledger.json");
