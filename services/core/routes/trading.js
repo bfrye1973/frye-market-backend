@@ -6,6 +6,7 @@ import { fileURLToPath } from "url";
 import {
   getTradingStatus,
   executeTradeTicket,
+  retryPaperJournalDelivery,
   listPaperExecutions,
   listPaperOrders,
   cancelPaperOrder,
@@ -528,6 +529,19 @@ router.get(
     }
   }
 );
+
+/**
+ * Admin-only, Journal-only recovery of an EXISTING simulated PAPER fill.
+ * Never calls executeTradeTicket or any broker.
+ */
+router.post("/paper/retry-journal", requireEngine8Admin, async (req, res) => {
+  try {
+    const out = await retryPaperJournalDelivery({ idempotencyKey: req.body?.idempotencyKey });
+    return res.status(out?.ok ? 200 : 409).json(out);
+  } catch (error) {
+    return res.status(503).json({ ok: false, rejected: true, reason: "ENGINE8_JOURNAL_RETRY_UNAVAILABLE" });
+  }
+});
 
 /**
  * POST /api/trading/cancel
