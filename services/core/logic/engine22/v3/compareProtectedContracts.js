@@ -59,3 +59,43 @@ export function buildEngine22V3CompatibilityPreview({legacy=null,shadow=null}={}
   protectedContractComparison:comparison,candidate,
   publicationEligible:false,noExecution:true,noPermissionCreated:true};
 }
+
+/**
+ * V3-specific seven-degree view in the same top-level shapes as the existing
+ * degreeStates/currentWavelength/engine22Display consumers. No live replacement.
+ * No legacy Micro alias is rewritten; both degrees retain distinct identities.
+ */
+export function buildEngine22V3ContractProjection({shadow=null}={}){
+ const names=["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"];
+ if(!shadow?.available || shadow.shadowOnly!==true)
+  return {available:false,reasonCodes:["V3_SHADOW_REQUIRED"]};
+ const states=shadow.degreeStates?.degrees;
+ const wavelengths=shadow.currentWavelength?.degrees;
+ const displays=shadow.engine22Display?.degrees;
+ if(!names.every(k=>states?.[k] && wavelengths?.[k] && displays?.[k] &&
+   typeof states[k].sourceCountId==="string" && states[k].sourceCountId.length>0 &&
+   wavelengths[k].sourceCountId===states[k].sourceCountId &&
+   displays[k].degree===k))
+  return {available:false,reasonCodes:["V3_DEGREE_IDENTITY_MISMATCH"]};
+ const degreeStates=Object.fromEntries(names.map(k=>[k,{
+  degree:k,active:states[k].activeWave!==null,
+  activeWave:states[k].activeWave,
+  lifecycle:states[k].lifecycle,stage:states[k].lifecycle,
+  parentDegree:states[k].parentDegree,parentWave:states[k].parentWave,
+  sourceCountId:states[k].sourceCountId,sequenceId:states[k].sequenceId,
+  marks:clone(states[k].anchors),invalidation:clone(states[k].invalidation),
+  noExecution:true,noPermissionCreated:true,paperTradeCandidate:false,
+ }]));
+ const currentWavelength={
+  version:"engine22.currentWavelength.v3",sourceMode:"CANONICAL_V3_SHADOW",
+  degrees:clone(wavelengths),noExecution:true,noPermissionCreated:true,
+ };
+ const engine22Display={
+  version:"engine22Display.v3",degreeOrder:[...names],degrees:clone(displays),
+  flags:{noExecution:true,noPermissionCreated:true,watchOnly:true},
+ };
+ return {available:true,shadowOnly:true,publicationEligible:false,
+  degreeStates,currentWavelength,engine22Display,
+  microExecutionContext:null,
+  noExecution:true,noPermissionCreated:true};
+}
