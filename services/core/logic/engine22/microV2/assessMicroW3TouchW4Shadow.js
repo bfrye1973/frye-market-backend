@@ -25,7 +25,21 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
  // The canonical record lacks a guaranteed W2 source candle. Do not infer an
  // exact post-W2 touch without its independently established start time.
  const w2Time=transition?.anchors?.w2SourceTimestamp;
- const start=typeof w2Time==="string"?Date.parse(w2Time):NaN;
+ let start=typeof w2Time==="string"?Date.parse(w2Time):NaN;
+ let w2SourceQuality="CANONICAL_W2_SOURCE";
+ if(!Number.isFinite(start)&&transition?.w2Down?.state==="LOCKED"){
+   // Strict observational fallback: one and only one closed 10m local-low
+   // candle matching the independently locked W2 price. Not anchor authority.
+   const candidates=normalized.filter((b,i)=>i>=2&&i+2<normalized.length&&
+     Math.abs(b.low-anchor)<0.001&&
+     normalized[i-2].low>b.low&&normalized[i-1].low>b.low&&
+     normalized[i+1].low>b.low&&normalized[i+2].low>b.low);
+   if(candidates.length===1){
+     start=candidates[0].ms;
+     w2SourceQuality="INFERRED_UNAPPROVED_PRICE_MATCHED_PIVOT";
+   }else return {...base,reasonCodes:[candidates.length===0?
+     "W2_SOURCE_CANDLE_TIMESTAMP_REQUIRED":"AMBIGUOUS_W2_PIVOT_IDENTITY"]};
+ }
  if(!Number.isFinite(start))return {...base,reasonCodes:["W2_SOURCE_CANDLE_TIMESTAMP_REQUIRED"]};
  const eligible=normalized.filter(b=>b.ms>=start);
  const touch=eligible.find(b=>b.high>=target);
@@ -40,7 +54,7 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
  const retracement=following.some(b=>b.close<touch.close);
  const lowerCloses=confirmedLocalHigh&&retracement;
  return {...base,available:true,
-   w3OneToOne:{target,touched:true,status:"TOUCHED",
+   w3OneToOne:{target,touched:true,status:"TOUCHED",w2SourceQuality,
      firstTouchTimestamp:new Date(touch.ms).toISOString(),
      sourceBarId:`ES:10m:${new Date(touch.ms).toISOString()}`,countId},
    w4DownCandidate:lowerCloses,
