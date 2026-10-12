@@ -2,6 +2,8 @@ name: Engine22 V3 Live Publication Diagnostic
 on:
   push:
     branches: [engine22-v3-live-publication-diagnostic-20261012]
+  pull_request:
+    paths: [".github/workflows/engine22-v3-live-publication-diagnostic.yml"]
 permissions:
   contents: read
 jobs:
