@@ -7901,7 +7901,8 @@ async function processStrategy(
   engine25Context = null,
   previousSnapshot = null,
   evaluationTimeMs = null,
-  engine3DiagnosticBars = null
+  engine3DiagnosticBars = null,
+  engine22MicroW3EvidenceBars = []
 ) {
 
 let contextResp = null;
@@ -8425,6 +8426,7 @@ const strategy1TenMinuteEma10 =
         breakoutContext: engine22Scalp?.breakoutContext || null,
 
         evaluationTimeMs,
+        microW3EvidenceBars: engine22MicroW3EvidenceBars,
         previousMicroSequence: previousSnapshot?.strategies?.[s.strategyId]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.microSequence || null,
         barsByTf: {
           "5m": engine3DiagnosticBars?.fiveMinute?.ok === true ? (engine3DiagnosticBars.fiveMinute.bars || []) : [],
@@ -10424,6 +10426,26 @@ console.log("Engine21 alignment fetched");
   strategies: {},
 };
 
+  // Independent read-only history solely for the legacy Micro W3-touch / W4
+  // candidate sidecar. Never feeds execution, permission, or legacy wave inputs.
+  let engine22MicroW3EvidenceBars = [];
+  if (String(symbol).toUpperCase() === "ES") {
+    try {
+      const evidenceResponse = await fetchJson(
+        `${CORE_BASE}/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=500`,
+        15000,
+      );
+      const payload = evidenceResponse?.json;
+      if (evidenceResponse?.ok === true) {
+        engine22MicroW3EvidenceBars = Array.isArray(payload)
+          ? payload : Array.isArray(payload?.bars) ? payload.bars : [];
+      }
+    } catch (error) {
+      console.warn("[Engine22 W3/W4 shadow] standalone 10m evidence unavailable:",
+        String(error?.message || error));
+    }
+  }
+
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
   try {
@@ -10486,7 +10508,8 @@ console.log("Engine21 alignment fetched");
   engine25Context,
   previousSnapshot,
   evaluationTimeMs, 
-  engine3DiagnosticBars
+  engine3DiagnosticBars,
+  engine22MicroW3EvidenceBars
 );
 
 const executionSymbol =
