@@ -46,3 +46,22 @@ jobs:
             '
           done
           node services/core/tests/engine22V3RealBarNodeProof.js "$RUNNER_TEMP/es.json" "$RUNNER_TEMP/5m.json"
+      - name: Probe historical ES daily continuity for higher-degree sourcing
+        shell: bash
+        run: |
+          status=$(curl -sS --max-time 40 -w '%{http_code}' -o "$RUNNER_TEMP/daily.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=1d&limit=1200&debug=1")
+          FILE="$RUNNER_TEMP/daily.json" STATUS="$status" node -e '
+            const fs=require("fs");const j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"));
+            const bars=Array.isArray(j)?j:j.bars||[];
+            const times=bars.map(b=>Number(b.time)*1000).filter(Number.isFinite);
+            const gaps=times.slice(1).map((t,i)=>Math.round((t-times[i])/86400000));
+            console.log("DAILY_LONG_HISTORY",JSON.stringify({
+              status:process.env.STATUS,requestedSymbol:j.requestedSymbol,
+              resolvedContract:j.resolvedSymbol,actualTf:j.timeframe,barCount:bars.length,
+              first:times.length?new Date(times[0]).toISOString():null,
+              last:times.length?new Date(times.at(-1)).toISOString():null,
+              gapsOverSevenDays:gaps.filter(v=>v>7).length,
+              maxGapDays:gaps.length?Math.max(...gaps):null,
+              sourceResolution:j.resolution||null
+            }));
+          '
