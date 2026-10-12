@@ -65,3 +65,24 @@ jobs:
               sourceResolution:j.resolution||null
             }));
           '
+      - name: Probe explicit ES contract daily histories read-only
+        shell: bash
+        run: |
+          for contract in ESZ5 ESH6 ESM6 ESU6 ESZ6; do
+            status=$(curl -sS --max-time 35 -w '%{http_code}' -o "$RUNNER_TEMP/${contract}.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=${contract}&timeframe=1d&limit=1200&debug=1")
+            CONTRACT="$contract" STATUS="$status" FILE="$RUNNER_TEMP/${contract}.json" node -e '
+              const fs=require("fs");
+              let j;try{j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"))}catch{j={error:"INVALID_JSON"}}
+              const b=Array.isArray(j)?j:(Array.isArray(j.bars)?j.bars:[]);
+              const t=b.map(x=>Number(x.time)).filter(Number.isFinite);
+              const gaps=t.slice(1).map((v,i)=>(v-t[i])/86400);
+              console.log("EXPLICIT_CONTRACT_PROBE",JSON.stringify({
+                requested:process.env.CONTRACT,status:process.env.STATUS,
+                resolved:j.resolvedSymbol??null,sourceTf:j.timeframe??null,
+                bars:b.length,first:t.length?new Date(t[0]*1000).toISOString():null,
+                last:t.length?new Date(t.at(-1)*1000).toISOString():null,
+                gapsOver7Days:gaps.filter(d=>d>7).length,maxGapDays:gaps.length?Math.max(...gaps):null,
+                error:j.error??j.message??null
+              }));
+            '
+          done
