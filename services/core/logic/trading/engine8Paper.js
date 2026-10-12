@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 import {
   createTradeJournalEntryFromEngine8Fill,
@@ -12,9 +13,9 @@ const __dirname = path.dirname(__filename);
 
 // core/data
 const DATA_DIR = path.resolve(__dirname, "../../data");
-const LEDGER_FILE = path.resolve(DATA_DIR, "paper-idempotency-ledger.json");
-const ORDERS_FILE = path.resolve(DATA_DIR, "paper-orders.json");
-const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");
+const LEDGER_FILE = "paper-idempotency-ledger.json";
+const ORDERS_FILE = "paper-orders.json";
+const EXEC_FILE = "paper-executions.json";
 
 // ---- Config (env-based, safe defaults) ----
 function cfg() {
@@ -31,22 +32,12 @@ function cfg() {
   };
 }
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
 function readJson(file, fallback) {
-  try {
-    if (!fs.existsSync(file)) return fallback;
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return fallback;
-  }
+  return readPaperStore(file, fallback);
 }
 
 function writeJson(file, data) {
-  ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  writePaperStore(file, data);
 }
 
 function nowIso() {
