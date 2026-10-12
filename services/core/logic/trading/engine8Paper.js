@@ -1,20 +1,36 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { readPaperStore, writePaperStore, withPaperInstructionLock } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 import {
   createTradeJournalEntryFromEngine8Fill,
   applyEngine8ExecutionToJournal,
 } from "../journal/tradeJournalStore.js";
 
+
+// Test-only dependency injection. Disabled outside isolated NODE_ENV=test.
+let testJournalHooks = null;
+export function setPaperJournalHooksForTests(hooks) {
+  if (process.env.NODE_ENV !== "test") throw new Error("TEST_HOOKS_FORBIDDEN");
+  testJournalHooks = hooks;
+}
+function journalCreate(delivery) {
+  return (process.env.NODE_ENV === "test" && testJournalHooks?.create
+    ? testJournalHooks.create : createTradeJournalEntryFromEngine8Fill)(delivery);
+}
+function journalApply(delivery) {
+  return (process.env.NODE_ENV === "test" && testJournalHooks?.apply
+    ? testJournalHooks.apply : applyEngine8ExecutionToJournal)(delivery);
+}
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // core/data
 const DATA_DIR = path.resolve(__dirname, "../../data");
-const LEDGER_FILE = path.resolve(DATA_DIR, "paper-idempotency-ledger.json");
-const ORDERS_FILE = path.resolve(DATA_DIR, "paper-orders.json");
-const EXEC_FILE = path.resolve(DATA_DIR, "paper-executions.json");
+const LEDGER_FILE = "paper-idempotency-ledger.json";
+const ORDERS_FILE = "paper-orders.json";
+const EXEC_FILE = "paper-executions.json";
 
 // ---- Config (env-based, safe defaults) ----
 function cfg() {
@@ -31,22 +47,12 @@ function cfg() {
   };
 }
 
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
 function readJson(file, fallback) {
-  try {
-    if (!fs.existsSync(file)) return fallback;
-    return JSON.parse(fs.readFileSync(file, "utf-8"));
-  } catch {
-    return fallback;
-  }
+  return readPaperStore(file, fallback);
 }
 
 function writeJson(file, data) {
-  ensureDataDir();
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  writePaperStore(file, data);
 }
 
 function nowIso() {
@@ -69,8 +75,9 @@ function toNumberOrNull(v) {
 
 function clampQty(qty) {
   const n = Number(qty);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.floor(n));
+  // Never silently round a manual quantity into a different instruction.
+  if (!Number.isSafeInteger(n) || n <= 0) return 0;
+  return n;
 }
 
 function normalizeAssetType(ticket) {
@@ -308,6 +315,15 @@ export async function listPaperExecutions() {
 
 export async function cancelPaperOrder(body) {
   const orderId = String(body?.orderId || "").trim();
+  if (!orderId) return {ok:false,rejected:true,reason:"MISSING_ORDER_ID"};
+  // Cancellation modifies the shared PAPER orders file and must not overwrite
+  // a concurrently appended fill/order from another process.
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    cancelPaperOrderLocked(body));
+}
+
+async function cancelPaperOrderLocked(body) {
+  const orderId = String(body?.orderId || "").trim();
   if (!orderId) {
     return { ok: false, rejected: true, reason: "MISSING_ORDER_ID" };
   }
@@ -336,6 +352,20 @@ export async function cancelPaperOrder(body) {
 }
 
 export async function executeTradeTicket(ticket) {
+  const key = String(ticket?.idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  // Serialize the shared JSON-ledger read/modify/write across ALL processes and keys.
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    withPaperInstructionLock(key, () => executeTradeTicketLocked(ticket)));
+}
+
+function testCrashAt(stage) {
+  if (process.env.NODE_ENV === "test" && process.env.ENGINE8_PAPER_TEST_CRASH_AT === stage) {
+    process.exit(92); // deliberately skips JS finally handlers to model process termination
+  }
+}
+
+async function executeTradeTicketLocked(ticket) {
   const c = cfg();
 
   const idempotencyKey = String(ticket?.idempotencyKey || "").trim();
@@ -398,8 +428,12 @@ export async function executeTradeTicket(ticket) {
     };
   }
 
-  const paper = ticket?.paper !== false;
-  if (c.paperOnly && paper === false) {
+  // This executor is intrinsically PAPER-only, regardless of environment flags.
+  if (
+    ticket?.paper === false || ticket?.real === true || ticket?.live === true ||
+    ["REAL", "LIVE"].includes(String(ticket?.accountMode || "").toUpperCase()) ||
+    ["REAL", "LIVE"].includes(String(ticket?.executionMode || ticket?.mode || "").toUpperCase())
+  ) {
     return {
       ok: false,
       rejected: true,
@@ -411,6 +445,10 @@ export async function executeTradeTicket(ticket) {
 
   const ledger = readJson(LEDGER_FILE, {});
   if (ledger[idempotencyKey]) {
+    if (ledger[idempotencyKey].journalStatus === "ORDER_RESERVED") {
+      return { ok: false, rejected: true, duplicate: true,
+        reason: "ORIGINAL_PAPER_EXECUTION_RESERVED_REQUIRES_RECONCILIATION", idempotencyKey };
+    }
     return {
       ok: true,
       duplicate: true,
@@ -517,6 +555,18 @@ const fillPrice =
       ? futuresEntryPrice
       : intendedMid;
 
+  testCrashAt("BEFORE_RESERVATION");
+  // Reserve the instruction identity on durable storage before any fill records.
+  // An interruption fails closed rather than issuing another simulated fill.
+  ledger[idempotencyKey] = {
+    ok: false, paper: true, status: "reserved",
+    orderId, executionId: String(ticket?.executionId || orderId),
+    idempotencyKey, journalStatus: "ORDER_RESERVED",
+    reservedAt: nowIso(),
+  };
+  writeJson(LEDGER_FILE, ledger);
+  testCrashAt("AFTER_RESERVATION");
+
   const filledAt = nowIso();
 
   const order = {
@@ -554,6 +604,7 @@ const fillPrice =
   const orders = readJson(ORDERS_FILE, []);
   orders.unshift(order);
   writeJson(ORDERS_FILE, orders);
+  testCrashAt("AFTER_ORDER_RECORD");
 
   const executions = readJson(EXEC_FILE, []);
   executions.unshift({
@@ -579,6 +630,7 @@ const fillPrice =
     status: "filled",    
   });
   writeJson(EXEC_FILE, executions);
+  testCrashAt("AFTER_EXECUTION_RECORD");
 
   const result = {
     ok: true,
@@ -599,22 +651,30 @@ const fillPrice =
     filledAt,
   };
 
-  ledger[idempotencyKey] = result;
+  // Commit the exact fill and original ticket BEFORE contacting Engine 10.
+  // Recovery replays only this immutable Journal delivery, never an order.
+  result.journalStatus = "JOURNAL_PENDING";
+  result.executionId = String(ticket?.executionId || orderId);
+  ledger[idempotencyKey] = {
+    ...result,
+    journalDelivery: { ticket, order, result: { ...result }, action },
+  };
   writeJson(LEDGER_FILE, ledger);
+  testCrashAt("AFTER_FILL_LEDGER");
 
 try {
   let journalResult = null;
 
   if (action === "NEW_ENTRY") {
     journalResult =
-      await createTradeJournalEntryFromEngine8Fill({
+      await journalCreate({
         ticket,
         order,
         result,
       });
   } else if (action === "REDUCE" || action === "EXIT") {
     journalResult =
-      await applyEngine8ExecutionToJournal({
+      await journalApply({
         ticket,
         order,
         result,
@@ -679,5 +739,110 @@ try {
   };
 }
 
+  // A failed status write must not be reported as a completed delivery.
+  testCrashAt("AFTER_JOURNAL_ACK");
+  const completed = result.journal?.ok === true && Boolean(result.journal?.tradeId);
+  result.journalStatus = completed ? "JOURNAL_COMPLETE" : "JOURNAL_PENDING";
+  const currentLedger = readJson(LEDGER_FILE, {});
+  if (currentLedger[idempotencyKey]?.orderId !== orderId) {
+    throw new Error("ENGINE8_PAPER_FILL_IDENTITY_LOST");
+  }
+  currentLedger[idempotencyKey] = {
+    ...result,
+    journalDelivery: completed ? null : { ticket, order, result: { ...result }, action },
+  };
+  writeJson(LEDGER_FILE, currentLedger);
+
   return result;
+}
+
+const journalRetriesInFlight = new Set();
+
+// Admin route calls this ONLY for a pre-existing persisted fill.
+// No new order, execution, or fill is constructed during reconciliation.
+export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    withPaperInstructionLock(key, () => retryPaperJournalDeliveryLocked(key)));
+}
+
+async function retryPaperJournalDeliveryLocked(idempotencyKey) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  if (journalRetriesInFlight.has(key)) {
+    return { ok: false, rejected: true, reason: "JOURNAL_RETRY_IN_PROGRESS" };
+  }
+  journalRetriesInFlight.add(key);
+  try {
+  const ledger = readJson(LEDGER_FILE, {});
+  const original = ledger[key];
+  if (!original || original.status !== "filled" || original.paper !== true) {
+    return { ok: false, rejected: true, reason: "PERSISTED_PAPER_FILL_NOT_FOUND" };
+  }
+  if (original.journalStatus === "JOURNAL_COMPLETE" && original.journal?.tradeId) {
+    return { ok: true, duplicate: true, journalStatus: "JOURNAL_COMPLETE", orderId: original.orderId, tradeId: original.journal.tradeId };
+  }
+  const delivery = original.journalDelivery;
+  if (!delivery?.ticket || !delivery?.order || !delivery?.result || delivery.order.orderId !== original.orderId) {
+    return { ok: false, rejected: true, reason: "ORIGINAL_JOURNAL_DELIVERY_UNAVAILABLE" };
+  }
+  let journal;
+  try {
+    journal = delivery.action === "NEW_ENTRY"
+      ? await journalCreate(delivery)
+      : await journalApply(delivery);
+  } catch (error) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "JOURNAL_RETRY_FAILED" };
+  }
+  if (journal?.ok !== true || !journal?.tradeId) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "ENGINE10_ACKNOWLEDGMENT_MISSING" };
+  }
+  // Re-read to protect against replacing unrelated ledger entries.
+  const latest = readJson(LEDGER_FILE, {});
+  if (latest[key]?.orderId !== original.orderId) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "PAPER_IDENTITY_CHANGED" };
+  }
+  latest[key] = {
+    ...latest[key], tradeId: journal.tradeId,
+    journal: { ...journal, journalCompleted: true },
+    journalStatus: "JOURNAL_COMPLETE", journalDelivery: null,
+  };
+  writeJson(LEDGER_FILE, latest);
+  return { ok: true, orderId: original.orderId, executionId: original.executionId,
+    idempotencyKey: key, tradeId: journal.tradeId, journalStatus: "JOURNAL_COMPLETE" };
+  } finally { journalRetriesInFlight.delete(key); }
+}
+
+// Read-only interruption classification. No lock deletion and no fill replay.
+export function inspectPaperInstructionRecovery({ idempotencyKey } = {}) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ok:false, reason:"MISSING_IDEMPOTENCY_KEY" };
+  const ledger = readJson(LEDGER_FILE, {});
+  const saved = ledger[key] || null;
+  const matchesOrder = readJson(ORDERS_FILE, []).filter(order => order?.idempotencyKey === key);
+  const matchesExecution = readJson(EXEC_FILE, []).filter(fill => fill?.idempotencyKey === key);
+  const conflicting = matchesOrder.length > 1 || matchesExecution.length > 1;
+  const orderId = saved?.orderId || matchesOrder[0]?.orderId || matchesExecution[0]?.orderId || null;
+  const identitiesMatch = matchesOrder.every(v => v.orderId === orderId) &&
+    matchesExecution.every(v => v.orderId === orderId);
+  let state = "AMBIGUOUS_FAIL_CLOSED";
+  if (!conflicting && identitiesMatch) {
+    if (!saved && matchesOrder.length === 0 && matchesExecution.length === 0) state = "NO_RESERVATION_FOUND";
+    else if (saved?.journalStatus === "ORDER_RESERVED") {
+      state = matchesOrder.length === 0 && matchesExecution.length === 0
+        ? "RESERVED_WITHOUT_RECORDED_FILL" : "PARTIAL_OR_UNACKNOWLEDGED_FILL_RECORDING";
+    } else if (saved?.status === "filled" &&
+      matchesOrder.length === 1 && matchesExecution.length === 1 &&
+      saved.orderId === orderId && saved.paper === true) {
+      state = saved.journalStatus === "JOURNAL_COMPLETE" && saved.journal?.tradeId
+        ? "JOURNAL_COMPLETE" : saved.journalStatus === "JOURNAL_PENDING" && saved.journalDelivery
+          ? "JOURNAL_ONLY_RETRY_ELIGIBLE" : "AMBIGUOUS_FAIL_CLOSED";
+    }
+  }
+  return { ok:true, state, idempotencyKey:key, orderId,
+    orderRecords:matchesOrder.length, fillRecords:matchesExecution.length,
+    journalTradeId:saved?.journal?.tradeId || null,
+    requiresReconciliation:state !== "JOURNAL_COMPLETE" && state !== "NO_RESERVATION_FOUND",
+    mayCreateNewFill:false };
 }

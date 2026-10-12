@@ -6,6 +6,8 @@ import { fileURLToPath } from "url";
 import {
   getTradingStatus,
   executeTradeTicket,
+  retryPaperJournalDelivery,
+  inspectPaperInstructionRecovery,
   listPaperExecutions,
   listPaperOrders,
   cancelPaperOrder,
@@ -146,6 +148,7 @@ router.get(
  */
 router.post(
   "/execute",
+  requireEngine8Admin,
   async (req, res) => {
     try {
       const out =
@@ -529,11 +532,39 @@ router.get(
 );
 
 /**
+ * Read-only admin inspection after an interrupted PAPER instruction.
+ * Does not clear locks, modify Journal, create fills, or contact Schwab.
+ */
+router.get("/paper/recovery-status", requireEngine8Admin, (req, res) => {
+  try {
+    return res.json(inspectPaperInstructionRecovery({
+      idempotencyKey: req.query?.idempotencyKey,
+    }));
+  } catch {
+    return res.status(503).json({ok:false,reason:"PAPER_RECOVERY_READ_FAILED"});
+  }
+});
+
+/**
+ * Admin-only, Journal-only recovery of an EXISTING simulated PAPER fill.
+ * Never calls executeTradeTicket or any broker.
+ */
+router.post("/paper/retry-journal", requireEngine8Admin, async (req, res) => {
+  try {
+    const out = await retryPaperJournalDelivery({ idempotencyKey: req.body?.idempotencyKey });
+    return res.status(out?.ok ? 200 : 409).json(out);
+  } catch (error) {
+    return res.status(503).json({ ok: false, rejected: true, reason: "ENGINE8_JOURNAL_RETRY_UNAVAILABLE" });
+  }
+});
+
+/**
  * POST /api/trading/cancel
  * Body: { orderId }
  */
 router.post(
   "/cancel",
+  requireEngine8Admin,
   async (req, res) => {
     try {
       const out =

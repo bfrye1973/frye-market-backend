@@ -6,7 +6,7 @@
 // This adapter:
 // - reads Engine 6 paper permission
 // - reads Engine 9 official management plan
-// - reads Engine 7B final position sizing
+// - reads current Engine 7 final position sizing
 // - validates readiness, identity, geometry, safety, and duplicates
 // - publishes WAITING / BLOCKED / READY state
 //
@@ -871,7 +871,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 7B final-size gate.
+   * Engine 7 final-size gate.
    */
   const finalContracts = Number(
     engine7?.finalContracts
@@ -1027,14 +1027,14 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 9 ↔ Engine 7B official geometry.
+   * Engine 9 ↔ current Engine 7 official geometry.
    */
   const geometryMismatches = compareFields({
     left: engine9,
     right: engine7,
     fields: GEOMETRY_FIELDS,
     leftName: "ENGINE9",
-    rightName: "ENGINE7B",
+    rightName: "ENGINE7",
   });
 
   const geometryErrors =
