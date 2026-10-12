@@ -238,3 +238,21 @@ rules, full calendar or structural completeness. Preserve both session-labelled 
 125 local automated tests passed: 117 prior tests plus eight new design invariants.
 The authenticated alignment job passed; findings are evidence, not source acceptance.
 Final proposal/test commit and CI run are identified in the PR's approval request.
+
+## 11. Original response-body preservation follow-up
+
+Commit `ad748606c1205e31f25615594e6d39f8e3c9fd04`, run
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38322418049 repeated the four
+bounded successful queries and archived their original decoded UTF-8 response body text,
+including untouched numeric timestamp spelling, plus SHA-256 of those UTF-8 bytes.
+This is HTTP response body evidence, not compressed transport bytes or request headers.
+The permanent evidence is `ENGINE11_ES_ALIGNMENT_ORIGINAL_BODY_EVIDENCE_V1.json`.
+Credentials are absent from URLs/headers in artifacts; successful body capture rejects
+credential-bearing responses. Error response bodies are not archived or logged.
+Parsed representations are stored alongside original text. All four 4h/1h comparisons
+again matched. Previous parsed-log evidence retains its original limitation label.
+
+Final local test count is 126, including one original-response preservation regression.
+The authenticated follow-up passed; final branch fixture CI is recorded in PR #103.
+Read-only Render inspection found 18 services, none tracking this research branch;
+production core remains on `main`. No Render configuration or deployment changed.
