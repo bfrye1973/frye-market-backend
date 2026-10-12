@@ -36,7 +36,36 @@ const ES_SNAPSHOT_FILE = path.resolve(
   "../data/strategy-snapshot-es.json"
 );
 
+import {
+  getManualPaperAccounts, initializeManualPaperAccounts,
+  readManualPaperAccount,
+} from "../logic/trading/manualPaperAccountStore.js";
+
 const router = express.Router();
+
+/**
+ * Phase 2: secure server-only seven-account initialization. No orders placed.
+ * The browser MUST NOT receive the Engine 8 admin secret.
+ */
+router.get("/manual-paper/accounts", requireEngine8Admin, (req,res)=>{
+  try{return res.json(getManualPaperAccounts());}
+  catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_STORE_UNAVAILABLE"});}
+});
+router.get("/manual-paper/accounts/:accountId", requireEngine8Admin, (req,res)=>{
+  try {
+    const result=readManualPaperAccount(req.params.accountId);
+    return res.status(result.ok?200:404).json(result);
+  } catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_STORE_UNAVAILABLE"});}
+});
+router.post("/manual-paper/initialize",requireEngine8Admin,async(req,res)=>{
+  try {
+    const result=await initializeManualPaperAccounts();
+    return res.status(result.ok?200:409).json(result);
+  } catch(err){
+    return res.status(503).json({ok:false,reason:"MANUAL_PAPER_INIT_BLOCKED",errorCode:String(err?.code||"INVARIANT_OR_STORAGE_FAILURE")});
+  }
+});
+
 
 function readEsStrategySnapshot() {
   if (!fs.existsSync(ES_SNAPSHOT_FILE)) {
