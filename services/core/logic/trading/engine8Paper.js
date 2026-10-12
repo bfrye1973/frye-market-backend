@@ -703,11 +703,18 @@ try {
   return result;
 }
 
+const journalRetriesInFlight = new Set();
+
 // Admin route calls this ONLY for a pre-existing persisted fill.
 // No new order, execution, or fill is constructed during reconciliation.
 export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
   const key = String(idempotencyKey || "").trim();
   if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  if (journalRetriesInFlight.has(key)) {
+    return { ok: false, rejected: true, reason: "JOURNAL_RETRY_IN_PROGRESS" };
+  }
+  journalRetriesInFlight.add(key);
+  try {
   const ledger = readJson(LEDGER_FILE, {});
   const original = ledger[key];
   if (!original || original.status !== "filled" || original.paper !== true) {
@@ -744,4 +751,5 @@ export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
   writeJson(LEDGER_FILE, latest);
   return { ok: true, orderId: original.orderId, executionId: original.executionId,
     idempotencyKey: key, tradeId: journal.tradeId, journalStatus: "JOURNAL_COMPLETE" };
+  } finally { journalRetriesInFlight.delete(key); }
 }
