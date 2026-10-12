@@ -41,7 +41,37 @@ import {
   readManualPaperAccount,
 } from "../logic/trading/manualPaperAccountStore.js";
 
+import {
+  executeManualPaperInstruction,retryManualPaperJournalOnly,
+  getManualPaperAccountsOverview,
+} from "../logic/trading/manualPaperOrderExecution.js";
+
 const router = express.Router();
+
+/**
+ * Engine 8D — server-side admin-only MANUAL PAPER execution.
+ * No strategy automation, no browser secret, no REAL broker gateway.
+ */
+router.get("/manual-paper/overview",requireEngine8Admin,(req,res)=>{
+  try {return res.json(getManualPaperAccountsOverview());}
+  catch {return res.status(503).json({ok:false,reason:"MANUAL_PAPER_OVERVIEW_BLOCKED"});}
+});
+router.post("/manual-paper/execute",requireEngine8Admin,async(req,res)=>{
+  try {
+    const result=await executeManualPaperInstruction(req.body);
+    return res.status(result.ok?200:409).json(result);
+  }catch(err) {
+    return res.status(503).json({ok:false,rejected:true,
+      reason:"MANUAL_PAPER_EXECUTION_BLOCKED",errorCode:String(err?.code||"STORAGE_OR_JOURNAL_FAILURE")});
+  }
+});
+router.post("/manual-paper/retry-journal",requireEngine8Admin,async(req,res)=>{
+  try {
+    const result=await retryManualPaperJournalOnly({idempotencyKey:req.body?.idempotencyKey});
+    return res.status(result.ok?200:409).json(result);
+  }catch{return res.status(503).json({ok:false,rejected:true,reason:"MANUAL_PAPER_RETRY_BLOCKED"});}
+});
+
 
 /**
  * Phase 2: secure server-only seven-account initialization. No orders placed.
