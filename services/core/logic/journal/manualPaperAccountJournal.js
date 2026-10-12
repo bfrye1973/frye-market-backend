@@ -5,7 +5,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import {PAPER_DATA_DIR,atomicPaperWrite} from "../trading/engine8PaperDurableStore.js";
-import {MANUAL_PAPER_DEGREES,MANUAL_PAPER_RISK_POLICY} from "../trading/manualPaperAccountRegistry.js";
+import {MANUAL_PAPER_DEGREES,getManualPaperRiskPolicy} from "../trading/manualPaperAccountRegistry.js";
 
 const FILE=path.join(PAPER_DATA_DIR,"manual-paper-engine10-journal-v1.json");
 const VERSION="engine10.manualPaperAccounts.v1";
@@ -31,13 +31,14 @@ export function readEngine10ManualPaperJournal(){
   return check(JSON.parse(fs.readFileSync(FILE,"utf8")));
 }
 function aggregates(row,marks={}){
+  const policy=getManualPaperRiskPolicy();
   const open=row.contracts.filter(c=>c.status==="OPEN");
   const closed=row.contracts.filter(c=>c.status==="CLOSED");
   const fees=round(row.executions.reduce((s,x)=>s+x.fee,0));
   const grossRealized=round(closed.reduce((s,c)=>s+c.grossRealizedPnL,0));
   const realizedPnL=round(grossRealized-fees);
   const cashBalance=round(10000+realizedPnL);
-  const marginUsed=round(open.reduce((s,c)=>s+MANUAL_PAPER_RISK_POLICY.simulatedInitialMargin[c.root],0));
+  const marginUsed=round(open.reduce((s,c)=>s+policy.simulatedInitialMargin[c.root],0));
   const unrealizedPnL=round(open.reduce((s,c)=>{
     const mark=marks[c.symbol]??c.entryPrice;
     return s+(c.side==="LONG"?mark-c.entryPrice:c.entryPrice-mark)*c.multiplier;
@@ -101,7 +102,7 @@ export function applyEngine10ManualPaperFill(fill){
   if(opening){
     const previous=account.positions[symbol];
     if(previous&&previous.side!==side)throw Error("ENGINE10_MANUAL_REVERSAL_FORBIDDEN");
-    if(account.openContracts+qty>MANUAL_PAPER_RISK_POLICY.maxContractsPerAccount)
+    if(account.openContracts+qty>getManualPaperRiskPolicy().maxContractsPerAccount)
       throw Error("ENGINE10_POSITION_LIMIT");
     if(!Number.isFinite(marginRequired)||account.availableFunds<marginRequired+fee)
       throw Error("ENGINE10_INSUFFICIENT_MARGIN");
