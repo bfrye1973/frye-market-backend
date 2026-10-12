@@ -31,6 +31,36 @@ jobs:
           name: engine22-v3-snapshot-proof
           path: ${{ runner.temp }}/engine22-v3-snapshot-proof.json
           if-no-files-found: error
+      - name: Read production ES snapshot endpoint without mutation
+        id: capture-es
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 35 \
+            --output "$RUNNER_TEMP/engine22-prod-es-snapshot.json" \
+            'https://frye-market-backend-1.onrender.com/api/dashboard-snapshot?symbol=ES'
+          node --input-type=module -e '
+            import fs from "node:fs";import crypto from "node:crypto";
+            const p=process.env.RUNNER_TEMP+"/engine22-prod-es-snapshot.json";
+            const b=fs.readFileSync(p);
+            const obj=JSON.parse(b.toString("utf8"));
+            if(obj.symbol!=="ES" || !obj.strategies?.["intraday_scalp@10m"])throw Error("ES_STRATEGY_SNAPSHOT_INVALID");
+            const proof={source:"GET /api/dashboard-snapshot?symbol=ES",capturedAt:new Date().toISOString(),
+              sha256:crypto.createHash("sha256").update(b).digest("hex"),bytes:b.length,
+              symbol:obj.symbol,hasEngine22:Boolean(obj.strategies["intraday_scalp@10m"].engine22WaveStrategy)};
+            fs.writeFileSync(process.env.RUNNER_TEMP+"/engine22-prod-capture-proof.json",JSON.stringify(proof,null,2));
+            console.log(JSON.stringify(proof));
+          '
+      - name: Preserve read-only production ES capture
+        if: steps.capture-es.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-production-es-readonly-capture
+          path: |
+            ${{ runner.temp }}/engine22-prod-es-snapshot.json
+            ${{ runner.temp }}/engine22-prod-capture-proof.json
+          if-no-files-found: error
       - name: Checkout exact production baseline for comparison
         uses: actions/checkout@v4
         with:
