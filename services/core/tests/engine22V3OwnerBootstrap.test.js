@@ -23,3 +23,16 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  assert.equal(projection.publicationEligible,false);
  assert.deepEqual(raw,original);
 });
+
+test("snapshot pipeline wires manual canonical bootstrap to existing Engine22 builder in shadow only",()=>{
+ const builder=fs.readFileSync(fileURLToPath(new URL("../jobs/buildStrategySnapshot.js",import.meta.url)),"utf8");
+ const wave=fs.readFileSync(fileURLToPath(new URL("../logic/engine22/wave/buildEngine22WaveStrategy.js",import.meta.url)),"utf8");
+ assert.match(builder,/getActiveWaveStateMeta\(\{symbol:"ES"\}\)/);
+ assert.match(builder,/buildEngine22V3OwnerBootstrap\(/);
+ assert.match(builder,/engine22V3Canonical:\s*engine22V3Bootstrap\?\.available === true\s*\? engine22V3Bootstrap\.canonical : null/);
+ assert.match(wave,/buildEngine22V3ShadowSnapshot\(\{canonical:input\.engine22V3Canonical\}\)/);
+ assert.match(wave,/engine22V3Projection:/);
+ assert.match(wave,/engine22V3Shadow,/);
+ assert.match(wave,/degreeStates:\s*publishedDegreeStates,/);
+ assert.match(wave,/microExecutionContext,/);
+});
