@@ -1,3 +1,4 @@
+import {validateEngine22V3ContinuousEsManifest} from "./validateContinuousEsManifest.js";
 // Read-only V3 source builder. No invented OHLC, backfill, or anchor authority.
 // Requires an independently verified continuous ES history, including rollover.
 const day=86400000;
@@ -15,6 +16,9 @@ export function aggregateValidatedEsDailyHistory({dailyBars=[],provenance=null,a
    !provenance?.rolloverMethod||!provenance?.sessionCalendar||
    !provenance?.sourceId)return reject("CONTINUOUS_ROLLOVER_PROVENANCE_REQUIRED");
  if(!Array.isArray(dailyBars)||dailyBars.length<20)return reject("DAILY_HISTORY_INSUFFICIENT");
+ const lineageCheck=validateEngine22V3ContinuousEsManifest({dailyBars,provenance});
+ if(!lineageCheck.accepted)return {available:false,reasonCodes:lineageCheck.reasonCodes,
+   bars:[],shadowOnly:true,noAnchorPromotion:true};
  const sorted=dailyBars.map(b=>({...b,_ms:ms(b?.time??b?.sourceTimestamp)})).sort((a,b)=>a._ms-b._ms);
  if(sorted.some((b,i)=>!Number.isFinite(b._ms)|| (i>0&&b._ms<=sorted[i-1]._ms)||
    b.closed===false||![b.open,b.high,b.low,b.close].every(finite)||
