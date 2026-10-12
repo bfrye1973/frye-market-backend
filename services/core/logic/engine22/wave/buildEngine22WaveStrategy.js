@@ -1,3 +1,4 @@
+import { assessMicroW3TouchW4Shadow } from "../microV2/assessMicroW3TouchW4Shadow.js";
 import { buildEngine22V3ContractProjection } from "../v3/compareProtectedContracts.js";
 import { buildEngine22V3ShadowSnapshot } from "../v3/buildShadowSnapshot.js";
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
@@ -2084,6 +2085,16 @@ export function buildEngine22WaveStrategy(input = {}) {
         })
       : null;
 
+  const microW3TouchW4Shadow = assessMicroW3TouchW4Shadow({
+    transition: microW2W3TransitionFibs
+      ? {...microW2W3TransitionFibs, anchors:{
+          ...microW2W3TransitionFibs.anchors,
+          w2SourceTimestamp: microV2Migration?.canonicalState?.waves?.W3?.startedAt || null,
+        }} : null,
+    bars: input?.barsByTf?.["10m"] || [],
+    evaluationTimeMs: input?.evaluationTimeMs,
+  });
+
   const degreeStateMirror = buildCanonicalDegreeStateMirror({
     context,
     degreeStates,
@@ -2298,6 +2309,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
     microExecutionContext,
     microW2W3TransitionFibs,
+    microW3TouchW4Shadow,
     microV2Migration: microV2Migration
       ? {
           mode: "SHADOW_ONLY",
