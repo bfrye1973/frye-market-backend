@@ -23,3 +23,11 @@ jobs:
           node --check services/core/logic/engine22/v3/evaluateWaveTransition.js
       - name: Run V3 isolated unit tests
         run: node --test services/core/tests/engine22V3*.test.js
+      - name: Produce isolated V3 snapshot proof
+        run: node services/core/tests/engine22V3SnapshotProof.js
+      - name: Preserve isolated snapshot proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-snapshot-proof
+          path: ${{ runner.temp }}/engine22-v3-snapshot-proof.json
+          if-no-files-found: error
