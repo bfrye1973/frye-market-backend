@@ -590,7 +590,14 @@ const fillPrice =
     filledAt,
   };
 
-  ledger[idempotencyKey] = result;
+  // Commit the exact fill and original ticket BEFORE contacting Engine 10.
+  // Recovery replays only this immutable Journal delivery, never an order.
+  result.journalStatus = "JOURNAL_PENDING";
+  result.executionId = String(ticket?.executionId || orderId);
+  ledger[idempotencyKey] = {
+    ...result,
+    journalDelivery: { ticket, order, result: { ...result }, action },
+  };
   writeJson(LEDGER_FILE, ledger);
 
 try {
@@ -670,5 +677,57 @@ try {
   };
 }
 
+  // A failed status write must not be reported as a completed delivery.
+  const completed = result.journal?.ok === true && Boolean(result.journal?.tradeId);
+  result.journalStatus = completed ? "JOURNAL_COMPLETE" : "JOURNAL_PENDING";
+  ledger[idempotencyKey] = {
+    ...result,
+    journalDelivery: completed ? null : { ticket, order, result: { ...result }, action },
+  };
+  writeJson(LEDGER_FILE, ledger);
+
   return result;
+}
+
+// Admin route calls this ONLY for a pre-existing persisted fill.
+// No new order, execution, or fill is constructed during reconciliation.
+export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
+  const key = String(idempotencyKey || "").trim();
+  if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
+  const ledger = readJson(LEDGER_FILE, {});
+  const original = ledger[key];
+  if (!original || original.status !== "filled" || original.paper !== true) {
+    return { ok: false, rejected: true, reason: "PERSISTED_PAPER_FILL_NOT_FOUND" };
+  }
+  if (original.journalStatus === "JOURNAL_COMPLETE" && original.journal?.tradeId) {
+    return { ok: true, duplicate: true, journalStatus: "JOURNAL_COMPLETE", orderId: original.orderId, tradeId: original.journal.tradeId };
+  }
+  const delivery = original.journalDelivery;
+  if (!delivery?.ticket || !delivery?.order || !delivery?.result || delivery.order.orderId !== original.orderId) {
+    return { ok: false, rejected: true, reason: "ORIGINAL_JOURNAL_DELIVERY_UNAVAILABLE" };
+  }
+  let journal;
+  try {
+    journal = delivery.action === "NEW_ENTRY"
+      ? await createTradeJournalEntryFromEngine8Fill(delivery)
+      : await applyEngine8ExecutionToJournal(delivery);
+  } catch (error) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "JOURNAL_RETRY_FAILED" };
+  }
+  if (journal?.ok !== true || !journal?.tradeId) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "ENGINE10_ACKNOWLEDGMENT_MISSING" };
+  }
+  // Re-read to protect against replacing unrelated ledger entries.
+  const latest = readJson(LEDGER_FILE, {});
+  if (latest[key]?.orderId !== original.orderId) {
+    return { ok: false, journalStatus: "JOURNAL_PENDING", reason: "PAPER_IDENTITY_CHANGED" };
+  }
+  latest[key] = {
+    ...latest[key], tradeId: journal.tradeId,
+    journal: { ...journal, journalCompleted: true },
+    journalStatus: "JOURNAL_COMPLETE", journalDelivery: null,
+  };
+  writeJson(LEDGER_FILE, latest);
+  return { ok: true, orderId: original.orderId, executionId: original.executionId,
+    idempotencyKey: key, tradeId: journal.tradeId, journalStatus: "JOURNAL_COMPLETE" };
 }
