@@ -315,6 +315,15 @@ export async function listPaperExecutions() {
 
 export async function cancelPaperOrder(body) {
   const orderId = String(body?.orderId || "").trim();
+  if (!orderId) return {ok:false,rejected:true,reason:"MISSING_ORDER_ID"};
+  // Cancellation modifies the shared PAPER orders file and must not overwrite
+  // a concurrently appended fill/order from another process.
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    cancelPaperOrderLocked(body));
+}
+
+async function cancelPaperOrderLocked(body) {
+  const orderId = String(body?.orderId || "").trim();
   if (!orderId) {
     return { ok: false, rejected: true, reason: "MISSING_ORDER_ID" };
   }
