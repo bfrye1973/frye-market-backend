@@ -54,7 +54,7 @@ test("reject mislabeled 1-minute records returned by weekly/monthly source",()=>
  for(const [degree,tf] of [["INTERMEDIATE","1w"],["PRIMARY","1mo"]]){
    const fake=bars(tf,60000);
    const evidence=build({canonical,barsByTf:{[tf]:fake},
-     evaluationTimeMs:Date.UTC(2026,10,20)});
+     evaluationTimeMs:Date.UTC(2027,0,20)});
    const result=evidence.degrees[degree.toLowerCase()];
    assert.equal(result.nodeEvidenceAvailable,false);
    assert.equal(result.sourceCandleCount,0);
