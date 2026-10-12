@@ -106,6 +106,7 @@ test("invalid quantity and price fail closed with no new simulated fills", async
   const count=executions().length;
   assert.equal((await executeTradeTicket({...ticket("ZERO"),qty:0,contracts:0})).reason,"SIZE_ZERO_OR_MISSING_QTY");
   assert.equal((await executeTradeTicket({...ticket("BAD-PRICE"),entry:{price:0}})).reason,"MISSING_FUTURES_ENTRY_PRICE");
+  assert.equal((await executeTradeTicket({...ticket("FRACTIONAL"),qty:1.5,contracts:1.5})).reason,"SIZE_ZERO_OR_MISSING_QTY");
   assert.equal(executions().length,count);
 });
 
@@ -113,6 +114,7 @@ test("REAL ticket rejection and kill switch prevent fills regardless of PAPER en
   const count=executions().length;
   assert.equal((await executeTradeTicket({...ticket("REAL-FLAG"),paper:false})).reason,"PAPER_ONLY_ENFORCED");
   assert.equal((await executeTradeTicket({...ticket("REAL-TRUE"),real:true})).reason,"PAPER_ONLY_ENFORCED");
+  assert.equal((await executeTradeTicket({...ticket("REAL-MODE"),accountMode:"REAL"})).reason,"PAPER_ONLY_ENFORCED");
   process.env.ENGINE8_KILL_SWITCH="1";
   try {
     assert.equal((await executeTradeTicket(ticket("KILLED"))).reason,"KILL_SWITCH");
