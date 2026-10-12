@@ -6,6 +6,8 @@ on:
     paths:
       - 'services/core/logic/engine2/**'
       - 'services/core/routes/engine2ChartOverlays.js'
+      - 'services/core/routes/engine2HistoricalFutures.js'
+      - 'services/core/tests/engine2HistoricalFutures.test.js'
       - 'services/core/tests/engine2ChartOverlaysV1.test.js'
       - 'services/core/tests/engine2ChartRealEngine22Builders.test.js'
       - 'services/core/tests/engine2LiveSnapshotParity.mjs'
@@ -31,8 +33,9 @@ jobs:
           node --check services/core/logic/engine2/buildEngine2ChartOverlayV1.js
           node --check services/core/routes/engine2ChartOverlays.js
           node --check services/core/server.js
+          node --check services/core/routes/engine2HistoricalFutures.js
       - name: Engine 2B regression tests
-        run: node --test services/core/tests/engine2ChartOverlaysV1.test.js services/core/tests/engine2ChartRealEngine22Builders.test.js services/core/tests/engine2ChartRouteCache.test.js
+        run: node --test services/core/tests/engine2ChartOverlaysV1.test.js services/core/tests/engine2ChartRealEngine22Builders.test.js services/core/tests/engine2ChartRouteCache.test.js services/core/tests/engine2HistoricalFutures.test.js
 
       - name: Live ES snapshot read-only parity
         run: node services/core/tests/engine2LiveSnapshotParity.mjs
