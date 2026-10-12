@@ -31,3 +31,18 @@ The isolated PR #97 pipeline runs the *existing* swing and wave-candidate detect
 **What this does NOT prove:** autonomous seven-degree Elliott Wave counting; sufficient 1w/1mo history; legitimate live shadow publication (PR unmerged); correctness of provisional wave counts; completed structural confirmations.
 
 Proof CI: Engine22 V3 Independent Nodes Shadow workflow; previous run `38264285608` and follow-up `38266693088` with raw 5m probe. All tests run on draft PR head; not on Render production.
+
+## Additional source audit — 2026-10-12T15:18Z
+
+Direct source-code inspection of `services/core/routes/futuresOhlc.js` establishes that the endpoint's `TF_MAP` supports only 1m, 5m, 10m, 15m, 30m, 1h, 4h, 1d. An unrecognized `1w` or `1mo` request falls back to `1m` by `const tf = TF_MAP[tfRaw] ? tfRaw : "1m"`. An HTTP 200 therefore **must not** be regarded as weekly/monthly data authority.
+
+Direct 1d `limit=1200&debug=1` probe: `resolvedContract=ESZ6`, `actualTf=1d`, `resolution=1day`, **159** daily bars from 2025-09-09T00:00Z to 2026-10-11T00:00Z, **eight date gaps longer than 7 days**, maximum gap **30 days**. This is a **single resolved futures contract**, not a verified multi-contract, rollover-normalized continuous ES history. Thus it cannot serve as official multi-year Intermediate/Primary wave node authority and has not been plugged into 1w/1mo lanes.
+
+### Higher-degree source acceptance requirements
+
+- Obtain approved continuous ES futures history with contract identity, rollover method/adjustment, exchange session/calendar, monthly/weekly interval finality, and timestamps.
+- Validate independent 1w and 1mo OHLCV bars, correct spacing, and sufficient multi-year structural lookback. Record missing sessions and bar count; **do not hide gaps or infer filled candles**.
+- Only after those provenance checks, pass completed 1w to INTERMEDIATE and completed 1mo to PRIMARY **in read-only shadow**, without anchor or Fibonacci promotion.
+- Preserve the existing first-five evidence proof, including standalone native 5m ES source in the draft build job.
+
+Audit source: GitHub Actions isolated read-only run `38269281369`; no production changes.
