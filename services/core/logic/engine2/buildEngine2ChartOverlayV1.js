@@ -44,23 +44,35 @@ function levelArray(levels, path) {
   return out;
 }
 function markArray(marks, path) {
-  const out = [];
-  if (!marks || typeof marks !== "object") return out;
-  const add = (name, node, source, parentStatus = null) => {
+  const out = [], unresolved = [];
+  if (!marks || typeof marks !== "object") return { marks: out, unresolved };
+  const add = (name, node, source, parentStatus = null, parentSuperseded = false) => {
+    const status = node?.status || node?.maturity || parentStatus || null;
+    const superseded = node?.superseded === true || parentSuperseded ||
+      /^(SUPERSEDED|INVALIDATED)$/i.test(String(status || ""));
+    if (superseded) return;
     const price = finite(node?.price ?? node?.p);
     const rawTime = node?.time ?? node?.timestamp ?? null;
+    if (price == null || price <= 0) return;
     const time = normalizeTime(rawTime);
-    if (price == null || price <= 0 || time == null) return;
-    out.push({ id: name, label: name, price, time, status: node.status || parentStatus || null, sourcePath: source });
+    if (time == null) {
+      unresolved.push({ id: name, price, date: typeof rawTime === "string" ? rawTime : null,
+        status, reason: /^\\d{4}-\\d{2}-\\d{2}$/.test(String(rawTime || "")) ?
+          "DATE_ONLY_NO_INTRADAY_SOURCE_TIME" : "SOURCE_TIMESTAMP_UNAVAILABLE",
+        sourcePath: source });
+      return;
+    }
+    out.push({ id: name, label: name, price, time, status, sourcePath: source });
   };
   for (const [name, node] of Object.entries(marks)) {
     if (!node || typeof node !== "object") continue;
+    const superseded = node.superseded === true;
     if (node.low || node.high) {
-      if (node.low) add(name + "_LOW", node.low, path + "." + name + ".low", node.status);
-      if (node.high) add(name + "_HIGH", node.high, path + "." + name + ".high", node.status);
+      if (node.low) add(name + "_LOW", node.low, path + "." + name + ".low", node.status, superseded);
+      if (node.high) add(name + "_HIGH", node.high, path + "." + name + ".high", node.status, superseded);
     } else add(name, node, path + "." + name);
   }
-  return out;
+  return { marks: out, unresolved };
 }
 function microMarks(state, source) {
   const seq = state?.microSequence || {};
@@ -106,8 +118,9 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
       "engine22WaveStrategy.degreeStates." + degree;
     const state = micro ? wavelength?.degrees?.micro : published?.[degree];
     if (!state || typeof state !== "object") { degrees[degree] = empty(degree, source, "CANONICAL_DEGREE_UNAVAILABLE"); continue; }
-    const marks = micro ? microMarks(state, source) :
+    const parsed = micro ? { marks: microMarks(state, source), unresolved: [] } :
       markArray(state.marks, source + ".marks");
+    const { marks, unresolved } = parsed;
     // For Micro only published currentWavelength levels are authoritative. Never substitute subminute.
     const activeFib = !micro && state.activeFibModel?.active === true ? state.activeFibModel : null;
     const structuralConflict = micro && wavelength?.canonicalWaveStateConflict === true;
@@ -153,7 +166,7 @@ export function buildEngine2ChartOverlayV1(snapshot, symbol = "ES") {
         confirmationStatus: state.confirmationStatus || null,
         authorityConflict: structuralConflict,
         status: state.stage || state.state || null, role: state.role || null },
-      marks, lines, zones: [], componentAvailability,
+      marks, unresolvedAnchors: unresolved, lines, zones: [], componentAvailability,
       model: micro ? { type: "MICRO_SEQUENTIAL", active: true } :
         { type: activeFib?.modelType || null, active: !!activeFib },
       provenance: { structuralSource: source, sourcesChecked: [source],
