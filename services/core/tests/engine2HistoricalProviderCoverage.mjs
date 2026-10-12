@@ -7,6 +7,9 @@ const cases=[
  {ticker:"ESM6",from:"2026-06-01",to:"2026-06-04"},
  {ticker:"ESU6",from:"2026-07-27",to:"2026-07-30"},
  {ticker:"ESU6",from:"2026-09-22",to:"2026-09-26"},
+ {ticker:"ESZ6",from:"2026-09-22",to:"2026-09-26"},
+ {ticker:"ESU6",from:"2026-09-10",to:"2026-09-14"},
+ {ticker:"ESZ6",from:"2026-09-10",to:"2026-09-14"},
  {ticker:"ESZ6",from:"2026-10-01",to:"2026-10-05"}
 ];
 let failed=0;
