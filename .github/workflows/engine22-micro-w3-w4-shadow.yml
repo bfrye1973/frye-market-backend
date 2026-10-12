@@ -77,3 +77,18 @@ jobs:
                 prior:[b[i-2]?.low,b[i-1]?.low],following:[b[i+1]?.low,b[i+2]?.low]
               })),candidateCount:matches.length,noAnchorPromotion:true},null,2));
           '
+      - name: Read-only end-to-end W3/W4 shadow proof
+        shell: bash
+        run: |
+          curl -fsS --max-time 45 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES' -o "$RUNNER_TEMP/snapshot.json"
+          curl -fsS --max-time 45 'https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=500' -o "$RUNNER_TEMP/es10m.json"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            import {assessMicroW3TouchW4Shadow as assess} from "./services/core/logic/engine22/microV2/assessMicroW3TouchW4Shadow.js";
+            const snap=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/snapshot.json","utf8"));
+            const bars=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/es10m.json","utf8"));
+            const t=snap.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.microW2W3TransitionFibs;
+            console.log("EXACT_W3_W4_PROOF",JSON.stringify({asOf:snap.now,historyDepth:bars.length,target:t?.w3Up?.levels?.find(l=>l.key==="e1000")?.price,
+             sourceCountId:t?.sourceCountId,w2State:t?.w2Down?.state,
+             observed:assess({transition:t,bars,evaluationTimeMs:Date.parse(snap.now)})},null,2));
+          '
