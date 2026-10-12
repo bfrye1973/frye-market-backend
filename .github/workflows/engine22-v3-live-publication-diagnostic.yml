@@ -32,3 +32,5 @@ jobs:
             v3CountIds:Object.fromEntries(Object.entries(e?.engine22V3Projection?.degreeStates??{}).map(([k,v])=>[k,v?.sourceCountId])),
             legacyDegreeStatesPresent:!!e?.degreeStates,engine27Present:!!s.engine27Strategies},null,2));
           '
+
+# Post PR96 publication verification: read-only.
