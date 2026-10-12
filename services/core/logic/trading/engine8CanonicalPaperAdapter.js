@@ -6,7 +6,7 @@
 // This adapter:
 // - reads Engine 6 paper permission
 // - reads Engine 9 official management plan
-// - reads Engine 7B final position sizing
+// - reads current Engine 7 final position sizing
 // - validates readiness, identity, geometry, safety, and duplicates
 // - publishes WAITING / BLOCKED / READY state
 //
@@ -211,7 +211,7 @@ function buildStrategy1Provenance(engine7, engine9) {
 
   return {
     contractVersion: "strategy1.provenance.v1",
-    source: "ENGINE7B_FINAL_SIZING",
+    source: "ENGINE7_FINAL_SIZING",
 
     laneId: engine7?.laneId ?? engine9?.laneId ?? null,
     strategyId: engine7?.strategyId ?? engine9?.strategyId ?? null,
@@ -370,7 +370,7 @@ function buildBaseOutput({
         engine9?.official === true,
     },
 
-    engine7B: {
+    engine7: {
       status: engine7?.status ?? null,
       allowed: engine7?.allowed === true,
       executableSizing:
@@ -871,7 +871,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 7B final-size gate.
+   * Engine 7 final-size gate.
    */
   const finalContracts = Number(
     engine7?.finalContracts
@@ -1027,14 +1027,14 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Engine 9 ↔ Engine 7B official geometry.
+   * Engine 9 ↔ current Engine 7 official geometry.
    */
   const geometryMismatches = compareFields({
     left: engine9,
     right: engine7,
     fields: GEOMETRY_FIELDS,
     leftName: "ENGINE9",
-    rightName: "ENGINE7B",
+    rightName: "ENGINE7",
   });
 
   const geometryErrors =
@@ -1063,7 +1063,7 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
         ),
       ],
       reasonCodes: [
-        "ENGINE9_ENGINE7B_GEOMETRY_NOT_EQUAL",
+        "ENGINE9_ENGINE7_GEOMETRY_NOT_EQUAL",
         "NO_ORDER_CREATED",
       ],
     });
