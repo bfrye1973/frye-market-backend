@@ -4,7 +4,7 @@ import fs from "node:fs";
 import {fileURLToPath} from "node:url";
 import {buildEngine22V3OwnerBootstrap} from "../logic/engine22/v3/buildOwnerBootstrap.js";
 import {buildEngine22V3ShadowSnapshot} from "../logic/engine22/v3/buildShadowSnapshot.js";
-import {buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
+import {buildEngine22V3ContractProjection,buildEngine22V3CompatibilityPreview} from "../logic/engine22/v3/compareProtectedContracts.js";
 const source=()=>JSON.parse(fs.readFileSync(fileURLToPath(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url)),"utf8"));
 test("actual manual ES source and owner anchors publish seven isolated V3 shadow degrees",()=>{
  const raw=source(),original=structuredClone(raw);
@@ -35,4 +35,31 @@ test("snapshot pipeline wires manual canonical bootstrap to existing Engine22 bu
  assert.match(wave,/engine22V3Shadow,/);
  assert.match(wave,/degreeStates:\s*publishedDegreeStates,/);
  assert.match(wave,/microExecutionContext,/);
+});
+
+test("real ES V3 bootstrap preserves original consumer payload during shadow comparison",()=>{
+ const canonical=buildEngine22V3OwnerBootstrap({activeWaveState:source()});
+ assert.equal(canonical.available,true);
+ const shadow=buildEngine22V3ShadowSnapshot({canonical:canonical.canonical});
+ const legacy={
+  degreeStates:{micro:{activeWave:"W2",sourceCountId:"LEGACY-MICRO"},minute:{activeWave:"W3"}},
+  currentWavelength:{degrees:{micro:{microSequence:{activeWave:"W2"}}}},
+  engine22Display:{degreeOrder:["micro","subminute","minute","minor","intermediate","primary"]},
+  microExecutionContext:{sourceCountId:"LEGACY-MICRO",automationEligible:false},
+  waveOpportunity:{readiness:"WATCH"},currentLifecycleState:{key:"UNCHANGED"},
+  tradeDecision:{allowLongEntry:false},action:"WAIT",bias:"NEUTRAL",
+ };
+ const before=structuredClone(legacy);
+ const preview=buildEngine22V3CompatibilityPreview({legacy,shadow});
+ assert.equal(preview.available,true);
+ assert.equal(preview.protectedContractsUnchanged,true);
+ assert.equal(preview.mappingReady,true);
+ assert.equal(preview.candidate.microExecutionContext.sourceCountId,"LEGACY-MICRO");
+ assert.notEqual(shadow.degreeStates.degrees.micro.sourceCountId,
+  shadow.degreeStates.degrees.intraday_submicro.sourceCountId);
+ const retained=structuredClone(preview.candidate);
+ delete retained.engine22V3Shadow;
+ assert.deepEqual(retained,before);
+ assert.deepEqual(legacy,before);
+ assert.equal(preview.publicationEligible,false);
 });
