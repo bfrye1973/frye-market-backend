@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inspectRows, verifyContract, chicagoClock, probeAggregates } from './coverageAudit.mjs';
+import { inspectRows, verifyContract, chicagoClock, probeAggregates, requestJson } from './coverageAudit.mjs';
 const from = '2026-09-10T13:00:00.000Z', to = '2026-09-10T14:00:00.000Z';
 const row = { ticker: 'ESU6', window_start: String(BigInt(Date.parse(from)) * 1000000n), open: 6500, high: 6501, low: 6499, close: 6500.25, volume: 10 };
 const inspect = rows => inspectRows(rows, { ticker: 'ESU6', from, to, stepMs: 60000 });
@@ -63,4 +63,9 @@ test('entitlement denial produces explicit unavailable evidence', async () => {
 test('unsafe provider cursor is rejected', async () => {
   const fetchImpl = async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ results: [row], next_url: 'https://evil.example/steal' }) });
   assert.equal((await probeAggregates({ ticker: 'ESU6', from, to, fetchImpl, apiKey: 'fixture' })).failure, 'UNSAFE_CURSOR');
+});
+test('successful body text capture preserves numeric nanosecond spelling separately from parsed payload',async()=>{
+  const bodyText='{"results":[{"window_start":1788984000000000000}]}';
+  const response=await requestJson('https://api.massive.com/futures/v1/aggs/ESU6',{apiKey:'fixture-secret',captureSuccessBody:true,fetchImpl:async()=>({ok:true,status:200,text:async()=>bodyText})});
+  assert.equal(response.bodyText,bodyText);assert.equal(response.body.results[0].window_start,'1788984000000000000');
 });

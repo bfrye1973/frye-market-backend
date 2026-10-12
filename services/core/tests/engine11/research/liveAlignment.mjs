@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { requestJson } from './coverageAudit.mjs';
 import { hash } from '../../../logic/engine11/rawCandles/identity.js';
+import { createHash } from 'node:crypto';
 const apiKey = process.env.POLYGON_API_KEY;
 if (!apiKey) throw new Error('Existing credential required');
 const samples = [];
@@ -9,9 +10,11 @@ for (const [ticker, from, to] of [['ESH0','2020-03-09T20:00:00Z','2020-03-10T00:
   for (const resolution of ['4hour','1hour']) {
     const url = new URL('https://api.massive.com/futures/v1/aggs/' + ticker);
     url.search = new URLSearchParams({ resolution, 'window_start.gte': String(BigInt(Date.parse(from))*1000000n), 'window_start.lt': String(BigInt(Date.parse(to))*1000000n), limit:'100',sort:'window_start.asc' });
-    const response = await requestJson(url.toString(), { apiKey });
+    const response = await requestJson(url.toString(), { apiKey, captureSuccessBody: true });
     data[resolution] = { httpStatus: response.status, requestDigest: hash(url.toString()),
-      payload: response.body, traversalComplete: !!response.body && !response.body.next_url };
+      payload: response.body, originalSuccessBodyText: response.bodyText ?? null,
+      bodyUtf8Sha256: response.bodyText ? createHash('sha256').update(response.bodyText,'utf8').digest('hex') : null,
+      traversalComplete: !!response.body && !response.body.next_url };
   }
   const reconciliation = (data['4hour'].payload?.results ?? []).map(parent => {
     const children = (data['1hour'].payload?.results ?? []).filter(row => row.session_end_date === parent.session_end_date && BigInt(row.window_start)>=BigInt(parent.window_start) && BigInt(row.window_start)<BigInt(parent.window_start)+14400000000000n);

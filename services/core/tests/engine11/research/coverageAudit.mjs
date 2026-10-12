@@ -59,12 +59,16 @@ export function chicagoClock(iso) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format( new Date(iso));
 }
 
-export async function requestJson(url, { apiKey, fetchImpl = fetch, attempts = 3 } = {}) {
+export async function requestJson(url, { apiKey, fetchImpl = fetch, attempts = 3, captureSuccessBody = false } = {}) {
   // No provider error bodies/URLs are logged. Never put credentials in a URL.
   for (let i = 0; i < attempts; i++) {
     try {
       const response = await fetchImpl(url, { headers: { Authorization: 'Bearer ' + apiKey, Accept: 'application/json' }, signal: AbortSignal.timeout(25000) });
-      if (response.ok) return { status: response.status, body: parseProviderJson(await response.text()) };
+      if (response.ok) {
+        const bodyText = await response.text();
+        if (captureSuccessBody && bodyText.includes(apiKey)) throw new Error('Credential in provider body');
+        return { status: response.status, body: parseProviderJson(bodyText), ...(captureSuccessBody ? { bodyText } : {}) };
+      }
       if (![429, 500, 502, 503, 504].includes(response.status) || i === attempts - 1) return { status: response.status, body: null };
     } catch { if (i === attempts - 1) return { status: 'TRANSPORT_UNAVAILABLE', body: null }; }
     await new Promise(resolve => setTimeout(resolve, 500 * 2 ** i));
