@@ -13,7 +13,7 @@ const round=v=>Math.round((Number(v)+Number.EPSILON)*100)/100;
 const hash=s=>crypto.createHash("sha256").update(String(s)).digest("hex").slice(0,24);
 function empty() {return {version:VERSION,createdAt:new Date().toISOString(),
   accounts:Object.fromEntries(MANUAL_PAPER_DEGREES.map(a=>[a.accountId,{
-    executions:[],contracts:[],highWaterEquity:10000,initialCapital:10000
+    executions:[],contracts:[],highWaterEquity:10000,maxDrawdown:0,initialCapital:10000
   }]))};}
 function check(raw){
   if(!raw || raw.version!==VERSION || !raw.accounts || typeof raw.accounts!=="object" ||
@@ -64,6 +64,8 @@ function aggregates(row,marks={}){
     profitFactor:grossLosses>0?round(grossWins/grossLosses):null,
     highWaterEquity:row.highWaterEquity,
     currentDrawdown:round(Math.max(0,row.highWaterEquity-equity)),
+    maxDrawdown:row.maxDrawdown||0,
+    valuationSource:"LAST_MANUAL_EXECUTION_OR_ENTRY",
     executions:row.executions};
 }
 export function readEngine10ManualPaperAccounts(){
@@ -133,6 +135,7 @@ export function applyEngine10ManualPaperFill(fill){
   row.executions.push(event);
   const projected=aggregates(row);
   row.highWaterEquity=Math.max(row.highWaterEquity,projected.equity);
+  row.maxDrawdown=Math.max(row.maxDrawdown||0,round(row.highWaterEquity-projected.equity));
   atomicPaperWrite(FILE,raw);
   return {ok:true,duplicate:false,journalStatus:"JOURNAL_COMPLETE",
     tradeId,contractIds,executionId,orderId,account:aggregates(row)};
