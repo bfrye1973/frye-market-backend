@@ -21,7 +21,7 @@ const {buildEngine22WaveStrategy}=await import(pathToFileURL(source).href);
 const originalNow=Date.now;
 Date.now=()=>${now};
 try {
- const result=buildEngine22WaveStrategy({symbol:"ES",marketType:"FUTURES",strategyId:"intraday_scalp@10m",tf:"10m",currentPrice:7835});
+ const result=buildEngine22WaveStrategy({symbol:"ES",marketType:"FUTURES",strategyId:"intraday_scalp@10m",tf:"10m",currentPrice:7835,engine2State:{subminute:{activeWave:"W3",direction:"UP",stage:"ACTIVE",marks:{W1:{low:{price:7671.5,time:"2026-10-01"},high:{price:7805,time:"2026-10-02"},status:"CONFIRMED"}}}}});
  process.stdout.write(JSON.stringify(result));
 } finally { Date.now=originalNow; }
 `;
