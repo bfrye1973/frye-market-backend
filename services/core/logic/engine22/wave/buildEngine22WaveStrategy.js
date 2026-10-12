@@ -1,3 +1,4 @@
+import { buildEngine22V3ContractProjection } from "../v3/compareProtectedContracts.js";
 import { buildEngine22V3ShadowSnapshot } from "../v3/buildShadowSnapshot.js";
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
 // Engine 22G — Clean Wave Strategy Wrapper
@@ -2276,6 +2277,8 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   return {
     engine22V3Shadow,
+    engine22V3Projection: engine22V3Shadow?.available === true
+      ? buildEngine22V3ContractProjection({shadow:engine22V3Shadow}) : null,
     ok: waveFibState?.ok === true,
     engine: "engine22.waveStrategy.v1",
     mode: "READ_ONLY",
