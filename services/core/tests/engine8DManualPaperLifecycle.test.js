@@ -17,7 +17,8 @@ const id=n=>initialized.accounts[n].accountId;
 let seq=0;
 function ticket(accountId,opts={}){
   return {accountId,idempotencyKey:"REQ-TEST-"+(++seq),contract:"MESZ26",
-    action:"BUY",intent:"OPEN_LONG",qty:2,price:7850,paper:true,...opts};
+    action:"BUY",intent:"OPEN_LONG",qty:2,price:7850,paper:true,
+    ownerConfirmation:"CONFIRM_PAPER",...opts};
 }
 test("one manual LONG produces one Engine 10 contract-level entry and correct fees",async()=>{
   const request=ticket(id(3));
@@ -66,6 +67,11 @@ test("SHORT entry and buy-close P&L remain isolated to PRIMARY",async()=>{
   assert.equal(p.openContracts,0);
   assert.equal(p.realizedPnL,47.5);
   assert.equal(manual.getManualPaperAccountsOverview().accounts[3].realizedPnL,145);
+});
+test("manual execution requires explicit owner confirmation",async()=>{
+  const attempt=await manual.executeManualPaperInstruction(ticket(id(5),{ownerConfirmation:null}));
+  assert.equal(attempt.reason,"EXPLICIT_OWNER_CONFIRMATION_REQUIRED");
+  assert.equal(manual.getManualPaperAccountsOverview().accounts[5].openContracts,0);
 });
 test("ES rejected on margin and fractional/invalid tick rejected",async()=>{
   const wrong=await manual.executeManualPaperInstruction(ticket(id(4),{contract:"ESZ26",qty:1}));
