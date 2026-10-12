@@ -34,6 +34,8 @@ export function inspectRows(rows, { ticker, from, to, stepMs = null }) {
     errors: [...new Set(errors)], first: stamps.length ? new Date(stamps[0]).toISOString() : null,
     last: stamps.length ? new Date(stamps.at(-1)).toISOString() : null,
     rowDigest: hash(rows), fields: [...new Set(rows.flatMap(row => Object.keys(row)))].sort(),
+    observationSamples: rows.slice(0, 3).map(({ window_start, session_end_date, close, settlement_price, transactions, volume }) =>
+      ({ window_start, session_end_date, close, settlement_price, transactions, volume })),
     gapCount: gaps.length, gapSamples: gaps.slice(0, 12),
     sourceFinality: 'UNKNOWN', calendarAccepted: false, structuralEligible: false, coverageComplete: false };
 }

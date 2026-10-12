@@ -10,16 +10,20 @@ const quarters = [['H', '03'], ['M', '06'], ['U', '09'], ['Z', '12']];
 // 40 point-in-time contract lookups and at most 40 small annual/session probes.
 // A one-page native session query can return at most ~252 rows per contract/year.
 for (let year = 2017; year <= 2026; year++) for (const [code, month] of quarters) {
-  const ticker = 'ES' + code + String(year).at(-1), date = `${year}-${month}-01`;
+  const ticker = 'ES' + code + String(year).at(-1);
+  // Never query a future point-in-time metadata snapshot.
+  const date = [`${year}-${month}-01`, new Date().toISOString().slice(0, 10)].sort()[0];
   const url = new URL('https://api.massive.com/futures/v1/contracts');
   url.search = new URLSearchParams({ date, product_code: 'ES', ticker, limit: '100' }).toString();
   const metadata = await requestJson(url.toString(), { apiKey });
   const identity = verifyContract(metadata.body?.results ?? [], ticker, year);
   const item = { fullContract: 'ES' + code + year, ticker, metadataDate: date, metadataStatus: metadata.status, ...identity };
-  if (identity.verified) {
-    item.sessionProbe = await probeAggregates({ ticker, from: `${year}-01-01T00:00:00.000Z`,
-      to: `${year + 1}-01-01T00:00:00.000Z`, apiKey });
-  } else item.unavailable = 'FULL_YEAR_IDENTITY_NOT_VERIFIED';
+  // An empty metadata lookup is NOT proof that aggregate history is absent.
+  // Observe older history separately, retaining unresolved full-contract identity.
+  item.sessionProbe = await probeAggregates({ ticker, from: `${year}-01-01T00:00:00.000Z`,
+    to: `${year + 1}-01-01T00:00:00.000Z`, apiKey });
+  item.contractAttributionAccepted = identity.verified;
+  if (!identity.verified) item.unavailable = 'FULL_YEAR_IDENTITY_NOT_VERIFIED';
   report.contracts.push(item);
   console.log('CONTRACT_EVIDENCE ' + JSON.stringify(item));
 }
@@ -44,6 +48,7 @@ for (const spec of diagnosticSpecs) {
 report.finishedAt = new Date().toISOString();
 report.summary = { verifiedContractIdentities: report.contracts.filter(x => x.verified).length,
   contractsWithObservedData: report.contracts.filter(x => x.sessionProbe?.inRangeRows > 0).length,
+  observedButUnverifiedContracts: report.contracts.filter(x => !x.verified && x.sessionProbe?.inRangeRows > 0).map(x => x.fullContract),
   unavailableContracts: report.contracts.filter(x => !x.verified || !x.sessionProbe?.inRangeRows).map(x => x.fullContract),
   integrityFindings: [...report.contracts.flatMap(x => x.sessionProbe ? [x.sessionProbe] : []), ...report.diagnostics]
     .filter(x => x.errors.length || x.conflicts).map(x => ({ ticker: x.ticker, from: x.from, errors: x.errors, conflicts: x.conflicts })),
