@@ -40,3 +40,12 @@ test("duplicate source timestamps fail closed",()=>{
  const result=build({canonical,barsByTf:{"5m":x},evaluationTimeMs:Date.UTC(2026,10,20)});
  assert.ok(result.degrees.intraday_submicro.reasonCodes.includes("DUPLICATE_SOURCE_CANDLE_IDENTITY"));
 });
+
+test("Engine22 source is standalone and cannot silently borrow Engine3 diagnostic bars",async()=>{
+ const fs=await import("node:fs");
+ const job=fs.readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
+ assert.match(job,/let engine22V3FiveMinuteBars = \[\]/);
+ assert.match(job,/timeframe=5m&limit=300/);
+ assert.match(job,/"5m": engine22V3FiveMinuteBars/);
+ assert.doesNotMatch(job,/"5m": engine3DiagnosticBars/);
+});
