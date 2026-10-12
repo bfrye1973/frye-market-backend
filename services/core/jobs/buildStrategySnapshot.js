@@ -54,6 +54,8 @@ import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
 } from "../logic/engine22/wave/manualMarks/readManualWaveMarks.js";
+import { getActiveWaveStateMeta } from "../logic/engine22/wave/manualMarks/readManualWaveMarks.js";
+import { buildEngine22V3OwnerBootstrap } from "../logic/engine22/v3/buildOwnerBootstrap.js";
 import {
   buildEngine26ImbalanceWatch,
   buildEngine26PaperTradePlan,
@@ -8301,6 +8303,18 @@ const strategy1TenMinuteEma10 =
     // Do not rely on the per-strategy Engine 2 block named `engine2`.
     // Engine 22 lifecycle needs the full degree stack:
     // primary / intermediate / minor / minute / micro.
+    // V3 is additive, read-only and derived from the existing checked-in
+    // manual ES source; never from old Micro V2 storage or snapshots.
+    const engine22V3Source = symbol === "ES"
+      ? getActiveWaveStateMeta({symbol:"ES"}) : null;
+    const engine22V3Bootstrap = engine22V3Source
+      ? buildEngine22V3OwnerBootstrap({
+          activeWaveState:{
+            symbol:"ES",
+            updatedAt:engine22V3Source.updatedAt,
+            activeStructures:engine22V3Source.activeStructures,
+          },
+        }) : null;
     let engine22Engine2State = null;
 
     try {
@@ -8319,6 +8333,10 @@ const strategy1TenMinuteEma10 =
         reaction: patchedConfluence?.context?.reaction || null,
         waveReaction: reaction?.waveReaction || null,
         engine2State: engine22Engine2State,
+        // Optional canonical V3 context from the existing upstream structural owner.
+        // No fallback to projections, previous snapshots, or invented marks.
+        // V3 remains a read-only sidecar until Manager acceptance.
+        engine22V3Canonical: engine22V3Bootstrap?.available === true ? engine22V3Bootstrap.canonical : null,
         marketMind,
         marketMeter,
 
