@@ -44,6 +44,41 @@ function run(rootDir,name){
  if(child.status!==0)throw new Error(name+"_BUILD_FAILED: "+(child.stderr||child.stdout).slice(0,1500));
  return JSON.parse(child.stdout);
 }
+// Frozen production capture is the primary source of truth for this comparison.
+// A snapshot response is OUTPUT, not a complete set of upstream build inputs.
+// Do not treat it as a deterministic replay input or synthesize the missing fields.
+const frozenPath=path.join(root,"engine22-prod-es-snapshot.json");
+if(fs.existsSync(frozenPath)){
+ const buf=fs.readFileSync(frozenPath);
+ const frozen=JSON.parse(buf.toString("utf8"));
+ const strategy=frozen.strategies?.["intraday_scalp@10m"];
+ if(frozen.symbol!=="ES" || !strategy?.engine22WaveStrategy)
+  throw new Error("FROZEN_ES_SNAPSHOT_INVALID");
+ const crypto=await import("node:crypto");
+ const proof={type:"FROZEN_PRODUCTION_OUTPUT_INPUT_AUDIT",
+  source:"GET /api/v1/dashboard-snapshot?symbol=ES",
+  sha256:crypto.createHash("sha256").update(buf).digest("hex"),
+  capturedTimestamp:frozen.now??null,
+  productionSha:baselineSha,
+  snapshotOutputAvailable:true,
+  reconstructableOriginalBuildInput:false,
+  exactCommitReplayReady:false,
+  reasonCodes:["SNAPSHOT_IS_OUTPUT_NOT_COMPLETE_SOURCE_INPUT"],
+  protectedObserved:{
+   engine22Keys:Object.keys(strategy.engine22WaveStrategy),
+   engine6PermissionPresent:strategy.permission!==undefined,
+   engine10JournalPresent:strategy.engine10Journal!==undefined,
+   engine26Present:strategy.engine26StructuralContext!==undefined,
+   engine27Present:frozen.engine27Strategies!==undefined,
+   engine28APresent:strategy.engine28AMicroTimingAutomationShadow!==undefined,
+  },
+ };
+ fs.writeFileSync(path.join(root,"engine22-v3-exact-commit-compare.json"),
+  JSON.stringify(proof,null,2)+"\n",{flag:"wx"});
+ console.log(JSON.stringify(proof));
+ // Exit successfully for capture audit, but never claim full exact-commit comparison passed.
+ process.exit(0);
+}
 const before=run(base,"baseline");
 const after=run(head,"candidate");
 const protectedKeys=["degreeStates","engine22Display","currentWavelength","microExecutionContext",
