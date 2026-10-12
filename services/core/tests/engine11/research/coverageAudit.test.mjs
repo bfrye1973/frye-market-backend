@@ -22,6 +22,12 @@ test('identical duplicates and source conflicts distinguished', () => {
   assert.equal(inspect([row, row]).duplicates, 1);
   assert.equal(inspect([row, { ...row, close: 6500.5 }]).conflicts, 1);
 });
+test('session-label collisions remain distinct from same-label changed values', () => {
+  const a = { ...row, session_end_date: '2026-09-10' };
+  const b = { ...row, session_end_date: '2026-09-11' };
+  assert.equal(inspect([a, b]).conflictSamples[0].classification, 'SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS');
+  assert.equal(inspect([a, { ...a, close: 6500.5 }]).conflictSamples[0].classification, 'SAME_BUCKET_CHANGED_VALUES');
+});
 test('gap remains unknown, never silently holiday or no-trade', () => {
   const next = { ...row, window_start: String(BigInt(Date.parse(from) + 120000) * 1000000n) };
   assert.equal(inspect([row, next]).gapSamples[0].classification, 'UNKNOWN_SOURCE_ABSENCE');

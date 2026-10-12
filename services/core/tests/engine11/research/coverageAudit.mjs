@@ -4,7 +4,7 @@ import { hash } from '../../../logic/engine11/rawCandles/identity.js';
 import { parseProviderJson, safePageUrl } from '../../../logic/engine11/rawCandles/provider.js';
 
 export function inspectRows(rows, { ticker, from, to, stepMs = null }) {
-  const errors = [], stamps = [], revisions = new Map();
+  const errors = [], stamps = [], revisions = new Map(), conflictSamples = [];
   let duplicates = 0, conflicts = 0, excluded = 0;
   for (const row of rows) {
     if (typeof row.window_start !== 'string' || !/^\d{16,20}$/.test(row.window_start)) {
@@ -22,8 +22,15 @@ export function inspectRows(rows, { ticker, from, to, stepMs = null }) {
     if (stamps.length && ms < stamps.at(-1)) errors.push('NONMONOTONIC');
     const digest = hash(row);
     if (revisions.has(row.window_start)) {
-      if (revisions.get(row.window_start) === digest) duplicates++; else conflicts++;
-    } else revisions.set(row.window_start, digest);
+      const prior = revisions.get(row.window_start);
+      if (prior.digest === digest) duplicates++;
+      else {
+        conflicts++;
+        if (conflictSamples.length < 5) conflictSamples.push({ window_start: row.window_start,
+          classification: prior.row.session_end_date !== row.session_end_date ? 'SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS' : 'SAME_BUCKET_CHANGED_VALUES',
+          prior: prior.row, observed: row });
+      }
+    } else revisions.set(row.window_start, { digest, row });
     stamps.push(ms);
   }
   const gaps = [];
@@ -36,7 +43,7 @@ export function inspectRows(rows, { ticker, from, to, stepMs = null }) {
     rowDigest: hash(rows), fields: [...new Set(rows.flatMap(row => Object.keys(row)))].sort(),
     observationSamples: rows.slice(0, 3).map(({ window_start, session_end_date, close, settlement_price, transactions, volume }) =>
       ({ window_start, session_end_date, close, settlement_price, transactions, volume })),
-    gapCount: gaps.length, gapSamples: gaps.slice(0, 12),
+    gapCount: gaps.length, gapSamples: gaps.slice(0, 12), conflictSamples,
     sourceFinality: 'UNKNOWN', calendarAccepted: false, structuralEligible: false, coverageComplete: false };
 }
 
