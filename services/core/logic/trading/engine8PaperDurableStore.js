@@ -30,40 +30,13 @@ export function atomicPaperWrite(file, value) {
     syncDirectory(path.dirname(file));
   } finally { if (fs.existsSync(temp)) fs.unlinkSync(temp); }
 }
+// New PAPER ledger is intentionally independent of all historical PAPER files.
+// No migration, old-file discovery, reading, copying, deleting, or merging.
+// Legacy records are left exactly as they were; this function only resolves the
+// dedicated PAPER store location for new, manager-authorized activity.
 export function paperStorePath(name) {
   if (!FILES.has(name)) throw new Error("UNKNOWN_ENGINE8_PAPER_FILE");
-  const target = path.join(PAPER_DATA_DIR, name);
-  const old = path.join(legacyDir, name);
-  if (path.resolve(old) === path.resolve(target)) return target;
-
-  const markerFile = path.join(PAPER_DATA_DIR, ".migrated-" + name + ".json");
-  const oldExists = fs.existsSync(old);
-  const targetExists = fs.existsSync(target);
-  const markerExists = fs.existsSync(markerFile);
-
-  if (oldExists) {
-    const bytes = fs.readFileSync(old);
-    const history = JSON.parse(bytes.toString("utf8")); // invalid history always fails closed
-    const checksum = crypto.createHash("sha256").update(bytes).digest("hex");
-    if (targetExists) {
-      if (!markerExists) {
-        throw new Error("PAPER_MIGRATION_AMBIGUOUS_DURABLE_AND_LEGACY");
-      }
-      const marker = parseFile(markerFile);
-      if (marker.checksum !== checksum || marker.source !== old) {
-        throw new Error("PAPER_MIGRATION_HISTORY_CHANGED");
-      }
-    } else {
-      if (markerExists) {
-        throw new Error("PAPER_MIGRATED_TARGET_MISSING");
-      }
-      atomicPaperWrite(target, history);
-      atomicPaperWrite(markerFile, {source: old, checksum, migratedAt: new Date().toISOString()});
-    }
-  } else if (markerExists && !targetExists) {
-    throw new Error("PAPER_MIGRATED_TARGET_MISSING");
-  }
-  return target;
+  return path.join(PAPER_DATA_DIR, name);
 }
 export function readPaperStore(name, empty) {
   const file = paperStorePath(name);
