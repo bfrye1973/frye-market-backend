@@ -1,0 +1,30 @@
+name: Engine22 V3 Phase2 Fibonacci Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/v3/projectActiveWaveFibShadow.js'
+      - 'services/core/tests/engine22V3ActiveWaveFibShadow.test.js'
+      - '.github/workflows/engine22-v3-phase2-fib-shadow.yml'
+permissions:
+  contents: read
+jobs:
+  fib-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Phase 2 W1-W5 shadow Fibonacci and Phase 1 lifecycle regression
+        working-directory: services/core
+        run: |
+          node --test tests/engine22V3ActiveWaveFibShadow.test.js tests/engine22V3DegreeFib.test.js tests/engine22V3ConfirmedLifecycleShadow.test.js tests/engine22V3WaveCompletion.test.js
+      - name: Enforce protected boundaries against Phase 1 base
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin engine22-v3-phase1-lifecycle-shadow-20261012
+          changed=$(git diff --name-only FETCH_HEAD HEAD)
+          printf '%s\n' "$changed"
+          if echo "$changed" | grep -E '(^services/core/jobs/|^services/core/logic/engine22/v3/projectDegreeFib.js$|^services/core/logic/engine(6|7|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
+            echo "PROTECTED_PRODUCTION_SOURCE_CHANGE"; exit 1
+          fi
