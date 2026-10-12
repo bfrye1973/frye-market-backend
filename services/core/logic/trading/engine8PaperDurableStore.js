@@ -34,10 +34,34 @@ export function paperStorePath(name) {
   if (!FILES.has(name)) throw new Error("UNKNOWN_ENGINE8_PAPER_FILE");
   const target = path.join(PAPER_DATA_DIR, name);
   const old = path.join(legacyDir, name);
-  // Never silently prefer an empty store when an older record exists.
-  if (!fs.existsSync(target) && fs.existsSync(old)) {
-    const history = parseFile(old); // corruption is a hard failure, not an empty ledger
-    atomicPaperWrite(target, history);
+  if (path.resolve(old) === path.resolve(target)) return target;
+
+  const markerFile = path.join(PAPER_DATA_DIR, ".migrated-" + name + ".json");
+  const oldExists = fs.existsSync(old);
+  const targetExists = fs.existsSync(target);
+  const markerExists = fs.existsSync(markerFile);
+
+  if (oldExists) {
+    const bytes = fs.readFileSync(old);
+    const history = JSON.parse(bytes.toString("utf8")); // invalid history always fails closed
+    const checksum = crypto.createHash("sha256").update(bytes).digest("hex");
+    if (targetExists) {
+      if (!markerExists) {
+        throw new Error("PAPER_MIGRATION_AMBIGUOUS_DURABLE_AND_LEGACY");
+      }
+      const marker = parseFile(markerFile);
+      if (marker.checksum !== checksum || marker.source !== old) {
+        throw new Error("PAPER_MIGRATION_HISTORY_CHANGED");
+      }
+    } else {
+      if (markerExists) {
+        throw new Error("PAPER_MIGRATED_TARGET_MISSING");
+      }
+      atomicPaperWrite(target, history);
+      atomicPaperWrite(markerFile, {source: old, checksum, migratedAt: new Date().toISOString()});
+    }
+  } else if (markerExists && !targetExists) {
+    throw new Error("PAPER_MIGRATED_TARGET_MISSING");
   }
   return target;
 }
