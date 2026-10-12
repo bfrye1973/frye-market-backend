@@ -1,0 +1,40 @@
+name: Engine 11 historical integrity research
+on:
+  push:
+    branches: [engine11-es-history-integrity-research-v1]
+  pull_request:
+    paths:
+      - services/core/tests/engine11/research/**
+      - docs/architecture/ENGINE11_ES_HISTORY_INTEGRITY_RESEARCH_V1.md
+      - .github/workflows/engine11-history-integrity-research.yml
+permissions:
+  contents: read
+jobs:
+  fixture-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs
+  bounded-authentic-research:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Bounded provider observations (negative findings retained)
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node services/core/tests/engine11/research/liveCoverage.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-es-history-research
+          path: research-evidence/es-history-coverage.json
+          if-no-files-found: error
+          retention-days: 30
