@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: "20"
       - name: Isolate simulated Journal files
-        run: echo "TRADE_JOURNAL_DIR=${{ runner.temp }}/engine8d-journal" >> "$GITHUB_ENV"
+        run: echo "TRADE_JOURNAL_DIR=$GITHUB_WORKSPACE/services/core/data" >> "$GITHUB_ENV"
       - name: Dependencies
         run: npm install --ignore-scripts
       - name: Syntax
