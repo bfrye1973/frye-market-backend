@@ -61,6 +61,35 @@ jobs:
             ${{ runner.temp }}/engine22-prod-es-snapshot.json
             ${{ runner.temp }}/engine22-prod-capture-proof.json
           if-no-files-found: error
+      - name: Verify live read-only V3 ES publication
+        id: live-v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 45 \
+            --output "$RUNNER_TEMP/engine22-live-es-v3.json" \
+            'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES'
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const d=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/engine22-live-es-v3.json","utf8"));
+            const e=d.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy;
+            if(!e)throw Error("ENGINE22_MISSING");
+            const shadow=e.engine22V3Shadow, projected=e.engine22V3Projection;
+            const names=["intraday_submicro","micro","subminute","minute","minor","intermediate","primary"];
+            const keys=Object.keys(projected?.degreeStates??{});
+            const ok=shadow?.available===true && projected?.available===true &&
+              names.every(k=>keys.includes(k)) &&
+              projected.degreeStates.intraday_submicro.sourceCountId!==projected.degreeStates.micro.sourceCountId;
+            const report={symbol:d.symbol,source:"GET /api/v1/dashboard-snapshot?symbol=ES",
+              snapshotAt:d.now??null,shadowAvailable:shadow?.available??null,
+              projectionAvailable:projected?.available??null,degrees:keys,
+              legacyDegreeStatesPreserved:Boolean(e.degreeStates),
+              legacyMicroExecutionContextPresent:Object.hasOwn(e,"microExecutionContext"),
+              engine27Present:Boolean(d.engine27Strategies),
+              v3ValidationPassed:ok};
+            console.log(JSON.stringify(report));
+            if(!ok)process.exitCode=1;
+          '
       - name: Checkout exact production baseline for comparison
         uses: actions/checkout@v4
         with:
