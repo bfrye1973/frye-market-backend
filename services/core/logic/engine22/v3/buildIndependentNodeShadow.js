@@ -33,6 +33,16 @@ function prepare(bars,tf,evaluationTimeMs){
   if(!Array.isArray(bars)||bars.length===0)return {bars:[],reasons:["SOURCE_HISTORY_UNAVAILABLE"]};
   const normalized=bars.map(b=>normalize(b,tf,evaluationTimeMs)).filter(Boolean)
     .sort((a,b)=>Date.parse(a.sourceTimestamp)-Date.parse(b.sourceTimestamp));
+  // A provider has returned 1m candles for 1w/1mo requests. Reject those
+  // mislabeled records: they must never become higher-degree wave evidence.
+  if((tf==="1w"||tf==="1mo")&&normalized.length>=5){
+    const gaps=normalized.slice(1).map((bar,i)=>
+      Date.parse(bar.sourceTimestamp)-Date.parse(normalized[i].sourceTimestamp))
+      .sort((a,b)=>a-b);
+    const median=gaps[Math.floor(gaps.length/2)];
+    const minimum=tf==="1w"?4*86400000:20*86400000;
+    if(median<minimum)return {bars:[],reasons:["TIMEFRAME_SPACING_MISMATCH"]};
+  }
   if(normalized.length<5)return {bars:normalized,reasons:["INSUFFICIENT_COMPLETED_BARS"]};
   if(normalized.some((b,i)=>i>0&&b.sourceTimestamp===normalized[i-1].sourceTimestamp))
     return {bars:[],reasons:["DUPLICATE_SOURCE_CANDLE_IDENTITY"]};
