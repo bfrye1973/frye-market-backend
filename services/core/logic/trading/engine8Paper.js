@@ -402,6 +402,10 @@ export async function executeTradeTicket(ticket) {
 
   const ledger = readJson(LEDGER_FILE, {});
   if (ledger[idempotencyKey]) {
+    if (ledger[idempotencyKey].journalStatus === "ORDER_RESERVED") {
+      return { ok: false, rejected: true, duplicate: true,
+        reason: "ORIGINAL_PAPER_EXECUTION_RESERVED_REQUIRES_RECONCILIATION", idempotencyKey };
+    }
     return {
       ok: true,
       duplicate: true,
@@ -507,6 +511,16 @@ const fillPrice =
     : assetType === "FUTURES"
       ? futuresEntryPrice
       : intendedMid;
+
+  // Reserve the instruction identity on durable storage before any fill records.
+  // An interruption fails closed rather than issuing another simulated fill.
+  ledger[idempotencyKey] = {
+    ok: false, paper: true, status: "reserved",
+    orderId, executionId: String(ticket?.executionId || orderId),
+    idempotencyKey, journalStatus: "ORDER_RESERVED",
+    reservedAt: nowIso(),
+  };
+  writeJson(LEDGER_FILE, ledger);
 
   const filledAt = nowIso();
 
