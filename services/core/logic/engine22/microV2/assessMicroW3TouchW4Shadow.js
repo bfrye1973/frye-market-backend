@@ -53,6 +53,10 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
  const following=eligible.filter(b=>b.ms>peak.ms);
  const threshold=(peak.high-anchor)*0.236; // W3 advance retracement watch only
  const minimumClose=following.length?Math.min(...following.map(b=>b.close)):null;
+ // Completed post-peak candle lows are read-only touch evidence for W4 retracements.
+ // Retain the lowest observed wick so a subsequent rebound cannot erase a touch.
+ const minimumPostPeakLow=following.length?Math.min(...following.map(b=>b.low)):null;
+ const minimumLowBar=following.find(b=>b.low===minimumPostPeakLow);
  const retracement=following.length>=2 && minimumClose!=null &&
    minimumClose<=peak.high-threshold;
  const lowerCloses=retracement;
@@ -62,7 +66,10 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
      sourceBarId:`ES:10m:${new Date(touch.ms).toISOString()}`,countId},
    w4DownCandidate:lowerCloses,
    w4CandidateEvidence:{retracement,thresholdPoints:Number(threshold.toFixed(2)),
-     minimumPostPeakClose:minimumClose,peakHigh:peak.high,
+     minimumPostPeakClose:minimumClose,minimumPostPeakLow,
+     minimumPostPeakLowTimestamp:minimumLowBar?new Date(minimumLowBar.ms).toISOString():null,
+     observationThroughTimestamp:new Date(normalized.at(-1).ms).toISOString(),
+     sourceCountId:countId,peakHigh:peak.high,
      peakTimestamp:new Date(peak.ms).toISOString(),waveCompletionConfirmed:false},
    reasonCodes:[lowerCloses?"REVERSAL_CANDIDATE_NOT_CONFIRMED":"W3_TARGET_TOUCH_EVIDENCE_ONLY"]};
 }

@@ -57,3 +57,33 @@ test("multiple confirmed W2 price-matched pivots fail closed rather than guessin
  assert.equal(x.available,false);
  assert.ok(x.reasonCodes.includes("AMBIGUOUS_W2_PIVOT_IDENTITY"));
 });
+
+test("historical completed post-peak wick low persists across rebounds for W4 fib touch evidence",()=>{
+ const bars=[
+  {time:epoch/1000,high:7870,low:7858,close:7865},
+  {time:(epoch+600000)/1000,high:7880,low:7868,close:7875},
+  {time:(epoch+1200000)/1000,high:7888,low:7870,close:7880},
+  {time:(epoch+1800000)/1000,high:7878,low:7850,close:7860},
+  {time:(epoch+2400000)/1000,high:7864,low:7848,close:7852},
+  {time:(epoch+3000000)/1000,high:7869,low:7858,close:7865},
+ ];
+ const x=assess({transition,bars,evaluationTimeMs:epoch+7*600000});
+ assert.equal(x.w4DownCandidate,true);
+ assert.equal(x.w4CandidateEvidence.minimumPostPeakLow,7848);
+ assert.equal(x.w4CandidateEvidence.sourceCountId,transition.sourceCountId);
+ assert.equal(x.w4CandidateEvidence.minimumPostPeakClose,7852);
+ assert.equal(x.w4CandidateEvidence.observationThroughTimestamp,
+   new Date(epoch+3000000).toISOString());
+ assert.equal(x.noAnchorPromotion,true);
+ assert.equal(x.noExecution,true);
+});
+
+test("forming 10m candle cannot mark a W4 retracement touched",()=>{
+ const bars=[
+  ...series,
+  {time:(epoch+6*600000)/1000,high:7865,low:7800,close:7820,closed:false},
+ ];
+ const x=assess({transition,bars,evaluationTimeMs:epoch+7*600000});
+ assert.equal(x.w4CandidateEvidence.minimumPostPeakLow,7852);
+ assert.ok(x.w4CandidateEvidence.minimumPostPeakLow>7839.75);
+});
