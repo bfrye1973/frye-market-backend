@@ -30,3 +30,18 @@ jobs:
           node services/core/tests/engine22V3RealBarNodeProof.js "$RUNNER_TEMP/es.json"
 
 # Live candle source depth confirmation.
+      - name: Probe native ES candle history by timeframe (read-only)
+        shell: bash
+        run: |
+          for tf in 5m 1w 1mo; do
+            status=$(curl -sS --max-time 35 -w '%{http_code}' -o "$RUNNER_TEMP/${tf}.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=${tf}&limit=300")
+            TF="$tf" STATUS="$status" FILE="$RUNNER_TEMP/${tf}.json" node -e '
+              const fs=require("fs");
+              const raw=fs.readFileSync(process.env.FILE,"utf8");let j;
+              try{j=JSON.parse(raw)}catch{j={error:"INVALID_JSON",preview:raw.slice(0,120)}}
+              const bars=Array.isArray(j)?j:Array.isArray(j.bars)?j.bars:Array.isArray(j.data)?j.data:[];
+              console.log("TIMEFRAME_PROBE",JSON.stringify({timeframe:process.env.TF,status:process.env.STATUS,ok:j.ok??null,
+               bars:bars.length,first:bars[0]?.time??null,last:bars.at(-1)?.time??null,
+               error:j.error??j.reasonCode??null,keys:Object.keys(j).slice(0,14)}));
+            '
+          done
