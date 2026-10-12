@@ -30,6 +30,8 @@ jobs:
           node --check services/core/logic/trading/engine8PaperDurableStore.js
           node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
           node --check services/core/routes/trading.js
+      - name: Admin authentication and PAPER-only contract checks
+        run: node --test services/core/tests/engine8DManualSecurity.test.js
       - name: Durable store, restart, historical migration
         run: node --test services/core/tests/engine8PaperDurableStore.test.js
       - name: Canonical Engine 7 and Engine 10 provenance
