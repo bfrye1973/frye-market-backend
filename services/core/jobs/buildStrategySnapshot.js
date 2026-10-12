@@ -8336,7 +8336,6 @@ const strategy1TenMinuteEma10 =
         // Optional canonical V3 context from the existing upstream structural owner.
         // No fallback to projections, previous snapshots, or invented marks.
         // V3 remains a read-only sidecar until Manager acceptance.
-        engine22V3Canonical: engine22V3Bootstrap?.available === true ? engine22V3Bootstrap.canonical : null,
         marketMind,
         marketMeter,
 
@@ -8390,6 +8389,9 @@ const strategy1TenMinuteEma10 =
         strategyId: s.strategyId,
         tf: s.tf,
         engine2State: engine22Engine2State,
+        // V3 display-only canonical source. No change to legacy trading contracts.
+        engine22V3Canonical: engine22V3Bootstrap?.available === true
+          ? engine22V3Bootstrap.canonical : null,
 
         // IMPORTANT:
         // Pre-Engine15 build. Engine 22 waveOpportunity must be independent
