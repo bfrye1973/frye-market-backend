@@ -96,6 +96,7 @@ export function buildEngine22V3ContractProjection({shadow=null}={}){
  };
  return {available:true,shadowOnly:true,publicationEligible:false,
   degreeStates,currentWavelength,engine22Display,
+  v3LiveShadow:shadow.v3LiveShadow ? clone(shadow.v3LiveShadow) : null,
   microExecutionContext:null,
   noExecution:true,noPermissionCreated:true};
 }
