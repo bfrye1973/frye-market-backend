@@ -56,3 +56,17 @@ Draft-only validator `validateContinuousEsManifest.js` now requires: source and 
 GitHub Actions isolated Engine22 V3 Independent Nodes Shadow workflow run `38273406498`: passed. PR #97 remains draft/unmerged/undeployed; trading outputs, approved wave anchors and Fib levels unchanged.
 
 **Outstanding:** procure/assemble authentic continuous ES daily history across multiple contract rolls, verify genuine gap/session/adjustment provenance, and independently audit output. Until then 1w/1mo remain unverified sources.
+
+## Explicit historical contract probe (2026-10-12T16:04Z)
+
+Read-only GitHub Actions job `38274789456` queried existing `/api/v1/futures/ohlc?symbol=<CONTRACT>&timeframe=1d&limit=1200&debug=1` independently:
+
+| Explicit ES contract | HTTP | Daily bars | Result |
+|---|---:|---:|---|
+| ESZ5 | 502 | 0 | upstream_error |
+| ESH6 | 502 | 0 | upstream_error |
+| ESM6 | 502 | 0 | upstream_error |
+| ESU6 | 502 | 0 | upstream_error |
+| ESZ6 | 200 | 159 | 2025-09-09 to 2026-10-11 UTC; eight gaps over seven days; max 30-day gap |
+
+HTTP 502 is **not proof that provider historical data does not exist**. It means the deployed existing route does not currently furnish these explicit expired/nearby contracts. A safe provider-side historical contract lookup / aggregation capability, documented multi-contract source identity, roll policy, and gap verification are still needed. Never infer a continuous series from ESZ6 alone. No chart, trading, or live route change authorized.
