@@ -42,6 +42,8 @@ jobs:
         run: node --test services/core/tests/engine8DManualPaperLifecycle.test.js
       - name: Browser operator one-time pairing and access control
         run: node --test services/core/tests/engine8DManualPaperAccess.test.js
+      - name: Four hard-crash manual execution restart tests
+        run: node --test services/core/tests/engine8DSevenManualCrashRecovery.test.js
       - name: Existing foundation regression
         run: |
           node --test services/core/tests/engine8PaperDurableStore.test.js
