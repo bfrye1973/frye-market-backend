@@ -398,8 +398,8 @@ export async function executeTradeTicket(ticket) {
     };
   }
 
-  const paper = ticket?.paper !== false;
-  if (c.paperOnly && paper === false) {
+  // This executor is intrinsically PAPER-only, regardless of environment flags.
+  if (ticket?.paper === false || ticket?.real === true || ticket?.live === true) {
     return {
       ok: false,
       rejected: true,
