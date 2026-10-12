@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
       - name: Independent completed-candle tests
         working-directory: services/core
-        run: node --test tests/engine22V3IndependentNodeShadow.test.js
+        run: node --test tests/engine22V3IndependentNodeShadow.test.js tests/engine22V3ValidatedDailyAggregation.test.js
       - name: Inspect real production ES snapshot provenance read-only
         shell: bash
         run: |
