@@ -45,19 +45,24 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
  const touch=eligible.find(b=>b.high>=target);
  if(!touch)return {...base,w3OneToOne:{target,touched:false,countId},
    reasonCodes:["W3_TARGET_NOT_TOUCHED_IN_AVAILABLE_COMPLETED_HISTORY"]};
- const following=eligible.filter(b=>b.ms>touch.ms);
- // Reversal candidate only: this is not Elliott W3 completion confirmation.
- const peakIndex=eligible.findIndex(b=>b.ms===touch.ms);
- const confirmedLocalHigh=peakIndex>=2&&peakIndex+2<eligible.length&&
-   eligible[peakIndex-2].high<touch.high&&eligible[peakIndex-1].high<touch.high&&
-   eligible[peakIndex+1].high<touch.high&&eligible[peakIndex+2].high<touch.high;
- const retracement=following.some(b=>b.close<touch.close);
- const lowerCloses=confirmedLocalHigh&&retracement;
+ // Track the highest price after the first 1.000 touch; equal highs form a
+ // plateau, not a reason to hide an observed corrective retracement.
+ const postTouch=eligible.filter(b=>b.ms>=touch.ms);
+ const high=Math.max(...postTouch.map(b=>b.high));
+ const peak=postTouch.filter(b=>Math.abs(b.high-high)<0.001).at(-1);
+ const following=eligible.filter(b=>b.ms>peak.ms);
+ const threshold=(peak.high-anchor)*0.236; // W3 advance retracement watch only
+ const minimumClose=following.length?Math.min(...following.map(b=>b.close)):null;
+ const retracement=following.length>=2 && minimumClose!=null &&
+   minimumClose<=peak.high-threshold;
+ const lowerCloses=retracement;
  return {...base,available:true,
    w3OneToOne:{target,touched:true,status:"TOUCHED",w2SourceQuality,
      firstTouchTimestamp:new Date(touch.ms).toISOString(),
      sourceBarId:`ES:10m:${new Date(touch.ms).toISOString()}`,countId},
    w4DownCandidate:lowerCloses,
-   w4CandidateEvidence:{confirmedLocalHigh,retracement,peakHigh:touch.high,peakTimestamp:new Date(touch.ms).toISOString(),waveCompletionConfirmed:false},
+   w4CandidateEvidence:{retracement,thresholdPoints:Number(threshold.toFixed(2)),
+     minimumPostPeakClose:minimumClose,peakHigh:peak.high,
+     peakTimestamp:new Date(peak.ms).toISOString(),waveCompletionConfirmed:false},
    reasonCodes:[lowerCloses?"REVERSAL_CANDIDATE_NOT_CONFIRMED":"W3_TARGET_TOUCH_EVIDENCE_ONLY"]};
 }
