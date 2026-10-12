@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - "services/core/logic/trading/manualPaperAccount*.js"
+      - "services/core/logic/trading/manualPaperOrderExecution.js"
+      - "services/core/logic/journal/manualPaperAccountJournal.js"
       - "services/core/tests/engine8DSevenManualAccounts.test.js"
       - "services/core/tests/engine8DManualInstructionValidator.test.js"
       - "services/core/routes/trading.js"
@@ -25,11 +27,15 @@ jobs:
           node --check services/core/logic/trading/manualPaperAccountRegistry.js
           node --check services/core/logic/trading/manualPaperAccountStore.js
           node --check services/core/logic/trading/validateManualPaperInstruction.js
+          node --check services/core/logic/trading/manualPaperOrderExecution.js
+          node --check services/core/logic/journal/manualPaperAccountJournal.js
           node --check services/core/routes/trading.js
       - name: Seven simulated accounts
         run: node --test services/core/tests/engine8DSevenManualAccounts.test.js
       - name: Manual trade validation
         run: node --test services/core/tests/engine8DManualInstructionValidator.test.js
+      - name: Engine 10 manual account journal and execution lifecycle
+        run: node --test services/core/tests/engine8DManualPaperLifecycle.test.js
       - name: Existing foundation regression
         run: |
           node --test services/core/tests/engine8PaperDurableStore.test.js
