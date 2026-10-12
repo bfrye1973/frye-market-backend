@@ -63,3 +63,6 @@ test('absent source watermark cannot manufacture finality', () => {
   assert.equal(normalizeRawCandle(row(), context({ sourceAsOf: null })).completionState, 'UNKNOWN');
   assert.equal(normalizeRawCandle(row(), context({ sourceAsOf: '2026-10-12T13:00:30Z' })).completionState, 'UNKNOWN');
 });
+test('direct normalization rejects future source watermark', () => {
+  assert.throws(() => normalizeRawCandle(row(), context({ sourceAsOf: '2026-10-13T00:00:00Z' })), { code: 'SOURCE_WATERMARK_AFTER_ASOF' });
+});

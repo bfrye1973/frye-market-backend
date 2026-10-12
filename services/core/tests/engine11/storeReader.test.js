@@ -137,3 +137,10 @@ test('publication receipt corruption blocks reads', async t => {
   await fs.writeFile(path.join(root, 'receipts', published.receiptId + '.json'), '{}');
   await assert.rejects(store.read(published.datasetVersion), { code: 'CORRUPT_PUBLICATION' });
 });
+test('symlink root rejected before creating any object directory', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'engine11-empty-')), link = root + '-alias';
+  await fs.symlink(root, link); t.after(async () => { await fs.unlink(link); await fs.rm(root, { recursive: true }); });
+  const store = new IsolatedRawStore({ root: link, isolated: true });
+  await assert.rejects(store.publish(await acquisition()), { code: 'STORE_SYMLINK_FORBIDDEN' });
+  assert.deepEqual(await fs.readdir(root), []);
+});

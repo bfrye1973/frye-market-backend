@@ -132,7 +132,7 @@ Run from repository root:
 node --test services/core/tests/engine11/*.test.js
 ```
 
-Local development result: 97 tests passed, 0 failed, using Node 24. CI runs
+Local development result: 99 tests passed, 0 failed, using Node 24. CI runs
 Node 20. Tests cover identity/correction/overlap, numeric/UTC validation, full
 calendar plans, finality/absence, provider pagination and failure, safe cursors,
 durable restart/concurrency, tamper detection, publication-crash recovery,

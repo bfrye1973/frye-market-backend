@@ -27,6 +27,7 @@ export function normalizeRawCandle(row, context) {
     sourceTimestampNs: stamp.sourceTimestampNs, alignmentVersion: context.calendar.alignmentVersion });
   const rawHash = hash(raw), rawRevisionId = id('raw-revision', { sourceKey, rawHash });
   const sourceAsOf = context.sourceAsOf == null ? null : new Date(instant(context.sourceAsOf)).toISOString();
+  if (sourceAsOf) requireTruth(instant(sourceAsOf) <= instant(context.asOf), 'SOURCE_WATERMARK_AFTER_ASOF');
   const completionState = sourceAsOf && instant(interval.endExclusive) <= instant(sourceAsOf) &&
     instant(interval.endExclusive) <= instant(context.asOf) ? 'COMPLETED' : 'UNKNOWN';
   return { schemaVersion: 'engine11.rawCandles.v1', ...instrument, provider: context.provider,

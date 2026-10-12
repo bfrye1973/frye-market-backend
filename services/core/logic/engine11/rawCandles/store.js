@@ -42,10 +42,13 @@ export class IsolatedRawStore {
   async writeObject(kind, value, name = hash(value)) {
     requireTruth(['datasets', 'receipts', 'publications'].includes(kind) && HEX.test(name), 'INVALID_STORE_OBJECT');
     const digest = hash(value), dir = path.join(this.root, kind);
-    await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     // Reject symlink roots/directories so an explicit test path cannot redirect
     // publication into another store.
-    requireTruth((await fs.realpath(this.root)) === this.root && (await fs.realpath(dir)) === dir, 'STORE_SYMLINK_FORBIDDEN');
+    requireTruth((await fs.realpath(this.root)) === this.root && (await fs.stat(this.root)).isDirectory(), 'STORE_SYMLINK_FORBIDDEN');
+    try { requireTruth(!(await fs.lstat(dir)).isSymbolicLink(), 'STORE_SYMLINK_FORBIDDEN'); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    await fs.mkdir(dir, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    requireTruth((await fs.realpath(dir)) === dir, 'STORE_SYMLINK_FORBIDDEN');
     const target = path.join(dir, name + '.json'), temp = path.join(dir, '.' + randomUUID() + '.tmp');
     const content = canonicalJson(value);
     const handle = await fs.open(temp, 'wx', 0o600);
