@@ -75,4 +75,22 @@ test("changed historical source after migration fails closed", () => {
   } finally { fs.writeFileSync(historyFile, original); }
 });
 
+test("historical Engine 8 execution identity and acceptance files migrate unchanged", () => {
+  const fixtures = {
+    "engine8-paper-execution-state.json": {
+      version:"engine8.paperExecutionState.v1", executions:{"EX-1":{executionId:"EX-1",orderId:"PAPER-ORIG",journalPending:true}}
+    },
+    "engine8-paper-acceptance-state.json": {
+      version:"engine8.paperAcceptanceState.v1", acceptanceTradeCompleted:true, tradeId:"TRD-HISTORY",
+      newPaperOrdersAllowed:false
+    }
+  };
+  for (const [name, value] of Object.entries(fixtures)) {
+    fs.writeFileSync(path.join(old,name),JSON.stringify(value));
+    assert.deepEqual(store.readPaperStore(name,{}),value);
+    assert.deepEqual(store.readPaperStore(name,{}),value);
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(durable,name),"utf8")),value);
+  }
+});
+
 process.on("exit", () => fs.rmSync(home, { recursive: true, force: true }));
