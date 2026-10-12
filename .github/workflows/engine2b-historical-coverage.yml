@@ -4,6 +4,7 @@ on:
     branches: [engine2b-chart-overlays-v1]
     paths:
       - 'services/core/tests/engine2HistoricalProviderCoverage.mjs'
+      - 'services/core/tests/engine2RolloverPriceParity.mjs'
       - '.github/workflows/engine2b-historical-coverage.yml'
   workflow_dispatch:
 permissions:
@@ -22,3 +23,9 @@ jobs:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           POLY_KEY: ${{ secrets.POLY_KEY }}
         run: node services/core/tests/engine2HistoricalProviderCoverage.mjs
+
+      - name: Compare unadjusted ESU6 and ESZ6 overlap prices
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: node services/core/tests/engine2RolloverPriceParity.mjs
