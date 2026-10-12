@@ -33,13 +33,17 @@ export function assessMicroW3TouchW4Shadow({transition=null,bars=[],evaluationTi
    reasonCodes:["W3_TARGET_NOT_TOUCHED_IN_AVAILABLE_COMPLETED_HISTORY"]};
  const following=eligible.filter(b=>b.ms>touch.ms);
  // Reversal candidate only: this is not Elliott W3 completion confirmation.
- const lowerCloses=following.length>=2&&
-   following.at(-1).close<following.at(-2).close&&
-   following.at(-2).close<touch.close;
+ const peakIndex=eligible.findIndex(b=>b.ms===touch.ms);
+ const confirmedLocalHigh=peakIndex>=2&&peakIndex+2<eligible.length&&
+   eligible[peakIndex-2].high<touch.high&&eligible[peakIndex-1].high<touch.high&&
+   eligible[peakIndex+1].high<touch.high&&eligible[peakIndex+2].high<touch.high;
+ const retracement=following.some(b=>b.close<touch.close);
+ const lowerCloses=confirmedLocalHigh&&retracement;
  return {...base,available:true,
    w3OneToOne:{target,touched:true,status:"TOUCHED",
      firstTouchTimestamp:new Date(touch.ms).toISOString(),
      sourceBarId:`ES:10m:${new Date(touch.ms).toISOString()}`,countId},
    w4DownCandidate:lowerCloses,
+   w4CandidateEvidence:{confirmedLocalHigh,retracement,peakHigh:touch.high,peakTimestamp:new Date(touch.ms).toISOString(),waveCompletionConfirmed:false},
    reasonCodes:[lowerCloses?"REVERSAL_CANDIDATE_NOT_CONFIRMED":"W3_TARGET_TOUCH_EVIDENCE_ONLY"]};
 }
