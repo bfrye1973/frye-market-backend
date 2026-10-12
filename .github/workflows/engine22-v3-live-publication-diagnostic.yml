@@ -14,9 +14,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error --max-time 40 \
+          curl --silent --show-error --max-time 40 \
             'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES' \
             -o "$RUNNER_TEMP/production-es.json"
+          node -e '
+          const fs=require("fs");
+          const f=process.env.RUNNER_TEMP+"/production-es.json";
+          const raw=fs.readFileSync(f,"utf8");
+          if(raw.includes("SNAPSHOT_NOT_READY") || raw.includes("SNAPSHOT_READ_FAILED") || raw.includes("SNAPSHOT_INVALID_JSON"))
+             {console.log("PRODUCTION_SNAPSHOT_RESPONSE",raw.slice(0,1300));process.exit(2);}
+          '
           node -e '
           const fs=require("fs");
           const crypto=require("crypto");
