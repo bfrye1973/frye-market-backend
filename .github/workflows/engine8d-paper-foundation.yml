@@ -35,6 +35,8 @@ jobs:
           node --check services/core/scripts/auditEngine8PaperStorage.js
       - name: Admin authentication and PAPER-only contract checks
         run: node --test services/core/tests/engine8DManualSecurity.test.js
+      - name: Fresh PAPER storage preflight (no history reads)
+        run: node --test services/core/tests/engine8DFreshStorePreflight.test.js
       - name: Durable store, restart, historical migration
         run: node --test services/core/tests/engine8PaperDurableStore.test.js
       - name: Cross-process instruction serialization and crash fail-closed
