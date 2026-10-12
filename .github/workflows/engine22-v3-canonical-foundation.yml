@@ -90,6 +90,13 @@ jobs:
             console.log(JSON.stringify(report));
             if(!ok)process.exitCode=1;
           '
+      - name: Preserve live V3 read-only verification output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-live-verification
+          path: ${{ runner.temp }}/engine22-live-es-v3.json
+          if-no-files-found: warn
       - name: Checkout exact production baseline for comparison
         uses: actions/checkout@v4
         with:
