@@ -62,7 +62,7 @@ export function buildEngine22V3IndependentNodeShadow({
     const {bars,reasons}=prepare(input,tf,evaluationTimeMs);
     const item={degree,sourceTimeframe:tf,sourceCandleCount:bars.length,
       latestCompletedCandle:bars.at(-1)?.sourceTimestamp||null,
-      nodeEvidenceAvailable:false,sourceCandleIds:bars.map(b=>b.sourceBarId),
+      nodeEvidenceAvailable:false,sourceCandleIds:bars.slice(-250).map(b=>b.sourceBarId),
       detectedNodes:{HIGH:[],LOW:[]},waveCandidate:null,
       reasonCodes:[...reasons],shadowOnly:true,noExecution:true,
       noPermissionCreated:true,anchorPromotionAllowed:false,
