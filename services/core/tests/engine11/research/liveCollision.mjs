@@ -5,9 +5,9 @@ if (!apiKey) throw new Error('Existing provider credential required.');
 const specs = [
   { ticker: 'ESH0', from: '2020-03-09T00:00:00.000Z', to: '2020-03-11T00:00:00.000Z', resolution: '4hour' },
   { ticker: 'ESU6', from: '2026-09-09T00:00:00.000Z', to: '2026-09-12T00:00:00.000Z', resolution: '4hour' },
-  { ticker: 'ESH0', from: '2020-03-08T00:00:00.000Z', to: '2020-03-10T00:00:00.000Z', resolution: '5min' },
-  { ticker: 'ESH5', from: '2025-03-09T00:00:00.000Z', to: '2025-03-11T00:00:00.000Z', resolution: '5min' },
-  { ticker: 'ESH0', from: '2020-03-08T00:00:00.000Z', to: '2020-03-10T00:00:00.000Z', resolution: '1hour' }
+  { ticker: 'ESH0', from: '2020-03-01T00:00:00.000Z', to: '2020-04-01T00:00:00.000Z', resolution: '5min' },
+  { ticker: 'ESH5', from: '2025-01-01T00:00:00.000Z', to: '2025-04-01T00:00:00.000Z', resolution: '5min' },
+  { ticker: 'ESH0', from: '2020-03-01T00:00:00.000Z', to: '2020-04-01T00:00:00.000Z', resolution: '1hour' }
 ];
 const observations = [];
 for (const spec of specs) {
