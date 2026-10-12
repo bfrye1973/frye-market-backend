@@ -1,12 +1,12 @@
 // Pure manual futures order validation; no automated strategy engine is consulted.
 import {
-  getManualPaperAccountDefinition,validateFuturesContract,MANUAL_PAPER_RISK_POLICY,
+  getManualPaperAccountDefinition,validateFuturesContract,getManualPaperRiskPolicy,
 } from "./manualPaperAccountRegistry.js";
 
 const ACTIONS = new Set(["BUY","SELL","REDUCE","CLOSE"]);
 const INTENTS = new Set(["OPEN_LONG","OPEN_SHORT","CLOSE_LONG","CLOSE_SHORT"]);
 function reject(reason){return {ok:false,rejected:true,reason};}
-export function validateManualPaperInstruction(input, account, policy=MANUAL_PAPER_RISK_POLICY) {
+export function validateManualPaperInstruction(input, account, policy=getManualPaperRiskPolicy()) {
   if(!account || !getManualPaperAccountDefinition(account.accountId) ||
     account.accountMode!=="PAPER")return reject("UNKNOWN_OR_INACTIVE_PAPER_ACCOUNT");
   if(String(input?.accountId||"")!==account.accountId)return reject("ACCOUNT_IDENTITY_MISMATCH");
