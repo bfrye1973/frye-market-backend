@@ -329,7 +329,9 @@ export async function cancelPaperOrder(body) {
 export async function executeTradeTicket(ticket) {
   const key = String(ticket?.idempotencyKey || "").trim();
   if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
-  return withPaperInstructionLock(key, () => executeTradeTicketLocked(ticket));
+  // Serialize the shared JSON-ledger read/modify/write across ALL processes and keys.
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    withPaperInstructionLock(key, () => executeTradeTicketLocked(ticket)));
 }
 
 async function executeTradeTicketLocked(ticket) {
@@ -720,7 +722,8 @@ const journalRetriesInFlight = new Set();
 export async function retryPaperJournalDelivery({ idempotencyKey } = {}) {
   const key = String(idempotencyKey || "").trim();
   if (!key) return { ok: false, rejected: true, reason: "MISSING_IDEMPOTENCY_KEY" };
-  return withPaperInstructionLock(key, () => retryPaperJournalDeliveryLocked(key));
+  return withPaperInstructionLock("__ENGINE8_PAPER_GLOBAL_WRITE__", () =>
+    withPaperInstructionLock(key, () => retryPaperJournalDeliveryLocked(key)));
 }
 
 async function retryPaperJournalDeliveryLocked(idempotencyKey) {
