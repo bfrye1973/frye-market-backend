@@ -146,6 +146,7 @@ router.get(
  */
 router.post(
   "/execute",
+  requireEngine8Admin,
   async (req, res) => {
     try {
       const out =
@@ -534,6 +535,7 @@ router.get(
  */
 router.post(
   "/cancel",
+  requireEngine8Admin,
   async (req, res) => {
     try {
       const out =
