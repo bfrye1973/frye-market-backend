@@ -63,3 +63,11 @@ test("real ES V3 bootstrap preserves original consumer payload during shadow com
  assert.deepEqual(legacy,before);
  assert.equal(preview.publicationEligible,false);
 });
+
+test("V3 canonical source reaches wave builder rather than scalp opportunity",()=>{
+ const code=fs.readFileSync(fileURLToPath(new URL("../jobs/buildStrategySnapshot.js",import.meta.url)),"utf8");
+ const scalp=code.slice(code.indexOf("engine22Scalp = computeEngine22ScalpOpportunity({"),code.indexOf("engine22WaveStrategy = buildEngine22WaveStrategy({"));
+ const wave=code.slice(code.indexOf("engine22WaveStrategy = buildEngine22WaveStrategy({"),code.indexOf("engine22WaveStrategy = buildEngine22WaveStrategy({")+450);
+ assert.doesNotMatch(scalp,/engine22V3Canonical:/);
+ assert.match(wave,/engine22V3Canonical:\s*engine22V3Bootstrap\?\.available === true/);
+});
