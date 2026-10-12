@@ -23,7 +23,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { readPaperStore } from "./engine8PaperDurableStore.js";
+import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -72,6 +72,8 @@ function readJson(filePath, fallback) {
   // PAPER fill/idempotency consumers must read the same persistent authority.
   if (filePath === ORDERS_FILE) return readPaperStore("paper-orders.json", fallback);
   if (filePath === LEDGER_FILE) return readPaperStore("paper-idempotency-ledger.json", fallback);
+  if (filePath === ACCEPTANCE_FILE) return readPaperStore("engine8-paper-acceptance-state.json", fallback);
+  if (filePath === LIFECYCLE_FILE) return readPaperStore("engine8-paper-execution-state.json", fallback);
   try {
     if (!fs.existsSync(filePath)) return fallback;
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -81,6 +83,8 @@ function readJson(filePath, fallback) {
 }
 
 function writeJson(filePath, value) {
+  if (filePath === ACCEPTANCE_FILE) return writePaperStore("engine8-paper-acceptance-state.json", value);
+  if (filePath === LIFECYCLE_FILE) return writePaperStore("engine8-paper-execution-state.json", value);
   ensureDataDir();
 
   const tempPath =
