@@ -19,7 +19,9 @@ jobs:
           node-version: '20'
       - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs
   bounded-authentic-research:
-    if: github.event_name == 'push'
+    # Re-run authenticated acquisition only on an intentional research commit;
+    # documentation-only updates should not repeat the provider experiment.
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[provider-research]')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
