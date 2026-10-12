@@ -2095,7 +2095,7 @@ export function buildEngine22WaveStrategy(input = {}) {
             microV2Migration?.canonicalState?.waves?.W2?.structuralEvidence?.confirmationTimestamp ||
             null,
         }} : null,
-    bars: input?.barsByTf?.["10m"] || [],
+    bars: input?.microW3EvidenceBars || [],
     evaluationTimeMs: input?.evaluationTimeMs,
   });
 
