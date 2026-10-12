@@ -82,7 +82,7 @@ test("verified bearish W2/W4 retracement and W3/W5 extension arithmetic",()=>{
  }
 });
 test("TOUCHED persists after rebound, but never completes or changes lifecycle",()=>{
- const f=fixture("W2","UP","MICRO",0,{prices:[108,104,109,109]});
+ const f=fixture("W2","UP","MICRO",0,{prices:[108,104,109,109,109]});
  const before=structuredClone(f.canonical);
  const first=project(f);
  assert.equal(first.available,true);
@@ -91,12 +91,14 @@ test("TOUCHED persists after rebound, but never completes or changes lifecycle",
  const latter=project({...f,source:{...f.source,bars:f.source.bars.slice(-3)},previous:first});
  assert.equal(latter.available,true);
  assert.equal(latter.levels.find(l=>l.key==="r500").status,"TOUCHED");
+ assert.equal(latter.levels.find(l=>l.key==="r500").firstTouchedAt,
+   first.levels.find(l=>l.key==="r500").firstTouchedAt);
  assert.equal(latter.waveCompletionConfirmed,false);
  assert.equal(latter.publishAuthorized,false);
  assert.deepEqual(f.canonical,before);
 });
 test("W4 touch can survive a rebounding partial page when model identity matches",()=>{
- const f=fixture("W4","UP","MICRO",0,{prices:[122,117,123,123]});
+ const f=fixture("W4","UP","MICRO",0,{prices:[122,117,123,123,123]});
  const a=project(f);
  assert.equal(a.levels.find(l=>l.key==="r382").status,"TOUCHED");
  const b=project({...f,source:{...f.source,bars:f.source.bars.slice(-3)},previous:a});
