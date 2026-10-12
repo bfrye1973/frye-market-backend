@@ -36,7 +36,96 @@ const ES_SNAPSHOT_FILE = path.resolve(
   "../data/strategy-snapshot-es.json"
 );
 
+import {
+  getManualPaperAccounts, initializeManualPaperAccounts,
+  readManualPaperAccount,
+} from "../logic/trading/manualPaperAccountStore.js";
+
+import {
+  executeManualPaperInstruction,retryManualPaperJournalOnly,
+  getManualPaperAccountsOverview,inspectManualPaperInstruction,
+} from "../logic/trading/manualPaperOrderExecution.js";
+
+import {
+  issueManualPaperPairing,redeemManualPaperPairing,requireManualPaperSession,
+} from "../logic/trading/manualPaperAccessSession.js";
+
+function requireManualPaperOperator(req,res,next) {
+  if(req.headers["x-engine8-admin-secret"])return requireEngine8Admin(req,res,next);
+  return requireManualPaperSession(req,res,next);
+}
+
 const router = express.Router();
+
+router.post("/manual-paper/access/pairing",requireEngine8Admin,async(req,res)=>{
+  try{return res.json(await issueManualPaperPairing());}
+  catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_PAIRING_UNAVAILABLE"});}
+});
+router.post("/manual-paper/access/redeem",async(req,res)=>{
+  try{
+    const result=await redeemManualPaperPairing({
+      pairingCode:req.body?.pairingCode,origin:req.headers.origin
+    });
+    return res.status(result.ok?200:401).json(result);
+  }catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_REDEMPTION_UNAVAILABLE"});}
+});
+router.get("/manual-paper/access/status",requireManualPaperSession,(req,res)=>{
+  return res.json({ok:true,authenticated:true,scope:"MANUAL_PAPER_ONLY"});
+});
+
+
+/**
+ * Engine 8D — server-side admin-only MANUAL PAPER execution.
+ * No strategy automation, no browser secret, no REAL broker gateway.
+ */
+router.get("/manual-paper/overview",requireManualPaperOperator,(req,res)=>{
+  try {return res.json(getManualPaperAccountsOverview());}
+  catch {return res.status(503).json({ok:false,reason:"MANUAL_PAPER_OVERVIEW_BLOCKED"});}
+});
+router.get("/manual-paper/recovery-status",requireManualPaperOperator,(req,res)=>{
+  try{return res.json(inspectManualPaperInstruction({idempotencyKey:req.query?.idempotencyKey}));}
+  catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_RECOVERY_UNAVAILABLE"});}
+});
+router.post("/manual-paper/execute",requireManualPaperOperator,async(req,res)=>{
+  try {
+    const result=await executeManualPaperInstruction(req.body);
+    return res.status(result.ok?200:409).json(result);
+  }catch(err) {
+    return res.status(503).json({ok:false,rejected:true,
+      reason:"MANUAL_PAPER_EXECUTION_BLOCKED",errorCode:String(err?.code||"STORAGE_OR_JOURNAL_FAILURE")});
+  }
+});
+router.post("/manual-paper/retry-journal",requireManualPaperOperator,async(req,res)=>{
+  try {
+    const result=await retryManualPaperJournalOnly({idempotencyKey:req.body?.idempotencyKey});
+    return res.status(result.ok?200:409).json(result);
+  }catch{return res.status(503).json({ok:false,rejected:true,reason:"MANUAL_PAPER_RETRY_BLOCKED"});}
+});
+
+
+/**
+ * Phase 2: secure server-only seven-account initialization. No orders placed.
+ * The browser MUST NOT receive the Engine 8 admin secret.
+ */
+router.get("/manual-paper/accounts", requireManualPaperOperator, (req,res)=>{
+  try{return res.json(getManualPaperAccounts());}
+  catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_STORE_UNAVAILABLE"});}
+});
+router.get("/manual-paper/accounts/:accountId", requireManualPaperOperator, (req,res)=>{
+  try {
+    const result=readManualPaperAccount(req.params.accountId);
+    return res.status(result.ok?200:404).json(result);
+  } catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_STORE_UNAVAILABLE"});}
+});
+router.post("/manual-paper/initialize",requireManualPaperOperator,async(req,res)=>{
+  try {
+    const result=await initializeManualPaperAccounts();
+    return res.status(result.ok?200:409).json(result);
+  } catch(err){
+    return res.status(503).json({ok:false,reason:"MANUAL_PAPER_INIT_BLOCKED",errorCode:String(err?.code||"INVARIANT_OR_STORAGE_FAILURE")});
+  }
+});
+
 
 function readEsStrategySnapshot() {
   if (!fs.existsSync(ES_SNAPSHOT_FILE)) {
