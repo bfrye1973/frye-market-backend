@@ -43,7 +43,7 @@ import {
 
 import {
   executeManualPaperInstruction,retryManualPaperJournalOnly,
-  getManualPaperAccountsOverview,
+  getManualPaperAccountsOverview,inspectManualPaperInstruction,
 } from "../logic/trading/manualPaperOrderExecution.js";
 
 import {
@@ -81,6 +81,10 @@ router.get("/manual-paper/access/status",requireManualPaperSession,(req,res)=>{
 router.get("/manual-paper/overview",requireManualPaperOperator,(req,res)=>{
   try {return res.json(getManualPaperAccountsOverview());}
   catch {return res.status(503).json({ok:false,reason:"MANUAL_PAPER_OVERVIEW_BLOCKED"});}
+});
+router.get("/manual-paper/recovery-status",requireManualPaperOperator,(req,res)=>{
+  try{return res.json(inspectManualPaperInstruction({idempotencyKey:req.query?.idempotencyKey}));}
+  catch{return res.status(503).json({ok:false,reason:"MANUAL_PAPER_RECOVERY_UNAVAILABLE"});}
 });
 router.post("/manual-paper/execute",requireManualPaperOperator,async(req,res)=>{
   try {
