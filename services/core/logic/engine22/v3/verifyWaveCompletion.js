@@ -40,7 +40,9 @@ export function verifyEngine22V3WaveCompletion({degreeState=null,candidate=null,
  if(reversal.passed && confirmed?.sourceBarId!==reversal.evidence.confirmingBarId)
    errors.push("CONFIRMATION_BAR_NOT_REVERSAL_BAR");
  const wave=degreeState.activeWave;
- const key={W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"}[wave];
+ const key=(degreeState.sequenceDirection==="UP" ?
+   {W1:"W1_HIGH",W2:"W2_LOW",W3:"W3_HIGH",W4:"W4_LOW",W5:"W5_HIGH"} :
+   {W1:"W1_LOW",W2:"W2_HIGH",W3:"W3_LOW",W4:"W4_HIGH",W5:"W5_LOW"})[wave];
  // Confirmed swing evidence alone is insufficient for Elliott completion:
  // require a separately established rule/evidence package bound to same count.
  const rule=degreeState.confirmationRule;
