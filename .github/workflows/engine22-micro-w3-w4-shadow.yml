@@ -61,3 +61,19 @@ jobs:
               oldW3FibTarget:w?.microW2W3TransitionFibs?.w3Up?.levels?.find(l=>l.key==="e1000")?.price??null
             },null,2));
           '
+      - name: Probe unique historical W2 7826.75 low in completed 10m ES candles
+        shell: bash
+        run: |
+          curl -fsS --max-time 45 "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=1500" -o "$RUNNER_TEMP/es10m.json"
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const a=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/es10m.json","utf8"));
+            const b=a.filter(x=>Number.isFinite(Number(x.time))&&Number.isFinite(Number(x.low))).sort((x,y)=>x.time-y.time);
+            const matches=b.map((x,i)=>({x,i})).filter(({x})=>Math.abs(Number(x.low)-7826.75)<0.001);
+            console.log("W2_CANONICAL_PRICE_CANDLE_PROBE",JSON.stringify({
+              matches:matches.map(({x,i})=>({
+                time:new Date(x.time*1000).toISOString(),low:x.low,
+                confirmedPivot:i>=2&&i+2<b.length&&b[i-2].low>x.low&&b[i-1].low>x.low&&b[i+1].low>x.low&&b[i+2].low>x.low,
+                prior:[b[i-2]?.low,b[i-1]?.low],following:[b[i+1]?.low,b[i+2]?.low]
+              })),candidateCount:matches.length,noAnchorPromotion:true},null,2));
+          '
