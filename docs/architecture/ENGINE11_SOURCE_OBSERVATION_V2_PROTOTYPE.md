@@ -41,13 +41,14 @@ revision is automatically accepted, no latest-row winner and no approved anchor 
 ## Verification
 
 New test path: `services/core/tests/engine11/sourceV2/prototype.test.mjs`.
-30 tests cover byte fidelity, UTF-8 offsets, malformed/duplicate-key capture, unknown
+32 tests cover byte fidelity, UTF-8 offsets, malformed/duplicate-key capture, unknown
 numeric lexemes, source identity, competing revisions, equal repeats, metadata/decade/
 lifespan ambiguity, snapshot restart and tampering, timestamp-tie paging, signed cursor
 drift/tampering, as-of restrictions, V1 one-to-many aliases and provider failures/budgets.
 Authentic archived 2020/2026 body tests are explicitly labelled; other fixtures are
 not provider or exchange proof. The V1 and earlier research suites run alongside V2.
-Initial local total: 156 passing tests (126 prior + 30 V2).
+Initial local total: 156 passing tests; final total 158 (126 prior + 32 V2), including
+UTC timestamp-precision as-of ordering and mixed unresolved correspondence guards.
 
 Bounded live script: `services/core/tests/engine11/sourceV2/livePrototype.mjs`.
 It captures four point-in-time metadata lookups and six narrow aggregate windows:
@@ -94,3 +95,36 @@ metadata binding guards, snapshot integrity and signed research paging. Do not i
 development acceptance as source/calendar/finality, structural integration or production
 approval. Execution, accounts, stops/targets, sizing, risk, journals, Replay, live routes,
 streams and approved Elliott/Fibonacci remain unchanged. No merge/deployment occurred.
+
+## Authentic milestone evidence
+
+Authentic probe commit `e14c4eaff30d4f11125645fbb09922c0f3655692`:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38323457065
+Full byte-preserving snapshot/acquisition artifact:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38323457065/artifacts/11780315089
+Permanent compact authentic summary: `ENGINE11_SOURCE_V2_LIVE_SUMMARY_V1.json`.
+
+Ten authenticated requests produced ten receipts and 14 source rows. Metadata bound
+ESU2026 and ESZ2026 independently; ESH2020 and ESM2020 metadata remained unavailable.
+The 2020 conflicting 5m/1h/4h records all survived with distinct receipt-scoped occurrence
+identities and unresolved global keys. For U/Z2026, the two session dates sharing a
+timestamp obtained distinct source keys; overlapping quarterly contracts remained
+distinct too. No record was interpreted as an accepted correction or analytical candle.
+
+One-record paging traversed all observations with no loss/duplication; retry etags and
+signed cursors matched. The ESU6 legacy timestamp alias yielded explicit one-to-many
+candidate correspondence, with migrationApproved=false. This alias is not represented
+as a verified historical V1 dataset identity. No acquisition failures occurred.
+Both GitHub PR checks and push workflow passed at the authentic probe commit.
+
+Final corrections strengthen as-of comparison for UTC strings with differing precision
+and keep mixed verified/unresolved aliases unresolved. Metadata provenance now carries
+its fixture/archive/HTTP evidence kind explicitly. These changes do not alter the
+underlying preserved response bytes or session conflict conclusion. Final SHA and final
+test CI are recorded in the draft PR's milestone request.
+
+Current blockers: authentic 2020 full-year metadata, provider correction indicators,
+intraday session semantics, validated dated ES calendar/alignment/finality, independent
+source parity, historical completeness and separately authorized consumer acceptance.
+Seven-degree structural source readiness remains unavailable; this milestone establishes
+safe source preservation and research identity/paging, not structural data acceptance.

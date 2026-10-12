@@ -70,6 +70,15 @@ test('no latest fallback, execution or structural reader purpose',()=>{
 test('as-of before any dependency refuses future observation evidence',()=>{
   const d=dataset([receipt([row])]);assert.throws(()=>reader(d)({datasetVersion:d.datasetVersion,asOf:'2026-10-12T22:00:00Z'}));
 });
+test('as-of compares actual instants when equivalent UTC strings have differing precision',()=>{
+  const secondsMeta=captureReceipt({...meta,body:Buffer.from(meta.bodyBase64,'base64'),observedAt:'2026-10-12T23:00:00Z'});
+  const d=buildSourceDataset({receipts:[secondsMeta,receipt([row],{observedAt:'2026-10-12T23:00:00.999Z'})],bindings:[{...binding,metadataReceipt:secondsMeta}]});
+  assert.equal(d.firstUsableAt,'2026-10-12T23:00:00.999Z');assert.throws(()=>reader(d)({datasetVersion:d.datasetVersion,asOf:'2026-10-12T23:00:00Z'}));
+});
+test('mixed verified and unresolved alias correspondence stays unresolved',()=>{
+  const d=dataset([receipt([row,{...row,session_end_date:'2016-09-09'}])]);
+  const r=correspondenceReport(d,[{v1Id:'alias',providerTicker:ticker,sourceResolution:'4hour',sourceTimestampNs:row.window_start}]);assert.equal(r[0].status,'UNRESOLVED');
+});
 test('serialized snapshot is readable and tampered content is rejected',()=>{
   const d=JSON.parse(JSON.stringify(dataset([receipt([row])])));reader(d);d.rows[0].payload.close=1;assert.throws(()=>reader(d));
 });

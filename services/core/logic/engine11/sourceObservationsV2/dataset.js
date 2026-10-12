@@ -1,4 +1,4 @@
-import { hash, requireTruth } from '../rawCandles/identity.js';
+import { hash, requireTruth, instant } from '../rawCandles/identity.js';
 import { freeze, verifyReceipt, bindingFromMetadata } from './evidence.js';
 const flag={purpose:'ISOLATED_RESEARCH_ONLY',structuralEligible:false,sourceFinality:'UNKNOWN',analyticalInterval:null,coverageComplete:false};
 export function buildSourceDataset({receipts,bindings=[],aggregationPolicyTag='MASSIVE_NATIVE_UNRESOLVED'}) {
@@ -37,14 +37,14 @@ export function buildSourceDataset({receipts,bindings=[],aggregationPolicyTag='M
     for(const k of ['providerTicker','sourceSessionLabel','sourceResolution','sourceKey','sourceRevisionId','observationId']){const d=String(a[k]??'').localeCompare(String(b[k]??''),'en');if(d)return d;}return 0;
   });
   const manifest={schemaVersion:'engine11.source-dataset.v2',identityPolicyVersion:'engine11.source-prototype.v2.0',aggregationPolicyTag,receiptIds:verifiedReceipts.map(x=>x.receiptId).sort(),bindingVersions:verifiedBindings.map(x=>x.bindingVersion).sort(),observationIds:classified.map(x=>x.observationId),...flag};
-  const firstUsableAt=[...verifiedReceipts.map(x=>x.observedAt),...verifiedBindings.map(x=>x.metadataObservedAt)].sort().at(-1);
+  const firstUsableAt=[...verifiedReceipts.map(x=>x.observedAt),...verifiedBindings.map(x=>x.metadataObservedAt)].reduce((latest,t)=>instant(t)>instant(latest)?t:latest);
   return freeze({manifest,datasetVersion:'dataset:v2:'+hash(manifest),firstUsableAt,receipts:verifiedReceipts,bindings:verifiedBindings,rows:classified,...flag});
 }
 export function correspondenceReport(dataset,v1Rows) {
   return freeze(v1Rows.map(old=>{
     const matches=dataset.rows.filter(row=>row.providerTicker===old.providerTicker&&row.sourceResolution===old.sourceResolution&&row.sourceTimestampNs===old.sourceTimestampNs);
     return {v1Id:old.v1Id,v1DatasetVersion:old.v1DatasetVersion??null,v2DatasetVersion:dataset.datasetVersion,
-      status:!matches.length?'UNRESOLVED':new Set(matches.map(x=>x.sourceKey)).size>1?'ONE_TO_MANY':matches.every(x=>x.sourceKey)?'CANDIDATE_CORRESPONDENCE':'UNRESOLVED',
+      status:!matches.length||matches.some(x=>!x.sourceKey)?'UNRESOLVED':new Set(matches.map(x=>x.sourceKey)).size>1?'ONE_TO_MANY':'CANDIDATE_CORRESPONDENCE',
       observationIds:matches.map(x=>x.observationId),sourceKeys:[...new Set(matches.map(x=>x.sourceKey).filter(Boolean))],migrationApproved:false,...flag};
   }));
 }

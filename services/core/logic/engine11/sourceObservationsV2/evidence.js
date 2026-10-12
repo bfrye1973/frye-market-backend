@@ -75,7 +75,7 @@ export function bindingFromMetadata(contract,ticker,receipt) {
     typeof x.payload.settlement_date==='string' && x.payload.settlement_date.startsWith(`${c.expirationYear}-${String(c.expirationMonth).padStart(2,'0')}-`));
   requireTruth(matches.length===1,'V2_FULL_CONTRACT_BINDING_UNRESOLVED');
   const row=matches[0];const binding={schemaVersion:'engine11.contract-binding.v2',contract:c.contract,instrumentId:esContract(contract).instrumentId,ticker,metadataReceiptId:evidence.receiptId,metadataObservationId:row.observationId,
-    metadataObservedAt:evidence.observedAt,settlementDate:row.payload.settlement_date,
+    metadataObservedAt:evidence.observedAt,bindingEvidenceKind:evidence.evidenceKind,settlementDate:row.payload.settlement_date,
     firstTradeDate:row.payload.first_trade_date??null,lastTradeDate:row.payload.last_trade_date??null,
     state:'METADATA_MATCH_RESEARCH_ONLY',structuralEligible:false};
   return freeze({...binding,bindingVersion:'binding:v2:'+hash(binding)});
