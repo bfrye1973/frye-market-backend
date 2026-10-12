@@ -57,7 +57,7 @@ function markArray(marks, path) {
     const time = normalizeTime(rawTime);
     if (time == null) {
       unresolved.push({ id: name, price, date: typeof rawTime === "string" ? rawTime : null,
-        status, reason: /^\\d{4}-\\d{2}-\\d{2}$/.test(String(rawTime || "")) ?
+        status, reason: /^\d{4}-\d{2}-\d{2}$/.test(String(rawTime || "")) ?
           "DATE_ONLY_NO_INTRADAY_SOURCE_TIME" : "SOURCE_TIMESTAMP_UNAVAILABLE",
         sourcePath: source });
       return;
