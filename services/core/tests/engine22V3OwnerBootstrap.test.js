@@ -1,0 +1,25 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import {fileURLToPath} from "node:url";
+import {buildEngine22V3OwnerBootstrap} from "../logic/engine22/v3/buildOwnerBootstrap.js";
+import {buildEngine22V3ShadowSnapshot} from "../logic/engine22/v3/buildShadowSnapshot.js";
+import {buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
+const source=()=>JSON.parse(fs.readFileSync(fileURLToPath(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url)),"utf8"));
+test("actual manual ES source and owner anchors publish seven isolated V3 shadow degrees",()=>{
+ const raw=source(),original=structuredClone(raw);
+ const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
+ assert.equal(initialized.available,true,JSON.stringify(initialized.reasonCodes));
+ assert.equal(initialized.canonical.degrees.MICRO.anchors.W4_LOW.price,7782.75);
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW.price,7826.25);
+ const shadow=buildEngine22V3ShadowSnapshot({canonical:initialized.canonical});
+ assert.equal(shadow.available,true,JSON.stringify(shadow.reasonCodes));
+ const projection=buildEngine22V3ContractProjection({shadow});
+ assert.equal(projection.available,true,JSON.stringify(projection.reasonCodes));
+ assert.equal(Object.keys(projection.degreeStates).length,7);
+ assert.equal(projection.degreeStates.micro.activeWave,"W5");
+ assert.equal(projection.degreeStates.intraday_submicro.activeWave,"W3");
+ assert.notEqual(projection.degreeStates.micro.sourceCountId,projection.degreeStates.intraday_submicro.sourceCountId);
+ assert.equal(projection.publicationEligible,false);
+ assert.deepEqual(raw,original);
+});
