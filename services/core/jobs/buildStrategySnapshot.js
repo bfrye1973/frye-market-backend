@@ -8319,6 +8319,10 @@ const strategy1TenMinuteEma10 =
         reaction: patchedConfluence?.context?.reaction || null,
         waveReaction: reaction?.waveReaction || null,
         engine2State: engine22Engine2State,
+        // Optional canonical V3 context from the existing upstream structural owner.
+        // No fallback to projections, previous snapshots, or invented marks.
+        // V3 remains a read-only sidecar until Manager acceptance.
+        engine22V3Canonical: engine22Engine2State?.engine22V3Canonical ?? null,
         marketMind,
         marketMeter,
 
