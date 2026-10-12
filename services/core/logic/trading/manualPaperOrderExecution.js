@@ -6,6 +6,7 @@ import crypto from "node:crypto";
 import {PAPER_DATA_DIR,atomicPaperWrite,withPaperInstructionLock} from "./engine8PaperDurableStore.js";
 import {getManualPaperAccounts} from "./manualPaperAccountStore.js";
 import {validateManualPaperInstruction} from "./validateManualPaperInstruction.js";
+import {getManualPaperRiskPolicy} from "./manualPaperAccountRegistry.js";
 import {
   readEngine10ManualPaperAccounts,applyEngine10ManualPaperFill
 } from "../journal/manualPaperAccountJournal.js";
@@ -46,7 +47,7 @@ export function getManualPaperAccountsOverview(){
     return {...def,...journal.accounts[def.accountId],pendingJournalInstructions:pending.length,
       tradingBlocked:pending.length>0};
   });
-  return {ok:true,accountMode:"PAPER",accounts,
+  return {ok:true,accountMode:"PAPER",riskPolicy:getManualPaperRiskPolicy(),accounts,
     startingCapital:70000,totalEquity:accounts.reduce((n,a)=>n+a.equity,0),
     pendingJournalInstructions:accounts.reduce((n,a)=>n+a.pendingJournalInstructions,0),
     warning:"PAPER ONLY — NO REAL BROKER ORDERS"};
