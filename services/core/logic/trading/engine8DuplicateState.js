@@ -23,6 +23,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
+import { readPaperStore } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -68,17 +69,12 @@ function nowIso() {
 }
 
 function readJson(filePath, fallback) {
+  // PAPER fill/idempotency consumers must read the same persistent authority.
+  if (filePath === ORDERS_FILE) return readPaperStore("paper-orders.json", fallback);
+  if (filePath === LEDGER_FILE) return readPaperStore("paper-idempotency-ledger.json", fallback);
   try {
-    if (!fs.existsSync(filePath)) {
-      return fallback;
-    }
-
-    return JSON.parse(
-      fs.readFileSync(
-        filePath,
-        "utf8"
-      )
-    );
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
   } catch {
     return fallback;
   }
