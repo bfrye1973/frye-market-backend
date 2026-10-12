@@ -1,0 +1,21 @@
+name: Engine22 V3 Independent Nodes Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/v3/buildIndependentNodeShadow.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
+      - 'services/core/tests/engine22V3IndependentNodeShadow.test.js'
+      - '.github/workflows/engine22-v3-independent-nodes.yml'
+permissions:
+  contents: read
+jobs:
+  isolated-node-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Independent completed-candle tests
+        working-directory: services/core
+        run: node --test tests/engine22V3IndependentNodeShadow.test.js
