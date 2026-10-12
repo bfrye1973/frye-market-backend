@@ -1,43 +1,41 @@
-# Engine 8D — PAPER Foundation Migration and Crash Recovery Runbook
+# Engine 8D — New PAPER Store / No Historical Migration
 
-**Status:** manager-gated, feature-branch development only. No production mutation or deployment authorized.
+**Owner instruction:** Do NOT migrate historical PAPER records. The code on PR #98 must not import, read, copy, merge, overwrite, or delete legacy PAPER files as a side effect of new PAPER execution.
 
-## Storage authority
-- Render service: `frye-market-backend-1`; confirmed mounted 100GB persistent disk at `/var/data/replay`.
-- PAPER target: `/var/data/replay/engine8-paper`.
-- Historical source (if still present): `/opt/render/project/src/services/core/data` (actual install path should be confirmed read-only).
-- Managed files: `paper-orders.json`, `paper-executions.json`, `paper-idempotency-ledger.json`, `engine8-paper-execution-state.json`, `engine8-paper-acceptance-state.json`.
-- **Never** include real `trade-journal.json`, Schwab OAuth/private store, broker fill watermarks, or REAL execution files in this migration.
+**Status:** Feature branch only. No production deployment, merge, restart, PAPER trade, or REAL broker action authorized.
 
-## Pre-deploy inventory — read only
-The connected Render service API currently exposes disk configuration but not mounted filesystem reads. No historical production bytes have been inspected.
+## Storage decision
 
-With explicit Manager authorization for a **read-only** Render Shell audit, execute the following *existing code* on a running service (or an identical read-only checkout with mounted disk):
-`node services/core/scripts/auditEngine8PaperStorage.js`
+- The new PAPER executor uses only `/var/data/replay/engine8-paper` on the existing Render persistent disk.
+- The five independent new-store files are `paper-orders.json`, `paper-executions.json`, `paper-idempotency-ledger.json`, `engine8-paper-execution-state.json`, and `engine8-paper-acceptance-state.json`.
+- Existing historical PAPER files under `services/core/data` are **never imported or modified**. No migration manifests are created.
+- Missing new-store files represent a new, empty PAPER store; corrupted existing new-store files fail closed instead of being silently reset.
+- No REAL Engine 10 Journal, Schwab OAuth, broker-watermark, or REAL execution file is moved or touched.
+- The read-only `scripts/auditEngine8PaperStorage.js` may be used only to verify that the target is clean if specifically requested; its execution is NOT needed for a historical migration, because none will occur.
 
-It emits only file presence, record counts and SHA-256 hashes; no order IDs, secrets or account values. It does not modify, migrate, restart or deploy anything. Any invalid JSON, conflicting historical/durable files without a migration manifest, or changed source after migration is a STOP condition. If the new script is not available on production (because deployment is blocked), use a read-only equivalent that only stats/hashes the five listed files, or postpone until Manager approves staging it.
+## Production gate (future Manager approval required)
 
-## Migration approval gate
-1. Record checksums and record counts for all five historical files before any cutover. Preserve copies/backups on persistent storage under an explicitly Manager-approved, non-conflicting location. No automated production copy is authorized by this runbook.
-2. Confirm destination does not contain unrelated historical data. If source and target both exist without the recorded migration manifest, abort. Do not merge JSON arrays blindly.
-3. After explicit merge/deploy approval, the PAPER store copies valid historical data to its new persistent target on first access and writes a per-file migration manifest with source SHA-256. It never deletes legacy files. It refuses unreadable/corrupt legacy data and manifest mismatches.
-4. Verify exact record counts, identities, and SHA-256 before accepting the migration. Confirm all five files remain after a separately authorized service restart. **Do not initiate a restart as part of inspection.**
-5. Keep the verified historical backup and log the approval/deploy SHA. New PAPER entries are disabled until acceptance checks complete.
+1. Inspect *only* the new target directory read-only. If it already has records or orphan locks, **stop**; do not overwrite, discard, or initialize across an ambiguous state.
+2. With separate authorization, take a backup of the new target before the first production release and preserve it after release. This backup must not change legacy files.
+3. Only after Manager approves the PR and deployment, activate the new PAPER storage path. Review atomic writes and the Engine 8 administration requirement.
+4. Before accepting any user-directed PAPER instruction, verify new-store persistence, unique idempotency identities, Engine 10 Journal-only retry, and that REAL Schwab behavior is unchanged.
+5. Perform an authorized restart persistence test only after separate approval.
 
-## Crash recovery
-- A per-instruction lock and one shared JSON mutation lock are created atomically on the persistent disk. Different processes cannot simultaneously commit conflicting PAPER idempotency ledgers.
-- Hard process death leaves an unreleased lock. **Never auto-expire or automatically delete such locks.**
-- Authenticated read-only `GET /api/trading/paper/recovery-status?idempotencyKey=...` returns classification without creating an execution or altering a Journal.
-- `NO_RESERVATION_FOUND`: do not infer a fill exists; verify the lock before deciding any subsequent operation.
-- `RESERVED_WITHOUT_RECORDED_FILL` / `PARTIAL_OR_UNACKNOWLEDGED_FILL_RECORDING` / `AMBIGUOUS_FAIL_CLOSED`: stop. Preserve files and investigate with Engine 8A; no automatic resubmission.
-- `JOURNAL_ONLY_RETRY_ELIGIBLE`: original order+fill identities are present. After a Manager-authorized resolution of any stranded lock, use admin-only `POST /api/trading/paper/retry-journal` supplying only the existing idempotencyKey; it resends the stored original Journal event, never a new simulated fill.
-- `JOURNAL_COMPLETE`: requires Engine 10 acknowledgment with tradeId. Repeat retry must return the same identity.
-- Engine 10 is authoritative for tradeId, contractId, FIFO and realized P&L. Never synthesize these during recovery.
-- **Stranded-lock removal is not automated in this PR.** Require Manager approval, evidence that prior process is dead, preservation of all source files, and explicit documented reconciliation before any manual unlock.
+## Crash and stranded-lock handling
+
+- Every manual PAPER instruction is protected by a global persistent-disk mutation lock and a per-idempotency-key lock.
+- Hard process death intentionally retains the lock and blocks new execution: **never auto-expire it**.
+- Authenticate and query `GET /api/trading/paper/recovery-status?idempotencyKey=...`. Preserve original lock, ledger, order, execution and Journal records.
+- States `RESERVED_WITHOUT_RECORDED_FILL`, `PARTIAL_OR_UNACKNOWLEDGED_FILL_RECORDING`, and `AMBIGUOUS_FAIL_CLOSED` require reconciliation. Never create a replacement fill automatically.
+- For a verified `JOURNAL_ONLY_RETRY_ELIGIBLE` event, request Engine 8A approval to resolve any stranded lock, then use the admin-only `POST /api/trading/paper/retry-journal` with the original key. Engine 10 must acknowledge the original event with a tradeId before `JOURNAL_COMPLETE`.
+- An operator must verify the original process is dead, preserve evidence, and obtain Engine 8A approval before clearing a lock. No unlock endpoint or automatic lock deletion is implemented.
 
 ## Rollback
-Before deployment: close PR #98 or revert its commits; production is unchanged.
-After a separately approved migration: stop new PAPER orders, preserve target and migrated source/manifest/backups, revert application code only with Manager approval. Do not delete or overwrite durable files; old code must not silently resume writing ephemeral records. Reconcile journal-pending identities before resuming trading.
 
-## Acceptance limitation
-Tests on disposable GitHub runners demonstrate simulated migration/restart/crash recovery and duplicate prevention, **not** the contents of the mounted production disk. Production historical migration and restart verification remain deployment-gated and unverified.
+Before production: reject or close PR #98; current deployment and historical files are unchanged.
+
+After a separately authorized deployment: stop new PAPER execution, preserve and back up new-store files/locks and all Engine 10 identities, then roll back code only with Manager acceptance. Never delete new-store data and never resume writing to the old ephemeral ledger.
+
+## Evidence boundary
+
+GitHub simulations prove independent new-store behavior and restart safety, but do not prove that the actual production directory is empty. Read-only target inspection remains a future deployment checkpoint. No migration of historical PAPER data is authorized or required.
