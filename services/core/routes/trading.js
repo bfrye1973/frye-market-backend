@@ -7,6 +7,7 @@ import {
   getTradingStatus,
   executeTradeTicket,
   retryPaperJournalDelivery,
+  inspectPaperInstructionRecovery,
   listPaperExecutions,
   listPaperOrders,
   cancelPaperOrder,
@@ -529,6 +530,20 @@ router.get(
     }
   }
 );
+
+/**
+ * Read-only admin inspection after an interrupted PAPER instruction.
+ * Does not clear locks, modify Journal, create fills, or contact Schwab.
+ */
+router.get("/paper/recovery-status", requireEngine8Admin, (req, res) => {
+  try {
+    return res.json(inspectPaperInstructionRecovery({
+      idempotencyKey: req.query?.idempotencyKey,
+    }));
+  } catch {
+    return res.status(503).json({ok:false,reason:"PAPER_RECOVERY_READ_FAILED"});
+  }
+});
 
 /**
  * Admin-only, Journal-only recovery of an EXISTING simulated PAPER fill.
