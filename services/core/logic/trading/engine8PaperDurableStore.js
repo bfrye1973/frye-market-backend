@@ -4,7 +4,9 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
-const legacyDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../data");
+const legacyDir = process.env.NODE_ENV === "test" && process.env.ENGINE8_PAPER_TEST_LEGACY_DIR
+  ? path.resolve(process.env.ENGINE8_PAPER_TEST_LEGACY_DIR)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../data");
 export const PAPER_DATA_DIR = path.resolve(process.env.ENGINE8_PAPER_DATA_DIR || (process.env.RENDER ? "/var/data/replay/engine8-paper" : legacyDir));
 const FILES = new Set(["paper-orders.json", "paper-executions.json", "paper-idempotency-ledger.json"]);
 
