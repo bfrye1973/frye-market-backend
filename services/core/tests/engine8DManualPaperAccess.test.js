@@ -41,4 +41,14 @@ test("invalid and expired bearer tokens denied",async()=>{
   fs.writeFileSync(file,JSON.stringify(state));
   assert.equal(verify(valid.accessToken).status,401);
 });
+test("manual execution, initialization, overview and Journal retry require operator authorization",()=>{
+  const routes=fs.readFileSync(path.resolve("services/core/routes/trading.js"),"utf8");
+  for(const endpoint of ["/manual-paper/execute","/manual-paper/retry-journal",
+    "/manual-paper/overview","/manual-paper/initialize"]){
+    const pos=routes.indexOf('"'+endpoint+'"');
+    assert.ok(pos>0,"missing "+endpoint);
+    assert.match(routes.slice(pos,pos+100),/requireManualPaperOperator/);
+  }
+  assert.match(routes,/router\.post\("\/manual-paper\/access\/pairing",requireEngine8Admin/);
+});
 process.on("exit",()=>fs.rmSync(dir,{recursive:true,force:true}));
