@@ -1,5 +1,13 @@
 # Engine 11 ES historical coverage and integrity research
 
+**Current acquisition priority: March 1, 2020 through observation time.**
+Project Owner direction relayed by Engine 22C on October 12 supersedes the initial
+priority to investigate 2017 coverage. Earlier findings remain evidence; they are
+not a current requirement to backfill to 2017. March 2020 is an approximate research
+start, not an approved canonical PRIMARY W1 timestamp, price or anchor. Structural
+warm-up or earlier history may still be requested separately by Engine 22.
+Formal Engine 22 Manager ratification remains pending.
+
 Stage authorization: Engine 2B Manager review on PR #102, comment 6134068011.
 Accepted foundation remains pinned at `431d595eb4fabe1c19fe6059e7a420b361fe0e5f`.
 Research branch: `engine11-es-history-integrity-research-v1`. No production change.
@@ -129,3 +137,100 @@ mutation, merge or deployment was performed.
 For deliberate future authenticated reruns, use a research-branch commit message
 containing `[provider-research]`. Fixture checks continue on every branch push and
 matching PR change; documentation updates do not repeat paid-provider requests.
+
+## March 2020 seven-degree probe
+
+Existing PR #103 now includes a separate bounded experiment (`liveMarch2020.mjs`),
+triggered by `[march2020-research]`. It does not rerun the earlier 2017 investigation.
+It queries 28 calendar-quarter windows through the current as-of and an explicit
+ESM2020 March overlap alongside ESH2020, for seven independent native resolutions.
+Each query is bounded to three pages of at most 50,000 rows, with existing credentials.
+The current period is truncated at observation time and remains provisional.
+
+Calendar-quarter windows are sampling boundaries, not canonical contract selection
+or rollover dates. Raw contracts are not concatenated, adjusted or published. Cross-
+contract gaps around expiration may need successor overlap evidence. This experiment
+measures returned source coverage and does not certify a continuous ES series.
+Native weekly and monthly queries remain independent of daily results. Missing or
+unsupported inputs are recorded unavailable, without timeframe substitution.
+
+The per-degree readiness report separately records nonempty/empty/failed windows,
+returned counts, malformed rows, duplicates, conflicting revisions and internal gaps.
+Completed-candle finality, dated calendars, full rollover lineage, contract attribution
+and Engine 22 structural sufficiency remain gates before shadow source integration.
+No detected candle or pivot can promote approved anchors or official Fibonacci.
+
+### Authentic March 2020 results
+
+Evidence commit `48992b9fe58b9dc50a6cddbcf2c4efc18efc500f`:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38320799154
+Full diagnostic artifact:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38320799154/artifacts/11778736751
+Permanent compact observations: `ENGINE11_ES_MARCH2020_OBSERVATIONS_V1.json`.
+
+All 203 native queries completed; each degree returned data in all 29 sampling windows.
+These counts include the intentional March H/M overlap, repeated source timestamps,
+and incomplete current/expiration periods. They are not unique continuous-series counts.
+
+| Degree | Native input | Returned rows | Windows with timestamp conflicts | Internal spacing gaps |
+| --- | --- | ---: | ---: | ---: |
+| SUBMICRO | 5m | 410,849 | 3 | 2,014 |
+| MICRO | 10m | 205,683 | 3 | 1,866 |
+| SUBMINUTE | 1h | 34,373 | 3 | 1,513 |
+| MINUTE | 4h | 10,479 | 29 | 290 |
+| MINOR | session | 1,452 | 0 | Not measured without dated calendar |
+| INTERMEDIATE | weekly | 295 | 0 | Not measured without dated calendar |
+| PRIMARY | monthly | 81 | 0 | Not measured without dated calendar |
+
+No malformed OHLC/tick/volume or nonmonotonic ordering was detected in these samples.
+Conflicting same-timestamp rows were retained as diagnostic findings. A green workflow
+means the research ran and recorded findings, not that these sources passed acceptance.
+No conflicting rows are published or silently deduplicated. Existing raw acquisition
+continues to fail closed on conflicting revisions; its runtime code was not changed.
+
+Both ESH2020 and ESM2020 returned native evidence in the March transition window.
+Neither overlap establishes an approved roll instant, adjustment amount or PRIMARY anchor.
+Weekly/monthly bars remain raw individual-contract periods; an expiring contract's final
+week/month is not automatically a complete continuous-market period. Current bars remain
+provisional independently of earlier periods.
+
+**Seven-degree shadow readiness: diagnostic evidence available; structural-source
+integration NOT READY.** Blocking evidence conditions include timestamp/alignment
+conflicts, older full-contract identity, rollover selection/lineage, completed-candle
+policy, dated calendars, unresolved gaps and per-degree Engine 22 sufficiency.
+No unavailable degree blocks independent review of another degree.
+
+### Reproduced 4h source identity collision — Manager decision required
+
+Focused research commit `2a0af1c76287e6f70b06547f5134c7c80f4e34dc`:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38321041011
+Full conflicting raw rows:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38321041011/artifacts/11779191611
+
+ESH0 native 4h rows share `window_start=1583784000000000000` but have session end
+dates March 9 and March 10, 2020, different OHLC, transactions and volume. ESU6
+reproduces the same issue in September 2026. This is evidence of a source bucket
+collision across session labels, not evidence that one row corrects the other.
+The accepted foundation rejects conflicts; it was not changed to bypass that rejection.
+
+**Escalation to Engine 2B Lead Manager:** review whether the next raw schema must
+include an explicit provider session/bucket discriminator and how validated 4h
+analytical inputs should align to exchange sessions. A source-specific identity
+extension or an independently validated lower-resolution aggregation requires design
+review; neither native 4h selection nor an aggregation methodology is authorized here.
+Preserve original timestamps and all conflicting raw payloads. Do not snap timestamps,
+choose a winner, silently merge sessions or promote these rows to Engine 22 shadow input.
+
+The follow-up reproduced smaller-timeframe collisions as well:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38321193041
+Artifact: https://github.com/bfrye1973/frye-market-backend/actions/runs/38321193041/artifacts/11778472401
+Permanent conflicting native rows: `ENGINE11_ES_SOURCE_COLLISION_OBSERVATIONS_V1.json`.
+ESH0 5m and 1h share a timestamp across March 2/March 3 session labels; ESH5 5m
+shares a timestamp across January 30/January 31 labels. Narrow DST-only samples did
+not reproduce these cases; the original query windows did. No cause such as DST,
+provider correction or exchange halt is assigned without further evidence.
+The session-aware identity review therefore covers intraday source evidence generally,
+not just 4h. Ten-minute conflicts remain recorded in the broad seven-degree experiment.
+
+117 local and GitHub automated tests pass, including source-label collision diagnosis.
+Authentic research findings remain negative acceptance evidence even with green CI.
