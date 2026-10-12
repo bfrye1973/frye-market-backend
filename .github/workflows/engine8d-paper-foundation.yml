@@ -32,6 +32,7 @@ jobs:
           node --check services/core/logic/trading/engine8PaperDurableStore.js
           node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
           node --check services/core/routes/trading.js
+          node --check services/core/scripts/auditEngine8PaperStorage.js
       - name: Admin authentication and PAPER-only contract checks
         run: node --test services/core/tests/engine8DManualSecurity.test.js
       - name: Durable store, restart, historical migration
