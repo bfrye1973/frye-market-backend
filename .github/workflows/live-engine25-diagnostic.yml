@@ -1,0 +1,36 @@
+name: Live Engine25 Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect live dashboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard -o /tmp/e25.json
+          echo '=== PARTICIPATION ==='
+          jq '{
+            generatedAt: .participationArtifact.generatedAt,
+            freshness: .participationArtifact.freshness,
+            breadth: .participationArtifact.participation.breadth,
+            upDown: .participationArtifact.participation.upDown,
+            stockVolume: .participationArtifact.participation.stockVolume,
+            source: .participationArtifact.source,
+            metadata: .participationArtifact.metadata
+          }' /tmp/e25.json
+          echo '=== YIELDS ==='
+          jq '{
+            trendComparisons: .intradayMacro.trendComparisons,
+            providerDiagnostics: {
+              TNX: .intradayMacro.providerDiagnostics.TNX,
+              TYX: .intradayMacro.providerDiagnostics.TYX,
+              FRED: .intradayMacro.providerDiagnostics.FRED
+            },
+            warnings: .intradayMacro.warnings
+          }' /tmp/e25.json
