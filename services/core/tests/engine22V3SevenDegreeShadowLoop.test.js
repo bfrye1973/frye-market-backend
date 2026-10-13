@@ -69,7 +69,8 @@ test("node evidence alone never authorizes shadow Fibonacci",()=>{
   evaluationTimeMs:Date.UTC(2026,10,1)});
  const card=out.v3LiveShadow.degrees.micro;
  assert.equal(card.nodeEvidenceAvailable,true);
- assert.equal(card.dataStatus,"INSUFFICIENT_HISTORY");
+ assert.equal(card.dataStatus,"PROVISIONAL_NODE_EVIDENCE");
+ assert.ok(card.reasonCodes.includes("VALIDATED_ENGINE11_SOURCE_REQUIRED"));
  assert.equal(card.levels.length,0);
  assert.equal(card.activeWave,c.degrees.MICRO.activeWave);
 });
