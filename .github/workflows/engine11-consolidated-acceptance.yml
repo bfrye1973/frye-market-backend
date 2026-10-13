@@ -1,0 +1,48 @@
+name: Engine 11 consolidated source acceptance research
+on:
+  push:
+    branches: [engine11-consolidated-source-acceptance-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/acceptanceResearchV1/**
+      - services/core/tests/engine11/acceptanceResearch/**
+      - .github/workflows/engine11-consolidated-acceptance.yml
+      - docs/architecture/ENGINE11_CONSOLIDATED_SOURCE_ACCEPTANCE_V1.md
+permissions:
+  contents: read
+  actions: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs services/core/tests/engine11/calendarPrototype/*.test.mjs services/core/tests/engine11/twoYearResearch/*.test.mjs services/core/tests/engine11/finalityResearch/*.test.mjs services/core/tests/engine11/acceptanceResearch/*.test.mjs
+  authentic-consolidated:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[consolidated-live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-two-year-original-evidence
+          run-id: 38333722706
+          github-token: ${{ github.token }}
+          path: research-evidence/source
+      - run: node services/core/tests/engine11/acceptanceResearch/archiveRealCorpus.mjs research-evidence/source/two-year-receipts.json research-evidence/consolidated-two-copy-restore.json
+      - env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node services/core/tests/engine11/acceptanceResearch/liveDelta.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-consolidated-latest-and-restore
+          path: research-evidence/consolidated-*.json
+          retention-days: 30
+          if-no-files-found: error
