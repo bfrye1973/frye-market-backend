@@ -36,6 +36,10 @@ import {
   buildEngine27TraderIntelligenceV2,
 } from "./v2/buildTraderIntelligenceV2.js";
 
+import {
+  buildEngine27TraderIntelligenceV3,
+} from "./v3/buildTraderIntelligenceV3.js";
+
 function barsForTimeframe(
   snapshot,
   timeframe
@@ -313,6 +317,13 @@ export function buildEngine27Strategies({
       snapshot,
     });
 
+  // Additive migration-only contract. V2 remains production-frozen while
+  // Submicro is introduced and the true parent Micro structure is mapped.
+  const engine27TraderIntelligenceV3 =
+    buildEngine27TraderIntelligenceV3({
+      snapshot,
+    });
+
   return {
     active: true,
 
@@ -337,6 +348,10 @@ export function buildEngine27Strategies({
 
     // Additive V2 presentation contract. Existing A–E fields remain frozen.
     engine27TraderIntelligenceV2,
+
+    // Additive V3 migration contract: seven structural degrees / six accounts.
+    // Frontend and account routing do not switch until explicit acceptance.
+    engine27TraderIntelligenceV3,
 
     laneCount:
       lanes.length,
@@ -364,6 +379,7 @@ export function buildEngine27Strategies({
       "ENGINE27_MARKET_STORY_BUILT",
       "ENGINE27_TRADER_DECISION_BUILT",
       "ENGINE27_V2_SIX_DEGREE_PRESENTATION_BUILT",
+      "ENGINE27_V3_SUBMICRO_MIGRATION_CONTRACT_BUILT",
       "ENGINE27_FIVE_INDEPENDENT_STRATEGIES_BUILT",
       "READ_ONLY",
       "NO_PERMISSION_CREATED",
