@@ -81,6 +81,8 @@ export function buildEngine22V3ShadowSnapshot({
     ownerCorrectionState:state.ownerCorrectionState??null,
     ownerW1High:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
       ? clone(state.anchors?.W1_HIGH??null):null,
+    ownerW1Low:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
+      ? clone(state.anchors?.W1_LOW??null):null,
     ownerW1LowPending:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED" &&
       !state.anchors?.W1_LOW,
     sourceCountId:state.countId,sequenceId:state.sequenceId,
