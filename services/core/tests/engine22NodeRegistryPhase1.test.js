@@ -2,11 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import {createHash} from "node:crypto";
 import {fileURLToPath} from "node:url";
 import {SOURCE_XLSX_SHA256, SOURCE_CELL_JSON_SHA256, DEGREES,
- readWorkbookCellArchive,importAllSourceCells,auditNodeRegistry} from "../scripts/auditEngine22NodeRegistryV1.mjs";
+ readWorkbookCellArchive,readOriginalOwnerWorkbookBytes,importAllSourceCells,auditNodeRegistry} from "../scripts/auditEngine22NodeRegistryV1.mjs";
 
 const dir=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../data/engine22/node-registry");
+test("corrected owner Excel workbook is byte-for-byte preserved in immutable source archive",()=>{
+ const raw=readOriginalOwnerWorkbookBytes();
+ assert.equal(raw.length,21141);
+ assert.equal(raw.subarray(0,2).toString("ascii"),"PK");
+ const hash = createHash("sha256").update(raw).digest("hex");
+ assert.equal(hash,SOURCE_XLSX_SHA256);
+});
 test("source-cell zlib archive round trips verbatim and retains fixed source SHA",()=>{
  const raw=readWorkbookCellArchive();
  assert.equal(raw.sourceSha256,SOURCE_XLSX_SHA256);
