@@ -142,6 +142,12 @@ test("owner MICRO W2 price-only WATCH map, Submicro ABC, Subminute W3 independen
  assert.equal(cards.micro.fibonacci.touchEvidenceAvailable,false);
  assert.equal(cards.micro.levels[1].ownerReportedTouch,false);
  assert.equal(cards.subminute.ownerApproxW2Low,7700);
+ assert.equal(cards.minute.activeWave,"W3");
+ assert.equal(cards.minute.lifecycle,"W3_STARTED_CONFIRMATION_PENDING");
+ assert.equal(cards.minute.ownerCorrectionState,"MINUTE_W3_OWNER_CONTEXT");
+ assert.equal(cards.minute.noExecution,true);
+ assert.equal(cards.minute.anchorPromotionAllowed,false);
+ assert.equal(cards.minute.fibonacci.touchEvidenceAvailable??false,false);
 
  assert.equal(cards.intraday_submicro.fibonacci.available,true);
  assert.equal(cards.intraday_submicro.levels.length,5);

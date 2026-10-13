@@ -25,6 +25,11 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  assert.equal(initialized.canonical.degrees.SUBMINUTE.ownerApproxW2Low,7700);
  assert.equal(initialized.canonical.degrees.PRIMARY.sequenceDirection,"UP");
  assert.equal(initialized.canonical.degrees.MINUTE.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.MINUTE.activeWave,"W3");
+ assert.equal(initialized.canonical.degrees.MINUTE.lifecycle,"W3_STARTED_CONFIRMATION_PENDING");
+ assert.equal(initialized.canonical.degrees.MINUTE.ownerCorrectionState,"MINUTE_W3_OWNER_CONTEXT");
+ assert.equal(initialized.canonical.degrees.MINUTE.anchors.W1_LOW.price,7591);
+ assert.equal(initialized.canonical.degrees.MINUTE.anchors.W1_HIGH.price,7848.5);
  assert.equal(raw.activeStructures.minute.direction,"DOWN");
  const shadow=buildEngine22V3ShadowSnapshot({canonical:initialized.canonical});
  assert.equal(shadow.available,true,JSON.stringify(shadow.reasonCodes));
@@ -32,6 +37,10 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  assert.equal(projection.available,true,JSON.stringify(projection.reasonCodes));
  assert.equal(Object.keys(projection.degreeStates).length,7);
  assert.equal(projection.degreeStates.micro.activeWave,"W2");
+ assert.equal(projection.degreeStates.minute.activeWave,"W3");
+ assert.equal(projection.v3LiveShadow.degrees.minute.activeWave,"W3");
+ assert.equal(projection.v3LiveShadow.degrees.minute.noExecution,true);
+ assert.equal(projection.v3LiveShadow.degrees.minute.anchorPromotionAllowed,false);
  assert.equal(projection.degreeStates.intraday_submicro.activeWave,null);
  assert.notEqual(projection.degreeStates.micro.sourceCountId,projection.degreeStates.intraday_submicro.sourceCountId);
  assert.equal(projection.publicationEligible,false);
