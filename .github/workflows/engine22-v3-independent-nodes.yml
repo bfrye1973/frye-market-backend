@@ -1,0 +1,88 @@
+name: Engine22 V3 Independent Nodes Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/v3/buildIndependentNodeShadow.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
+      - 'services/core/tests/engine22V3IndependentNodeShadow.test.js'
+      - '.github/workflows/engine22-v3-independent-nodes.yml'
+      - 'services/core/tests/engine22V3LiveEvidenceDiagnostic.js'
+permissions:
+  contents: read
+jobs:
+  isolated-node-evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Independent completed-candle tests
+        working-directory: services/core
+        run: node --test tests/engine22V3IndependentNodeShadow.test.js tests/engine22V3ValidatedDailyAggregation.test.js
+      - name: Inspect real production ES snapshot provenance read-only
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --max-time 40 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES')
+          echo "HTTP_STATUS=$status"
+          if [ "$status" != "200" ]; then cat "$RUNNER_TEMP/es.json"; exit 1; fi
+          node services/core/tests/engine22V3LiveEvidenceDiagnostic.js "$RUNNER_TEMP/es.json"
+          node services/core/tests/engine22V3RealBarNodeProof.js "$RUNNER_TEMP/es.json"
+
+# Live candle source depth confirmation.
+      - name: Probe native ES candle history by timeframe (read-only)
+        shell: bash
+        run: |
+          for tf in 5m 1w 1mo; do
+            status=$(curl -sS --max-time 35 -w '%{http_code}' -o "$RUNNER_TEMP/${tf}.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=${tf}&limit=300")
+            TF="$tf" STATUS="$status" FILE="$RUNNER_TEMP/${tf}.json" node -e '
+              const fs=require("fs");
+              const raw=fs.readFileSync(process.env.FILE,"utf8");let j;
+              try{j=JSON.parse(raw)}catch{j={error:"INVALID_JSON",preview:raw.slice(0,120)}}
+              const bars=Array.isArray(j)?j:Array.isArray(j.bars)?j.bars:Array.isArray(j.data)?j.data:[];
+              console.log("TIMEFRAME_PROBE",JSON.stringify({timeframe:process.env.TF,status:process.env.STATUS,ok:j.ok??null,
+               bars:bars.length,first:bars[0]?.time??null,last:bars.at(-1)?.time??null,
+               error:j.error??j.reasonCode??null,keys:Object.keys(j).slice(0,14),exampleBar:bars.at(-1)?Object.keys(bars.at(-1)):[],medianSpacingSec:bars.length>1?([...bars].slice(1).map((b,i)=>Number(b.time)-Number(bars[i].time)).sort((a,b)=>a-b)[Math.floor((bars.length-1)/2)]):null}));
+            '
+          done
+          node services/core/tests/engine22V3RealBarNodeProof.js "$RUNNER_TEMP/es.json" "$RUNNER_TEMP/5m.json"
+      - name: Probe historical ES daily continuity for higher-degree sourcing
+        shell: bash
+        run: |
+          status=$(curl -sS --max-time 40 -w '%{http_code}' -o "$RUNNER_TEMP/daily.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=1d&limit=1200&debug=1")
+          FILE="$RUNNER_TEMP/daily.json" STATUS="$status" node -e '
+            const fs=require("fs");const j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"));
+            const bars=Array.isArray(j)?j:j.bars||[];
+            const times=bars.map(b=>Number(b.time)*1000).filter(Number.isFinite);
+            const gaps=times.slice(1).map((t,i)=>Math.round((t-times[i])/86400000));
+            console.log("DAILY_LONG_HISTORY",JSON.stringify({
+              status:process.env.STATUS,requestedSymbol:j.requestedSymbol,
+              resolvedContract:j.resolvedSymbol,actualTf:j.timeframe,barCount:bars.length,
+              first:times.length?new Date(times[0]).toISOString():null,
+              last:times.length?new Date(times.at(-1)).toISOString():null,
+              gapsOverSevenDays:gaps.filter(v=>v>7).length,
+              maxGapDays:gaps.length?Math.max(...gaps):null,
+              sourceResolution:j.resolution||null
+            }));
+          '
+      - name: Probe explicit ES contract daily histories read-only
+        shell: bash
+        run: |
+          for contract in ESZ5 ESH6 ESM6 ESU6 ESZ6; do
+            status=$(curl -sS --max-time 35 -w '%{http_code}' -o "$RUNNER_TEMP/${contract}.json" "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=${contract}&timeframe=1d&limit=1200&debug=1")
+            CONTRACT="$contract" STATUS="$status" FILE="$RUNNER_TEMP/${contract}.json" node -e '
+              const fs=require("fs");
+              let j;try{j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"))}catch{j={error:"INVALID_JSON"}}
+              const b=Array.isArray(j)?j:(Array.isArray(j.bars)?j.bars:[]);
+              const t=b.map(x=>Number(x.time)).filter(Number.isFinite);
+              const gaps=t.slice(1).map((v,i)=>(v-t[i])/86400);
+              console.log("EXPLICIT_CONTRACT_PROBE",JSON.stringify({
+                requested:process.env.CONTRACT,status:process.env.STATUS,
+                resolved:j.resolvedSymbol??null,sourceTf:j.timeframe??null,
+                bars:b.length,first:t.length?new Date(t[0]*1000).toISOString():null,
+                last:t.length?new Date(t.at(-1)*1000).toISOString():null,
+                gapsOver7Days:gaps.filter(d=>d>7).length,maxGapDays:gaps.length?Math.max(...gaps):null,
+                error:j.error??j.message??null
+              }));
+            '
+          done
