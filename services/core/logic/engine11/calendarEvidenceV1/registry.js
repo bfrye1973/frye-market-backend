@@ -30,7 +30,9 @@ export function buildCalendarRegistry({documents=[],rules=[],sessions=[],previou
  });
  const ids=new Set(verified.map(d=>d.documentId));requireTruth(ids.size===verified.length,'DUPLICATE_CALENDAR_DOCUMENT');
  const reviewed=id=>verified.find(d=>d.documentId===id)?.review.state==='RESEARCH_REVIEWED';
- for(const rule of rules){validDate(rule.effectiveFrom);validDate(rule.effectiveThrough);requireTruth(rule.effectiveFrom<=rule.effectiveThrough&&Array.isArray(rule.documentIds)&&rule.documentIds.length>0&&rule.documentIds.every(id=>ids.has(id)&&reviewed(id)),'CALENDAR_RULE_EVIDENCE');}
+ for(const rule of rules){validDate(rule.effectiveFrom);validDate(rule.effectiveThrough);requireTruth(typeof rule.scope==='string'&&rule.scope.length>0&&rule.effectiveFrom<=rule.effectiveThrough&&Array.isArray(rule.documentIds)&&rule.documentIds.length>0&&rule.documentIds.every(id=>ids.has(id)&&reviewed(id)),'CALENDAR_RULE_EVIDENCE');
+  requireTruth(rule.documentIds.every(id=>{const r=verified.find(d=>d.documentId===id).review;return r.effectiveFrom<=rule.effectiveFrom&&r.effectiveThrough>=rule.effectiveThrough;}),'RULE_OUTSIDE_REVIEWED_COVERAGE');
+ }
  for(let i=0;i<rules.length;i++)for(let j=i+1;j<rules.length;j++)requireTruth(rules[i].scope!==rules[j].scope||rules[i].effectiveThrough<rules[j].effectiveFrom||rules[j].effectiveThrough<rules[i].effectiveFrom,'OVERLAPPING_CALENDAR_RULES');
  const dates=new Set();
  for(const session of sessions){validDate(session.tradingDate);requireTruth(!dates.has(session.tradingDate),'DUPLICATE_TRADING_DATE');dates.add(session.tradingDate);
@@ -47,6 +49,8 @@ export function buildCalendarRegistry({documents=[],rules=[],sessions=[],previou
   for(const segment of session.segments){requireTruth(['OPEN','PAUSED','CLOSED','UNKNOWN'].includes(segment.state),'SEGMENT_STATE');const start=instant(segment.from),end=instant(segment.to);requireTruth(start===cursor&&end>start&&end<=hi,'SESSION_PARTITION');cursor=end;requireTruth(typeof segment.reason==='string'&&segment.reason.length>0,'SEGMENT_REASON');}
   requireTruth(cursor===hi,'SESSION_PARTITION_INCOMPLETE');
  }
+ const matching=sessions.filter(s=>s.validationState!=='UNKNOWN').flatMap(s=>s.segments.filter(x=>x.state==='OPEN').map(x=>({date:s.tradingDate,start:instant(x.from),end:instant(x.to)}))).sort((a,b)=>a.start-b.start);
+ for(let i=1;i<matching.length;i++)requireTruth(matching[i].start>=matching[i-1].end,'OVERLAPPING_EXCHANGE_MATCHING_SESSIONS');
  const content={schemaVersion:'engine11.es-calendar.v1',registryPolicyVersion:'es-calendar-research.1',exchange:'CME',product:'ES',timezone:'America/Chicago',tzdbVersion,previousVersion,
   documents:verified,rules:[...rules].sort((a,b)=>a.effectiveFrom.localeCompare(b.effectiveFrom)),sessions:[...sessions].sort((a,b)=>a.tradingDate.localeCompare(b.tradingDate)),...researchFlags};
  const times=verified.flatMap(d=>[d.observedAt,...(d.review.reviewedAt?[d.review.reviewedAt]:[])]);

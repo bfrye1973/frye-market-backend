@@ -1,0 +1,223 @@
+{
+  "provenance": {
+    "commit": "5bb540d63a755ac64ab7004b9a5d803679ea44d0",
+    "run": 38329993585,
+    "job": 115077357395,
+    "evidenceKind": "AUTHENTIC_LOG_DERIVED_SUMMARY"
+  },
+  "summary": {
+    "calendarVersion": "calendar:v1:26053a31f3e04131f0c235ae390c0a64935ce37b3fc1056cc6b12ea1fd98aad6",
+    "tzdbVersion": "2025c",
+    "documents": [],
+    "documentFailures": [
+      {
+        "name": "pause_notice",
+        "url": "https://www.cmegroup.com/content/dam/cmegroup/notices/ser/2021/06/SER-8788R.pdf",
+        "reason": "HTTP_403"
+      },
+      {
+        "name": "es_applicability",
+        "url": "https://www.cmegroup.com/content/dam/cmegroup/notices/electronic-trading/2021/06/cme-equity-index-futures-options.pdf",
+        "reason": "HTTP_403"
+      },
+      {
+        "name": "current_rulebook",
+        "url": "https://www.cmegroup.com/content/dam/cmegroup/rulebook/CME/IV/350/358/358.pdf",
+        "reason": "HTTP_403"
+      }
+    ],
+    "bindings": [
+      {
+        "schemaVersion": "engine11.historical-binding-candidate.v1",
+        "method": "PROVIDER_LAST_TRADE_MONTH_YEAR_WITH_LIFESPAN",
+        "contract": "ESH2020",
+        "instrumentId": "CME:ES:2020-03",
+        "ticker": "ESH0",
+        "metadataReceiptId": "receipt:v2:ea07a8a29df53ef04639963d3d848bc5f4edf4d39a499e790f20984005802deb",
+        "metadataEvidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+        "queryDate": "2020-03-10",
+        "settlementDate": null,
+        "purpose": "ISOLATED_RESEARCH_ONLY",
+        "structuralEligible": false,
+        "calendarProductionAccepted": false,
+        "firstTradeDate": "2018-12-21",
+        "lastTradeDate": "2020-03-20",
+        "metadataObservationId": "observation:v2:ec8550890ba6c1ceb6b0d9973195439ded568de8a933daf8517aa8e8462ac2cc",
+        "state": "UNRESOLVED",
+        "reason": "INDEPENDENT_EXPIRY_CORROBORATION_REQUIRED",
+        "bindingAccepted": false
+      },
+      {
+        "schemaVersion": "engine11.historical-binding-candidate.v1",
+        "method": "PROVIDER_LAST_TRADE_MONTH_YEAR_WITH_LIFESPAN",
+        "contract": "ESM2020",
+        "instrumentId": "CME:ES:2020-06",
+        "ticker": "ESM0",
+        "metadataReceiptId": "receipt:v2:59c5b4b50d09d7fd36202ad7bc5593dac7a35553375414d714582df68f94a674",
+        "metadataEvidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+        "queryDate": "2020-03-10",
+        "settlementDate": null,
+        "purpose": "ISOLATED_RESEARCH_ONLY",
+        "structuralEligible": false,
+        "calendarProductionAccepted": false,
+        "firstTradeDate": "2019-03-15",
+        "lastTradeDate": "2020-06-19",
+        "metadataObservationId": "observation:v2:776387da6418392204ed5421f1e821f89e6a042bf48fd7e32038c4a3ff5a43f1",
+        "state": "UNRESOLVED",
+        "reason": "INDEPENDENT_EXPIRY_CORROBORATION_REQUIRED",
+        "bindingAccepted": false
+      }
+    ],
+    "membershipChecks": [
+      {
+        "date": "2020-03-03",
+        "timeframe": "5m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-03-03",
+        "timeframe": "10m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-03-03",
+        "timeframe": "1h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-03-03",
+        "timeframe": "4h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-04-10",
+        "timeframe": "5m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-04-10",
+        "timeframe": "10m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-04-10",
+        "timeframe": "1h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2020-04-10",
+        "timeframe": "4h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-25",
+        "timeframe": "5m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-25",
+        "timeframe": "10m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-25",
+        "timeframe": "1h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-25",
+        "timeframe": "4h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-28",
+        "timeframe": "5m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-28",
+        "timeframe": "10m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-28",
+        "timeframe": "1h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2021-06-28",
+        "timeframe": "4h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2026-09-10",
+        "timeframe": "5m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2026-09-10",
+        "timeframe": "10m",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2026-09-10",
+        "timeframe": "1h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      },
+      {
+        "date": "2026-09-10",
+        "timeframe": "4h",
+        "state": "UNAVAILABLE",
+        "reason": "COMPLETE_DATED_ES_SESSION_EXCEPTION_PROOF_UNAVAILABLE",
+        "intervalCount": 0
+      }
+    ],
+    "unknownDateRanges": [
+      {
+        "from": "2020-03-01",
+        "through": "2026-10-13",
+        "reason": "COMPLETE_HISTORICAL_ES_MATCHING_CALENDAR_UNVERIFIED"
+      }
+    ],
+    "productionCalendarAccepted": false,
+    "structuralEligible": false
+  }
+}

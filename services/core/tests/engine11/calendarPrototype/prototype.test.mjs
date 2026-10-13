@@ -46,6 +46,11 @@ test('effective-dated June 2021 boundary selects non-overlapping registry rules'
 test('overlapping rules and unknown rule documents rejected',()=>{
  const x={scope:'ES_PAUSE',effectiveFrom:'2020-03-01',effectiveThrough:'2026-10-13',documentIds:[doc.documentId]};assert.throws(()=>buildCalendarRegistry({documents:[doc],rules:[x,x]}));assert.throws(()=>buildCalendarRegistry({rules:[x]}));
 });
+test('rules cannot extend evidence coverage backward to unreviewed history',()=>{
+ const d=captureCalendarDocument({...doc,body:Buffer.from(doc.bodyBase64,'base64'),review:{...doc.review,effectiveFrom:'2021-06-28',coverageType:'BASELINE_RULE'}});
+ assert.throws(()=>buildCalendarRegistry({documents:[d],rules:[{scope:'ES_PAUSE',effectiveFrom:'2020-03-01',effectiveThrough:'2026-10-13',documentIds:[d.documentId]}]}));
+});
+test('different session labels cannot authorize overlapping exchange matching segments',()=>assert.throws(()=>registry([session(),session({tradingDate:'2026-09-11'})])));
 for(const [tf,count] of [['5m',276],['10m',138],['1h',23],['4h',6]])test(tf+' uses session-open elapsed-time boundaries without OHLCV publication',()=>{
  const p=plan(tf);assert.equal(p.intervals.length,count);assert.equal(p.intervals[0].startUtc,'2026-09-09T22:00:00.000Z');assert.ok(p.intervals.every(x=>x.ohlcv===null&&!x.structuralEligible&&x.sourceFinality==='UNKNOWN'));assert.ok(p.evidenceKinds.includes('FIXTURE'));
 });

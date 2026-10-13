@@ -73,3 +73,41 @@ connection, merge or deployment. Accepted #102/#106 modules remain unchanged. No
 Engine 22/frontend, official Elliott/Fib, trading/execution/account/Journal/Replay,
 Engine 26, paid infrastructure/provider plan or live-route/stream changes occurred.
 Formal Engine 22 Manager ratification remains separately undocumented.
+
+## Authentic outcome and dependency ledger
+
+Live probe SHA `5bb540d63a755ac64ab7004b9a5d803679ea44d0`:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38329993585
+Original provider receipt bytes and registry diagnostics:
+https://github.com/bfrye1973/frye-market-backend/actions/runs/38329993585/artifacts/11781349017
+Permanent log-derived summary: `ENGINE11_CALENDAR_MEMBERSHIP_LIVE_EVIDENCE_V1.json`.
+
+All three direct CME PDF requests returned HTTP 403 in GitHub Actions. No successful
+original CME PDF bytes were captured, no reviewed baseline rule was registered from
+the denied requests, and no calendar document was fabricated. Previously researched
+official web/PDF excerpts remain cited in PR #108, with their retrieval limitations;
+they are not represented as the successful HTTP body-byte capture required by this run.
+An accessible authorized archive/export of dated ES-specific matching schedules and
+independent 2020 expiry reference is a genuine source dependency. No paid access or
+authentication bypass is attempted or implied.
+
+Authentic provider metadata again supplied the ESH0/ESM0 trading lifespans ending
+March 20 / June 19, 2020, with no settlement_date. Both alternate candidates remained
+UNRESOLVED / INDEPENDENT_EXPIRY_CORROBORATION_REQUIRED. The original receipt bytes and
+observation references are preserved. No change to the accepted V2 validator occurred.
+
+All 20 date/timeframe checks returned UNAVAILABLE, with zero analytical intervals,
+because full dated ES session proof is missing. The unresolved complete-calendar range
+is March 1, 2020 through the observation date, October 13, 2026 UTC. Partial prior native
+observations cannot certify that range. This negative outcome is expected fail-closed
+behavior, not authentic calendar/alignment success. Green live CI means experiment
+execution and recorded outcomes, not source acceptance.
+
+Final guards also reject rules extending before their reviewed evidence coverage and
+overlapping exchange matching sessions. Final local count: 212 tests (170 prior + 42
+new prototype regressions). Final SHA/Node 20 CI are pinned in the draft PR's milestone
+request. No fixture calendar is passed off as an authentic holiday/expiry schedule.
+
+Next Manager action: ACCEPT or REVISE the bounded prototype and determine the authorized
+calendar/expiry evidence acquisition path. No consumer/structural or publication scope
+is requested; actual source integration remains blocked on the ledger above.
