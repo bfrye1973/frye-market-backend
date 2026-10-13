@@ -1,0 +1,352 @@
+{
+  "probeCommit": "8b2b9c28be750e1bcee8a5414de515a24971a2cc",
+  "runId": 38439285186,
+  "asOf": "2026-10-13T17:31:22.691Z",
+  "queryCount": 9,
+  "failures": [],
+  "samples": [
+    {
+      "timeframe": "5m",
+      "date": null,
+      "rowCount": 487,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791912600000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7844.75,
+        "high": 7845.75,
+        "low": 7844,
+        "close": 7845.5,
+        "transactions": 439,
+        "volume": 1756,
+        "dollar_volume": 13775559.25
+      },
+      "latestClockStatus": {
+        "fromNs": "1791912600000000000",
+        "toNs": "1791912900000000000",
+        "state": "PARTIAL_SOURCE_CLOCK_WINDOW",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "d79ce058-ed88-4531-8991-5db9aecad86a",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=5min&window_start.gte=1791763200000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:23.376Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "92190165548249c431241bcbeacc4f4670f801126397fa27d3086d177deea658",
+          "receiptId": "finality-receipt:71101070446bda844430158c50adcae55cc0f090c815b6efdf5db32dcf8c2833",
+          "providerRequestId": "baab7745acfc160f69ef0cc3206dd11f"
+        }
+      ]
+    },
+    {
+      "timeframe": "10m",
+      "date": null,
+      "rowCount": 244,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791912600000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7844.75,
+        "high": 7845.75,
+        "low": 7844,
+        "close": 7845.5,
+        "transactions": 439,
+        "volume": 1756,
+        "dollar_volume": 13775559.25
+      },
+      "latestClockStatus": {
+        "fromNs": "1791912600000000000",
+        "toNs": "1791913200000000000",
+        "state": "PARTIAL_SOURCE_CLOCK_WINDOW",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "ed0e598d-c4a4-48a2-9dee-80447b4d6f53",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=10min&window_start.gte=1791763200000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:23.619Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "c99933b138ce613cb0860e7137d1d593caf73dbba3e89a72851656bfd31eba7a",
+          "receiptId": "finality-receipt:e4ab147c01fdd1fc241000fd1ce1a1b1ca601d67232f834badb4d6728163c4cb",
+          "providerRequestId": "141630ca782a2da57cce2f09bfb64f83"
+        }
+      ]
+    },
+    {
+      "timeframe": "1h",
+      "date": null,
+      "rowCount": 41,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791910800000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7847,
+        "high": 7848.5,
+        "low": 7844,
+        "close": 7845.5,
+        "transactions": 11113,
+        "volume": 41199,
+        "dollar_volume": 323269000.25
+      },
+      "latestClockStatus": {
+        "fromNs": "1791910800000000000",
+        "toNs": "1791914400000000000",
+        "state": "PARTIAL_SOURCE_CLOCK_WINDOW",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "db877550-5d8d-4497-b851-64225cd3d86b",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=1hour&window_start.gte=1791763200000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:23.834Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "40cbacd45252ca69edabb57325c579c35b7d806232e6a712ec41c49f78429c74",
+          "receiptId": "finality-receipt:235378173efdcef8ba2c26000fef2992c657dc6f248e5d1b558d45aef4c6e31f",
+          "providerRequestId": "8f776f8dfbdf99c96deaf12bc31100ce"
+        }
+      ]
+    },
+    {
+      "timeframe": "4h",
+      "date": null,
+      "rowCount": 12,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791907200000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7841.5,
+        "high": 7854.75,
+        "low": 7841,
+        "close": 7845.5,
+        "transactions": 37617,
+        "volume": 140629,
+        "dollar_volume": 1103597409.75
+      },
+      "latestClockStatus": {
+        "fromNs": "1791907200000000000",
+        "toNs": "1791921600000000000",
+        "state": "PARTIAL_SOURCE_CLOCK_WINDOW",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "160a3d16-3692-49ce-85d0-d02c5a8860ac",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=4hour&window_start.gte=1791763200000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:24.155Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "c09d78bfc07c7d311897e203a2d01c898273c0505558ab741ed832d7eb96ae77",
+          "receiptId": "finality-receipt:66f788e975e0c08fa419f73c636d3d840afeff248d7dc535d5ff5627ecb0f5db",
+          "providerRequestId": "bfda524bcf94888d5f70012f22d261f0"
+        }
+      ]
+    },
+    {
+      "timeframe": "1d",
+      "date": null,
+      "rowCount": 2,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791763200000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7855.5,
+        "high": 7864,
+        "low": 7834.5,
+        "close": 7845.25,
+        "transactions": 255142,
+        "volume": 789004,
+        "dollar_volume": 6192845663.5
+      },
+      "latestClockStatus": {
+        "state": "UNKNOWN_PERIOD_BOUNDARIES",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "e2d38493-5989-469a-a663-e518706560f2",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=1session&window_start.gte=1791676800000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:24.359Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "cc0cf63c22d9bf367e3a5d9694c026319c3e5a1eb8af3c9da3fa87a41910da35",
+          "receiptId": "finality-receipt:22d48f400a8fb59f17f76752211c467b32e2ea77eb0b5e33414c00ef73dd04f5",
+          "providerRequestId": "87f801ee93dea8cf00f4a5fc8ddaa445"
+        }
+      ]
+    },
+    {
+      "timeframe": "1w",
+      "date": null,
+      "rowCount": 2,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1791676800000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7873,
+        "high": 7887,
+        "low": 7834.5,
+        "close": 7845.25,
+        "transactions": 517285,
+        "volume": 1676770,
+        "dollar_volume": 13171108637
+      },
+      "latestClockStatus": {
+        "state": "UNKNOWN_PERIOD_BOUNDARIES",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "a4141c09-e7cc-40d3-be9c-67e50036e250",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=1week&window_start.gte=1791072000000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:24.608Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "94b5771dcfce6630a19b960abc738295dd6692d034de0ddcbe2a6cefe1c6337b",
+          "receiptId": "finality-receipt:a641e910c573f5f13fe0f7626aefecc907ae5e79fae8fb72b7ebad9d3251c43f",
+          "providerRequestId": "9d09c34b52504f9a6050fcc58156a1e8"
+        }
+      ]
+    },
+    {
+      "timeframe": "1mo",
+      "date": null,
+      "rowCount": 2,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "ticker": "ESZ6",
+        "window_start": "1790812800000000000",
+        "session_end_date": "2026-10-13",
+        "open": 7724,
+        "high": 7897.5,
+        "low": 7723.25,
+        "close": 7845.25,
+        "transactions": 2933868,
+        "volume": 9969979,
+        "dollar_volume": 78061140565.25
+      },
+      "latestClockStatus": {
+        "state": "UNKNOWN_PERIOD_BOUNDARIES",
+        "sourceFinality": "UNKNOWN",
+        "canonicalAlignmentAccepted": false,
+        "structuralEligible": false
+      },
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "3550be1b-052d-432c-8c15-79f6e6950236",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/aggs/ESZ6?resolution=1month&window_start.gte=1788220800000000000&window_start.lt=1791912682691000000&limit=50000&sort=window_start.asc",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:24.843Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "7be1e3ac8bc82feeea63d70d14c8502d1e4f8fa1b10602ec4ba64d5b882c527e",
+          "receiptId": "finality-receipt:bcc341de0117fc6a9c39731e6f17883852cf8547d924837d9b8b28610b50b51b",
+          "providerRequestId": "f8a56e5abd0e4bfae5c2469726bd71b0"
+        }
+      ]
+    },
+    {
+      "timeframe": null,
+      "date": "2026-10-12",
+      "rowCount": 6,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "product_code": "ES",
+        "product_name": "ES Equity Calendar Spread",
+        "session_end_date": "2026-10-12",
+        "trading_venue": "XCME",
+        "event": "close",
+        "timestamp": "2026-10-12T21:00:00+00:00"
+      },
+      "latestClockStatus": null,
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "2c991846-21d1-4196-869f-8658bf9fbc15",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/schedules?product_code=ES&trading_venue=XCME&session_end_date=2026-10-12&limit=1000",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:25.011Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "6f8d12224c9536ef4a41f97288e16a34bb96dad7b0be91230e7d52b8fd50febd",
+          "receiptId": "finality-receipt:25def6175c7e0da64dd20bff27529409d556c163ce5bfebe303131e64e478ec0",
+          "providerRequestId": "ee5005fec6ef4bfd832ec3e743ad5531"
+        }
+      ]
+    },
+    {
+      "timeframe": null,
+      "date": "2026-10-13",
+      "rowCount": 6,
+      "traversalComplete": true,
+      "failure": null,
+      "lastObservation": {
+        "product_code": "ES",
+        "product_name": "ES Equity Calendar Spread",
+        "session_end_date": "2026-10-13",
+        "trading_venue": "XCME",
+        "event": "close",
+        "timestamp": "2026-10-13T21:00:00+00:00"
+      },
+      "latestClockStatus": null,
+      "receipts": [
+        {
+          "schemaVersion": "engine11.finality-receipt.v1",
+          "captureId": "bcb8f375-e591-4ac1-b53c-2cbf0dfd65da",
+          "page": 1,
+          "request": "https://api.massive.com/futures/v1/schedules?product_code=ES&trading_venue=XCME&session_end_date=2026-10-13&limit=1000",
+          "httpStatus": 200,
+          "observedAt": "2026-10-13T17:31:25.173Z",
+          "evidenceKind": "HTTP_BODY_AFTER_CONTENT_DECODE",
+          "bodySha256": "6b4c82f0852f3b4efe4b5aeb6c811761b854686d4e0506bd9707e15617c40611",
+          "receiptId": "finality-receipt:f9e5d07501a4530feabcad2304a89a9a823998b7dc44c1d677e958d5096145c0",
+          "providerRequestId": "6f7b08a2d9454224ad9d021e88828d8f"
+        }
+      ]
+    }
+  ],
+  "structuralEligible": false,
+  "canonicalPublication": false
+}
