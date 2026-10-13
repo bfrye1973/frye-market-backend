@@ -109,58 +109,50 @@ test("existing V3 compatibility projection forwards seven-degree sidecar without
  assert.equal(projected.noExecution,true);
 });
 
-test("actual owner corrected Submicro W2 awaits W1 low while Micro W5 remains independent",()=>{
+test("owner MICRO W2 price-only WATCH map, Submicro ABC, Subminute W3 independently fail closed",()=>{
  const raw=JSON.parse(fs.readFileSync(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url),"utf8"));
  const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
- assert.equal(initialized.available,true);
+ assert.equal(initialized.available,true,JSON.stringify(initialized.reasonCodes));
  const canonical=structuredClone(initialized.canonical);
  const out=buildEngine22V3ShadowSnapshot({canonical});
- const sub=out.v3LiveShadow.degrees.intraday_submicro;
- assert.equal(sub.activeWave,"W2");
- assert.equal(sub.ownerCorrectionState,"SUBMICRO_W2_OWNER_CORRECTED");
- assert.equal(sub.ownerW1High.price,7887.25);
- assert.equal(sub.ownerW1High.time,"2026-10-11 20:00");
- assert.equal(canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.price,7787.5);
- assert.equal(canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.time,"2026-10-08 10:30");
- assert.equal(sub.ownerW1LowPending,false);
- assert.equal(sub.fibonacci.available,true);
- assert.equal(sub.fibonacci.anchorOnly,true);
- assert.equal(sub.fibonacci.modelType,"RETRACEMENT");
- assert.equal(sub.fibonacci.provisional,true);
- assert.equal(sub.fibonacci.touchEvidenceAvailable,false);
- assert.deepEqual(sub.levels.map(l=>[l.key,l.price]),[
-  ["r236",7863.75],["r382",7849.25],["r500",7837.5],
-  ["r618",7825.5],["r786",7808.75],
+ const cards=out.v3LiveShadow.degrees;
+ assert.equal(cards.intraday_submicro.activeWave,null);
+ assert.equal(cards.intraday_submicro.ownerRole,"MICRO_W2_INTERNAL_ABC_DOWN");
+ assert.equal(cards.intraday_submicro.parentWaveCompletionConfirmed,false);
+ assert.equal(cards.intraday_submicro.abcLeg,"UNCONFIRMED");
+ assert.equal(cards.intraday_submicro.fibonacci.available,false);
+ assert.equal(cards.intraday_submicro.levels.length,0);
+ const micro=cards.micro;
+ assert.equal(micro.activeWave,"W2");
+ assert.equal(micro.ownerW1HighPrice,7897.5);
+ assert.equal(micro.ownerW1HighTimeVerified,false);
+ assert.equal(canonical.degrees.MICRO.anchors.W1_LOW.price,7677.25);
+ assert.equal(canonical.degrees.MICRO.anchors.W1_LOW.time,"2026-10-01 08:30");
+ assert.equal(micro.fibonacci.available,true);
+ assert.equal(micro.fibonacci.modelType,"RETRACEMENT");
+ assert.equal(micro.fibonacci.anchorOnly,true);
+ assert.equal(micro.fibonacci.provisional,true);
+ assert.equal(micro.fibonacci.touchEvidenceAvailable,false);
+ assert.ok(micro.fibonacci.reasonCodes.includes("W1_HIGH_TIMESTAMP_UNVERIFIED"));
+ assert.deepEqual(micro.levels.map(l=>[l.key,l.price]),[
+  ["r236",7845.5],["r382",7813.25],["r500",7787.5],
+  ["r618",7761.5],["r786",7724.5],
  ]);
- assert.ok(sub.levels.every(l=>l.status==="WATCH"&&l.firstTouchedAt===null));
- assert.equal(sub.publishAuthorized,false);
- for(const [key,wave] of [["micro","W5"]]){
-  const card=out.v3LiveShadow.degrees[key];
-  assert.equal(card.dataStatus,"PROVISIONAL_ANCHOR_FIB",key);
-  assert.equal(card.activeWave,wave);
-  assert.equal(card.fibonacci.available,true);
-  assert.equal(card.fibonacci.anchorOnly,true);
-  assert.equal(card.fibonacci.provisional,true);
-  assert.equal(card.fibonacci.touchEvidenceAvailable,false);
-  assert.equal(card.fibonacci.evidenceThrough,null);
-  assert.ok(card.levels.length>=3);
-  assert.ok(card.levels.every(level=>level.status==="WATCH"&&level.firstTouchedAt===null));
-  assert.ok(card.reasonCodes.includes("VALIDATED_ENGINE11_SOURCE_REQUIRED"));
-  assert.equal(card.publishAuthorized,false);
-  assert.equal(card.anchorPromotionAllowed,false);
+ assert.ok(micro.levels.every(l=>l.status==="WATCH"&&l.firstTouchedAt===null));
+ assert.equal(micro.publishAuthorized,false);
+ assert.equal(cards.subminute.activeWave,"W3");
+ assert.equal(cards.subminute.ownerApproxW2Low,7700);
+ for(const d of Object.values(cards)){
+   assert.equal(d.noExecution,true);
+   assert.equal(d.anchorPromotionAllowed,false);
  }
  for(const k of ["intermediate","primary"]){
-  assert.equal(out.v3LiveShadow.degrees[k].dataStatus,"INSUFFICIENT_HISTORY");
-  assert.equal(out.v3LiveShadow.degrees[k].levels.length,0);
+  assert.equal(cards[k].dataStatus,"INSUFFICIENT_HISTORY");
+  assert.equal(cards[k].levels.length,0);
  }
- const micro=out.v3LiveShadow.degrees.micro.fibonacci;
- const forged={...micro,levels:micro.levels.map((l,i)=>i===0?{
-  ...l,status:"TOUCHED",firstTouchedAt:"2026-10-10T00:00:00Z",
-  firstTouchedBarId:"UNVERIFIED",
- }:l)};
- const unchangedTouch=buildEngine22V3ShadowSnapshot({canonical,
-  previousFibByDegree:{MICRO:forged}});
- assert.ok(unchangedTouch.v3LiveShadow.degrees.micro.levels.every(l=>l.status==="WATCH"));
+ const forged={...micro.fibonacci,levels:micro.levels.map(l=>({...l,status:"TOUCHED",firstTouchedAt:"2026-10-11T00:00:00Z"}))};
+ const repeat=buildEngine22V3ShadowSnapshot({canonical,previousFibByDegree:{MICRO:forged}});
+ assert.ok(repeat.v3LiveShadow.degrees.micro.levels.every(l=>l.status==="WATCH"));
  assert.deepEqual(initialized.canonical,canonical);
 });
 
