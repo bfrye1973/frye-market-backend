@@ -4,6 +4,7 @@ import {ENGINE22_V3_SCHEMA,ENGINE22_V3_DEGREES,ENGINE22_V3_PARENT} from "../logi
 import {buildEngine22V3ShadowSnapshot} from "../logic/engine22/v3/buildShadowSnapshot.js";
 import {buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
 import {buildEngine22V3OwnerBootstrap} from "../logic/engine22/v3/buildOwnerBootstrap.js";
+import {inspectEngine11V2SevenDegreeShadow} from "../logic/engine22/v3/inspectEngine11SourceIdentityShadow.js";
 import fs from "node:fs";
 const tf={INTRADAY_SUBMICRO:"5m",MICRO:"10m",SUBMINUTE:"1h",
  MINUTE:"4h",MINOR:"1d",INTERMEDIATE:"1w",PRIMARY:"1mo"};
@@ -142,4 +143,65 @@ test("actual owner Submicro W3 and Micro W5 expose only provisional anchor Fib W
   previousFibByDegree:{MICRO:forged}});
  assert.ok(unchangedTouch.v3LiveShadow.degrees.micro.levels.every(l=>l.status==="WATCH"));
  assert.deepEqual(initialized.canonical,canonical);
+});
+
+test("Phase3 Engine11 V2 observed identity survives, without elevating research to candle authority",()=>{
+ const c=canonical(),id="obs:source:v2-1";
+ const row={observationId:id,receiptId:"receipt:v2-1",rowDigest:"sha256-1",
+  sourceKey:"source:v2-1",sourceRevisionId:"revision:v2-1",
+  sourceTimestampNs:"1600000000000000000",sourceSessionLabel:"2020-09-13",
+  providerTicker:"ESU2020",sourceResolution:"5m",
+  bindingVersion:"binding:v2-1",identityState:"SESSION_DISCRIMINATED_RESEARCH_KEY",
+  revisionClassification:"SINGLE_OBSERVATION",sourceFinality:"UNKNOWN",
+  structuralEligible:false};
+ const dataset={datasetVersion:"dataset:v2-2020",purpose:"ISOLATED_RESEARCH_ONLY",
+  structuralEligible:false,coverageComplete:false,
+  manifest:{schemaVersion:"engine11.source-dataset.v2"},rows:[row]};
+ const page={schemaVersion:"engine11.source-page.v2",
+  datasetVersion:dataset.datasetVersion,purpose:"ISOLATED_RESEARCH_ONLY",
+  structuralEligible:false,rows:[{...row}]};
+ const sourcePagesByDegree={INTRADAY_SUBMICRO:{dataset,page,
+  priceBasis:{kind:"RAW",accepted:false},
+  rolloverLineage:{accepted:false}}};
+ const before=structuredClone(c);
+ const out=buildEngine22V3ShadowSnapshot({canonical:c,
+   engine11V2SourcePagesByDegree:sourcePagesByDegree});
+ const card=out.v3LiveShadow.degrees.intraday_submicro;
+ const evidence=card.engine11SourceIdentity;
+ assert.equal(evidence.datasetVersion,dataset.datasetVersion);
+ assert.equal(evidence.observationIds[0],id);
+ assert.equal(evidence.sourceIdentity[0].sourceRevisionId,row.sourceRevisionId);
+ assert.equal(evidence.sourceIdentity[0].sourceTimestampNs,row.sourceTimestampNs);
+ assert.equal(evidence.sourceIdentity[0].bindingVersion,row.bindingVersion);
+ assert.equal(evidence.priceBasis,"RAW");
+ assert.equal(evidence.priceBasisVerified,false);
+ assert.equal(evidence.sourceIdentityOnly,true);
+ assert.equal(evidence.structuralEligible,false);
+ assert.equal(evidence.coverageComplete,false);
+ assert.ok(evidence.reasonCodes.includes("ENGINE11_RESEARCH_ONLY_NOT_ELIGIBLE"));
+ assert.equal(card.fibonacci.available,false);
+ assert.equal(card.lifecycle,"DEVELOPING");
+ assert.equal(out.v3LiveShadow.degrees.primary.engine11SourceIdentity.status,"INSUFFICIENT_HISTORY");
+ assert.deepEqual(c,before);
+});
+test("Phase3 source mismatches fail closed independently across all seven degrees",()=>{
+ const c=canonical(),row={observationId:"o",receiptId:"r",rowDigest:"h",
+  sourceKey:null,sourceRevisionId:null,providerTicker:"ESH2020",sourceResolution:"4h",
+  sourceFinality:"UNKNOWN",structuralEligible:false};
+ const dataset={datasetVersion:"dataset:v2-a",purpose:"ISOLATED_RESEARCH_ONLY",
+  structuralEligible:false,coverageComplete:false,
+  manifest:{schemaVersion:"engine11.source-dataset.v2"},rows:[row]};
+ const page={schemaVersion:"engine11.source-page.v2",datasetVersion:"dataset:v2-b",
+  purpose:"ISOLATED_RESEARCH_ONLY",structuralEligible:false,rows:[row]};
+ const specs={MINUTE:{dataset,page}};
+ const result=inspectEngine11V2SevenDegreeShadow({canonical:c,sourcePagesByDegree:specs});
+ assert.equal(Object.keys(result.degrees).length,7);
+ assert.deepEqual(result.degrees.minute.reasonCodes,["DATASET_VERSION_MISMATCH"]);
+ assert.equal(result.degrees.micro.reasonCodes[0],"SOURCE_UNAVAILABLE");
+ assert.equal(result.noExecution,true);
+ page.datasetVersion=dataset.datasetVersion;
+ const unresolved=inspectEngine11V2SevenDegreeShadow({canonical:c,sourcePagesByDegree:specs});
+ assert.ok(unresolved.degrees.minute.reasonCodes.includes("UNRESOLVED_CONTRACT_BINDING"));
+ assert.equal(unresolved.degrees.minute.sourceContractIds[0],"ESH2020");
+ assert.equal(unresolved.degrees.minute.structuralEligible,false);
 });
