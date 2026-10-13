@@ -47,7 +47,12 @@ test("Engine22 source is standalone and cannot silently borrow Engine3 diagnosti
  assert.match(job,/let engine22V3FiveMinuteBars = \[\]/);
  assert.match(job,/timeframe=5m&limit=300/);
  assert.match(job,/"5m": engine22V3FiveMinuteBars/);
- assert.doesNotMatch(job,/"5m": engine3DiagnosticBars/);
+ // Production's independent Engine3/legacy input is preserved, but V3 has
+ // a separate sidecar source and cannot borrow that legacy diagnostic feed.
+ assert.match(job,/engine22V3BarsByTf:/);
+ const v3=job.slice(job.indexOf("engine22V3BarsByTf:"),job.indexOf("engine22V3BarsByTf:")+500);
+ assert.match(v3,/"5m": engine22V3FiveMinuteBars/);
+ assert.doesNotMatch(v3,/engine3DiagnosticBars/);
 });
 
 test("reject mislabeled 1-minute records returned by weekly/monthly source",()=>{
