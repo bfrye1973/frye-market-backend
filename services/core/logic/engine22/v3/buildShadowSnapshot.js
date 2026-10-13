@@ -64,9 +64,10 @@ export function buildEngine22V3ShadowSnapshot({
      source.sourceCountId===state.countId &&
      source.timeframe===DEGREE_CANDLE_TIMEFRAMES[d] &&
      shadowFib.reasonCodes?.[0]!=="SOURCE_UNAVAILABLE";
-  const dataStatus=!validatedHistory?"INSUFFICIENT_HISTORY":
-    !shadowFib.available?"EVIDENCE_PENDING":
-    shadowFib.provisional?"PROVISIONAL":"SHADOW_READY";
+  const dataStatus=!validatedHistory
+    ? (node?.nodeEvidenceAvailable===true ? "PROVISIONAL_NODE_EVIDENCE" : "INSUFFICIENT_HISTORY")
+    : !shadowFib.available?"EVIDENCE_PENDING":
+      shadowFib.provisional?"PROVISIONAL":"SHADOW_READY";
   v3Cards[key]={
     degree:d,sourceTimeframe:DEGREE_CANDLE_TIMEFRAMES[d],
     activeWave:shadowState.activeWave,lifecycle:shadowState.lifecycle,
@@ -84,8 +85,8 @@ export function buildEngine22V3ShadowSnapshot({
     }:null,
     fibonacci:shadowFib,
     levels:shadowFib.available?clone(shadowFib.levels):[],
-    reasonCodes:dataStatus==="INSUFFICIENT_HISTORY"?
-      ["INSUFFICIENT_HISTORY",...(node?.reasonCodes??[])]:
+    reasonCodes:!validatedHistory?
+      ["INSUFFICIENT_HISTORY","VALIDATED_ENGINE11_SOURCE_REQUIRED",...(node?.reasonCodes??[])]:
       [...(shadowFib.reasonCodes??[]),...(node?.reasonCodes??[])],
     shadowOnly:true,publishAuthorized:false,
     officialFibAuthorityChanged:false,anchorPromotionAllowed:false,
