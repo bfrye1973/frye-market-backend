@@ -58,13 +58,16 @@ export function buildEngine22V3ShadowSnapshot({
   const shadowFib=projectEngine22V3ActiveWaveFibShadow({
     canonical:projected,degree:d,source,
     previous:previousFibByDegree?.[d]??null,
+    anchorOnly:true,
   });
   const validatedHistory=source?.structuralEligible===true &&
      source.coverageComplete===true &&
      source.sourceCountId===state.countId &&
      source.timeframe===DEGREE_CANDLE_TIMEFRAMES[d] &&
      shadowFib.reasonCodes?.[0]!=="SOURCE_UNAVAILABLE";
-  const dataStatus=!validatedHistory
+  const dataStatus=shadowFib.available===true && shadowFib.anchorOnly===true
+    ? "PROVISIONAL_ANCHOR_FIB"
+    : !validatedHistory
     ? (node?.nodeEvidenceAvailable===true ? "PROVISIONAL_NODE_EVIDENCE" : "INSUFFICIENT_HISTORY")
     : !shadowFib.available?"EVIDENCE_PENDING":
       shadowFib.provisional?"PROVISIONAL":"SHADOW_READY";
