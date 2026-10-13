@@ -11,6 +11,17 @@ export const SOURCE_CELL_JSON_SHA256 = "3242facd72f1ec1a1d14db02f5a063f8d3bc0b78
 export const SOURCE_XLSX_SHA256 = "6fb824cc5e8469bc66db004b903fbf3caf537d624ad18fcbc24a20815f9f40a8";
 export const DEGREES = Object.freeze(["SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"]);
 
+export function readOriginalOwnerWorkbookBytes(root=ROOT){
+  // Byte-for-byte reversible archive of the corrected owner-provided XLSX.
+  // Never writes it into production or replaces the owner's original cells.
+  const chunks=Array.from({length:7},(_,i)=>fs.readFileSync(
+    path.join(root,"source-workbook-zlib","chunk-"+String(i+1).padStart(2,"0")+".b64"),
+    "utf8").trim());
+  const bytes=zlib.inflateSync(Buffer.from(chunks.join(""),"base64"));
+  if(hash(bytes)!==SOURCE_XLSX_SHA256)throw new Error("OWNER_XLSX_ARCHIVE_HASH_DRIFT");
+  if(bytes[0]!==0x50||bytes[1]!==0x4b)throw new Error("OWNER_XLSX_NOT_ZIP");
+  return bytes;
+}
 export function readWorkbookCellArchive(root=ROOT) {
   const parts = [1,2,3].map(i=>fs.readFileSync(path.join(root, "source-cells-zlib", "chunk-0"+i+".b64"),"utf8").trim());
   const json=zlib.inflateSync(Buffer.from(parts.join(""),"base64"));
