@@ -1,0 +1,39 @@
+name: Engine 11 calendar interval research
+on:
+  push:
+    branches: [engine11-es-calendar-interval-research-v1]
+  pull_request:
+    paths:
+      - services/core/tests/engine11/calendarResearch/**
+      - docs/architecture/ENGINE11_CANONICAL_ES_CALENDAR_ANALYTICAL_INTERVAL_PROPOSAL_V1.md
+      - .github/workflows/engine11-calendar-interval-research.yml
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs
+  authentic-calendar-research:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[calendar-evidence]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node services/core/tests/engine11/calendarResearch/liveCalendar.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-calendar-interval-authentic
+          path: research-evidence/es-calendar-interval.json
+          if-no-files-found: error
+          retention-days: 30
