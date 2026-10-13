@@ -1,0 +1,17 @@
+import fs from 'node:fs/promises';
+import { hash } from '../../../logic/engine11/acceptanceResearchV1/eligibility.js';
+import { captureReceipt } from '../../../logic/engine11/sourceObservationsV2/evidence.js';
+import { tierFromFinalityMetadata } from '../../../logic/engine11/evidenceTierResearchV1/alternativeIdentity.js';
+import { versionCoverageReport } from '../../../logic/engine11/evidenceTierResearchV1/coverageLedger.js';
+const [rawPath,metadataPath,out='research-evidence']=process.argv.slice(2);
+if(!rawPath||!metadataPath)throw new Error('Usage: buildHistoricalEvidence.mjs ORIGINAL_TWO_YEAR_RECEIPTS ORIGINAL_FINALITY_RECEIPTS OUTPUT_DIRECTORY');
+const rawBytes=await fs.readFile(rawPath);if(hash(rawBytes)!=='174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9')throw new Error('ORIGINAL_CORPUS_DIGEST_MISMATCH');
+const raw=JSON.parse(rawBytes),metadata=JSON.parse(await fs.readFile(metadataPath));
+for(const r of [...raw.receipts,...metadata.receipts])if(hash(Buffer.from(r.bodyBase64,'base64'))!==r.bodySha256)throw new Error('ORIGINAL_RECEIPT_DIGEST_MISMATCH');
+const example=raw.receipts.find(r=>r.request.includes('/aggs/ESZ4')&&r.rowCount>0);
+const v2=captureReceipt({request:example.request,body:Buffer.from(example.bodyBase64,'base64'),captureId:example.captureId,page:example.page,observedAt:example.observedAt,httpStatus:example.httpStatus});
+const references=v2.observations.slice(0,2).map(x=>({observationId:x.observationId,receiptId:v2.receiptId,identityState:'UNRESOLVED'}));
+const receipt=metadata.receipts.find(r=>r.request.includes('/contracts')&&JSON.parse(Buffer.from(r.bodyBase64,'base64')).results?.some(x=>x.ticker==='ESZ4'));
+const tier=tierFromFinalityMetadata({contract:'ESZ2024',receipt,originalUnresolvedReferences:references});
+const coverage=versionCoverageReport({from:raw.from,to:raw.asOf,confidence:'OBSERVATION_ONLY',receiptManifests:raw.receipts,report:{originalCorpusSha256:hash(rawBytes),coverageMeaning:'SAMPLED_QUARTERLY_AND_SUCCESSOR_WINDOWS_NOT_EXHAUSTIVE_CONTINUOUS_HISTORY',canonicalVerifiedCount:0,guardPolicy:'APPROVED_EXCHANGE_PERIOD_BOUNDARIES_AND_SOURCE_FINALITY_REQUIRED'}});
+await fs.mkdir(out,{recursive:true});await fs.writeFile(out+'/historical-evidence-tier.json',JSON.stringify(tier,null,2));await fs.writeFile(out+'/coverage-provenance.json',JSON.stringify(coverage,null,2));console.log(JSON.stringify({tier:tier.evidenceTierId,version:coverage.reportVersion,receipts:raw.receipts.length,structuralEligible:false}));

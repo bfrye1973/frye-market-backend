@@ -1,0 +1,681 @@
+{
+  "schemaVersion": "engine11.coverage-report.research.v1",
+  "range": {
+    "fromInclusive": "2024-10-12",
+    "toExclusive": "2026-10-13T01:46:32.756Z"
+  },
+  "confidence": "OBSERVATION_ONLY",
+  "report": {
+    "baselineObservationCount": 276604,
+    "verifiedCanonicalCount": 0,
+    "frames": {
+      "5m": 170991,
+      "10m": 86040,
+      "1h": 14416,
+      "4h": 4392,
+      "1d": 608,
+      "1w": 125,
+      "1mo": 32
+    },
+    "eligibility": {
+      "COMPLETE": 0,
+      "PROVISIONAL": 4,
+      "UNKNOWN": 275622,
+      "QUARANTINED": 978
+    },
+    "calendar": {
+      "candidateDates": 390,
+      "noEventsDates": 332,
+      "incompleteDates": 2,
+      "holidaySemanticsUnknownDates": 8
+    },
+    "coverageMeaning": "SAMPLED_QUARTERLY_AND_SUCCESSOR_WINDOWS_NOT_EXHAUSTIVE_TWO_YEAR_CONTINUOUS_ACQUISITION",
+    "baselineOriginalFileSha256": "174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9"
+  },
+  "sourceReceipts": [
+    {
+      "receiptId": "receipt:two-year:00426e6e6b093d05787c6fbf81a4d041518d63e5bb674eee3a11234b5d4db15c",
+      "bodySha256": "49d3ab8332a687c3f4e06d5c7dbc810b2f15cdc08b366ed854f1421dda181831",
+      "observedAt": "2026-10-13T01:46:39.168Z"
+    },
+    {
+      "receiptId": "receipt:two-year:00f27fe08d10dbf2f24d5029b6f205d4ad4bd8b8c51f166d0a2f5c516eca2ec7",
+      "bodySha256": "2addd4722b6c98d764a8a6c569fd3e9809fc9ff200085b622dfc61fd11b25ed3",
+      "observedAt": "2026-10-13T01:46:56.506Z"
+    },
+    {
+      "receiptId": "receipt:two-year:08b3247ed0cbfedb16f42df067f45276d3a0f96131963fe52e484cffdf8555cc",
+      "bodySha256": "b57ffc4fb8262c2008741ffb69cfff0a2aceebeb084da37d17065f08c850d9f8",
+      "observedAt": "2026-10-13T01:46:36.335Z"
+    },
+    {
+      "receiptId": "receipt:two-year:0c07014cca76dc4ff9db8d2daf1441625f06d4f90b05f158f6db86fc5f8ad7fe",
+      "bodySha256": "74abeb399ab2049ce7f31ee870c6167405c4e14d9d29dae8259bab6bc39872e5",
+      "observedAt": "2026-10-13T01:46:55.489Z"
+    },
+    {
+      "receiptId": "receipt:two-year:0df0fd7f0eef852371301515d993cd28b0bb61b8f13469b6e75384c3f31307cb",
+      "bodySha256": "e56dd3763b26d4759a989757e2ed7753297d7c3bb3522a828db030564c68eca7",
+      "observedAt": "2026-10-13T01:46:55.052Z"
+    },
+    {
+      "receiptId": "receipt:two-year:14f5ea2009dcfe8ec7db7ea60ce09dae7488d06af854301352264f31d8e0682a",
+      "bodySha256": "9f7dfc475a0352d46f298bdc0e4e602daa08d12445099a0400ca66eed4071e3b",
+      "observedAt": "2026-10-13T01:46:51.315Z"
+    },
+    {
+      "receiptId": "receipt:two-year:1516265703a9dbb2352abcffe2d420018dcdaedde25b78ed1c730e245b7c9cd8",
+      "bodySha256": "8f59447e2214b3d7cb762f84b84c8c94e58e1b8c4e3be02de3cc91b01b73ab9c",
+      "observedAt": "2026-10-13T01:46:33.503Z"
+    },
+    {
+      "receiptId": "receipt:two-year:17162d661432d5b44a25cc761ed51829168071b24415f768dd03a5a879bf17ac",
+      "bodySha256": "c189b37cb322d2ef4fc552308406be80c54b28e66902c1a5ee3a343443b687c0",
+      "observedAt": "2026-10-13T01:46:50.554Z"
+    },
+    {
+      "receiptId": "receipt:two-year:1f90593f6f3cde943c2866b5b34e418ac572b3e55d8895e3477bec4cccc37899",
+      "bodySha256": "16bfc04d0d7eede8d656bbb7bcb7f53b35f4480abddd89ce9c63e3268ef42e5d",
+      "observedAt": "2026-10-13T01:46:53.408Z"
+    },
+    {
+      "receiptId": "receipt:two-year:20ff3e93a8144c33411abc827b417d09c03e37786e3e349db9197bd8185d5505",
+      "bodySha256": "35b94fd9e2c9cbb3e89f3c0c02135af664a1235e69ebdd4864e7f6ad0ab7d4a8",
+      "observedAt": "2026-10-13T01:46:51.571Z"
+    },
+    {
+      "receiptId": "receipt:two-year:22a534d7df692b2c32e7775c43351ac6ac82f3317d67d7f0dfdb2c4917fba0de",
+      "bodySha256": "a5518503b5943558ddfd6597782269cd26a31a67d30cd38a5664093d2f07093c",
+      "observedAt": "2026-10-13T01:46:33.233Z"
+    },
+    {
+      "receiptId": "receipt:two-year:24311d891f08f9fb85d4f6554a4498b040f85214d4d5af55008e627da9716c9b",
+      "bodySha256": "161070d3081f452a81f78d04615d954ff1f06255617ebd709a755d0663d9bd37",
+      "observedAt": "2026-10-13T01:46:37.343Z"
+    },
+    {
+      "receiptId": "receipt:two-year:25fa1dd6e430fa6ce0dbe129da8b7fdd35c350b21d0a54eabcac7d80dea244ef",
+      "bodySha256": "32d02d411dd97dafd72d42002e4a4380616244f485730efb64e4ddf95c34c1f4",
+      "observedAt": "2026-10-13T01:46:52.930Z"
+    },
+    {
+      "receiptId": "receipt:two-year:26c83862fd5251f9c5fe5f01f2b6b471be6434b4a284982c0ac1196beadebed5",
+      "bodySha256": "158f38acd6deef7f81e38236af378515c3c9cdb95d859757eb3e356b91487b0a",
+      "observedAt": "2026-10-13T01:46:37.049Z"
+    },
+    {
+      "receiptId": "receipt:two-year:27173c9252659c416209c32aeb80ed429063340bbe6ad9d0858440358b9d4e13",
+      "bodySha256": "f5200813a1734f04f41f17ec88858f6ae9bdf4873afe1a64a812670cc5736b9f",
+      "observedAt": "2026-10-13T01:46:54.956Z"
+    },
+    {
+      "receiptId": "receipt:two-year:27e455d203a2d8f87286d07eada5689ae3b79f52e0dd90d5144092d43e78e71d",
+      "bodySha256": "733ea59605397d13ad9bcd362933db99079db52480023ef3d580df0e6945c4f6",
+      "observedAt": "2026-10-13T01:46:51.751Z"
+    },
+    {
+      "receiptId": "receipt:two-year:2938baac523847f623c75736b7a2f2b5988824d0338fed85318072d62bcb3036",
+      "bodySha256": "f927f4e61d5bf151c984ee47356970ceae84b7df2afeadaf3109474a7d7e0f50",
+      "observedAt": "2026-10-13T01:46:50.102Z"
+    },
+    {
+      "receiptId": "receipt:two-year:2a9b5ab679ba7f2cc87c30be2c07d03c91dfb0f56d2eb2480b02de34f2601377",
+      "bodySha256": "f31c0e7e6b0556cca8348f238d50e4eb0a7050a7ec679324b82f16e9c07beb5f",
+      "observedAt": "2026-10-13T01:46:52.416Z"
+    },
+    {
+      "receiptId": "receipt:two-year:2b40c2d9e88b9ba0f69b32c300888a621c4c7bcf40f8e3e133d7478d74fe928b",
+      "bodySha256": "91ac5c575f14243caadc3afde432a03b8b6ad676c4cb889fed037f940b821e6d",
+      "observedAt": "2026-10-13T01:46:33.645Z"
+    },
+    {
+      "receiptId": "receipt:two-year:2ced7cd39533226de8eca58c75e589ff316e870c87f962843bddf564f3ad76a4",
+      "bodySha256": "209f654bc73df9bf34301061241fd6d59b1f0cd32be56d228d7738d764fdf5bd",
+      "observedAt": "2026-10-13T01:46:49.630Z"
+    },
+    {
+      "receiptId": "receipt:two-year:31bdf1e5573203f2d40215bae7a8cef3d0e54b2e9962f61f7ae026bebf272b3f",
+      "bodySha256": "f7f69c60ce72fc23ab1db7c34c322adf708393e1c78c8edae25c4ac33734ce91",
+      "observedAt": "2026-10-13T01:46:47.637Z"
+    },
+    {
+      "receiptId": "receipt:two-year:32ae425df89361024150510827daf77acdb9dee58808e80eb7575868aa2ec547",
+      "bodySha256": "ebdf570580f85d557d580b8b0ae22649ed6616a339f1942dc7755b00b523e767",
+      "observedAt": "2026-10-13T01:46:51.459Z"
+    },
+    {
+      "receiptId": "receipt:two-year:3aabd7b8b274e15136b5b310d385e54e667579eb0635dd8b3ab983fff7cd19b0",
+      "bodySha256": "e442a5014ce968f9ec0950909f5201feca165274de30e1fcee0f94cb0e6f1cc8",
+      "observedAt": "2026-10-13T01:46:57.504Z"
+    },
+    {
+      "receiptId": "receipt:two-year:4048d2b018a7bc4898553aaf668f33ed5bde09a4ee2f6b6ac024cc996da91eb5",
+      "bodySha256": "576916bc94a0363e636202f53509bbce7a7f7c229712caa4cbac0d62be077341",
+      "observedAt": "2026-10-13T01:46:54.411Z"
+    },
+    {
+      "receiptId": "receipt:two-year:43dcf454c0517cd9e7378c395e18e27737421ba6c1f376710748f3d481996bd5",
+      "bodySha256": "4fb344f572c1bb551a3d8a04fa8d192c490b21412e7bd3ca9c45cb94d8ce6caa",
+      "observedAt": "2026-10-13T01:46:52.183Z"
+    },
+    {
+      "receiptId": "receipt:two-year:4603c7dcf0a4183a21f4bf979dd13f61cda488b34810245a22e101e2f6bc8370",
+      "bodySha256": "f875f1d6507ca9041563a7fc02027c9b91db21feea36fae421c6efc93d9c39f3",
+      "observedAt": "2026-10-13T01:46:49.891Z"
+    },
+    {
+      "receiptId": "receipt:two-year:4720fd65e6e131b150d342e0ca85a4be0783c5f26d2ef493a06be945e819d17e",
+      "bodySha256": "e6f528b640df4b918d4f261753e7131d60dcaea60a3d00a46f5ebfab6f4e407b",
+      "observedAt": "2026-10-13T01:46:48.842Z"
+    },
+    {
+      "receiptId": "receipt:two-year:47ca59e8524725a1ed6f78abbb79609c9d72f3ec6f0939e34fded8a7ec9813f9",
+      "bodySha256": "86d6c676199602f985c4d63de84f000c5a2e5f1d8caac87f88308ef9a06c08fa",
+      "observedAt": "2026-10-13T01:46:43.119Z"
+    },
+    {
+      "receiptId": "receipt:two-year:489260f48b8380d5ced2f7373a0b82fa3dfbd688ed2d46ca7c93d99749f3a2dd",
+      "bodySha256": "1ee53fd8fc45369d25e170b0cfa86aafb08a7ce9febbbd166b69215294430992",
+      "observedAt": "2026-10-13T01:46:53.836Z"
+    },
+    {
+      "receiptId": "receipt:two-year:4f0c7fb84766bd4ed7b98bc41339d3f77cabe28e95be12d5966cd6d7e73fc79b",
+      "bodySha256": "aa1e81af3c07418a01e76d24bc1fc96ee286c89482bf436f1371a045215d6f80",
+      "observedAt": "2026-10-13T01:46:46.399Z"
+    },
+    {
+      "receiptId": "receipt:two-year:51cf5d3ce456ad0037d3117248cbaea9e729edb9af87fc97ae78021a3dbba010",
+      "bodySha256": "1be5d4ace44c8b7909c2fb0f320ad1d80ee292751029199a6a30a9fb93537f07",
+      "observedAt": "2026-10-13T01:46:36.801Z"
+    },
+    {
+      "receiptId": "receipt:two-year:52b63edd9b599e6a1711647871166b7d60ab184239c56a4757be4604623fb264",
+      "bodySha256": "8bad4f7bd7d51006278ea4e47895b7de80415fb837c11109a939b1dddce6468d",
+      "observedAt": "2026-10-13T01:46:50.247Z"
+    },
+    {
+      "receiptId": "receipt:two-year:52c176a929d520674101b80296523a030de73246916b9f91c2b42f3d637aa1b6",
+      "bodySha256": "894706621275c3a689359420a649173238f30e4da16c9ab86300b053a3cb1af0",
+      "observedAt": "2026-10-13T01:46:34.560Z"
+    },
+    {
+      "receiptId": "receipt:two-year:52d8948b97556881a7589de021e339c0f13f265e7d15d5cc643012f245898f65",
+      "bodySha256": "2c6739481ac13bb02337ca92de6f89b97901b369f5247a60836ff25c96b9707a",
+      "observedAt": "2026-10-13T01:46:35.733Z"
+    },
+    {
+      "receiptId": "receipt:two-year:53c75f09ae051cfbccc9d635d10fa9f855b0aaf87f8da8ab45142f43dfc56c3e",
+      "bodySha256": "dce14bb59241efb63f943220b82bb7f9318d5c81fb8e819e4b82662d4e09385d",
+      "observedAt": "2026-10-13T01:46:45.711Z"
+    },
+    {
+      "receiptId": "receipt:two-year:5783a0ce255a94529f42c9a69719b9d77059e3377d9577818c99911f49e8ed59",
+      "bodySha256": "3cabd9f9b4c409cfb393d6a0cea4d930eed151d2d6100f672c06809bb7886c0a",
+      "observedAt": "2026-10-13T01:46:49.446Z"
+    },
+    {
+      "receiptId": "receipt:two-year:591f16e25b5487b01e3a39457b8aa88162d59b5591fb7a93ea74505d2d48c6ad",
+      "bodySha256": "94a9a679e2f3331615b9da27e12f52a723de655fb822c69b3ba4b393c9471867",
+      "observedAt": "2026-10-13T01:46:51.665Z"
+    },
+    {
+      "receiptId": "receipt:two-year:6078b4850ee2b9e2a5b8c6d13e80f3def62450ca1c9f59a637f4a5f5f1a310ce",
+      "bodySha256": "47c8deadd77b4baef335959b5646ff774bb09d19bcbb3c9cdb7579187fbaaf9b",
+      "observedAt": "2026-10-13T01:46:33.574Z"
+    },
+    {
+      "receiptId": "receipt:two-year:60fbda94d46927d2533f2cc82e33821fc1bc26f206343779d4d4f6aa98cf172c",
+      "bodySha256": "b40b1318dc14ce8e9e6dd7a5bee1c81f3de2f2436ad5659a8c1537c150e28cdc",
+      "observedAt": "2026-10-13T01:46:56.260Z"
+    },
+    {
+      "receiptId": "receipt:two-year:61b77e7cfe2e27b4240a9ccf46314c70b775dc336d11528a21d3d926cb05deae",
+      "bodySha256": "e4fd1a95c7f30c5ee5d192f81c7891b8b29c9229c8e6510b164d2c739747df51",
+      "observedAt": "2026-10-13T01:46:38.162Z"
+    },
+    {
+      "receiptId": "receipt:two-year:62d157e4829e3cff86d180e517f22effede5b03f4c93ef85adec252d579dd654",
+      "bodySha256": "6cba93e87c1bd95f1646e864b6a377eb9aef2479b7ad64ab9f31ea642aed14ab",
+      "observedAt": "2026-10-13T01:46:39.994Z"
+    },
+    {
+      "receiptId": "receipt:two-year:640f9caa672e4225cf45443ba471b165db890655da07681402f86d93cdbe7dd9",
+      "bodySha256": "cc2b1bafb4358ac1678f93da300deee45ae4061e81009ebabc6f1df6cbadbb2d",
+      "observedAt": "2026-10-13T01:46:35.638Z"
+    },
+    {
+      "receiptId": "receipt:two-year:65ac9f8fd0316042871d2a4f9f849e548493b1782ff6bcca829ecb5dca911ea8",
+      "bodySha256": "64b1d3e14341e391f392a1499bd8f9786d75b5d896bd59802eeb171bdbc549ee",
+      "observedAt": "2026-10-13T01:46:57.946Z"
+    },
+    {
+      "receiptId": "receipt:two-year:67fbd0ab3e3ec796cece4ee6219ea0b8cc7d6e0f9e4fa696a5c95b9e038a5f8e",
+      "bodySha256": "9b92babbbb001b61ad9bb2b32d872b073698bf752f40f7a155705c1a82459285",
+      "observedAt": "2026-10-13T01:46:57.274Z"
+    },
+    {
+      "receiptId": "receipt:two-year:699da4ac39ffe157477eca887a7d6beeb96576c9e35fca975bfab77a25c806df",
+      "bodySha256": "b5b23d5a26112ebe1e3324c44c5d031159825baf0c0bfdc9cf2deef5f61fc3a7",
+      "observedAt": "2026-10-13T01:46:35.283Z"
+    },
+    {
+      "receiptId": "receipt:two-year:6e29ca64a6e2c3c53157763d90b85a97bad2c931155bbc56cf418f4659eb6cf1",
+      "bodySha256": "7adfcac5903771da3c9f34f837be61767c44e97a379aacdde1d129c8c3269bc8",
+      "observedAt": "2026-10-13T01:46:44.985Z"
+    },
+    {
+      "receiptId": "receipt:two-year:7271eda141bb4c7fbfe31a6b6615251dd89159b58afa729c43fd97be1e20b276",
+      "bodySha256": "e1d8d971b89335af5da749abb508cbe7c153e670c822531eb197854eb766dd6b",
+      "observedAt": "2026-10-13T01:46:58.260Z"
+    },
+    {
+      "receiptId": "receipt:two-year:759755169afdc6f3d5a361d10f4c07f0bef022a007ef3ebfefc931346cacaa4a",
+      "bodySha256": "8dfce3e78aa9b2e72a979c901d71e0d774957d0920e5adb4a4cab6b233780cdf",
+      "observedAt": "2026-10-13T01:46:53.642Z"
+    },
+    {
+      "receiptId": "receipt:two-year:75d610fd6bb7f26ce123bcc3649cfba633a9f37b6336f58820a37e6237c64bb8",
+      "bodySha256": "80979f88831917edbe9be635189e26dc92fb43094fe0ead871140a5df462065b",
+      "observedAt": "2026-10-13T01:46:56.172Z"
+    },
+    {
+      "receiptId": "receipt:two-year:76968b9161f800dbf09115c756a05ac740f4b8b23bd3b657ab30b3e79d5ac960",
+      "bodySha256": "410ece9c4bd0587c6a3b8141aefba5d8066b83aef0fecfcbc1f45939f8c5cd7d",
+      "observedAt": "2026-10-13T01:46:58.041Z"
+    },
+    {
+      "receiptId": "receipt:two-year:76ca7c758baa67aab86fecdad5197aed74c9ba789c2a8bec25e56b5821f47c35",
+      "bodySha256": "cc38fc539d5addae4a35545e62b18eb53e7ab1bd3ad54959c584473236be39e1",
+      "observedAt": "2026-10-13T01:46:44.755Z"
+    },
+    {
+      "receiptId": "receipt:two-year:76e5c491e903dbc301f95e60a319d7a92ae610b45258018200142a0d8e108ffa",
+      "bodySha256": "cce819fff8ebef495f219406da2798414cae5f15c9cc158d7932bb77ed2ef18c",
+      "observedAt": "2026-10-13T01:46:55.867Z"
+    },
+    {
+      "receiptId": "receipt:two-year:7877950de7ea35af55e3467d5ed6c99557af3bfa080fd7a81a5c9a5a5ed399b5",
+      "bodySha256": "64c7eda88fce2f67f3547d806980a4b5b167b509b9e9ddda49eb47e58176d132",
+      "observedAt": "2026-10-13T01:46:57.183Z"
+    },
+    {
+      "receiptId": "receipt:two-year:81ec59a63c4b002e2b875fc6ba5bc9bf09aff985b24e8de0adedc2cc6b2fe559",
+      "bodySha256": "ed38959bb48010b1cbd2d25b6f5fc0768296ae72c52a1cad22e28d53557e9b2c",
+      "observedAt": "2026-10-13T01:46:42.938Z"
+    },
+    {
+      "receiptId": "receipt:two-year:85acc0f65896e346549fba95da11141ef405570c067dfff1a6f3bae88950afa2",
+      "bodySha256": "66eb87c5568936661cb3c1187941657d7244b605307c14d49dd1cd9360a0c619",
+      "observedAt": "2026-10-13T01:46:33.874Z"
+    },
+    {
+      "receiptId": "receipt:two-year:8875f56ada7b01046e6eb724d517c7e2f2745578c9aaeaba8231d1263ef33d94",
+      "bodySha256": "e21ba65d3f1abdfbcedf24cfd7130cd90e0ca07b86496ddf39c439557b128045",
+      "observedAt": "2026-10-13T01:46:37.251Z"
+    },
+    {
+      "receiptId": "receipt:two-year:8b6437d39836db0d89974bbbdd81e55479de15ddf0f8dfc08420c0b78ed61907",
+      "bodySha256": "871ce87e19b90edaf9361dc763ac1a81a74c25c8418fb73294811973efae47a1",
+      "observedAt": "2026-10-13T01:46:53.538Z"
+    },
+    {
+      "receiptId": "receipt:two-year:8b6a45ee22b3532490c44c668e9b6d845df22701f4acc5c9b988a6ae5d9c6c40",
+      "bodySha256": "e4858b3a19d03d7070690814200dee1f87cb8d134519c23dac1c79dcce833b1d",
+      "observedAt": "2026-10-13T01:46:54.713Z"
+    },
+    {
+      "receiptId": "receipt:two-year:8f7eaf8f72d4d7e91e0b05cd2d8e56fb84459bdd376be4e1f4f621010b100222",
+      "bodySha256": "7a00d8fee1be9d830c8f149ac504e4418c3dcbd02cc29b320b4d6afb75508ae2",
+      "observedAt": "2026-10-13T01:46:57.845Z"
+    },
+    {
+      "receiptId": "receipt:two-year:9033c9c62337a7b3221de426b782188cb36640ce0887211a6b86f159b9ff694a",
+      "bodySha256": "12931c829b8b6fe3bf6245fb908ccbde08ee8570960d2ea7305b9720172e603a",
+      "observedAt": "2026-10-13T01:46:55.233Z"
+    },
+    {
+      "receiptId": "receipt:two-year:9154c2e9db5872de598b7b03710782af9e7716c0e5a6d032a0ebc6e54d5c7e47",
+      "bodySha256": "3d8bbf566c54cb4668c04f6ccabe95317f321165c1dfa6d00ea9843df1f10afa",
+      "observedAt": "2026-10-13T01:46:39.004Z"
+    },
+    {
+      "receiptId": "receipt:two-year:91aab0d15121eb9c9bdb979237535dcd5a0b1179d83825f752d0af97827f7d33",
+      "bodySha256": "aaefa2538657417615f23171a4268b8f291ea5460264c628007971e915f8f8e7",
+      "observedAt": "2026-10-13T01:46:38.734Z"
+    },
+    {
+      "receiptId": "receipt:two-year:9390ce56c7e44ba0a2f5c7d78c60847f9241a48d7166e4fa4ff14a51a72a313d",
+      "bodySha256": "56901d8d3c4ac4b71f5af51b6efe30388c4f92dd16324688f28d3a33f41db61f",
+      "observedAt": "2026-10-13T01:46:52.841Z"
+    },
+    {
+      "receiptId": "receipt:two-year:95359045a4087d8b4be1e7cfabbc31c5ef349853abc08a62838fd45558375836",
+      "bodySha256": "0c5f59d5f1ed1630625d6e166e24e388df4ce5fc4bb8db188e1545755ff38f4c",
+      "observedAt": "2026-10-13T01:46:43.785Z"
+    },
+    {
+      "receiptId": "receipt:two-year:959dc7242d45822b45e25e0a97d7b42961d33406e983ad93dfdb93b38484df27",
+      "bodySha256": "ef981a6afc4dec4778bcb2833b58c600676900a33375aff4a87e818ac9491c10",
+      "observedAt": "2026-10-13T01:46:41.269Z"
+    },
+    {
+      "receiptId": "receipt:two-year:99d0dc864a6dfb4fc638cd811de6e16f3a65a1e1531f6bf9748176fffdd54052",
+      "bodySha256": "e88a8513bc11831368b6a241be9addda4c0e8a2abd0e602a787eaab42d64cd8d",
+      "observedAt": "2026-10-13T01:46:53.933Z"
+    },
+    {
+      "receiptId": "receipt:two-year:9d9a173ac11e4b80039a87eb03ac28623f849ddb24f21fd5c5397adb3ec82f55",
+      "bodySha256": "d51d5751503a397268b665c8d1474a8c00091150980f7fa248f908c89a7c49c4",
+      "observedAt": "2026-10-13T01:46:41.832Z"
+    },
+    {
+      "receiptId": "receipt:two-year:9e3af71c73221082f211e6626748995965ed900f0bb4dc1f11a6cbea2e8b9f39",
+      "bodySha256": "d0fb9135e39439e798474a4e7edded43a5de7bde8d7f00410df92acf6ffe48f6",
+      "observedAt": "2026-10-13T01:46:51.083Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a3471706adc410f9ec6a2959df6071f186a39b3a8ee9fd661896745c23474b3e",
+      "bodySha256": "19d38e39420de6b09592bd2265d5714427d064ada7c40802194f668c8454927e",
+      "observedAt": "2026-10-13T01:46:50.454Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a3e087c5a7422c1a293c2f44e528ae1316eb74eba3d9da5def2cd2cc05bf4dfd",
+      "bodySha256": "a30acba1b6c5bdae8eeccff98d9c8048e4627fb574aebd8134c26411db6641d0",
+      "observedAt": "2026-10-13T01:46:33.349Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a4ebc11c2b28f747fdf69b567760691682e20166cc39f20e5cfac927179dddb4",
+      "bodySha256": "3e6f1786e09d6efe11a1a86b45f5bc302331f6832b750d06eaa523871ef99104",
+      "observedAt": "2026-10-13T01:46:52.652Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a6ac90d2edfef90e251789161cac6ed45120866d80fa6771d62f1ac081ef9559",
+      "bodySha256": "c1438659e53237c14be7d73c4bccaab35318240310e6cd0d16451223ceac74d0",
+      "observedAt": "2026-10-13T01:46:48.656Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a70219459d1920d408b19b7769652939d978b5056171874db36cbbc0c5f02b9f",
+      "bodySha256": "90a63d519ba159cbf27539522e05d232731e0b551e4dc968324b24a9e303dc94",
+      "observedAt": "2026-10-13T01:46:35.432Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a72883058f6ce895dcbe754f184e99fb227a66919e93b436e128eb5466cfcfd8",
+      "bodySha256": "6c0a4217eff0508ec5402b6e5c14e753b352672716b72557314448112004db66",
+      "observedAt": "2026-10-13T01:46:44.890Z"
+    },
+    {
+      "receiptId": "receipt:two-year:a73071e8e7425949d17a69ca11712fd6af49cbba04fe9cdb7fb7e11e1acd514e",
+      "bodySha256": "790ff1aaaa0c0da390f97069440e11264cd04ee3f74146536dca301b3bdee3db",
+      "observedAt": "2026-10-13T01:46:56.883Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ab6dd053c196735a1054163e7a83b03011fb90daeb994553b41f37d7e3661de6",
+      "bodySha256": "178abada6d2a63f183ee733315d8fd6ad482d5e5ebfd19a3214894b10165b289",
+      "observedAt": "2026-10-13T01:46:40.969Z"
+    },
+    {
+      "receiptId": "receipt:two-year:abfd1def47bc5bac2ee79100f5c1b8a962e63e6c2f48fa9a1bf1db44d8236b94",
+      "bodySha256": "d11bf49683c2bd732416d043cc572e5831a78de5807254225c87faa8ca15ce5c",
+      "observedAt": "2026-10-13T01:46:50.650Z"
+    },
+    {
+      "receiptId": "receipt:two-year:acaeeffce6d47947deed42a03915d8ec7f8b732018936c40f8e7cdd9d136c074",
+      "bodySha256": "b32011d125418e0dfb7dd882c13b0be23532d53dbd72067c082c6462deae5871",
+      "observedAt": "2026-10-13T01:46:33.806Z"
+    },
+    {
+      "receiptId": "receipt:two-year:aeab53a66e0475a14cde43d69d6617817527e33afbe799b133864aebde4dc285",
+      "bodySha256": "8df80e150865912f72b7a95721cf4ef0a67b8a70f5ed16c607701c3b44d46ea7",
+      "observedAt": "2026-10-13T01:46:46.782Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b00027fe51bb9bda3ba4883f52ce75736c04af92b94b3bf8fc676ed2de07e94b",
+      "bodySha256": "56d3ac32cdeebcd691e56e033fe6dc6dcab1871fc567a43c4d63d957fdcc78bd",
+      "observedAt": "2026-10-13T01:46:53.182Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b05fcc0c12cc90c8473f34787a1235782f99e3bec1db123449f4c95ace6b28f4",
+      "bodySha256": "f9b309eb6c57f16e7de227bdcbf515e6da75d9056faa4de7a55adec8bd9b1964",
+      "observedAt": "2026-10-13T01:46:41.166Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b0af9613b4fdeb88f90dbe134accf4d99b26efa48a4ec905e283b0cd489ff709",
+      "bodySha256": "ba0264c904a91df660a085ca313b498bca331bb90611d062d6797b524acff656",
+      "observedAt": "2026-10-13T01:46:56.758Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b0c2ee7ca7a4db28e997d58495c0f20719de313c725b90cb9cffce31f5340cea",
+      "bodySha256": "0a34d9fe148e17b55b06914a5435317799cea483df75714ec13dfc084fbdaefb",
+      "observedAt": "2026-10-13T01:46:52.548Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b1817af0cb8263f68b5932ddc7a7d2ed4b3febf5504aa63d7ea091d43503b5ed",
+      "bodySha256": "6fee5d1681a84b4aabc0e28f44b14ef9efca9ebdd343d63a4ff9cd10273da22b",
+      "observedAt": "2026-10-13T01:46:56.072Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b3ea347d9488517ef96c88f2b799635f5653888f5aaf3c857a7f07a4d5cb906d",
+      "bodySha256": "052dfdba064ef1d96cc5cafb1628fe25f91182b457014716e7daf5dfaeab4284",
+      "observedAt": "2026-10-13T01:46:49.151Z"
+    },
+    {
+      "receiptId": "receipt:two-year:b3ec5355a304b25f7538eb10634730a3ffe8e96b13354f7c17ced1125d7fcb43",
+      "bodySha256": "4bc43193efef00fb21975829945e8c0f1f4420eeaaba787e96d604fb3ba6854f",
+      "observedAt": "2026-10-13T01:46:48.555Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bad1d2892d9996f6bcdac2337748b7f791cecbd3024f32913ea7179cb9a44e77",
+      "bodySha256": "52636641ca09de9114559cd96ee9d7f3de2093c3887ea360adeacf2625d87248",
+      "observedAt": "2026-10-13T01:46:48.748Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bb01964f9a95fff2d42c0998da44d5ae068bc7dae6950f70834150a6db69e803",
+      "bodySha256": "81cd1bb014f1ef25873ee8c2b707d4df35d7575911b7425c77fcf53fcf8def19",
+      "observedAt": "2026-10-13T01:46:46.582Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bb6883e26050c3c50c73229bab50fb625079804925b9aa16f8d69450d7cf4db6",
+      "bodySha256": "b212056d208bbaebcbeff140f3a2c8121d7eb16d42cc027cd9dc9af5f661b17b",
+      "observedAt": "2026-10-13T01:46:57.095Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bc500c4abf98f11498f2a62e68baa2daf87c33fc1fc49cd749bdea3603709851",
+      "bodySha256": "84135e1ec524e1470a555236b9d0f1e674abd81c760c7541b2b8a500e29b7b2e",
+      "observedAt": "2026-10-13T01:46:50.356Z"
+    },
+    {
+      "receiptId": "receipt:two-year:be0d671b3c1cf4e3dab68e23c4ead9a7b80c2520fdf5ec1b30525d8852ff3eff",
+      "bodySha256": "4b562923fb634257ccac92317c2874ccdbb28d23030d88dfc653919bde896367",
+      "observedAt": "2026-10-13T01:46:48.995Z"
+    },
+    {
+      "receiptId": "receipt:two-year:be7b0321b12ff889ff092933dbcf612f89433af996c288177cfb97573d1bcd58",
+      "bodySha256": "64efcac4d0fdbf2addee418af73f3d1f5bd4e09d0c14c700728f51f06ec83d5c",
+      "observedAt": "2026-10-13T01:46:51.854Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bf131b1fafbe1c38cb14781f69f19d8490633b484788b4d05f10f560a187d67c",
+      "bodySha256": "eb2637e2f0a13951a7a561e745a18801944086a909016147add4e8ec3f166afb",
+      "observedAt": "2026-10-13T01:46:55.146Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bf24ff6052a0dafcb2e5c9c45ee624d79c6244cb3e4d2c079c8a7b59c4641640",
+      "bodySha256": "3f2a06e62fb6425a2ec0851888e11f97f541d5da2f17bf4701f0c1dc6f154b1b",
+      "observedAt": "2026-10-13T01:46:55.984Z"
+    },
+    {
+      "receiptId": "receipt:two-year:bf60e4a3386234b09949292873e0511aad0964ba19247ced9905c4834cea13ab",
+      "bodySha256": "ae00a8d7a70c137cad007bbadcf261e70e2281529862f79ed1ef882141dc97c9",
+      "observedAt": "2026-10-13T01:46:48.354Z"
+    },
+    {
+      "receiptId": "receipt:two-year:c6acdc4a8cbe250cb98c89195031bed162b008c91d928ba2261d4149f9aa2c51",
+      "bodySha256": "bb041b12009d613da2a8c7a8455559b4bd48e374a78a606871ba65b06d47a479",
+      "observedAt": "2026-10-13T01:46:39.263Z"
+    },
+    {
+      "receiptId": "receipt:two-year:cbcb8b59a084ae7480dec209609acb4f5214c5c897124029a50bbdd0ae914897",
+      "bodySha256": "1a1c6efdaea66b176a73dc3571dcbc24d8412b1a77913d6e425c64469dbc0a24",
+      "observedAt": "2026-10-13T01:46:57.716Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ce617c391d17838d8ea05a9bd785d271a87e90f05ca6898351107c7e21eedff9",
+      "bodySha256": "5f66032c185914922d952fe3695d5a52ce3b110fbd82bf3ebe3104c1ca75f5b9",
+      "observedAt": "2026-10-13T01:46:42.836Z"
+    },
+    {
+      "receiptId": "receipt:two-year:d00cfa61d7bcda1f4f02c97297649f887d9a9b053670cf4a2f97ef492dbff4cc",
+      "bodySha256": "6b52efcaa62818fe8fc6db88498894e1591ab3af0b418b6a116964a0e927af2f",
+      "observedAt": "2026-10-13T01:46:49.541Z"
+    },
+    {
+      "receiptId": "receipt:two-year:d149dc9096cb7d7edff3e97cdf57cf31311ee9b7fd168ad4f5bec54c84c6d355",
+      "bodySha256": "97f7446b52c074fce7b8f655cd27186ad7bd47b36fb12cfb58cbbe2bfd756581",
+      "observedAt": "2026-10-13T01:46:54.845Z"
+    },
+    {
+      "receiptId": "receipt:two-year:d4f3f76f0607225d67cfaf287fa83949bedbbdea16e41672b96411ff8b19b618",
+      "bodySha256": "b36443ccc46664eaf304bbd395f5da28d1e8fa2cb858ba08ee139c12af5404d3",
+      "observedAt": "2026-10-13T01:46:58.164Z"
+    },
+    {
+      "receiptId": "receipt:two-year:d5abd29e04bd35526cdcfaed74cbe1317c6772b6f3b64e4cfea886ba416b23f5",
+      "bodySha256": "3fa807f277d7380dce90540f271b1a4dc9fc95963029fb6a37f9e8ab0212a54e",
+      "observedAt": "2026-10-13T01:46:37.537Z"
+    },
+    {
+      "receiptId": "receipt:two-year:d9e7312fbb89d6a617f8f8abb38832f11e86fab2bf07b3ca5b63ebbae5ec33ec",
+      "bodySha256": "274e8a17b2813312e22bc531d63f857913316f41fd676ec017c9799caf0d0bd5",
+      "observedAt": "2026-10-13T01:46:44.654Z"
+    },
+    {
+      "receiptId": "receipt:two-year:dabac75484b540e6d27ab9c4c70a587cbcc8a91b784155751952a13ac07cce60",
+      "bodySha256": "ea151929a149fee62e5d8122c7f885c6386fca37bc5fdc60b39523223f6a0e59",
+      "observedAt": "2026-10-13T01:46:55.723Z"
+    },
+    {
+      "receiptId": "receipt:two-year:dca988e2c02314d7cde08b3b959afc22ef0c39b473764844afc41ab4de6423d4",
+      "bodySha256": "cd2059f1963d67565f183cee16a215c2a0cd99f2eeeb02b918c3ee0645cb59c1",
+      "observedAt": "2026-10-13T01:46:35.068Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ddbe01ee3bda739486230c0527c9ff2a73ad6d979218d087e5625a06e7d50690",
+      "bodySha256": "44f9a4b063647e2e20e3b4ea635618ea902f4b524b18162952e172028c003134",
+      "observedAt": "2026-10-13T01:46:43.029Z"
+    },
+    {
+      "receiptId": "receipt:two-year:de33ddc3bf4f03c38a5568b0704c55848c31f45a94c0a24e0c0fa491d7fc7095",
+      "bodySha256": "6b0d757362579a96e6f49dbae7dbe83c933947217470ddea6d8371f0e141712e",
+      "observedAt": "2026-10-13T01:46:33.434Z"
+    },
+    {
+      "receiptId": "receipt:two-year:de83d568fd42da7df892c4eccea81ece9db8b6513e8e0e6a73f05e7e861ed191",
+      "bodySha256": "29cf869fd11a0c66191b9b3497a0ca9c470fc6cfd39edf716a822adc86412b18",
+      "observedAt": "2026-10-13T01:46:42.669Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e0c3b2051f993c922503cb93a6ebdbd2e83a0e6994080a46f084ad49894dc0a0",
+      "bodySha256": "2908cec6700f45bffcbd5067ce4de3b9d1e393ddb5828b309f381b124140a05e",
+      "observedAt": "2026-10-13T01:46:49.267Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e31bed0a4c9b7ca501dbc5ac4f5bf22bed4a78493f9de79868d640665b13978f",
+      "bodySha256": "9c91e48a0138ce97bdc3d16295bbddffeff31aeb1cfe47145615bb1669cd4ecf",
+      "observedAt": "2026-10-13T01:46:44.250Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e33d67258e3c131d97748fe9b4a471a7f3d8e853ea90afc652eb78d90d8f59be",
+      "bodySha256": "e20be6fd2222ec4340dcbea4d5abe462a6099768ac3b2096094626e1160e2e81",
+      "observedAt": "2026-10-13T01:46:37.448Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e38650c3e954e390e44972d0772eaa2cc414fe9f152cab00819df0d766f40611",
+      "bodySha256": "1c182b104d2c88ecde561dbac56a22eb8a6b6820bb3558d4573a3e6d6952cab1",
+      "observedAt": "2026-10-13T01:46:33.717Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e3bf565ac85355630e792787499dae6d785efe3b36418f3d59f9fd11f6a5f0ab",
+      "bodySha256": "e03cb93fb8a03c8f6780b0870785ca61becc3580192f218677215ff5eb36b841",
+      "observedAt": "2026-10-13T01:46:52.746Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e8ece2e5b4a9124c11bb39e78b25a0350a89b6f747a9c5566e265dd5aaf0f6be",
+      "bodySha256": "6b69a342e188fecbb9811b869b455c6e893e48887e7123787c04c16c249a614f",
+      "observedAt": "2026-10-13T01:46:42.434Z"
+    },
+    {
+      "receiptId": "receipt:two-year:e9b2ed688ec3c8cebd664ac82bb38a98a86921d68a1d2c3359bce8185d96e8cf",
+      "bodySha256": "0fe08901f372fc1c64fb19ceb018c3f455575de41a359de3501282f6872b4393",
+      "observedAt": "2026-10-13T01:46:44.471Z"
+    },
+    {
+      "receiptId": "receipt:two-year:eb9324b3a3bc70ddf22527e4ae3ed8c966bac21694dba51955db7493a846d020",
+      "bodySha256": "b0704552e002a0c962fe1be5654733f527360c79f4ac7314da87140edb7e1aee",
+      "observedAt": "2026-10-13T01:46:46.681Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ebb1fa6651b2873d007460d46ae151a85b2af3d3579dd8c0029300675b2bff1f",
+      "bodySha256": "c5015783cd4cf28eaa3a518bc0b792c9c06ec4f5a7cd65caa8704ec746edd393",
+      "observedAt": "2026-10-13T01:46:39.356Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ebb28b0fcf9000f29b05c853f43c5315eb2151a3d4c86d8ed75ab57bae43204f",
+      "bodySha256": "f3a0b1bd576057f1ab9e433a39e00596734130e54c78119190b7d7f5ade27d40",
+      "observedAt": "2026-10-13T01:46:46.160Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ed3c4ff353330cb621bbcddd7bcea7c5d9b3cb700ac9131c97645f303f433bd0",
+      "bodySha256": "97f5c14a4afe0548089bf212396195ddc242c28a88344455fa5d6b1cbfd805bf",
+      "observedAt": "2026-10-13T01:46:40.805Z"
+    },
+    {
+      "receiptId": "receipt:two-year:eed5b663c6ec2f381341af92a0fc9cb0aad26d02884b8e144934f50970a91535",
+      "bodySha256": "5773a4853bcff18cbaa0065d7d1bc0fc041ebe08dea07625ea1c129edfd4d3fd",
+      "observedAt": "2026-10-13T01:46:40.557Z"
+    },
+    {
+      "receiptId": "receipt:two-year:f0290dffcb922a2c468dc6e7034f205249e70ff9143e0189f29cc830776243fc",
+      "bodySha256": "8adc6e7ee8e9422488c4181932277dd0e29d520df479a098b21f26c4211bcc8d",
+      "observedAt": "2026-10-13T01:46:53.738Z"
+    },
+    {
+      "receiptId": "receipt:two-year:f0ecfdf512ff55d12e7f4a95a7e683687540ba0e3888e9f2fa641c406ce79c7c",
+      "bodySha256": "b7949c10c502c24ca754a5302039599daaeeaa2ab4811189d9da85f0e8886035",
+      "observedAt": "2026-10-13T01:46:46.886Z"
+    },
+    {
+      "receiptId": "receipt:two-year:f584a1c06e6dded238ab8a140ca3f3b7062f8577c23fb029ab94bcfe545909b7",
+      "bodySha256": "5033cc9600989de72b67c99c97558d45b218aa0aebb2906ec13f16fe500cd34c",
+      "observedAt": "2026-10-13T01:46:41.074Z"
+    },
+    {
+      "receiptId": "receipt:two-year:f591c96a510e9107cdcc07bbf30087585a203f19255d812efbe1b7307afe66f1",
+      "bodySha256": "a4104337009faebdd4edb2bf1b5dc522bcf32ac1280efa0677a05b259f1178d4",
+      "observedAt": "2026-10-13T01:46:56.996Z"
+    },
+    {
+      "receiptId": "receipt:two-year:fbdfe69cfbfba1ca8ab32e580e81fad0a45139ed687d650a50245061177d8596",
+      "bodySha256": "4519bda6394de0e3738a06980d2c72f9ef49a5623dbed8db6225be96f4685b8b",
+      "observedAt": "2026-10-13T01:46:39.452Z"
+    },
+    {
+      "receiptId": "receipt:two-year:fc0b5d7e92bf62493c02ef45765c5e0623ccbad54810d6a2a3748b4b9694dee1",
+      "bodySha256": "69b571e412b32e03e31b7d857b9a0f8c9f4b0a85dbe653ee3216b0f5dc0d2bd4",
+      "observedAt": "2026-10-13T01:46:35.535Z"
+    },
+    {
+      "receiptId": "receipt:two-year:fc96e9e773b8ed68facbf448fbc05e964cec0727e090312cad39fbb460af4e65",
+      "bodySha256": "fe2a2034f6aa9c20bbb01b7476845155e48204b151f67b81646636f1082cf5d9",
+      "observedAt": "2026-10-13T01:46:49.360Z"
+    },
+    {
+      "receiptId": "receipt:two-year:ff79fce5959afd8ce53158c889b03e85323911a62775729b084659be67ce6a17",
+      "bodySha256": "ff6eedeec156c77f31b2e96baa625cb8120d1fbdc09b45c6d192b69c89c6c7a6",
+      "observedAt": "2026-10-13T01:46:48.101Z"
+    }
+  ],
+  "snapshotSemantics": "PER_RECEIPT_CAPTURE_VECTOR_NOT_ATOMIC_ASOF",
+  "sourceFinality": "UNKNOWN",
+  "structuralEligible": false,
+  "reportVersion": "coverage-report:3302373cae53a94f05e36e2205c6dd7e2aac37e1b0fc71b27defcf04454b3397"
+}
