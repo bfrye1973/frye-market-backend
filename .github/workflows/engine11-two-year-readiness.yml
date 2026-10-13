@@ -20,7 +20,7 @@ jobs:
           node-version: '20'
       - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs services/core/tests/engine11/calendarPrototype/*.test.mjs services/core/tests/engine11/twoYearResearch/*.test.mjs
   authentic-two-year:
-    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[two-year-live]')
+    if: github.event_name == 'push' && (contains(github.event.head_commit.message, '[two-year-live]') || contains(github.event.head_commit.message, '[schedules-live]'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -30,7 +30,13 @@ jobs:
           node-version: '20'
       - env:
           POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
-        run: node services/core/tests/engine11/twoYearResearch/liveReadiness.mjs
+          SCHEDULES_ONLY: ${{ contains(github.event.head_commit.message, '[schedules-live]') }}
+        run: |
+          if [ "$SCHEDULES_ONLY" = "true" ]; then
+            node services/core/tests/engine11/twoYearResearch/schedulesProbe.mjs
+          else
+            node services/core/tests/engine11/twoYearResearch/liveReadiness.mjs
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

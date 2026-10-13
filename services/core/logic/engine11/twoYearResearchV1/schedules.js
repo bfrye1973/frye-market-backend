@@ -17,11 +17,10 @@ export async function capturePages({request,apiKey,fetchImpl=fetch,maxPages=20,m
   if(receipts.length>=maxPages){failure='PAGE_BUDGET';break;}if(seen.has(next)){failure='CURSOR_CYCLE';break;}seen.add(next);
   try{
    let response;for(let attempt=0;attempt<3;attempt++){response=await fetchImpl(next,{headers:{Accept:'application/json',Authorization:'Bearer '+apiKey},signal:AbortSignal.timeout(25000)});if(![429,500,502,503,504].includes(response.status)||attempt===2)break;await new Promise(r=>setTimeout(r,200*2**attempt));}
-   if(!response.ok){failure='HTTP_'+response.status;break;}
    const bytes=Buffer.from(await response.arrayBuffer());requireTruth(bytes.length<=16*1024*1024&&!bytes.includes(Buffer.from(apiKey)),'BODY_SIZE_OR_CREDENTIAL');
-   const parsed=parseBody(bytes);const observedAt=new Date().toISOString();
-   const receipt={schemaVersion:'engine11.two-year-receipt.v1',captureId,page:receipts.length+1,request:next,httpStatus:response.status,observedAt,bodySha256:sha256(bytes),bodyBase64:bytes.toString('base64'),evidenceKind:'HTTP_BODY_AFTER_CONTENT_DECODE',rowCount:parsed.rows.length};
-   receipts.push({...receipt,receiptId:'receipt:two-year:'+hash(receipt)});rows.push(...parsed.rows.map(x=>x.payload));
+   const parsed=response.ok?parseBody(bytes):null;const observedAt=new Date().toISOString();
+   const receipt={schemaVersion:'engine11.two-year-receipt.v1',captureId,page:receipts.length+1,request:next,httpStatus:response.status,observedAt,bodySha256:sha256(bytes),bodyBase64:bytes.toString('base64'),evidenceKind:'HTTP_BODY_AFTER_CONTENT_DECODE',rowCount:parsed?.rows.length??0};
+   receipts.push({...receipt,receiptId:'receipt:two-year:'+hash(receipt)});if(!response.ok){failure='HTTP_'+response.status;break;}rows.push(...parsed.rows.map(x=>x.payload));
    if(rows.length>maxRows){failure='ROW_BUDGET';break;}if(parsed.parsed.status!=='OK'){failure='PROVIDER_STATUS';break;}
    next=parsed.parsed.next_url?safeResearchUrl(parsed.parsed.next_url,initial):null;
   }catch(e){failure=e.code??'TRANSPORT_OR_PARSE_UNAVAILABLE';break;}
