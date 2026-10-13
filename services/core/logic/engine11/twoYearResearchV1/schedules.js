@@ -46,7 +46,7 @@ export function scheduleLedger(rows,{from,through,traversalComplete}) {
   let phase='CLOSED',invalidSequence=false;
   for(const event of events){if(event.event==='open'){if(phase==='OPEN')invalidSequence=true;phase='OPEN';}else if(['close','pause','halt'].includes(event.event)){if(phase!=='OPEN')invalidSequence=true;phase='CLOSED';}else if(event.event==='pre_open'&&phase==='OPEN')invalidSequence=true;}
   for(let i=0;i+1<events.length;i++)if(events[i].event==='open'&&Date.parse(events[i+1].timestamp)>Date.parse(events[i].timestamp))matching.push({from:new Date(events[i].timestamp).toISOString(),to:new Date(events[i+1].timestamp).toISOString()});
-  const state=!traversalComplete?'UNKNOWN_INCOMPLETE_TRAVERSAL':!source.length?'UNKNOWN_NO_SCHEDULE_EVENTS':unknown.length?'UNKNOWN_EVENT_SEMANTICS':tie?'UNKNOWN_EVENT_TIMESTAMP_TIE':repeated?'UNKNOWN_REPEATED_SCHEDULE_EVENT':!opens.length||!closes.length||!terminal||!matching.length||invalidSequence?'UNKNOWN_INCOMPLETE_SESSION_EVENTS':'PROVIDER_SCHEDULE_CANDIDATE';
+  const state=!traversalComplete?'UNKNOWN_INCOMPLETE_TRAVERSAL':!source.length?'UNKNOWN_NO_SCHEDULE_EVENTS':unknown.length?'UNKNOWN_EVENT_SEMANTICS':tie?'UNKNOWN_EVENT_TIMESTAMP_TIE':repeated?'UNKNOWN_REPEATED_SCHEDULE_EVENT':!opens.length||!closes.length||!terminal||!matching.length?'UNKNOWN_INCOMPLETE_SESSION_EVENTS':invalidSequence?'UNKNOWN_TRANSITION_POLICY':'PROVIDER_SCHEDULE_CANDIDATE';
   dates.push({date,state,eventCount:source.length,sourceEventsDigest:hash(source),events,matchingSegments:matching,unknownEvents:unknown,
    firstOpen:opens[0]?.timestamp??null,lastClose:closes.at(-1)?.timestamp??null,sourceScheduleVersion:'NOT_SUPPLIED',calendarAccepted:false,structuralEligible:false});
  }
