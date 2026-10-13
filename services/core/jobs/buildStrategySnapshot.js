@@ -7902,7 +7902,8 @@ async function processStrategy(
   previousSnapshot = null,
   evaluationTimeMs = null,
   engine3DiagnosticBars = null,
-  engine22MicroW3EvidenceBars = []
+  engine22MicroW3EvidenceBars = [],
+  engine22V3FiveMinuteBars = []
 ) {
 
 let contextResp = null;
@@ -8427,6 +8428,13 @@ const strategy1TenMinuteEma10 =
 
         evaluationTimeMs,
         microW3EvidenceBars: engine22MicroW3EvidenceBars,
+        engine22V3BarsByTf: {
+          "5m": engine22V3FiveMinuteBars,
+          "10m": marketMeter?.layers?.emaPosture?.tenMinute?.bars || [],
+          "1h": marketMeter?.layers?.emaPosture?.oneHour?.bars || [],
+          "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
+          "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
+        },
         previousMicroSequence: previousSnapshot?.strategies?.[s.strategyId]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.microSequence || null,
         barsByTf: {
           "5m": engine3DiagnosticBars?.fiveMinute?.ok === true ? (engine3DiagnosticBars.fiveMinute.bars || []) : [],
@@ -10446,6 +10454,25 @@ console.log("Engine21 alignment fetched");
     }
   }
 
+  // V3 shadow-only native 5m source; legacy Micro/Engine3 inputs are unchanged.
+  let engine22V3FiveMinuteBars = [];
+  if (String(symbol).toUpperCase() === "ES") {
+    try {
+      const v3Response = await fetchJson(
+        `${CORE_BASE}/api/v1/futures/ohlc?symbol=ES&timeframe=5m&limit=300`,
+        15000,
+      );
+      const payload = v3Response?.json;
+      if (v3Response?.ok === true) {
+        engine22V3FiveMinuteBars = Array.isArray(payload)
+          ? payload : Array.isArray(payload?.bars) ? payload.bars : [];
+      }
+    } catch (error) {
+      console.warn("[Engine22 V3 shadow] independent 5m evidence unavailable:",
+        String(error?.message || error));
+    }
+  }
+
   for (const s of STRATEGIES) {
     let engine16ForStrategy = null;
   try {
@@ -10509,7 +10536,8 @@ console.log("Engine21 alignment fetched");
   previousSnapshot,
   evaluationTimeMs, 
   engine3DiagnosticBars,
-  engine22MicroW3EvidenceBars
+  engine22MicroW3EvidenceBars,
+  engine22V3FiveMinuteBars
 );
 
 const executionSymbol =

@@ -1,6 +1,7 @@
 import { assessMicroW3TouchW4Shadow } from "../microV2/assessMicroW3TouchW4Shadow.js";
 import { buildEngine22V3ContractProjection } from "../v3/compareProtectedContracts.js";
 import { buildEngine22V3ShadowSnapshot } from "../v3/buildShadowSnapshot.js";
+import { buildEngine22V3IndependentNodeShadow } from "../v3/buildIndependentNodeShadow.js";
 // services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
 // Engine 22G — Clean Wave Strategy Wrapper
 //
@@ -2287,10 +2288,27 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive V3 read-only projection. Explicit supplied canonical data only.
   // Existing legacy execution/strategy contracts are never reassigned here.
   const engine22V3Shadow = input?.engine22V3Canonical
-    ? buildEngine22V3ShadowSnapshot({canonical:input.engine22V3Canonical})
+    ? buildEngine22V3ShadowSnapshot({
+        canonical:input.engine22V3Canonical,
+        barsByTf:input.engine22V3BarsByTf ?? input.barsByTf,
+        evaluationTimeMs:input.evaluationTimeMs,
+        sourceByDegree:input.engine22V3ValidatedSourceByDegree ?? null,
+        previousFibByDegree:input.engine22V3PreviousFibByDegree ?? null,
+        rulesByDegree:input.engine22V3StructuralRulesByDegree ?? null,
+        engine11V2SourcePagesByDegree:input.engine11V2SourcePagesByDegree ?? null,
+      })
+    : null;
+
+  const engine22V3NodeEvidence = input?.engine22V3Canonical
+    ? buildEngine22V3IndependentNodeShadow({
+        canonical:input.engine22V3Canonical,
+        barsByTf:input.engine22V3BarsByTf ?? input.barsByTf,
+        evaluationTimeMs:input.evaluationTimeMs,
+      })
     : null;
 
   return {
+    engine22V3NodeEvidence,
     engine22V3Shadow,
     engine22V3Projection: engine22V3Shadow?.available === true
       ? buildEngine22V3ContractProjection({shadow:engine22V3Shadow}) : null,

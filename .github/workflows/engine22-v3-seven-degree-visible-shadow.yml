@@ -1,0 +1,30 @@
+name: Engine22 V3 Seven-Degree Visible Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/v3/buildShadowSnapshot.js'
+      - 'services/core/tests/engine22V3SevenDegreeShadowLoop.test.js'
+      - '.github/workflows/engine22-v3-seven-degree-visible-shadow.yml'
+permissions:
+  contents: read
+jobs:
+  shadow-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Seven-degree shadow loop and existing lifecycle/Fibonacci tests
+        working-directory: services/core
+        run: |
+          node --test tests/engine22V3SevenDegreeShadowLoop.test.js tests/engine22V3ActiveWaveFibShadow.test.js tests/engine22V3ConfirmedLifecycleShadow.test.js tests/engine22V3DegreeFib.test.js
+      - name: Verify protected contracts unchanged from Phase 2 base
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          changed=$(git diff --name-only FETCH_HEAD HEAD)
+          printf '%s\n' "$changed"
+          if echo "$changed" | grep -E '(^services/core/logic/engine22/v3/projectDegreeFib.js$|^services/core/logic/engine(6|7|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
+            echo "PROTECTED_SOURCE_MODIFIED"; exit 1
+          fi

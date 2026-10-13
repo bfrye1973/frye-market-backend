@@ -11,6 +11,12 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
  assert.equal(initialized.available,true,JSON.stringify(initialized.reasonCodes));
  assert.equal(initialized.canonical.degrees.MICRO.anchors.W4_LOW.price,7782.75);
+ assert.equal(initialized.canonical.degrees.MICRO.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.PRIMARY.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.MINUTE.sequenceDirection,"UP");
+ // Current Minute correction bias cannot override the degree's earlier W1 impulse.
+ assert.equal(raw.activeStructures.minute.direction,"DOWN");
  assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW.price,7826.25);
  const shadow=buildEngine22V3ShadowSnapshot({canonical:initialized.canonical});
  assert.equal(shadow.available,true,JSON.stringify(shadow.reasonCodes));
@@ -30,7 +36,9 @@ test("snapshot pipeline wires manual canonical bootstrap to existing Engine22 bu
  assert.match(builder,/getActiveWaveStateMeta\(\{symbol:"ES"\}\)/);
  assert.match(builder,/buildEngine22V3OwnerBootstrap\(/);
  assert.match(builder,/engine22V3Canonical:\s*engine22V3Bootstrap\?\.available === true\s*\? engine22V3Bootstrap\.canonical : null/);
- assert.match(wave,/buildEngine22V3ShadowSnapshot\(\{canonical:input\.engine22V3Canonical\}\)/);
+ assert.match(wave,/buildEngine22V3ShadowSnapshot\(\{\s*canonical:input\.engine22V3Canonical,/);
+ assert.match(wave,/barsByTf:input\.engine22V3BarsByTf \?\? input\.barsByTf,/);
+ assert.match(wave,/sourceByDegree:input\.engine22V3ValidatedSourceByDegree/);
  assert.match(wave,/engine22V3Projection:/);
  assert.match(wave,/engine22V3Shadow,/);
  assert.match(wave,/degreeStates:\s*publishedDegreeStates,/);
