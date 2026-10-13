@@ -31,6 +31,14 @@ const owner={
   activeWave:"W3",ownerCorrectionState:"SUBMINUTE_W3_OWNER_CONTEXT",
   sequenceDirection:"UP",ownerApproxW2Low:7700,anchors:{},
  },
+ // Owner's current Minute structure is W3 UP, started / confirmation pending.
+ // Retain existing historical manual marks for observation; never promote
+ // the older manual W2-C status as current shadow wave authority.
+ MINUTE:{
+  activeWave:"W3",ownerCorrectionState:"MINUTE_W3_OWNER_CONTEXT",
+  sequenceDirection:"UP",correctionDirection:"UP",
+  lifecycle:"W3_STARTED_CONFIRMATION_PENDING",
+ },
 };
 function waveOneSequenceDirection(anchors){
  const lo=anchors?.W1_LOW,hi=anchors?.W1_HIGH;
@@ -58,7 +66,7 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
   const supplied=owner[d];
   const historical=activeWaveState.activeStructures[d.toLowerCase()];
   if(!supplied&&!historical)return {available:false,reasonCodes:[d+"_SOURCE_MISSING"],canonical:null};
-  const anchors=supplied?Object.fromEntries(Object.entries(supplied.anchors).map(([k,[price,time]])=>[k,{price,time,status:"CONFIRMED"}])):marks(historical.marks);
+  const anchors=supplied?.anchors?Object.fromEntries(Object.entries(supplied.anchors).map(([k,[price,time]])=>[k,{price,time,status:"CONFIRMED"}])):marks(historical?.marks);
   degrees[d]={
    degreeId:d,countId:"ES-V3-BASELINE-"+d,sequenceId:"ES-V3-SEQUENCE-"+d,
    parentDegree:ENGINE22_V3_PARENT[d],parentWave:supplied?.parentWave??historical?.parentWave??null,
@@ -72,7 +80,7 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
    ownerReportedTouchKeys:supplied?.ownerReportedTouchKeys?clone(supplied.ownerReportedTouchKeys):[],
    ownerApproxW2Low:supplied?.ownerApproxW2Low??null,
    ownerAbcTurns:supplied?.ownerAbcTurns?clone(supplied.ownerAbcTurns):null,
-   lifecycle:supplied?"DEVELOPING":historical?.stage??"DEVELOPING",
+   lifecycle:supplied?.lifecycle??(supplied?"DEVELOPING":historical?.stage??"DEVELOPING"),
    anchors,history:[{event:"OWNER_V3_BASELINE" ,historicalTransitionsKnown:false,
      source:supplied?"OWNER_CONFIRMED_ANCHORS":"EXISTING_MANUAL_STRUCTURE",
      originalSnapshot:supplied?null:clone(historical)}],
