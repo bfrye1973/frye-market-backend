@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {ENGINE22_V3_SCHEMA,ENGINE22_V3_DEGREES,ENGINE22_V3_PARENT} from "../logic/engine22/v3/canonicalStructure.js";
 import {buildEngine22V3ShadowSnapshot} from "../logic/engine22/v3/buildShadowSnapshot.js";
 import {buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
+import {buildEngine22V3OwnerBootstrap} from "../logic/engine22/v3/buildOwnerBootstrap.js";
+import fs from "node:fs";
 const tf={INTRADAY_SUBMICRO:"5m",MICRO:"10m",SUBMINUTE:"1h",
  MINUTE:"4h",MINOR:"1d",INTERMEDIATE:"1w",PRIMARY:"1mo"};
 const stamp=i=>new Date(Date.UTC(2026,9,1,0,i*5)).toISOString();
@@ -104,4 +106,32 @@ test("existing V3 compatibility projection forwards seven-degree sidecar without
  assert.equal(projected.engine22Display.version,"engine22Display.v3");
  assert.equal(projected.publicationEligible,false);
  assert.equal(projected.noExecution,true);
+});
+
+test("actual owner Submicro W3 and Micro W5 expose only provisional anchor Fib WATCH",()=>{
+ const raw=JSON.parse(fs.readFileSync(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url),"utf8"));
+ const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
+ assert.equal(initialized.available,true);
+ const canonical=structuredClone(initialized.canonical);
+ const out=buildEngine22V3ShadowSnapshot({canonical});
+ for(const [key,wave] of [["intraday_submicro","W3"],["micro","W5"]]){
+  const card=out.v3LiveShadow.degrees[key];
+  assert.equal(card.dataStatus,"PROVISIONAL_ANCHOR_FIB",key);
+  assert.equal(card.activeWave,wave);
+  assert.equal(card.fibonacci.available,true);
+  assert.equal(card.fibonacci.anchorOnly,true);
+  assert.equal(card.fibonacci.provisional,true);
+  assert.equal(card.fibonacci.touchEvidenceAvailable,false);
+  assert.equal(card.fibonacci.evidenceThrough,null);
+  assert.ok(card.levels.length>=3);
+  assert.ok(card.levels.every(level=>level.status==="WATCH"&&level.firstTouchedAt===null));
+  assert.ok(card.reasonCodes.includes("VALIDATED_ENGINE11_SOURCE_REQUIRED"));
+  assert.equal(card.publishAuthorized,false);
+  assert.equal(card.anchorPromotionAllowed,false);
+ }
+ for(const k of ["intermediate","primary"]){
+  assert.equal(out.v3LiveShadow.degrees[k].dataStatus,"INSUFFICIENT_HISTORY");
+  assert.equal(out.v3LiveShadow.degrees[k].levels.length,0);
+ }
+ assert.deepEqual(initialized.canonical,canonical);
 });
