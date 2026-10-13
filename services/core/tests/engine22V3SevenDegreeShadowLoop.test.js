@@ -119,10 +119,20 @@ test("actual owner corrected Submicro W2 awaits W1 low while Micro W5 remains in
  assert.equal(sub.activeWave,"W2");
  assert.equal(sub.ownerCorrectionState,"SUBMICRO_W2_OWNER_CORRECTED");
  assert.equal(sub.ownerW1High.price,7887.25);
- assert.equal(sub.ownerW1High.time,"2026-08-11 20:00");
- assert.equal(sub.ownerW1LowPending,true);
- assert.equal(sub.fibonacci.available,false);
- assert.equal(sub.levels.length,0);
+ assert.equal(sub.ownerW1High.time,"2026-10-11 20:00");
+ assert.equal(canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.price,7787.5);
+ assert.equal(canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.time,"2026-10-08 10:30");
+ assert.equal(sub.ownerW1LowPending,false);
+ assert.equal(sub.fibonacci.available,true);
+ assert.equal(sub.fibonacci.anchorOnly,true);
+ assert.equal(sub.fibonacci.modelType,"RETRACEMENT");
+ assert.equal(sub.fibonacci.provisional,true);
+ assert.equal(sub.fibonacci.touchEvidenceAvailable,false);
+ assert.deepEqual(sub.levels.map(l=>[l.key,l.price]),[
+  ["r236",7863.75],["r382",7849.25],["r500",7837.5],
+  ["r618",7825.5],["r786",7808.75],
+ ]);
+ assert.ok(sub.levels.every(l=>l.status==="WATCH"&&l.firstTouchedAt===null));
  assert.equal(sub.publishAuthorized,false);
  for(const [key,wave] of [["micro","W5"]]){
   const card=out.v3LiveShadow.degrees[key];
