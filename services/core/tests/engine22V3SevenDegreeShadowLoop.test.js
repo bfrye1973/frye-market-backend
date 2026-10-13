@@ -143,8 +143,8 @@ test("owner MICRO W2 price-only WATCH map, Submicro ABC, Subminute W3 independen
  assert.equal(cards.micro.levels[1].ownerReportedTouch,false);
  assert.equal(cards.subminute.ownerApproxW2Low,7700);
 
- assert.equal(cards.intraday_submicro.fibonacci.available,false);
- assert.equal(cards.intraday_submicro.levels.length,0);
+ assert.equal(cards.intraday_submicro.fibonacci.available,true);
+ assert.equal(cards.intraday_submicro.levels.length,5);
  const micro=cards.micro;
  assert.equal(micro.activeWave,"W2");
  assert.equal(micro.ownerW1HighPrice,7897.5);
