@@ -1,0 +1,61 @@
+name: Engine22 Minute W3 Owner Shadow Live Proof
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/engine22-minute-w3-live-proof.yml'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify live minute wave and separate lower-degree outputs
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6 7 8 9; do
+            code=$(curl -sSL --max-time 75 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+            [ "$code" = "200" ] && break
+            echo "ES snapshot warming, HTTP $code"; sleep 20
+          done
+          [ "$code" = "200" ]
+          node - "$RUNNER_TEMP/es.json" <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const w=j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
+          const p=w?.engine22V3Projection;
+          const d=p?.v3LiveShadow?.degrees;
+          const min=d?.minute;
+          const result={
+            snapshot:j.now,degreeCount:Object.keys(d||{}).length,
+            minuteWave:min?.activeWave,minuteLifecycle:min?.lifecycle,
+            minuteOwnerContext:min?.ownerCorrectionState,
+            minuteShadowOnly:min?.shadowOnly,minuteNoExecution:min?.noExecution,
+            submicroRole:d?.intraday_submicro?.ownerRole,
+            submicroCLeg:d?.intraday_submicro?.abcLeg,
+            microWave:d?.micro?.activeWave,
+            microLevels:d?.micro?.levels?.map(l=>[l.key,l.price]),
+            subminuteWave:d?.subminute?.activeWave,
+            minorWave:d?.minor?.activeWave,
+            intermediateWave:d?.intermediate?.activeWave,
+            primaryWave:d?.primary?.activeWave,
+            legacyDegreeStates:!!w?.degreeStates,
+            legacyMinuteHeadline:w?.engine22Display?.degrees?.minute?.headline,
+            existingMinuteFibCount:w?.currentWavelength?.degrees?.minute?.levels?.length??0
+          };
+          console.log('MINUTE_W3_LIVE_PROOF',JSON.stringify(result));
+          assert.equal(result.degreeCount,7);
+          assert.equal(result.minuteWave,'W3');
+          assert.equal(result.minuteLifecycle,'W3_STARTED_CONFIRMATION_PENDING');
+          assert.equal(result.minuteOwnerContext,'MINUTE_W3_OWNER_CONTEXT');
+          assert.equal(result.minuteShadowOnly,true);
+          assert.equal(result.minuteNoExecution,true);
+          assert.equal(result.microWave,'W2');
+          assert.equal(result.subminuteWave,'W3');
+          assert.equal(result.minorWave,'W5');
+          assert.equal(result.intermediateWave,'W3');
+          assert.equal(result.primaryWave,'W5');
+          assert.ok(result.legacyDegreeStates);
+          NODE
