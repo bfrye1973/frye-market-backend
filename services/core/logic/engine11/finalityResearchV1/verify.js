@@ -4,12 +4,19 @@ const ns=x=>{if(typeof x!=='string'||!/^\d+$/.test(x))throw new Error('EXACT_NS_
 const iso=x=>{if(typeof x!=='string'||!/(?:Z|\+00:00)$/.test(x)||!Number.isFinite(Date.parse(x)))throw new Error('UTC_EVIDENCE_REQUIRED');return Date.parse(x);};
 // A caller-supplied trust envelope is a research input, never an authorization to publish candles.
 function compatible(a,b){return a&&b&&['contract','seriesId','priceBasis','resolution','calendarVersion','alignmentVersion','datasetVersion'].every(k=>typeof a[k]==='string'&&a[k]===b[k]);}
-export function verifyInterval({interval,calendar,observations=[],acquisition,watermark,noTrades,asOf,correctionEvidence=[]}){
+export function sourceClockWindowStatus({row,timeframe,observedAt}){
+ if(!Object.hasOwn(degrees,timeframe))throw new Error('UNSUPPORTED_TIMEFRAME');
+ const start=ns(row.window_start),now=BigInt(iso(observedAt))*1000000n,step=degrees[timeframe];
+ if(!step)return {state:'UNKNOWN_PERIOD_BOUNDARIES',sourceFinality:'UNKNOWN',canonicalAlignmentAccepted:false,structuralEligible:false};
+ const end=start+BigInt(step)*1000000n;
+ return {fromNs:start.toString(),toNs:end.toString(),state:start>now?'FUTURE_SOURCE_CLOCK_WINDOW':end>now?'PARTIAL_SOURCE_CLOCK_WINDOW':'ELAPSED_SOURCE_CLOCK_WINDOW_NOT_FINAL',sourceFinality:'UNKNOWN',canonicalAlignmentAccepted:false,structuralEligible:false};
+}
+export function verifyInterval({interval,calendar,observations=[],acquisition,watermark,noTrades,asOf,correctionEvidence=[],arrivalEvidence=[]}){
  if(!Object.hasOwn(degrees,interval.timeframe))throw new Error('UNSUPPORTED_TIMEFRAME');
  const from=iso(interval.from),to=iso(interval.to),now=iso(asOf);if(from>=to)throw new Error('INTERVAL_RANGE');
  const start=BigInt(from)*1000000n,end=BigInt(to)*1000000n;
  const result={schemaVersion:'engine11.completeness-finality-research.v1',intervalId:interval.id??null,timeframe:interval.timeframe,
-  completeness:'UNKNOWN_CALENDAR',completion:now<to?'PARTIAL_PERIOD':'ELAPSED_NOT_FINAL',sourceFinality:'UNKNOWN_SOURCE_WATERMARK',revisionState:'NO_CORRECTION_AUTHORITY',guardState:'UNKNOWN_ALIGNMENT',calendarEvidenceKind:calendar?.evidenceKind??'NONE',structuralEligible:false,publishedCanonical:false};
+  completeness:'UNKNOWN_CALENDAR',completion:now<to?'PARTIAL_PERIOD':'ELAPSED_NOT_FINAL',sourceFinality:'UNKNOWN_SOURCE_WATERMARK',revisionState:'NO_CORRECTION_AUTHORITY',arrivalState:'UNKNOWN_SOURCE_ARRIVAL_TIME',guardState:'UNKNOWN_ALIGNMENT',calendarEvidenceKind:calendar?.evidenceKind??'NONE',structuralEligible:false,publishedCanonical:false};
  const scope=interval.scope;
  const calendarTrusted=calendar?.state==='VERIFIED_RESEARCH_INPUT'&&calendar.evidenceId&&calendar.effectiveFrom&&calendar.effectiveThrough&&compatible(scope,calendar.scope)&&iso(calendar.effectiveFrom)<=from&&iso(calendar.effectiveThrough)>=to;
  const records=observations.filter(x=>x.ticker===interval.providerTicker);
@@ -17,11 +24,13 @@ export function verifyInterval({interval,calendar,observations=[],acquisition,wa
  const crossSession=new Map();for(const r of records){const set=crossSession.get(r.window_start)??new Set();set.add(r.session_end_date);crossSession.set(r.window_start,set);}
  if([...crossSession.values()].some(x=>x.size>1))result.revisionState='DISTINCT_SESSION_BUCKETS_UNRESOLVED';
  if(correctionEvidence.length){const valid=correctionEvidence.every(x=>x.state==='VERIFIED_CORRECTION_RESEARCH_INPUT'&&x.evidenceId&&x.supersedesObservationId&&x.correctedObservationId&&x.supersedesObservationId!==x.correctedObservationId&&compatible(scope,x.scope));result.correctionEvidenceState=valid?'EXPLICIT_CORRECTION_EVIDENCE':'UNKNOWN_CORRECTION_EVIDENCE';}
+ let latestArrival=to;
+ if(arrivalEvidence.length){const valid=arrivalEvidence.every(x=>x.kind==='VERIFIED_SOURCE_ARRIVAL_RESEARCH_INPUT'&&x.evidenceId&&compatible(scope,x.scope)&&iso(x.firstPublishedAt)<=now);result.arrivalState=valid?arrivalEvidence.some(x=>iso(x.firstPublishedAt)>to)?'LATE_SOURCE_ROWS_RESEARCH_ONLY':'SOURCE_ARRIVAL_EVIDENCE_RESEARCH_ONLY':'UNKNOWN_SOURCE_ARRIVAL_EVIDENCE';if(valid)latestArrival=Math.max(to,...arrivalEvidence.map(x=>iso(x.firstPublishedAt)));}
  if(!calendarTrusted)return result;
  const matching=calendar.matchingSegments??[],closed=calendar.closedSegments??[];
  const partition=[...matching.map(x=>({...x,type:'MATCHING'})),...closed.map(x=>({...x,type:'CLOSED'}))].map(x=>({from:iso(x.from),to:iso(x.to),type:x.type})).filter(x=>x.to>from&&x.from<to).map(x=>({...x,from:Math.max(from,x.from),to:Math.min(to,x.to)})).sort((a,b)=>a.from-b.from);
  let covered=from;for(const segment of partition){if(segment.from!==covered||segment.to<=segment.from)throw new Error('CALENDAR_PARTITION_NOT_EXACT');covered=segment.to;}if(covered!==to)throw new Error('CALENDAR_PARTITION_NOT_EXACT');
- const scopedWatermark=watermark?.kind==='VERIFIED_SOURCE_COMPLETENESS_WATERMARK_RESEARCH_INPUT'&&watermark.evidenceId&&compatible(scope,watermark.scope)&&typeof watermark.through==='string'&&ns(watermark.through)>=end&&typeof watermark.observedAt==='string'&&iso(watermark.observedAt)<=now&&iso(watermark.observedAt)>=to&&ns(watermark.through)<=BigInt(iso(watermark.observedAt))*1000000n;
+ const scopedWatermark=watermark?.kind==='VERIFIED_SOURCE_COMPLETENESS_WATERMARK_RESEARCH_INPUT'&&watermark.evidenceId&&compatible(scope,watermark.scope)&&typeof watermark.through==='string'&&ns(watermark.through)>=end&&typeof watermark.observedAt==='string'&&iso(watermark.observedAt)<=now&&iso(watermark.observedAt)>=latestArrival&&ns(watermark.through)<=BigInt(iso(watermark.observedAt))*1000000n;
  if(watermark&&!scopedWatermark)result.sourceFinality='INCOMPATIBLE_OR_INSUFFICIENT_WATERMARK';
  if(scopedWatermark){result.sourceFinality='SOURCE_COMPLETENESS_WATERMARK_RESEARCH_ONLY';result.completion=now>=to?'COMPLETED_BY_EXPLICIT_SOURCE_EVIDENCE_RESEARCH_ONLY':'PARTIAL_PERIOD';}
  const isClosed=partition.every(x=>x.type==='CLOSED');
