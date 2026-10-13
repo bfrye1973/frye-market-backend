@@ -28,11 +28,13 @@ export async function capturePages({request,apiKey,fetchImpl=fetch,maxPages=20,m
  return freeze({request:initial,receipts,rows,traversalComplete:failure===null&&next===null,failure,purpose:'ISOLATED_RESEARCH_ONLY',structuralEligible:false});
 }
 const states={pre_open:'PREOPEN',open:'OPEN',close:'CLOSED',pause:'PAUSED',halt:'PAUSED'};
+// Observed provider labels, used only for research scoping; not an approved instrument registry.
+export const outrightNames=['E-mini S&P 500 Futures',"E-mini Standard and Poor's 500 Stock Price Index Futures"];
 export function scheduleLedger(rows,{from,through,traversalComplete}) {
  const validDate=d=>typeof d==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(d)&&Number.isFinite(Date.parse(d+'T00:00:00Z'))&&new Date(d+'T00:00:00Z').toISOString().slice(0,10)===d;
  requireTruth(validDate(from)&&validDate(through)&&from<=through&&(Date.parse(through)-Date.parse(from))/86400000<=800,'TWO_YEAR_LEDGER_RANGE');
  const groups=new Map(),unscoped=[];
- for(const row of rows){if(row.product_code!=='ES'||row.trading_venue!=='XCME'||!validDate(row.session_end_date)){unscoped.push(row);continue;}const g=groups.get(row.session_end_date)??[];g.push(row);groups.set(row.session_end_date,g);}
+ for(const row of rows){if(row.product_code!=='ES'||row.trading_venue!=='XCME'||!outrightNames.includes(row.product_name)||!validDate(row.session_end_date)){unscoped.push(row);continue;}const g=groups.get(row.session_end_date)??[];g.push(row);groups.set(row.session_end_date,g);}
  const dates=[];
  for(let day=Date.parse(from+'T00:00:00Z');day<=Date.parse(through+'T00:00:00Z');day+=86400000){
   const date=new Date(day).toISOString().slice(0,10),source=groups.get(date)??[],events=[...source].sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp));
@@ -41,8 +43,10 @@ export function scheduleLedger(rows,{from,through,traversalComplete}) {
   const repeated=new Set(events.map(x=>hash(x))).size!==events.length;
   const opens=events.filter(x=>x.event==='open'),closes=events.filter(x=>x.event==='close');
   const terminal=events.at(-1)?.event==='close';const matching=[];
+  let phase='CLOSED',invalidSequence=false;
+  for(const event of events){if(event.event==='open'){if(phase==='OPEN')invalidSequence=true;phase='OPEN';}else if(['close','pause','halt'].includes(event.event)){if(phase!=='OPEN')invalidSequence=true;phase='CLOSED';}else if(event.event==='pre_open'&&phase==='OPEN')invalidSequence=true;}
   for(let i=0;i+1<events.length;i++)if(events[i].event==='open'&&Date.parse(events[i+1].timestamp)>Date.parse(events[i].timestamp))matching.push({from:new Date(events[i].timestamp).toISOString(),to:new Date(events[i+1].timestamp).toISOString()});
-  const state=!traversalComplete?'UNKNOWN_INCOMPLETE_TRAVERSAL':!source.length?'UNKNOWN_NO_SCHEDULE_EVENTS':unknown.length?'UNKNOWN_EVENT_SEMANTICS':tie?'UNKNOWN_EVENT_TIMESTAMP_TIE':repeated?'UNKNOWN_REPEATED_SCHEDULE_EVENT':!opens.length||!closes.length||!terminal||!matching.length?'UNKNOWN_INCOMPLETE_SESSION_EVENTS':'PROVIDER_SCHEDULE_CANDIDATE';
+  const state=!traversalComplete?'UNKNOWN_INCOMPLETE_TRAVERSAL':!source.length?'UNKNOWN_NO_SCHEDULE_EVENTS':unknown.length?'UNKNOWN_EVENT_SEMANTICS':tie?'UNKNOWN_EVENT_TIMESTAMP_TIE':repeated?'UNKNOWN_REPEATED_SCHEDULE_EVENT':!opens.length||!closes.length||!terminal||!matching.length||invalidSequence?'UNKNOWN_INCOMPLETE_SESSION_EVENTS':'PROVIDER_SCHEDULE_CANDIDATE';
   dates.push({date,state,eventCount:source.length,sourceEventsDigest:hash(source),events,matchingSegments:matching,unknownEvents:unknown,
    firstOpen:opens[0]?.timestamp??null,lastClose:closes.at(-1)?.timestamp??null,sourceScheduleVersion:'NOT_SUPPLIED',calendarAccepted:false,structuralEligible:false});
  }
