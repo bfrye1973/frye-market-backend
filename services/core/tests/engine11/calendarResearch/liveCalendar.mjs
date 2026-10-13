@@ -1,5 +1,6 @@
 import { mkdir,writeFile } from 'node:fs/promises';
 import { acquireSourceObservations } from '../../../logic/engine11/sourceObservationsV2/provider.js';
+import { bindingFromMetadata } from '../../../logic/engine11/sourceObservationsV2/evidence.js';
 const apiKey=process.env.POLYGON_API_KEY;if(!apiKey)throw new Error('Existing credential required');
 const evidence=[];
 const specs=[
@@ -26,7 +27,10 @@ const metadata=[];
 for(const [label,ticker,date] of [['ESH0-date','ESH0','2020-03-10'],['ESM0-date','ESM0','2020-03-10'],['ESH2020-full-code','ESH2020','2020-03-10'],['ESM2020-full-code','ESM2020','2020-03-10'],['ES-all-product-date',null,'2020-03-10']]){
  const query={product_code:'ES',date,limit:'1000',...(ticker?{ticker}:{})};
  const acquisition=await acquireSourceObservations({request:'https://api.massive.com/futures/v1/contracts?'+new URLSearchParams(query),apiKey,maxPages:1,maxRows:1000});
- const item={label,status:acquisition.status,failure:acquisition.failure,rows:acquisition.rowCount,receipts:acquisition.receipts};metadata.push(item);console.log('CALENDAR_METADATA '+JSON.stringify({...item,receipts:undefined}));
+ let binding=null,bindingFailure=null;
+ if(ticker==='ESH0'||ticker==='ESM0')try{binding=bindingFromMetadata(ticker==='ESH0'?'ESH2020':'ESM2020',ticker,acquisition.receipts[0]);}catch(e){bindingFailure=e.code??'UNRESOLVED';}
+ const item={label,status:acquisition.status,failure:acquisition.failure,rows:acquisition.rowCount,binding,bindingFailure,
+  returnedMetadata:acquisition.receipts.flatMap(r=>r.observations.map(x=>x.payload)),receipts:acquisition.receipts};metadata.push(item);console.log('CALENDAR_METADATA '+JSON.stringify({...item,receipts:undefined}));
 }
 const children=evidence.find(x=>x.name==='2020_conflict_1min').originalReceipts.flatMap(x=>x.observations.map(y=>y.payload));
 const comparisons=[];
