@@ -125,6 +125,24 @@ test("owner MICRO W2 price-only WATCH map, Submicro ABC, Subminute W3 independen
  assert.equal(cards.intraday_submicro.ownerAbcTurns.B.price,7886.5);
  assert.equal(cards.intraday_submicro.ownerAbcTurns.B.time,"2026-10-11 21:00");
  assert.equal(cards.intraday_submicro.ownerAbcTurns.C.price,null);
+ assert.equal(cards.intraday_submicro.fibonacci.modelType,"ABC_C_DOWN_EXTENSION");
+ assert.equal(cards.intraday_submicro.fibonacci.assumedAStartPrice,7897.5);
+ assert.equal(cards.intraday_submicro.fibonacci.assumedAStartTimeVerified,false);
+ assert.equal(cards.intraday_submicro.fibonacci.touchEvidenceAvailable,false);
+ assert.deepEqual(cards.intraday_submicro.levels.map(l=>[l.key,l.price,l.status]),[
+  ["c618",7818.5,"WATCH"],["c1000",7776.5,"WATCH"],
+  ["c1272",7746.5,"WATCH"],["c1618",7708.5,"WATCH"],
+  ["c2000",7666.5,"WATCH"],
+ ]);
+ assert.equal(cards.intraday_submicro.parentWaveCompletionConfirmed,false);
+ assert.equal(cards.micro.levels[0].price,7845.5);
+ assert.equal(cards.micro.levels[0].status,"WATCH");
+ assert.equal(cards.micro.levels[0].ownerReportedTouch,true);
+ assert.equal(cards.micro.levels[0].touchEvidenceType,"OWNER_REPORTED_UNVERIFIED");
+ assert.equal(cards.micro.fibonacci.touchEvidenceAvailable,false);
+ assert.equal(cards.micro.levels[1].ownerReportedTouch,false);
+ assert.equal(cards.subminute.ownerApproxW2Low,7700);
+
  assert.equal(cards.intraday_submicro.fibonacci.available,false);
  assert.equal(cards.intraday_submicro.levels.length,0);
  const micro=cards.micro;
