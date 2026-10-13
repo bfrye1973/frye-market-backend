@@ -78,6 +78,11 @@ export function buildEngine22V3ShadowSnapshot({
   v3Cards[key]={
     degree:d,sourceTimeframe:DEGREE_CANDLE_TIMEFRAMES[d],
     activeWave:shadowState.activeWave,lifecycle:shadowState.lifecycle,
+    ownerCorrectionState:state.ownerCorrectionState??null,
+    ownerW1High:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
+      ? clone(state.anchors?.W1_HIGH??null):null,
+    ownerW1LowPending:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED" &&
+      !state.anchors?.W1_LOW,
     sourceCountId:state.countId,sequenceId:state.sequenceId,
     sequenceDirection:shadowState.sequenceDirection??null,
     dataStatus,sourceCandleCount:node?.sourceCandleCount??0,
