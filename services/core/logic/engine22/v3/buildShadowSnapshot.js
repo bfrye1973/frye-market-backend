@@ -5,12 +5,14 @@ import {projectEngine22V3DegreeFib} from "./projectDegreeFib.js";
 import {projectEngine22V3ActiveWaveFibShadow} from "./projectActiveWaveFibShadow.js";
 import {buildEngine22V3IndependentNodeShadow,DEGREE_CANDLE_TIMEFRAMES} from "./buildIndependentNodeShadow.js";
 import {replayConfirmedEngine22V3LifecycleShadow} from "./replayConfirmedLifecycleShadow.js";
+import {inspectEngine11V2SevenDegreeShadow} from "./inspectEngine11SourceIdentityShadow.js";
 import {buildEngine22V3CrossDegreeWatch} from "./buildCrossDegreeWatch.js";
 import {proposeEngine22V3CanonicalObservation} from "./proposeCanonicalObservation.js";
 const clone=x=>structuredClone(x);
 export function buildEngine22V3ShadowSnapshot({
  canonical=null,evidenceByDegree=null,barsByTf=null,evaluationTimeMs=null,
  sourceByDegree=null,previousFibByDegree=null,rulesByDegree=null,
+ engine11V2SourcePagesByDegree=null,
 }={}){
  const v=validateEngine22V3Canonical(canonical);
  if(!v.ok)return {available:false,reasonCodes:v.errors,shadowOnly:true};
@@ -34,6 +36,8 @@ export function buildEngine22V3ShadowSnapshot({
  const nodes=buildEngine22V3IndependentNodeShadow({
    canonical:effective,barsByTf,evaluationTimeMs,
  });
+ const sourceIdentities=inspectEngine11V2SevenDegreeShadow({canonical:effective,
+   sourcePagesByDegree:engine11V2SourcePagesByDegree});
  const degreeStates={}, wavelengthDegrees={}, displayDegrees={},v3Cards={};
  for(const d of ENGINE22_V3_DEGREES){
   const state=effective.degrees[d],key=d.toLowerCase();
@@ -87,6 +91,7 @@ export function buildEngine22V3ShadowSnapshot({
       lastEvent:replay.events?.at(-1)??null,
     }:null,
     fibonacci:shadowFib,
+    engine11SourceIdentity:sourceIdentities.degrees[key],
     levels:shadowFib.available?clone(shadowFib.levels):[],
     reasonCodes:!validatedHistory?
       ["INSUFFICIENT_HISTORY","VALIDATED_ENGINE11_SOURCE_REQUIRED",...(node?.reasonCodes??[])]:
@@ -122,6 +127,7 @@ export function buildEngine22V3ShadowSnapshot({
   observed,
   // Consumer-safe V3-specific read model. Never replace official degreeStates.
   v3LiveShadow:{available:true,shadowOnly:true,publishAuthorized:false,
+    engine11SourceIdentityOnly:true,
     degreeOrder:ENGINE22_V3_DEGREES.map(d=>d.toLowerCase()),
     degrees:v3Cards,noExecution:true,noPermissionCreated:true,
     officialFibAuthorityChanged:false,anchorPromotionAllowed:false},
