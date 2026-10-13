@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../data/engine22/node-registry");
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../data/engine22/node-registry");
 const hash = x => crypto.createHash("sha256").update(x).digest("hex");
 export const SOURCE_CELL_JSON_SHA256 = "3242facd72f1ec1a1d14db02f5a063f8d3bc0b78018c5d434ceeb164c311d604";
 export const SOURCE_XLSX_SHA256 = "6fb824cc5e8469bc66db004b903fbf3caf537d624ad18fcbc24a20815f9f40a8";
