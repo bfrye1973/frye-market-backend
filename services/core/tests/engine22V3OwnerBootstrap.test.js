@@ -37,7 +37,7 @@ test("snapshot pipeline wires manual canonical bootstrap to existing Engine22 bu
  assert.match(builder,/buildEngine22V3OwnerBootstrap\(/);
  assert.match(builder,/engine22V3Canonical:\s*engine22V3Bootstrap\?\.available === true\s*\? engine22V3Bootstrap\.canonical : null/);
  assert.match(wave,/buildEngine22V3ShadowSnapshot\(\{\s*canonical:input\.engine22V3Canonical,/);
- assert.match(wave,/barsByTf:input\.barsByTf,/);
+ assert.match(wave,/barsByTf:input\.engine22V3BarsByTf \?\? input\.barsByTf,/);
  assert.match(wave,/sourceByDegree:input\.engine22V3ValidatedSourceByDegree/);
  assert.match(wave,/engine22V3Projection:/);
  assert.match(wave,/engine22V3Shadow,/);
