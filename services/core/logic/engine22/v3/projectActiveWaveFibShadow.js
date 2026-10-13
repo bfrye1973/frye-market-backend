@@ -106,7 +106,7 @@ export function projectEngine22V3ActiveWaveFibShadow({
   datasetVersion,priceBasis,
   ...keys.map(key=>key==="COMPLETED_RANGE_EXTREME"?"DEVELOPING":
    [key,a[key]?.price,a[key]?.time].join(":")),base,length,tickSize].join("|");
- const compatible=previous?.available===true&&previous.modelKey===modelKey&&
+ const compatible=sourceQualified && previous?.available===true&&previous.modelKey===modelKey&&
    previous.sourceCountId===s.countId&&previous.degree===degree&&
    previous.seriesId===seriesId&&previous.datasetVersion===datasetVersion;
  const observations=sourceQualified?source.bars.filter(b=>stamp(b)>=Date.parse(waveOrigin.time)):[];
