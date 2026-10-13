@@ -109,13 +109,22 @@ test("existing V3 compatibility projection forwards seven-degree sidecar without
  assert.equal(projected.noExecution,true);
 });
 
-test("actual owner Submicro W3 and Micro W5 expose only provisional anchor Fib WATCH",()=>{
+test("actual owner corrected Submicro W2 awaits W1 low while Micro W5 remains independent",()=>{
  const raw=JSON.parse(fs.readFileSync(new URL("../data/waves/active/active-wave-state-es.json",import.meta.url),"utf8"));
  const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
  assert.equal(initialized.available,true);
  const canonical=structuredClone(initialized.canonical);
  const out=buildEngine22V3ShadowSnapshot({canonical});
- for(const [key,wave] of [["intraday_submicro","W3"],["micro","W5"]]){
+ const sub=out.v3LiveShadow.degrees.intraday_submicro;
+ assert.equal(sub.activeWave,"W2");
+ assert.equal(sub.ownerCorrectionState,"SUBMICRO_W2_OWNER_CORRECTED");
+ assert.equal(sub.ownerW1High.price,7887.25);
+ assert.equal(sub.ownerW1High.time,"2026-08-11 20:00");
+ assert.equal(sub.ownerW1LowPending,true);
+ assert.equal(sub.fibonacci.available,false);
+ assert.equal(sub.levels.length,0);
+ assert.equal(sub.publishAuthorized,false);
+ for(const [key,wave] of [["micro","W5"]]){
   const card=out.v3LiveShadow.degrees[key];
   assert.equal(card.dataStatus,"PROVISIONAL_ANCHOR_FIB",key);
   assert.equal(card.activeWave,wave);
