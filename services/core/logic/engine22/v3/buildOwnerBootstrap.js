@@ -5,12 +5,13 @@ import {ENGINE22_V3_SCHEMA,ENGINE22_V3_DEGREES,ENGINE22_V3_PARENT,validateEngine
 const clone=x=>structuredClone(x);
 const owner={
  // Owner correction 2026-10-12: former W3/W4 hypothesis advanced too early.
- // The August W1 high cannot be paired with the later October W1 low.
- // Preserve only the explicitly owner-supplied W1 high until its preceding low
- // is independently reconciled; NEVER invent a W2 retracement range.
+ // Owner confirmed final W1 endpoints 2026-10-12: October 8 10:30
+ // to October 11 20:00. Supersedes the incorrectly entered August 11 date.
+ // Only owner-provided structural anchors; no candle-touch promotions.
  INTRADAY_SUBMICRO:{activeWave:"W2",ownerCorrectionState:"SUBMICRO_W2_OWNER_CORRECTED",
   sequenceDirection:"UP",anchors:{
-    W1_HIGH:[7887.25,"2026-08-11 20:00"]
+    W1_LOW:[7787.50,"2026-10-08 10:30"],
+    W1_HIGH:[7887.25,"2026-10-11 20:00"]
   }},
  MICRO:{activeWave:"W5",anchors:{
   W1_LOW:[7675,"2026-10-01 07:00"],W1_HIGH:[7805,"2026-10-02 07:00"],

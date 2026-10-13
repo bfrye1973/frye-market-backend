@@ -19,8 +19,9 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  assert.equal(raw.activeStructures.minute.direction,"DOWN");
  assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.activeWave,"W2");
  assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_HIGH.price,7887.25);
- assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_HIGH.time,"2026-08-11 20:00");
- assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW,undefined);
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_HIGH.time,"2026-10-11 20:00");
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.price,7787.5);
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W1_LOW.time,"2026-10-08 10:30");
  assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW,undefined);
  const shadow=buildEngine22V3ShadowSnapshot({canonical:initialized.canonical});
  assert.equal(shadow.available,true,JSON.stringify(shadow.reasonCodes));
