@@ -37,6 +37,36 @@ function provisionalMicroW2Map(state){
  };
 }
 
+// Owner-price scenario: A is provisionally measured from MICRO W1 high
+// (7897.50) to SUBMICRO A low (7787.50). Missing high timestamp and
+// independently accepted completed-bar lineage prohibit confirmed C targets.
+function provisionalSubmicroCMap(sub,micro){
+ const turns=sub?.ownerAbcTurns;
+ const start=micro?.ownerW1HighPrice;
+ const a=turns?.A?.price,b=turns?.B?.price;
+ if(sub?.ownerCorrectionState!=="SUBMICRO_ABC_INSIDE_MICRO_W2" ||
+    !Number.isFinite(start)||!Number.isFinite(a)||!Number.isFinite(b)||
+    !(start>a&&b>a))return null;
+ const length=start-a;
+ const ratios=[["c618",.618],["c1000",1],["c1272",1.272],
+               ["c1618",1.618],["c2000",2]];
+ return {
+  available:true,degree:"INTRADAY_SUBMICRO",activeWave:null,
+  modelType:"ABC_C_DOWN_EXTENSION",projectionBase:b,
+  projectionLength:length,
+  assumedAStartPrice:start,assumedAStartTimeVerified:false,
+  levels:ratios.map(([key,ratio])=>({
+   key,ratio,price:Math.round((b-length*ratio)*4)/4,status:"WATCH",
+   firstTouchedAt:null,firstTouchedBarId:null,
+  })),
+  sourceTimeframe:"5m",anchorOnly:true,provisional:true,
+  touchEvidenceAvailable:false,waveCompletionConfirmed:false,
+  reasonCodes:["OWNER_PRICE_SCENARIO","ASSUMED_A_START_AT_MICRO_W1_HIGH",
+   "A_START_TIME_UNVERIFIED","C_END_UNCONFIRMED","NO_VALIDATED_TOUCH_EVIDENCE"],
+  shadowOnly:true,noExecution:true,noPermissionCreated:true,
+  officialFibAuthorityChanged:false,publishAuthorized:false,
+ };
+}
 export function buildEngine22V3ShadowSnapshot({
  canonical=null,evidenceByDegree=null,barsByTf=null,evaluationTimeMs=null,
  sourceByDegree=null,previousFibByDegree=null,rulesByDegree=null,
@@ -88,7 +118,9 @@ export function buildEngine22V3ShadowSnapshot({
     ...effective,degrees:{...effective.degrees,[d]:shadowState},
   };
   const provisionalMicroFib=d==="MICRO" ? provisionalMicroW2Map(state) : null;
-  const shadowFib=provisionalMicroFib || projectEngine22V3ActiveWaveFibShadow({
+  const provisionalSubmicroFib=d==="INTRADAY_SUBMICRO"
+    ? provisionalSubmicroCMap(state,effective.degrees.MICRO):null;
+  const shadowFib=provisionalMicroFib || provisionalSubmicroFib || projectEngine22V3ActiveWaveFibShadow({
     canonical:projected,degree:d,source,
     previous:previousFibByDegree?.[d]??null,
     anchorOnly:true,
@@ -112,6 +144,7 @@ export function buildEngine22V3ShadowSnapshot({
     correctionDirection:state.correctionDirection??null,
     ownerW1HighPrice:state.ownerW1HighPrice??null,
     ownerW1HighTimeVerified:state.ownerW1HighTimeVerified??null,
+    ownerReportedTouchKeys:clone(state.ownerReportedTouchKeys??[]),
     ownerApproxW2Low:state.ownerApproxW2Low??null,
     ownerAbcTurns:state.ownerCorrectionState==="SUBMICRO_ABC_INSIDE_MICRO_W2"
       ? clone(state.ownerAbcTurns??null):null,
@@ -138,7 +171,14 @@ export function buildEngine22V3ShadowSnapshot({
     }:null,
     fibonacci:shadowFib,
     engine11SourceIdentity:sourceIdentities.degrees[key],
-    levels:shadowFib.available?clone(shadowFib.levels):[],
+    levels:shadowFib.available?shadowFib.levels.map(level=>({
+      ...clone(level),
+      ownerReportedTouch:d==="MICRO" &&
+        (state.ownerReportedTouchKeys??[]).includes(level.key),
+      touchEvidenceType:d==="MICRO" &&
+        (state.ownerReportedTouchKeys??[]).includes(level.key)
+        ? "OWNER_REPORTED_UNVERIFIED":"NO_VALIDATED_TOUCH",
+    })):[],
     reasonCodes:!validatedHistory?
       ["INSUFFICIENT_HISTORY","VALIDATED_ENGINE11_SOURCE_REQUIRED",...(node?.reasonCodes??[])]:
       [...(shadowFib.reasonCodes??[]),...(node?.reasonCodes??[])],
