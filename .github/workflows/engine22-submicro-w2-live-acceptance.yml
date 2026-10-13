@@ -1,0 +1,77 @@
+name: Engine22 SUBMICRO W2 Live Acceptance Read Only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/engine22-submicro-w2-live-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  verify-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify actual production SUBMICRO shadow and all unchanged degrees
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            status=$(curl -sSL --max-time 70 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+            [ "$status" = 200 ] && break
+            echo "ES snapshot HTTP=$status, retrying"; sleep 15
+          done
+          [ "$status" = 200 ]
+          node - "$RUNNER_TEMP/es.json" <<'NODE'
+          const fs=require('node:fs');
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const projection=j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.engine22V3Projection;
+          const d=projection?.v3LiveShadow?.degrees;
+          const s=d?.intraday_submicro;
+          const other={};
+          for(const key of ['micro','subminute','minute','minor','intermediate','primary'])
+            other[key]={wave:d?.[key]?.activeWave,status:d?.[key]?.dataStatus};
+          console.log('SUBMICRO_W2_LIVE',JSON.stringify({
+            now:j.now,wave:s?.activeWave,lifecycle:s?.lifecycle,
+            correction:s?.ownerCorrectionState,high:s?.ownerW1High,
+            lowPending:s?.ownerW1LowPending,fibAvailable:s?.fibonacci?.available,
+            fibLevels:s?.levels?.length,shadow:s?.shadowOnly,
+            noExecution:s?.noExecution,other,legacyPresent:!!j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.degreeStates
+          }));
+          if(s?.activeWave!=='W2' || s?.ownerCorrectionState!=='SUBMICRO_W2_OWNER_CORRECTED' ||
+             s?.ownerW1High?.price!==7887.25 || s?.ownerW1High?.time!=='2026-08-11 20:00' ||
+             s?.ownerW1LowPending!==true || s?.fibonacci?.available!==false ||
+             (s?.levels||[]).length!==0 || s?.shadowOnly!==true || s?.noExecution!==true ||
+             d?.micro?.activeWave!=='W5' || !projection?.shadowOnly)
+             process.exit(2);
+          NODE
+      - name: Capture rendered SUBMICRO W2 card
+        run: |
+          npm install --no-save --no-package-lock playwright@1.57.0
+          npx playwright install chromium
+          node <<'NODE'
+          const { chromium }=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try{
+              const page=await browser.newPage({viewport:{width:1780,height:970}});
+              await page.goto('https://frye-dashboard.onrender.com/strategies?symbol=ES',{waitUntil:'domcontentloaded',timeout:65000});
+              await page.waitForTimeout(22000);
+              const section=page.locator('body');
+              const text=await section.innerText();
+              await page.screenshot({path:process.env.RUNNER_TEMP+'/engine22-submicro-w2-live.png',fullPage:true});
+              const area=text.slice(text.indexOf('Engine 22 Wave Degrees'),text.indexOf('MICRO\nImmediate timing'));
+              const good=area.includes('W2 DOWN')&&area.includes('7887.25')&&
+                area.includes('PENDING VERIFIED W1 LOW')&&!area.includes('W4 DOWN — CURRENT DEVELOPING')&&
+                !area.includes('W3 1.000 VERIFIED TOUCH') && !area.includes('FIB EXTENSIONS — W3_WATCH');
+              console.log('SUBMICRO_VISUAL_W2',JSON.stringify({good,area:area.slice(0,2100)}));
+              if(!good)process.exitCode=3;
+            }finally{await browser.close();}
+          })().catch(e=>{console.error(e);process.exitCode=2;});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine22-submicro-w2-live-screenshot
+          path: ${{ runner.temp }}/engine22-submicro-w2-live.png
+          if-no-files-found: warn
