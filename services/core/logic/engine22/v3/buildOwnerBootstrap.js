@@ -10,6 +10,11 @@ const owner={
   activeWave:null,ownerCorrectionState:"SUBMICRO_ABC_INSIDE_MICRO_W2",
   role:"MICRO_W2_INTERNAL_ABC_DOWN",sequenceDirection:"DOWN",
   correctionDirection:"DOWN",parentWave:"W2",anchors:{},
+  ownerAbcTurns:{
+   A:{price:7787.50,time:"2026-10-08 10:30",status:"OWNER_IDENTIFIED"},
+   B:{price:7886.50,time:"2026-10-11 21:00",status:"OWNER_IDENTIFIED"},
+   C:{price:null,time:null,status:"DEVELOPING_UNCONFIRMED"},
+  },
  },
  // Only W1 low has a supplied timestamp. W1 high *price* is accepted from the
  // owner, but its date/time remains unverified; never mark a dated high locked.
@@ -64,6 +69,7 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
    ownerW1HighPrice:supplied?.ownerW1HighPrice??null,
    ownerW1HighTimeVerified:supplied?.ownerW1HighTimeVerified??null,
    ownerApproxW2Low:supplied?.ownerApproxW2Low??null,
+   ownerAbcTurns:supplied?.ownerAbcTurns?clone(supplied.ownerAbcTurns):null,
    lifecycle:supplied?"DEVELOPING":historical?.stage??"DEVELOPING",
    anchors,history:[{event:"OWNER_V3_BASELINE" ,historicalTransitionsKnown:false,
      source:supplied?"OWNER_CONFIRMED_ANCHORS":"EXISTING_MANUAL_STRUCTURE",
