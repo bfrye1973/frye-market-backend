@@ -133,5 +133,13 @@ test("actual owner Submicro W3 and Micro W5 expose only provisional anchor Fib W
   assert.equal(out.v3LiveShadow.degrees[k].dataStatus,"INSUFFICIENT_HISTORY");
   assert.equal(out.v3LiveShadow.degrees[k].levels.length,0);
  }
+ const micro=out.v3LiveShadow.degrees.micro.fibonacci;
+ const forged={...micro,levels:micro.levels.map((l,i)=>i===0?{
+  ...l,status:"TOUCHED",firstTouchedAt:"2026-10-10T00:00:00Z",
+  firstTouchedBarId:"UNVERIFIED",
+ }:l)};
+ const unchangedTouch=buildEngine22V3ShadowSnapshot({canonical,
+  previousFibByDegree:{MICRO:forged}});
+ assert.ok(unchangedTouch.v3LiveShadow.degrees.micro.levels.every(l=>l.status==="WATCH"));
  assert.deepEqual(initialized.canonical,canonical);
 });
