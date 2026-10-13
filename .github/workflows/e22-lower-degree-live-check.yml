@@ -1,0 +1,75 @@
+name: E22 Lower Degree Live Levels Acceptance
+on:
+  pull_request:
+    paths: ['.github/workflows/e22-lower-degree-live-check.yml']
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Verify production ES snapshot Fibonacci and touch lineage
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6 7 8; do
+            code=$(curl -sSL --max-time 75 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+            [ "$code" = "200" ] && break
+            echo "Snapshot pending: $code"; sleep 20
+          done
+          [ "$code" = "200" ]
+          node - "$RUNNER_TEMP/es.json" <<'NODE'
+          const fs=require('fs'),assert=require('assert').strict;
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const d=j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.engine22V3Projection?.v3LiveShadow?.degrees;
+          const c=d?.intraday_submicro,m=d?.micro,s=d?.subminute;
+          const report={submicroC:c?.levels?.map(l=>[l.key,l.price,l.status]),
+            microW2:m?.levels?.map(l=>[l.key,l.price,l.status,l.ownerReportedTouch]),
+            subminuteW3:s?.activeWave,subminuteApproxW2:s?.ownerApproxW2Low,
+            cAStartAssumption:c?.fibonacci?.assumedAStartPrice,
+            microTouchVerified:m?.fibonacci?.touchEvidenceAvailable,
+            noExecution:c?.noExecution && m?.noExecution && s?.noExecution};
+          console.log('LOWER_DEGREE_LIVE',JSON.stringify(report));
+          assert.equal(c.activeWave,null);
+          assert.equal(c.fibonacci.modelType,'ABC_C_DOWN_EXTENSION');
+          assert.deepEqual(report.submicroC,[['c618',7818.5,'WATCH'],['c1000',7776.5,'WATCH'],
+            ['c1272',7746.5,'WATCH'],['c1618',7708.5,'WATCH'],['c2000',7666.5,'WATCH']]);
+          assert.equal(m.activeWave,'W2');
+          assert.equal(m.levels[0].ownerReportedTouch,true);
+          assert.equal(m.levels[0].status,'WATCH');
+          assert.equal(m.fibonacci.touchEvidenceAvailable,false);
+          assert.equal(s.ownerApproxW2Low,7700);
+          assert.equal(report.noExecution,true);
+          NODE
+      - name: Verify live rendered green level panels
+        shell: bash
+        run: |
+          npm install --no-save --no-package-lock playwright@1.57.0
+          npx playwright install chromium
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const b=await chromium.launch({headless:true});
+            try{
+              const p=await b.newPage({viewport:{width:1800,height:1000}});
+              await p.goto('https://frye-dashboard.onrender.com/strategies?symbol=ES',{waitUntil:'domcontentloaded',timeout:75000});
+              await p.waitForTimeout(20000);
+              const t=await p.locator('body').innerText();
+              const a=t.slice(t.indexOf('Engine 22 Wave Degrees'),t.indexOf('ENGINE 27'));
+              await p.screenshot({path:process.env.RUNNER_TEMP+'/lower-degree-green-levels.png',fullPage:true});
+              const ok=['SUBMICRO levels','MICRO levels','SUBMINUTE levels',
+               '7818.50','7776.50','7845.50','OWNER TOUCH','~7700'].every(v=>a.includes(v));
+              console.log('GREEN_PANELS_DOM',JSON.stringify({ok,text:a.slice(0,3900)}));
+              if(!ok)process.exitCode=2;
+            }finally{await b.close();}
+          })().catch(e=>{console.error(e);process.exitCode=2});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e22-lower-degree-green-levels
+          path: ${{ runner.temp }}/lower-degree-green-levels.png
+          if-no-files-found: warn
