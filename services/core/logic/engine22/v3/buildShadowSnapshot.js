@@ -113,7 +113,10 @@ export function buildEngine22V3ShadowSnapshot({
     ownerW1HighPrice:state.ownerW1HighPrice??null,
     ownerW1HighTimeVerified:state.ownerW1HighTimeVerified??null,
     ownerApproxW2Low:state.ownerApproxW2Low??null,
-    abcLeg:"UNCONFIRMED",
+    ownerAbcTurns:state.ownerCorrectionState==="SUBMICRO_ABC_INSIDE_MICRO_W2"
+      ? clone(state.ownerAbcTurns??null):null,
+    abcLeg:state.ownerCorrectionState==="SUBMICRO_ABC_INSIDE_MICRO_W2"
+      ? "C_DOWN_DEVELOPING_UNCONFIRMED":"UNCONFIRMED",
     parentWaveCompletionConfirmed:false,
     ownerW1High:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
       ? clone(state.anchors?.W1_HIGH??null):null,
