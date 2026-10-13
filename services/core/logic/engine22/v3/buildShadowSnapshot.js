@@ -9,6 +9,34 @@ import {inspectEngine11V2SevenDegreeShadow} from "./inspectEngine11SourceIdentit
 import {buildEngine22V3CrossDegreeWatch} from "./buildCrossDegreeWatch.js";
 import {proposeEngine22V3CanonicalObservation} from "./proposeCanonicalObservation.js";
 const clone=x=>structuredClone(x);
+// Price-only W2 planning map where the owner has confirmed both prices but
+// not the W1 high timestamp. This cannot provide structural confirmation,
+// authoritative Fibonacci, completed-bar touches, or execution permission.
+function provisionalMicroW2Map(state){
+ const low=state.anchors?.W1_LOW;
+ const high=state.ownerW1HighPrice;
+ if(state.ownerCorrectionState!=="MICRO_W2_OWNER_RECOUNT" ||
+    low?.status!=="CONFIRMED" || !Number.isFinite(low.price) ||
+    !Number.isFinite(high) || high<=low.price)return null;
+ const ratios=[["r236",.236],["r382",.382],["r500",.5],
+               ["r618",.618],["r786",.786]];
+ return {
+  available:true,degree:"MICRO",activeWave:"W2",modelType:"RETRACEMENT",
+  modelKey:["MICRO_OWNER_PRICE_ONLY_W2",low.price,low.time,high].join("|"),
+  projectionBase:high,projectionLength:high-low.price,
+  levels:ratios.map(([key,ratio])=>({
+   key,ratio,price:Math.round((high-(high-low.price)*ratio)*4)/4,
+   status:"WATCH",firstTouchedAt:null,firstTouchedBarId:null,
+  })),
+  sourceTimeframe:"10m",anchorOnly:true,provisional:true,
+  touchEvidenceAvailable:false,waveCompletionConfirmed:false,
+  reasonCodes:["OWNER_PRICE_ONLY","W1_HIGH_TIMESTAMP_UNVERIFIED",
+               "NO_VALIDATED_TOUCH_EVIDENCE"],
+  shadowOnly:true,noExecution:true,noPermissionCreated:true,
+  officialFibAuthorityChanged:false,publishAuthorized:false,
+ };
+}
+
 export function buildEngine22V3ShadowSnapshot({
  canonical=null,evidenceByDegree=null,barsByTf=null,evaluationTimeMs=null,
  sourceByDegree=null,previousFibByDegree=null,rulesByDegree=null,
@@ -59,7 +87,8 @@ export function buildEngine22V3ShadowSnapshot({
   const projected=shadowState===state?effective:{
     ...effective,degrees:{...effective.degrees,[d]:shadowState},
   };
-  const shadowFib=projectEngine22V3ActiveWaveFibShadow({
+  const provisionalMicroFib=d==="MICRO" ? provisionalMicroW2Map(state) : null;
+  const shadowFib=provisionalMicroFib || projectEngine22V3ActiveWaveFibShadow({
     canonical:projected,degree:d,source,
     previous:previousFibByDegree?.[d]??null,
     anchorOnly:true,
@@ -79,6 +108,13 @@ export function buildEngine22V3ShadowSnapshot({
     degree:d,sourceTimeframe:DEGREE_CANDLE_TIMEFRAMES[d],
     activeWave:shadowState.activeWave,lifecycle:shadowState.lifecycle,
     ownerCorrectionState:state.ownerCorrectionState??null,
+    ownerRole:state.ownerRole??null,
+    correctionDirection:state.correctionDirection??null,
+    ownerW1HighPrice:state.ownerW1HighPrice??null,
+    ownerW1HighTimeVerified:state.ownerW1HighTimeVerified??null,
+    ownerApproxW2Low:state.ownerApproxW2Low??null,
+    abcLeg:"UNCONFIRMED",
+    parentWaveCompletionConfirmed:false,
     ownerW1High:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
       ? clone(state.anchors?.W1_HIGH??null):null,
     ownerW1Low:state.ownerCorrectionState==="SUBMICRO_W2_OWNER_CORRECTED"
