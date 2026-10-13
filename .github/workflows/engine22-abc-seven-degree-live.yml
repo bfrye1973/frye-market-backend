@@ -1,0 +1,97 @@
+name: Engine22 Seven Degree Micro W2 ABC Live Read-Only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/engine22-abc-seven-degree-live.yml'
+permissions:
+  contents: read
+jobs:
+  live-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check live ES owner V3 structure independently of trading
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6 7 8; do
+            status=$(curl -sSL --max-time 70 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+            [ "$status" = "200" ] && break
+            echo "Snapshot warming: $status"; sleep 20
+          done
+          [ "$status" = "200" ]
+          node - "$RUNNER_TEMP/es.json" <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const w=j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
+          const p=w?.engine22V3Projection;
+          const d=p?.v3LiveShadow?.degrees;
+          const micro=d?.micro, sub=d?.intraday_submicro, subminute=d?.subminute;
+          const levels=micro?.levels?.map(x=>[x.key,x.price,x.status]);
+          console.log('E22_SEVEN_ABC_LIVE',JSON.stringify({
+            time:j.now,allDegrees:Object.keys(d||{}),microWave:micro?.activeWave,
+            ownerHigh:micro?.ownerW1HighPrice,highTimeVerified:micro?.ownerW1HighTimeVerified,
+            microLevels:levels,submicroRole:sub?.ownerRole,submicroWave:sub?.activeWave,
+            subminuteWave:subminute?.activeWave,subminuteApproxLow:subminute?.ownerApproxW2Low,
+            noExecution:micro?.noExecution,legacyDegreeStatesPresent:!!w?.degreeStates,
+            engine6Present:!!j.strategies?.['intraday_scalp@10m']?.engine6,
+          }));
+          assert.equal(Object.keys(d||{}).length,7);
+          assert.equal(sub.ownerRole,'MICRO_W2_INTERNAL_ABC_DOWN');
+          assert.equal(sub.activeWave,null);
+          assert.equal(sub.abcLeg,'UNCONFIRMED');
+          assert.equal(sub.parentWaveCompletionConfirmed,false);
+          assert.equal(micro.activeWave,'W2');
+          assert.equal(micro.ownerW1HighPrice,7897.5);
+          assert.equal(micro.ownerW1HighTimeVerified,false);
+          assert.equal(micro.fibonacci.provisional,true);
+          assert.equal(micro.fibonacci.touchEvidenceAvailable,false);
+          assert.deepEqual(levels,[
+            ['r236',7845.5,'WATCH'],['r382',7813.25,'WATCH'],
+            ['r500',7787.5,'WATCH'],['r618',7761.5,'WATCH'],
+            ['r786',7724.5,'WATCH'],
+          ]);
+          assert.equal(subminute.activeWave,'W3');
+          assert.equal(subminute.ownerApproxW2Low,7700);
+          assert.equal(micro.noExecution,true);
+          assert.ok(w.degreeStates);
+          NODE
+      - name: Verify actual seven-card Strategies display and screenshot
+        shell: bash
+        run: |
+          npm install --no-save --no-package-lock playwright@1.57.0
+          npx playwright install chromium
+          node <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try{
+              const page=await browser.newPage({viewport:{width:1800,height:1000}});
+              await page.goto('https://frye-dashboard.onrender.com/strategies?symbol=ES',{waitUntil:'domcontentloaded',timeout:70000});
+              await page.waitForTimeout(20000);
+              const all=await page.locator('body').innerText();
+              await page.screenshot({path:process.env.RUNNER_TEMP+'/engine22-seven-degree-abc.png',fullPage:true});
+              const start=all.indexOf('Engine 22 Wave Degrees');
+              const context=all.slice(start,start+6500);
+              const checks={
+                seven: ['SUBMICRO','MICRO','SUBMINUTE','MINUTE','MINOR','INTERMEDIATE','PRIMARY'].every(t=>context.includes(t)),
+                abc:context.includes('A–B–C DOWN'),
+                microW2:context.includes('W2 DOWN — DEVELOPING (OWNER SHADOW)'),
+                high:context.includes('7897.5'),
+                fib: ['7845.50','7813.25','7787.50','7761.50','7724.50'].every(t=>context.includes(t)),
+                subminuteW3:context.includes('W3 DEVELOPING — OWNER SHADOW'),
+              };
+              console.log('E22_ABC_DOM_LIVE',JSON.stringify({checks,context:context.slice(0,3500)}));
+              if(Object.values(checks).some(v=>!v))process.exitCode=2;
+            }finally{await browser.close()}
+          })().catch(e=>{console.error(e);process.exitCode=2});
+          NODE
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine22-seven-degree-micro-w2-abc
+          path: ${{ runner.temp }}/engine22-seven-degree-abc.png
+          if-no-files-found: warn
