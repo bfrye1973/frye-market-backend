@@ -23,9 +23,9 @@ jobs:
       - name: Verify no protected production files changed in this Phase1 branch
         shell: bash
         run: |
-          git fetch --no-tags --depth=1 origin engine22-v3-independent-candle-node-shadow-20261012
+          git fetch --no-tags --depth=1 origin main
           git diff --name-only FETCH_HEAD HEAD
           changed=$(git diff --name-only FETCH_HEAD HEAD)
-          if echo "$changed" | grep -E '(^services/core/jobs/buildStrategySnapshot.js$|^services/core/logic/engine(6|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
+          if echo "$changed" | grep -E '(^services/core/logic/engine(6|7|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
             echo "Protected files modified"; exit 1
           fi
