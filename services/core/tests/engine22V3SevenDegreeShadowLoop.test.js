@@ -119,7 +119,12 @@ test("owner MICRO W2 price-only WATCH map, Submicro ABC, Subminute W3 independen
  assert.equal(cards.intraday_submicro.activeWave,null);
  assert.equal(cards.intraday_submicro.ownerRole,"MICRO_W2_INTERNAL_ABC_DOWN");
  assert.equal(cards.intraday_submicro.parentWaveCompletionConfirmed,false);
- assert.equal(cards.intraday_submicro.abcLeg,"UNCONFIRMED");
+ assert.equal(cards.intraday_submicro.abcLeg,"C_DOWN_DEVELOPING_UNCONFIRMED");
+ assert.equal(cards.intraday_submicro.ownerAbcTurns.A.price,7787.5);
+ assert.equal(cards.intraday_submicro.ownerAbcTurns.A.time,"2026-10-08 10:30");
+ assert.equal(cards.intraday_submicro.ownerAbcTurns.B.price,7886.5);
+ assert.equal(cards.intraday_submicro.ownerAbcTurns.B.time,"2026-10-11 21:00");
+ assert.equal(cards.intraday_submicro.ownerAbcTurns.C.price,null);
  assert.equal(cards.intraday_submicro.fibonacci.available,false);
  assert.equal(cards.intraday_submicro.levels.length,0);
  const micro=cards.micro;
