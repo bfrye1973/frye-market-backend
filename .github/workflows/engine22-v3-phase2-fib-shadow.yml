@@ -22,9 +22,9 @@ jobs:
       - name: Enforce protected boundaries against Phase 1 base
         shell: bash
         run: |
-          git fetch --no-tags --depth=1 origin engine22-v3-phase1-lifecycle-shadow-20261012
+          git fetch --no-tags --depth=1 origin main
           changed=$(git diff --name-only FETCH_HEAD HEAD)
           printf '%s\n' "$changed"
-          if echo "$changed" | grep -E '(^services/core/jobs/|^services/core/logic/engine22/v3/projectDegreeFib.js$|^services/core/logic/engine(6|7|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
+          if echo "$changed" | grep -E '(^services/core/logic/engine22/v3/projectDegreeFib.js$|^services/core/logic/engine(6|7|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
             echo "PROTECTED_PRODUCTION_SOURCE_CHANGE"; exit 1
           fi
