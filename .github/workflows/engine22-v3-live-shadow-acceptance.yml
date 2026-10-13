@@ -1,0 +1,61 @@
+name: Engine22 V3 Live Shadow Acceptance - Read Only
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/engine22-v3-live-shadow-acceptance.yml'
+permissions:
+  contents: read
+jobs:
+  check-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Inspect live production ES snapshot, no writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=$(curl --silent --show-error --location --retry 2 --retry-delay 5 --max-time 100 -w '%{http_code}' -o "$RUNNER_TEMP/es-live.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+          echo "ES_SNAPSHOT_HTTP=$status"
+          if [ "$status" != "200" ]; then head -c 400 "$RUNNER_TEMP/es-live.json"; exit 1; fi
+          node - "$RUNNER_TEMP/es-live.json" <<'NODE'
+          const fs=require('node:fs');
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const strategy=j.strategies?.['intraday_scalp@10m'];
+          const w=strategy?.engine22WaveStrategy;
+          const p=w?.engine22V3Projection;
+          const shadow=p?.v3LiveShadow;
+          const names=['intraday_submicro','micro','subminute','minute','minor','intermediate','primary'];
+          const report={schema:j.ok,snapshotTime:j.now||j.ts,
+            waveStrategyPresent:!!w,v3ProjectionAvailable:p?.available,
+            v3ShadowOnly:shadow?.shadowOnly,noExecution:shadow?.noExecution,
+            legacyDegreeStates:!!w?.degreeStates,
+            legacyWaveDisplay:!!w?.engine22Display,
+            legacyCurrentWavelength:!!w?.currentWavelength,
+            keys: names.map(key=>{const d=shadow?.degrees?.[key];return {
+              degree:key,present:!!d,activeWave:d?.activeWave,
+              lifecycle:d?.lifecycle,status:d?.dataStatus,
+              fibCount:d?.levels?.length||0,fibModel:d?.fibonacci?.modelType,
+              provisional:d?.fibonacci?.provisional,
+              noExecution:d?.noExecution,
+              sourceIdentityStatus:d?.engine11SourceIdentity?.status,
+            }}),
+            tradeDecisionPresent:!!w?.tradeDecision,
+            engine6Present:!!strategy?.engine6v2||!!strategy?.engine6,
+          };
+          console.log('V3_LIVE_ACCEPTANCE_REPORT',JSON.stringify(report));
+          if(!w||!p?.available||!shadow?.shadowOnly||shadow?.noExecution!==true ||
+             !w.degreeStates||!w.engine22Display||!w.currentWavelength ||
+             !names.every(name=>shadow.degrees?.[name]?.shadowOnly===true &&
+               shadow.degrees[name].noExecution===true))
+            process.exit(2);
+          NODE
+      - name: Verify production frontend is publicly reachable
+        shell: bash
+        run: |
+          status=$(curl --silent --show-error --location --retry 2 --max-time 45 -w '%{http_code}' -o "$RUNNER_TEMP/ui.html" 'https://frye-dashboard.onrender.com')
+          echo "DASHBOARD_HTTP=$status"
+          [ "$status" = "200" ]
+          grep -Eqi '<html|<!doctype' "$RUNNER_TEMP/ui.html"
