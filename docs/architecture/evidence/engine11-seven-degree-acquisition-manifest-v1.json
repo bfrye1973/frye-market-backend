@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "engine11.node-reconciliation-manifest.research.v1",
+  "asOf": "2026-10-13T23:10:38.266Z",
+  "originalUncompressedSha256": "0177e95c58e711d78456b00d952d56f0efe77d64d195a5c86024b0d9cff5b0e4",
+  "workbookSha256": "6fb824cc5e8469bc66db004b903fbf3caf537d624ad18fcbc24a20815f9f40a8",
+  "nodeCount": 40,
+  "fibCount": 34,
+  "queryCount": 280,
+  "successfulQueries": 280,
+  "rows": 8422,
+  "failures": [],
+  "receiptCount": 280,
+  "structuralEligible": false
+}

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "engine11.seven-degree-node-price-reconciliation.research.v1",
+  "reportSha256": "2aa5700c8672456fd9a86a91d9a019ba630e90df02befb39c35a4acee187a119",
+  "originalEvidenceSha256": "0177e95c58e711d78456b00d952d56f0efe77d64d195a5c86024b0d9cff5b0e4",
+  "workbookSha256": "6fb824cc5e8469bc66db004b903fbf3caf537d624ad18fcbc24a20815f9f40a8",
+  "datasetVersion": "node-research-dataset:887b284abd2906788b45902cbf7d00055998dc09533f70ed1ee3b03c15ab6ddd",
+  "summary": {
+    "nodes": 40,
+    "priceBearing": 24,
+    "blankPlaceholders": 16,
+    "results": {
+      "VERIFIED MATCH": 0,
+      "CANDIDATE MATCH": 0,
+      "CONFLICT": 14,
+      "UNRESOLVED": 26
+    },
+    "candidateCandleRows": 0,
+    "fibs": 34,
+    "verifiedCanonicalCandles": 0
+  },
+  "bodyEncoding": "ZLIB_BASE64_OF_MINIFIED_UTF8_JSON",
+  "structuralEligible": false
+}
