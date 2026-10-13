@@ -1,0 +1,44 @@
+name: Live Participation Yield Diagnostic
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect live endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS https://frye-market-backend-1.onrender.com/live/intraday -o /tmp/intraday.json
+          curl -fsS https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard -o /tmp/e25.json
+          echo "=== LIVE INTRADAY ==="
+          jq '{
+            updated_at_utc,
+            updated_at,
+            meta,
+            sectorCardsCount: (.sectorCards|length),
+            totals: {
+              up: ([.sectorCards[]?.up // 0] | add),
+              down: ([.sectorCards[]?.down // 0] | add),
+              advancingVolume: ([.sectorCards[]?.advancingVolume // 0] | add),
+              decliningVolume: ([.sectorCards[]?.decliningVolume // 0] | add)
+            }
+          }' /tmp/intraday.json
+          echo "=== PARTICIPATION ==="
+          jq '{
+            generatedAt: .participationArtifact.generatedAt,
+            freshness: .participationArtifact.freshness.intraday,
+            upDown: .participationArtifact.participation.upDown,
+            stockVolume: .participationArtifact.participation.stockVolume.intraday
+          }' /tmp/e25.json
+          echo "=== YIELDS ==="
+          jq '{
+            ten: .intradayMacro.trendComparisons.tenYearYield,
+            thirty: .intradayMacro.trendComparisons.thirtyYearYield,
+            tnxDiag: .intradayMacro.providerDiagnostics.TNX,
+            tyxDiag: .intradayMacro.providerDiagnostics.TYX
+          }' /tmp/e25.json
