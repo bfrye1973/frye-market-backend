@@ -1,0 +1,41 @@
+name: Engine 11 seven-degree historical price reconciliation
+on:
+  push:
+    branches: [engine11-seven-degree-price-reconciliation-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/nodeReconciliationResearchV1/**
+      - services/core/tests/engine11/nodeReconciliationResearch/**
+      - .github/workflows/engine11-node-reconciliation.yml
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs services/core/tests/engine11/calendarPrototype/*.test.mjs services/core/tests/engine11/twoYearResearch/*.test.mjs services/core/tests/engine11/finalityResearch/*.test.mjs services/core/tests/engine11/acceptanceResearch/*.test.mjs services/core/tests/engine11/evidenceTierResearch/*.test.mjs services/core/tests/engine11/finalCompatibilityResearch/*.test.mjs services/core/tests/engine11/nodeReconciliationResearch/*.test.mjs
+  live-read-only-handoff:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[node-live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/checkout@v4
+        with:
+          ref: 482ef74bc46367718fb207148d5e92a7b0cc248a
+          path: registry-source
+      - env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node services/core/tests/engine11/nodeReconciliationResearch/acquire.mjs registry-source research-evidence
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine11-node-reconciliation-original
+          path: research-evidence/node-reconciliation-*
+          retention-days: 30

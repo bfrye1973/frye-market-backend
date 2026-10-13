@@ -1,0 +1,11 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {coordinate,contractPair,researchRolls,buildPlan,nano} from '../../../logic/engine11/nodeReconciliationResearchV1/plan.js';
+const node={id:'FIXTURE',degree:'MINOR',price:6496,rawDate:46111,rawTime:2/3};
+test('owner March30 correction remains March30 16:00 without timezone certification',()=>{const c=coordinate(node);assert.equal(c.date,'2026-03-30');assert.equal(c.recordedLocalTime,'2026-03-30T16:00:00');assert.equal(c.utcCandidates[0].utc,'2026-03-30T23:00:00.000Z');assert.match(c.state,/UNCONFIRMED/);});
+test('malformed 7/29/206 cannot become a guessed 2026 timestamp',()=>assert.equal(coordinate({...node,rawDate:'7/29/206',rawTime:1}).utcCandidates.length,0));
+test('blank placeholders and 24h durations cannot fabricate endpoints',()=>{assert.equal(coordinate({...node,price:null}).state,'BLANK_PRICE_PLACEHOLDER');assert.equal(coordinate({...node,rawTime:1}).state,'UNRESOLVED_TIME_OR_DURATION');});
+test('September overlap explicitly retains both full contracts',()=>assert.deepEqual(contractPair('2026-09-16').map(x=>x.full),['ESU2026','ESZ2026']));
+test('old contract aliases never remove full-year context',()=>assert.deepEqual(contractPair('2020-03-24').map(x=>x.full),['ESM2020','ESU2020']));
+test('roll calendar research is never TradingView switch confirmation',()=>{const r=researchRolls().find(x=>x.old.full==='ESU2026');assert.equal(r.rollDate,'2026-09-14');assert.equal(r.tradingViewSwitchVerified,false);assert.equal(researchRolls().length,26);});
+test('diagnostic minute queries never replace structural native intervals',()=>{const p=buildPlan([node]);assert.ok(p.queries.some(q=>q.purpose==='NODE_NATIVE_FRAME'&&q.resolution==='1session'));assert.ok(p.queries.some(q=>q.timeframe==='1m_DIAGNOSTIC_NOT_STRUCTURAL'));assert.equal(p.structuralEligible,false);});
+test('nanosecond query construction preserves exact integer magnitude',()=>assert.equal(nano('2026-03-30T23:00:00.000Z'),'1774911600000000000'));
