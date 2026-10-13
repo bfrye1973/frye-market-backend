@@ -1,0 +1,3985 @@
+{
+  "schemaVersion": "engine11.final-compatibility-evidence.v1",
+  "captures": {
+    "core": {
+      "url": "https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1",
+      "startedAt": "2026-10-13T18:52:33.344Z",
+      "observedAt": "2026-10-13T18:52:34.398Z",
+      "httpStatus": 200,
+      "bodySha256": "83b4565a402362637fbb2353da2c0df8dbc9f9a09d3d0e0bb9e3926cac52e06f",
+      "etag": null,
+      "selected": {
+        "schemaVersion": "engine11.engine22-publication-capture.v1",
+        "state": "CAPTURED_OWNER_PUBLICATIONS_NOT_APPROVAL",
+        "strategyPublicationHash": "0709338293b5cb0b561bae416fa1e9e6109a412a91f397ba5e22d376132a20aa",
+        "snapshotMetadata": {
+          "symbol": "ES",
+          "generatedAt": null,
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "schemaVersion": null
+        },
+        "strategyMetadata": {
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "schemaVersion": null,
+          "authority": null,
+          "sourceMode": null
+        },
+        "wavelengthMetadata": {
+          "canonicalWaveStateConflict": true,
+          "canonicalWaveStateConflictReason": null,
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "sourceMode": "OVERRIDE_DISPLAY_INTELLIGENCE",
+          "authority": null
+        },
+        "degrees": [
+          {
+            "degree": "submicro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.submicro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "submicro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.submicro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "micro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.micro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "micro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro",
+            "available": true,
+            "selected": {
+              "activeWave": "W3_WATCH",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": null,
+              "role": "TIMING_ONLY",
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [],
+              "invalidation": 7782.75,
+              "microSequence": {
+                "version": "engine22.microWaveSequence.v1",
+                "role": "TIMING_ONLY",
+                "origin": 7782.75,
+                "invalidation": 7782.75,
+                "anchorProvenance": {
+                  "source": "MANAGER_LOCKED_MICRO_W4_LOW",
+                  "price": 7782.75,
+                  "timestamp": "2026-10-08 07:00"
+                },
+                "referenceLength": 130,
+                "currentPrice": 7847.5,
+                "activeWave": "W3_WATCH",
+                "state": "MICRO_W3_SETUP_WATCH",
+                "confirmationStatus": "W2_CONFIRMED_W3_PENDING",
+                "candidateW1High": 7853.75,
+                "confirmedW1High": 7843,
+                "w1ConfirmationSource": "FIVE_MIN_STRUCTURAL_EVIDENCE",
+                "w1Completion": {
+                  "state": "LOCKED",
+                  "anchor": 7843,
+                  "evidence": {
+                    "timeframe": "5m",
+                    "immutable": true
+                  },
+                  "reasonCodes": [
+                    "ANCHOR_LOCKED_NO_REPAINT"
+                  ]
+                },
+                "w2Completion": {
+                  "state": "LOCKED",
+                  "anchor": 7826.75,
+                  "evidence": {
+                    "timeframe": "5m",
+                    "immutable": true
+                  },
+                  "reasonCodes": [
+                    "ANCHOR_LOCKED_NO_REPAINT"
+                  ]
+                },
+                "projectedW1": [
+                  {
+                    "key": "e382",
+                    "label": "0.382",
+                    "price": 7832.5,
+                    "status": "TOUCHED",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e500",
+                    "label": "0.500",
+                    "price": 7847.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e618",
+                    "label": "0.618",
+                    "price": 7863,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1000",
+                    "label": "1.000",
+                    "price": 7912.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1272",
+                    "label": "1.272",
+                    "price": 7948,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1618",
+                    "label": "1.618",
+                    "price": 7993,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e2000",
+                    "label": "2.000",
+                    "price": 8042.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  }
+                ],
+                "projectedW2": [
+                  {
+                    "key": "r236",
+                    "label": "0.236",
+                    "price": 7828.75,
+                    "status": "TOUCHED",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r382",
+                    "label": "0.382",
+                    "price": 7820,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r500",
+                    "label": "0.500",
+                    "price": 7813,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r618",
+                    "label": "0.618",
+                    "price": 7805.75,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r786",
+                    "label": "0.786",
+                    "price": 7795.75,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  }
+                ],
+                "w2TargetsAvailable": true,
+                "confirmedW2Low": 7826.75,
+                "rules": {
+                  "completion": "EXPLICIT_VALIDATED_W1_COMPLETION_EVIDENCE_REQUIRED",
+                  "wave2": "PROJECT_RETRACEMENTS_ONLY_AFTER_CONFIRMED_W1_HIGH",
+                  "wave3": "WAIT_FOR_CONFIRMED_W2_LOW"
+                },
+                "noPermissionCreated": true,
+                "noExecution": true,
+                "noSizing": true,
+                "resetReasonCodes": [],
+                "w1LastObservedBarTime": 1791917100,
+                "w1ConfirmedAtBarTime": 1791525600,
+                "w2LastObservedBarTime": 1791917100,
+                "w2CandidateLow": 7826.75
+              }
+            },
+            "publicationHash": "b459b6ded592bdf8cc14abea45ba2c5cca414ecef0454e56121548b2322a3df7",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.anchorProvenance.timestamp",
+                "originalValue": "2026-10-08 07:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w1LastObservedBarTime",
+                "originalValue": 1791917100,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w1ConfirmedAtBarTime",
+                "originalValue": 1791525600,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w2LastObservedBarTime",
+                "originalValue": 1791917100,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "subminute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.subminute",
+            "available": true,
+            "selected": {
+              "activeWave": null,
+              "currentWave": null,
+              "status": null,
+              "stage": "SUBMINUTE_TIMING_CONTEXT_INSIDE_MINUTE_W2_C_DOWN",
+              "currentRead": "SUBMINUTE_TIMING_CONTEXT_ONLY_FOR_MINUTE_W2_C_DOWN",
+              "direction": "DOWN",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "subminute",
+                "activeWave": null,
+                "direction": "DOWN",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": null,
+                "W2": null,
+                "W3": null,
+                "W4": null,
+                "W5": null,
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "c8780eef4785c1fec6bacd073585051481a8aa12908159b2b7b4f8c173d164f7",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "subminute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.subminute",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7780,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7813.75,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7847.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25,
+                  "note": "Historical .618 touch per Manager; projected price is provisional pending anchor review."
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7955.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 8033,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 8131.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8240,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                }
+              ],
+              "invalidation": 7671.5,
+              "microSequence": null
+            },
+            "publicationHash": "bbf550332efe1ab08fe4eb75e7f407c859b29ab0ea45d3175ae27d164c4efd1f",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "minute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute",
+            "available": true,
+            "selected": {
+              "activeWave": "W2",
+              "currentWave": null,
+              "status": null,
+              "stage": "MINUTE_W2_ABC_PULLBACK_ACTIVE_C_DOWN_WATCH",
+              "currentRead": "MINUTE_W2_C_DOWN_ACTIVE_FROM_B_HIGH_7810_75",
+              "direction": "DOWN",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "minute",
+                "activeWave": "W2",
+                "direction": "DOWN",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 7848.5,
+                  "time": "2026-09-23",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINUTE_W1_UP_FROM_7591",
+                    "HIGH_REFERENCE_7848_50",
+                    "FOLLOWED_BY_W2_ABC_PULLBACK"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 0,
+                  "time": null,
+                  "status": "CANDIDATE",
+                  "confidence": "MEDIUM",
+                  "maturity": "CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "A_DOWN_COMPLETED_AT_7707_25_ON_2026_09_24_1430",
+                    "B_UP_COMPLETED_CANDIDATE_AT_7810_75_ON_2026_09_25_1000",
+                    "C_DOWN_ACTIVE_OR_EXPECTED_FROM_7810_75",
+                    "MINUTE_W3_NOT_CONFIRMED_YET"
+                  ],
+                  "reasonCodes": []
+                },
+                "W3": {
+                  "price": null,
+                  "time": null,
+                  "status": "NOT_CONFIRMED",
+                  "confidence": "LOW",
+                  "maturity": "NOT_CONFIRMED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "REQUIRES_RECLAIM_7848_50",
+                    "STRONGER_CONFIRMATION_ABOVE_7906_25"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": null,
+                "W5": null,
+                "A": {
+                  "price": 7707.25,
+                  "time": "2026-09-24 14:30",
+                  "status": "COMPLETED",
+                  "confidence": null,
+                  "maturity": "COMPLETED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "B": {
+                  "price": 7810.75,
+                  "time": "2026-09-25 10:00",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": null,
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "C": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE_OR_EXPECTED",
+                  "confidence": null,
+                  "maturity": "ACTIVE_OR_EXPECTED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "103d9363944b5deac8a10f35327f963b743eb69ef36d1a5e18e56fbed8a8d503",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.W1.time",
+                "originalValue": "2026-09-23",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.A.time",
+                "originalValue": "2026-09-24 14:30",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.B.time",
+                "originalValue": "2026-09-25 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "minute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.minute",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7674.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7704.75,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7735.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7833.5,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 7903.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 7992.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8091,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                }
+              ],
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "04572a5bdc5f907dede95228531d7219e197770405177dc753064050b7f85644",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "minor",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W2_PULLBACK_ACTIVE",
+              "currentRead": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W3_NOT_CONFIRMED",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "minor",
+                "activeWave": "W5",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 6948.75,
+                  "time": "2026-04-10 08:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W1_LOW_6417_ON_2026_03_30_1700",
+                    "MINOR_W1_HIGH_6948_75_ON_2026_04_10_0800",
+                    "MINOR_W1_IDENTIFIED_FROM_INTERNAL_PULLBACK_STRUCTURE"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 6829,
+                  "time": "2026-04-12 15:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W2_COMPLETED_AT_6829_ON_2026_04_12_1500",
+                    "ONLY_LEGITIMATE_3H_PULLBACK_INSIDE_APRIL_JUNE_RUN",
+                    "MINOR_W3_STARTED_FROM_6829"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": 7694.25,
+                  "time": "2026-06-02 19:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W3_COMPLETED_NEAR_7694_25",
+                    "APRIL_TO_JUNE_RUN_COMPLETED_AS_MINOR_W3_NOT_MINOR_W1",
+                    "FOLLOWED_BY_SIDEWAYS_OVERLAPPING_ABCDE_PULLBACK",
+                    "CURRENT_CONSOLIDATION_HAS_W4_PERSONALITY"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": {
+                  "price": 7398,
+                  "time": "2026-07-29 13:30",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": "HIGH",
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "BRIAN_LOCKED_MINOR_W4_COMPLETED_AT_7398_ON_2026_07_29_1330",
+                    "PRIOR_BEARISH_C_DOWN_FAILED_TO_BREAK_PARENT_A_LOW",
+                    "PRICE_RECLAIMED_BACK_TOWARD_PRIOR_HIGH_REGION",
+                    "PARENT_DEGREE_REASSESSMENT_PROMOTED_W4_COMPLETE_CANDIDATE"
+                  ],
+                  "reasonCodes": []
+                },
+                "W5": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "ACTIVE_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W5_STARTED_FROM_MINOR_W4_LOW_7398",
+                    "INTERNAL_WAVE1_UP_COMPLETED_AT_7904",
+                    "INTERNAL_WAVE2_PULLBACK_COMPLETED_CANDIDATE_AT_7576",
+                    "WAVE3_SETUP_REFERENCE_7591_BUT_NOT_CONFIRMED_UNTIL_RECLAIM",
+                    "MINUTE_W2_ABC_PULLBACK_ACTIVE_NOW"
+                  ],
+                  "reasonCodes": []
+                },
+                "A": {
+                  "price": 7075.75,
+                  "time": "2026-06-10 17:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_A_LOW_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "B": {
+                  "price": 7645,
+                  "time": "2026-06-15 10:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_B_HIGH_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "C": {
+                  "price": 7360,
+                  "time": "2026-06-26 05:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_C_LOW_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "D": {
+                  "price": 7636.25,
+                  "time": "2026-07-15 12:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_D_HIGH_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "E": {
+                  "price": 7416,
+                  "time": "2026-07-27 10:00",
+                  "status": "ACTIVE_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "ACTIVE_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_E_LOW_CANDIDATE_AT_7416",
+                    "E_LEG_MAY_BE_COMPLETE",
+                    "WAIT_FOR_RECLAIM_AND_PARTICIPATION_CONFIRMATION",
+                    "MINOR_W5_ONLY_AFTER_CONFIRMATION"
+                  ],
+                  "reasonCodes": []
+                }
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "40dfb05c11e2c727aeda65f4c354cc6bc1c99e42418474071605cce91f637aba",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W1.time",
+                "originalValue": "2026-04-10 08:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W2.time",
+                "originalValue": "2026-04-12 15:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W3.time",
+                "originalValue": "2026-06-02 19:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W4.time",
+                "originalValue": "2026-07-29 13:30",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.A.time",
+                "originalValue": "2026-06-10 17:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.B.time",
+                "originalValue": "2026-06-15 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.C.time",
+                "originalValue": "2026-06-26 05:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.D.time",
+                "originalValue": "2026-07-15 12:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.E.time",
+                "originalValue": "2026-07-27 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "minor",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.minor",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7601.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7664,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7726.5,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7929.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 8074.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 8258.25,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8461.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                }
+              ],
+              "invalidation": 7398,
+              "microSequence": null
+            },
+            "publicationHash": "e5910e9d0a9aca3738c6031d554a20151edc2a5e5a0d586d4792f60a6e4aa70e",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "intermediate",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": "ACTIVE",
+              "currentRead": "INTERMEDIATE_W3_ACTIVE_MINOR_W5_CANDIDATE_CONTEXT",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": true,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": "W3_EXTENSION_LADDER",
+                "modelType": "EXTENSION_LADDER",
+                "degree": "intermediate",
+                "activeWave": "W3",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "anchorModel": {
+                  "impulseStart": 5188.5,
+                  "impulseEnd": 7151,
+                  "projectionBase": 6407,
+                  "range": 1962.5
+                },
+                "levels": {
+                  "1.000": 8369.5,
+                  "e100": 8369.5,
+                  "1.272": 8903.25,
+                  "e1272": 8903.25,
+                  "1.618": 9582.25,
+                  "e1618": 9582.25,
+                  "2.000": 10332,
+                  "e200": 10332,
+                  "2.618": 11544.75,
+                  "e2618": 11544.75
+                },
+                "displayLevels": [
+                  {
+                    "label": "1.000",
+                    "price": 8369.5,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "1.272",
+                    "price": 8903.25,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "1.618",
+                    "price": 9582.25,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "2.000",
+                    "price": 10332,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "2.618",
+                    "price": 11544.75,
+                    "status": "WATCH"
+                  }
+                ],
+                "currentPrice": 7847.5,
+                "nextTarget": 8369.5,
+                "nextTargetKey": null,
+                "tickSize": null,
+                "normalization": null,
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_ACTIVE_FIB_MODEL_SELECTED",
+                  "ENGINE22_ACTIVE_WAVE_W3_USES_EXTENSION_LADDER",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 7151,
+                  "time": "2026-01-28",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W1_LOW_5188_50_ON_2025_04_08",
+                    "INTERMEDIATE_W1_HIGH_7151_ON_2026_01_28",
+                    "INTERMEDIATE_W1_RANGE_1962_50"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 6407,
+                  "time": "2026-03-30",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W2_COMPLETED_AT_6407",
+                    "INTERMEDIATE_W3_STARTED_FROM_6407"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE",
+                  "confidence": "HIGH",
+                  "maturity": "ACTIVE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
+                    "MINOR_W4_CORRECTION_COMPLETED_CANDIDATE_AT_7323",
+                    "MINOR_W5_LAUNCH_CONTEXT_ACTIVE",
+                    "MINUTE_W3_BREAKOUT_ACTIVE_INSIDE_MINOR_W5",
+                    "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": null,
+                "W5": null,
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "35881a096bcd874bf383f667decb8a7679baf5143c46aea5474ad9f392051d2b",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.marks.W1.time",
+                "originalValue": "2026-01-28",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.marks.W2.time",
+                "originalValue": "2026-03-30",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "intermediate",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.intermediate",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "primary",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": "ACTIVE",
+              "currentRead": "PRIMARY_W5_ACTIVE_FROM_PRIMARY_W4_LOW",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "primary",
+                "activeWave": "W5",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 5620,
+                  "time": "2022-01-05",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W1_LOW_3200_ON_2020_04_02",
+                    "PRIMARY_W1_HIGH_5620_ON_2022_01_05",
+                    "PRIMARY_W1_RANGE_2420"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 4306,
+                  "time": "2022-10-12",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W2_COMPLETED_AT_4306"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": 6487,
+                  "time": "2025-02-20",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W3_COMPLETED_AT_6487"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": {
+                  "price": 5182,
+                  "time": "2025-04-09",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W4_COMPLETED_AT_5182",
+                    "PRIMARY_W5_STARTED_FROM_5182"
+                  ],
+                  "reasonCodes": []
+                },
+                "W5": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE",
+                  "confidence": "HIGH",
+                  "maturity": "ACTIVE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W5_ACTIVE_FROM_PRIMARY_W4_LOW",
+                    "WATCH_PRIMARY_W5_EXTENSION_TARGETS",
+                    "CURRENT_PRICE_TESTING_PRIMARY_W5_1000_EXTENSION_REGION",
+                    "STRUCTURAL_CONTEXT_ONLY"
+                  ],
+                  "reasonCodes": []
+                },
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "bfd1571325ea9e31ebd1efe54b307aed042759e25b6db1baeff25b20e276a276",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W1.time",
+                "originalValue": "2022-01-05",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W2.time",
+                "originalValue": "2022-10-12",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W3.time",
+                "originalValue": "2025-02-20",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W4.time",
+                "originalValue": "2025-04-09",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "primary",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.primary",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          }
+        ],
+        "nonApprovalBranches": [
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3NodeEvidence",
+            "hash": "36d64859eecd3a6f8f7fc0e699ffc6283cc87752520c4aa2464ed8b43d95ad0a",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3Shadow",
+            "hash": "25922f0bacfad8bdffd998fe935931860e03c641fd0832417aa1c19fe5015caf",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3Projection",
+            "hash": "5f7a7f2d631851535cdc2feeef720ba9191329f2baa4cec899d5e96ada08c6c2",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.microW3TouchW4Shadow",
+            "hash": "fbb02fdfe481ee453c7baed3b9ae1040f67902b997f9014dd21e23b324e69243",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          }
+        ],
+        "structuralEligible": false,
+        "renderingAuthorized": false
+      }
+    },
+    "previewUpstream": {
+      "url": "https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES",
+      "startedAt": "2026-10-13T18:52:34.406Z",
+      "observedAt": "2026-10-13T18:52:35.576Z",
+      "httpStatus": 200,
+      "bodySha256": "83b4565a402362637fbb2353da2c0df8dbc9f9a09d3d0e0bb9e3926cac52e06f",
+      "etag": null,
+      "selected": {
+        "schemaVersion": "engine11.engine22-publication-capture.v1",
+        "state": "CAPTURED_OWNER_PUBLICATIONS_NOT_APPROVAL",
+        "strategyPublicationHash": "0709338293b5cb0b561bae416fa1e9e6109a412a91f397ba5e22d376132a20aa",
+        "snapshotMetadata": {
+          "symbol": "ES",
+          "generatedAt": null,
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "schemaVersion": null
+        },
+        "strategyMetadata": {
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "schemaVersion": null,
+          "authority": null,
+          "sourceMode": null
+        },
+        "wavelengthMetadata": {
+          "canonicalWaveStateConflict": true,
+          "canonicalWaveStateConflictReason": null,
+          "sourceTimestamp": null,
+          "timestamp": null,
+          "updatedAt": null,
+          "sourceMode": "OVERRIDE_DISPLAY_INTELLIGENCE",
+          "authority": null
+        },
+        "degrees": [
+          {
+            "degree": "submicro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.submicro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "submicro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.submicro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "micro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.micro",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "micro",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro",
+            "available": true,
+            "selected": {
+              "activeWave": "W3_WATCH",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": null,
+              "role": "TIMING_ONLY",
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [],
+              "invalidation": 7782.75,
+              "microSequence": {
+                "version": "engine22.microWaveSequence.v1",
+                "role": "TIMING_ONLY",
+                "origin": 7782.75,
+                "invalidation": 7782.75,
+                "anchorProvenance": {
+                  "source": "MANAGER_LOCKED_MICRO_W4_LOW",
+                  "price": 7782.75,
+                  "timestamp": "2026-10-08 07:00"
+                },
+                "referenceLength": 130,
+                "currentPrice": 7847.5,
+                "activeWave": "W3_WATCH",
+                "state": "MICRO_W3_SETUP_WATCH",
+                "confirmationStatus": "W2_CONFIRMED_W3_PENDING",
+                "candidateW1High": 7853.75,
+                "confirmedW1High": 7843,
+                "w1ConfirmationSource": "FIVE_MIN_STRUCTURAL_EVIDENCE",
+                "w1Completion": {
+                  "state": "LOCKED",
+                  "anchor": 7843,
+                  "evidence": {
+                    "timeframe": "5m",
+                    "immutable": true
+                  },
+                  "reasonCodes": [
+                    "ANCHOR_LOCKED_NO_REPAINT"
+                  ]
+                },
+                "w2Completion": {
+                  "state": "LOCKED",
+                  "anchor": 7826.75,
+                  "evidence": {
+                    "timeframe": "5m",
+                    "immutable": true
+                  },
+                  "reasonCodes": [
+                    "ANCHOR_LOCKED_NO_REPAINT"
+                  ]
+                },
+                "projectedW1": [
+                  {
+                    "key": "e382",
+                    "label": "0.382",
+                    "price": 7832.5,
+                    "status": "TOUCHED",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e500",
+                    "label": "0.500",
+                    "price": 7847.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e618",
+                    "label": "0.618",
+                    "price": 7863,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1000",
+                    "label": "1.000",
+                    "price": 7912.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1272",
+                    "label": "1.272",
+                    "price": 7948,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e1618",
+                    "label": "1.618",
+                    "price": 7993,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  },
+                  {
+                    "key": "e2000",
+                    "label": "2.000",
+                    "price": 8042.75,
+                    "status": "WATCH",
+                    "projectionMode": "PROVISIONAL_REFERENCE_LENGTH_NOT_CONFIRMED_W1_HIGH",
+                    "touchedAt": null,
+                    "confirmedAt": null
+                  }
+                ],
+                "projectedW2": [
+                  {
+                    "key": "r236",
+                    "label": "0.236",
+                    "price": 7828.75,
+                    "status": "TOUCHED",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r382",
+                    "label": "0.382",
+                    "price": 7820,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r500",
+                    "label": "0.500",
+                    "price": 7813,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r618",
+                    "label": "0.618",
+                    "price": 7805.75,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  },
+                  {
+                    "key": "r786",
+                    "label": "0.786",
+                    "price": 7795.75,
+                    "status": "WATCH",
+                    "touchedAt": null,
+                    "confirmedAt": null,
+                    "anchorSource": "CONFIRMED_MICRO_W1_HIGH"
+                  }
+                ],
+                "w2TargetsAvailable": true,
+                "confirmedW2Low": 7826.75,
+                "rules": {
+                  "completion": "EXPLICIT_VALIDATED_W1_COMPLETION_EVIDENCE_REQUIRED",
+                  "wave2": "PROJECT_RETRACEMENTS_ONLY_AFTER_CONFIRMED_W1_HIGH",
+                  "wave3": "WAIT_FOR_CONFIRMED_W2_LOW"
+                },
+                "noPermissionCreated": true,
+                "noExecution": true,
+                "noSizing": true,
+                "resetReasonCodes": [],
+                "w1LastObservedBarTime": 1791917100,
+                "w1ConfirmedAtBarTime": 1791525600,
+                "w2LastObservedBarTime": 1791917100,
+                "w2CandidateLow": 7826.75
+              }
+            },
+            "publicationHash": "b459b6ded592bdf8cc14abea45ba2c5cca414ecef0454e56121548b2322a3df7",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.anchorProvenance.timestamp",
+                "originalValue": "2026-10-08 07:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w1LastObservedBarTime",
+                "originalValue": 1791917100,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w1ConfirmedAtBarTime",
+                "originalValue": 1791525600,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w2LastObservedBarTime",
+                "originalValue": 1791917100,
+                "originalType": "number",
+                "state": "NUMERIC_UNIT_REQUIRES_FIELD_CONTRACT",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "subminute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.subminute",
+            "available": true,
+            "selected": {
+              "activeWave": null,
+              "currentWave": null,
+              "status": null,
+              "stage": "SUBMINUTE_TIMING_CONTEXT_INSIDE_MINUTE_W2_C_DOWN",
+              "currentRead": "SUBMINUTE_TIMING_CONTEXT_ONLY_FOR_MINUTE_W2_C_DOWN",
+              "direction": "DOWN",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "subminute",
+                "activeWave": null,
+                "direction": "DOWN",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": null,
+                "W2": null,
+                "W3": null,
+                "W4": null,
+                "W5": null,
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "c8780eef4785c1fec6bacd073585051481a8aa12908159b2b7b4f8c173d164f7",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "subminute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.subminute",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7780,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7813.75,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7847.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25,
+                  "note": "Historical .618 touch per Manager; projected price is provisional pending anchor review."
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7955.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 8033,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 8131.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8240,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "USER_CHART_SUBMINUTE_W1_PROVISIONAL_20261008",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 284.25
+                }
+              ],
+              "invalidation": 7671.5,
+              "microSequence": null
+            },
+            "publicationHash": "bbf550332efe1ab08fe4eb75e7f407c859b29ab0ea45d3175ae27d164c4efd1f",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "minute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute",
+            "available": true,
+            "selected": {
+              "activeWave": "W2",
+              "currentWave": null,
+              "status": null,
+              "stage": "MINUTE_W2_ABC_PULLBACK_ACTIVE_C_DOWN_WATCH",
+              "currentRead": "MINUTE_W2_C_DOWN_ACTIVE_FROM_B_HIGH_7810_75",
+              "direction": "DOWN",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "minute",
+                "activeWave": "W2",
+                "direction": "DOWN",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 7848.5,
+                  "time": "2026-09-23",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINUTE_W1_UP_FROM_7591",
+                    "HIGH_REFERENCE_7848_50",
+                    "FOLLOWED_BY_W2_ABC_PULLBACK"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 0,
+                  "time": null,
+                  "status": "CANDIDATE",
+                  "confidence": "MEDIUM",
+                  "maturity": "CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "A_DOWN_COMPLETED_AT_7707_25_ON_2026_09_24_1430",
+                    "B_UP_COMPLETED_CANDIDATE_AT_7810_75_ON_2026_09_25_1000",
+                    "C_DOWN_ACTIVE_OR_EXPECTED_FROM_7810_75",
+                    "MINUTE_W3_NOT_CONFIRMED_YET"
+                  ],
+                  "reasonCodes": []
+                },
+                "W3": {
+                  "price": null,
+                  "time": null,
+                  "status": "NOT_CONFIRMED",
+                  "confidence": "LOW",
+                  "maturity": "NOT_CONFIRMED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "REQUIRES_RECLAIM_7848_50",
+                    "STRONGER_CONFIRMATION_ABOVE_7906_25"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": null,
+                "W5": null,
+                "A": {
+                  "price": 7707.25,
+                  "time": "2026-09-24 14:30",
+                  "status": "COMPLETED",
+                  "confidence": null,
+                  "maturity": "COMPLETED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "B": {
+                  "price": 7810.75,
+                  "time": "2026-09-25 10:00",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": null,
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "C": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE_OR_EXPECTED",
+                  "confidence": null,
+                  "maturity": "ACTIVE_OR_EXPECTED",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": null,
+                  "reasonCodes": []
+                },
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "103d9363944b5deac8a10f35327f963b743eb69ef36d1a5e18e56fbed8a8d503",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.W1.time",
+                "originalValue": "2026-09-23",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.A.time",
+                "originalValue": "2026-09-24 14:30",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minute.marks.B.time",
+                "originalValue": "2026-09-25 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "minute",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.minute",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7674.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7704.75,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7735.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7833.5,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 7903.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 7992.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8091,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 257.5
+                }
+              ],
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "04572a5bdc5f907dede95228531d7219e197770405177dc753064050b7f85644",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "minor",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W2_PULLBACK_ACTIVE",
+              "currentRead": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W3_NOT_CONFIRMED",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "minor",
+                "activeWave": "W5",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 6948.75,
+                  "time": "2026-04-10 08:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W1_LOW_6417_ON_2026_03_30_1700",
+                    "MINOR_W1_HIGH_6948_75_ON_2026_04_10_0800",
+                    "MINOR_W1_IDENTIFIED_FROM_INTERNAL_PULLBACK_STRUCTURE"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 6829,
+                  "time": "2026-04-12 15:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W2_COMPLETED_AT_6829_ON_2026_04_12_1500",
+                    "ONLY_LEGITIMATE_3H_PULLBACK_INSIDE_APRIL_JUNE_RUN",
+                    "MINOR_W3_STARTED_FROM_6829"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": 7694.25,
+                  "time": "2026-06-02 19:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W3_COMPLETED_NEAR_7694_25",
+                    "APRIL_TO_JUNE_RUN_COMPLETED_AS_MINOR_W3_NOT_MINOR_W1",
+                    "FOLLOWED_BY_SIDEWAYS_OVERLAPPING_ABCDE_PULLBACK",
+                    "CURRENT_CONSOLIDATION_HAS_W4_PERSONALITY"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": {
+                  "price": 7398,
+                  "time": "2026-07-29 13:30",
+                  "status": "COMPLETED_CANDIDATE",
+                  "confidence": "HIGH",
+                  "maturity": "COMPLETED_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "BRIAN_LOCKED_MINOR_W4_COMPLETED_AT_7398_ON_2026_07_29_1330",
+                    "PRIOR_BEARISH_C_DOWN_FAILED_TO_BREAK_PARENT_A_LOW",
+                    "PRICE_RECLAIMED_BACK_TOWARD_PRIOR_HIGH_REGION",
+                    "PARENT_DEGREE_REASSESSMENT_PROMOTED_W4_COMPLETE_CANDIDATE"
+                  ],
+                  "reasonCodes": []
+                },
+                "W5": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "ACTIVE_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W5_STARTED_FROM_MINOR_W4_LOW_7398",
+                    "INTERNAL_WAVE1_UP_COMPLETED_AT_7904",
+                    "INTERNAL_WAVE2_PULLBACK_COMPLETED_CANDIDATE_AT_7576",
+                    "WAVE3_SETUP_REFERENCE_7591_BUT_NOT_CONFIRMED_UNTIL_RECLAIM",
+                    "MINUTE_W2_ABC_PULLBACK_ACTIVE_NOW"
+                  ],
+                  "reasonCodes": []
+                },
+                "A": {
+                  "price": 7075.75,
+                  "time": "2026-06-10 17:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_A_LOW_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "B": {
+                  "price": 7645,
+                  "time": "2026-06-15 10:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_B_HIGH_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "C": {
+                  "price": 7360,
+                  "time": "2026-06-26 05:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_C_LOW_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "D": {
+                  "price": 7636.25,
+                  "time": "2026-07-15 12:00",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_D_HIGH_CONFIRMED"
+                  ],
+                  "reasonCodes": []
+                },
+                "E": {
+                  "price": 7416,
+                  "time": "2026-07-27 10:00",
+                  "status": "ACTIVE_CANDIDATE",
+                  "confidence": "MEDIUM_HIGH",
+                  "maturity": "ACTIVE_CANDIDATE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "MINOR_W4_E_LOW_CANDIDATE_AT_7416",
+                    "E_LEG_MAY_BE_COMPLETE",
+                    "WAIT_FOR_RECLAIM_AND_PARTICIPATION_CONFIRMATION",
+                    "MINOR_W5_ONLY_AFTER_CONFIRMATION"
+                  ],
+                  "reasonCodes": []
+                }
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "40dfb05c11e2c727aeda65f4c354cc6bc1c99e42418474071605cce91f637aba",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W1.time",
+                "originalValue": "2026-04-10 08:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W2.time",
+                "originalValue": "2026-04-12 15:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W3.time",
+                "originalValue": "2026-06-02 19:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.W4.time",
+                "originalValue": "2026-07-29 13:30",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.A.time",
+                "originalValue": "2026-06-10 17:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.B.time",
+                "originalValue": "2026-06-15 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.C.time",
+                "originalValue": "2026-06-26 05:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.D.time",
+                "originalValue": "2026-07-15 12:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.minor.marks.E.time",
+                "originalValue": "2026-07-27 10:00",
+                "originalType": "string",
+                "state": "TIMEZONE_NAIVE_OWNER_CONVENTION_REQUIRED",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "minor",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.minor",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": null,
+              "currentRead": null,
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": null,
+              "marks": null,
+              "anchors": null,
+              "levels": [
+                {
+                  "key": "e0382",
+                  "label": "0.382",
+                  "price": 7601.25,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e0500",
+                  "label": "0.500",
+                  "price": 7664,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e0618",
+                  "label": "0.618",
+                  "price": 7726.5,
+                  "status": "TOUCHED",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1000",
+                  "label": "1.000",
+                  "price": 7929.75,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1272",
+                  "label": "1.272",
+                  "price": 8074.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e1618",
+                  "label": "1.618",
+                  "price": 8258.25,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                },
+                {
+                  "key": "e2000",
+                  "label": "2.000",
+                  "price": 8461.5,
+                  "status": "WATCH",
+                  "touchedAt": null,
+                  "confirmedAt": null,
+                  "anchorSource": "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+                  "projectionMode": "MANAGER_REVIEW_PROVISIONAL",
+                  "wave1Length": 531.75
+                }
+              ],
+              "invalidation": 7398,
+              "microSequence": null
+            },
+            "publicationHash": "e5910e9d0a9aca3738c6031d554a20151edc2a5e5a0d586d4792f60a6e4aa70e",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "intermediate",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate",
+            "available": true,
+            "selected": {
+              "activeWave": "W3",
+              "currentWave": null,
+              "status": null,
+              "stage": "ACTIVE",
+              "currentRead": "INTERMEDIATE_W3_ACTIVE_MINOR_W5_CANDIDATE_CONTEXT",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": true,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": "W3_EXTENSION_LADDER",
+                "modelType": "EXTENSION_LADDER",
+                "degree": "intermediate",
+                "activeWave": "W3",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "anchorModel": {
+                  "impulseStart": 5188.5,
+                  "impulseEnd": 7151,
+                  "projectionBase": 6407,
+                  "range": 1962.5
+                },
+                "levels": {
+                  "1.000": 8369.5,
+                  "e100": 8369.5,
+                  "1.272": 8903.25,
+                  "e1272": 8903.25,
+                  "1.618": 9582.25,
+                  "e1618": 9582.25,
+                  "2.000": 10332,
+                  "e200": 10332,
+                  "2.618": 11544.75,
+                  "e2618": 11544.75
+                },
+                "displayLevels": [
+                  {
+                    "label": "1.000",
+                    "price": 8369.5,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "1.272",
+                    "price": 8903.25,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "1.618",
+                    "price": 9582.25,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "2.000",
+                    "price": 10332,
+                    "status": "WATCH"
+                  },
+                  {
+                    "label": "2.618",
+                    "price": 11544.75,
+                    "status": "WATCH"
+                  }
+                ],
+                "currentPrice": 7847.5,
+                "nextTarget": 8369.5,
+                "nextTargetKey": null,
+                "tickSize": null,
+                "normalization": null,
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_ACTIVE_FIB_MODEL_SELECTED",
+                  "ENGINE22_ACTIVE_WAVE_W3_USES_EXTENSION_LADDER",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 7151,
+                  "time": "2026-01-28",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W1_LOW_5188_50_ON_2025_04_08",
+                    "INTERMEDIATE_W1_HIGH_7151_ON_2026_01_28",
+                    "INTERMEDIATE_W1_RANGE_1962_50"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 6407,
+                  "time": "2026-03-30",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W2_COMPLETED_AT_6407",
+                    "INTERMEDIATE_W3_STARTED_FROM_6407"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE",
+                  "confidence": "HIGH",
+                  "maturity": "ACTIVE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "INTERMEDIATE_W3_ACTIVE_AFTER_CONFIRMED_W2_LOW",
+                    "MINOR_W4_CORRECTION_COMPLETED_CANDIDATE_AT_7323",
+                    "MINOR_W5_LAUNCH_CONTEXT_ACTIVE",
+                    "MINUTE_W3_BREAKOUT_ACTIVE_INSIDE_MINOR_W5",
+                    "INTERMEDIATE_PARENT_TREND_REMAINS_UP"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": null,
+                "W5": null,
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "35881a096bcd874bf383f667decb8a7679baf5143c46aea5474ad9f392051d2b",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.marks.W1.time",
+                "originalValue": "2026-01-28",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.marks.W2.time",
+                "originalValue": "2026-03-30",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "intermediate",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.intermediate",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          },
+          {
+            "degree": "primary",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary",
+            "available": true,
+            "selected": {
+              "activeWave": "W5",
+              "currentWave": null,
+              "status": null,
+              "stage": "ACTIVE",
+              "currentRead": "PRIMARY_W5_ACTIVE_FROM_PRIMARY_W4_LOW",
+              "direction": "UP",
+              "role": null,
+              "countId": null,
+              "sourceCountId": null,
+              "countIdentity": null,
+              "sequenceId": null,
+              "revision": null,
+              "datasetVersion": null,
+              "seriesId": null,
+              "priceBasis": null,
+              "contract": null,
+              "sourceTimestamp": null,
+              "timestamp": null,
+              "updatedAt": null,
+              "activeFibModel": {
+                "active": false,
+                "source": "engine22.degreeStates.activeFibModel.v1",
+                "modelKey": null,
+                "modelType": null,
+                "degree": "primary",
+                "activeWave": "W5",
+                "direction": "UP",
+                "purpose": "ACTIVE_PARENT_WAVE_STRUCTURAL_MAP",
+                "noExecution": true,
+                "noPermissionCreated": true,
+                "watchOnly": true,
+                "reasonCodes": [
+                  "ENGINE22_NO_ACTIVE_FIB_MODEL_FOR_CURRENT_WAVE",
+                  "NO_EXECUTION",
+                  "NO_PERMISSION_CREATED"
+                ],
+                "internalCStructure": null
+              },
+              "marks": {
+                "W1": {
+                  "price": 5620,
+                  "time": "2022-01-05",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W1_LOW_3200_ON_2020_04_02",
+                    "PRIMARY_W1_HIGH_5620_ON_2022_01_05",
+                    "PRIMARY_W1_RANGE_2420"
+                  ],
+                  "reasonCodes": []
+                },
+                "W2": {
+                  "price": 4306,
+                  "time": "2022-10-12",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W2_COMPLETED_AT_4306"
+                  ],
+                  "reasonCodes": [
+                    "W2_MARK_DECLARED_CONFIRMED_HIGH_CONFIDENCE"
+                  ]
+                },
+                "W3": {
+                  "price": 6487,
+                  "time": "2025-02-20",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W3_COMPLETED_AT_6487"
+                  ],
+                  "reasonCodes": []
+                },
+                "W4": {
+                  "price": 5182,
+                  "time": "2025-04-09",
+                  "status": "CONFIRMED",
+                  "confidence": "HIGH",
+                  "maturity": "CONFIRMED",
+                  "confirmed": true,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W4_COMPLETED_AT_5182",
+                    "PRIMARY_W5_STARTED_FROM_5182"
+                  ],
+                  "reasonCodes": []
+                },
+                "W5": {
+                  "price": null,
+                  "time": null,
+                  "status": "ACTIVE",
+                  "confidence": "HIGH",
+                  "maturity": "ACTIVE",
+                  "confirmed": false,
+                  "superseded": false,
+                  "previousMark": null,
+                  "source": "activeStructures",
+                  "basis": [
+                    "PRIMARY_W5_ACTIVE_FROM_PRIMARY_W4_LOW",
+                    "WATCH_PRIMARY_W5_EXTENSION_TARGETS",
+                    "CURRENT_PRICE_TESTING_PRIMARY_W5_1000_EXTENSION_REGION",
+                    "STRUCTURAL_CONTEXT_ONLY"
+                  ],
+                  "reasonCodes": []
+                },
+                "A": null,
+                "B": null,
+                "C": null,
+                "D": null,
+                "E": null
+              },
+              "anchors": null,
+              "levels": null,
+              "invalidation": null,
+              "microSequence": null
+            },
+            "publicationHash": "bfd1571325ea9e31ebd1efe54b307aed042759e25b6db1baeff25b20e276a276",
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": [
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W1.time",
+                "originalValue": "2022-01-05",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W2.time",
+                "originalValue": "2022-10-12",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W3.time",
+                "originalValue": "2025-02-20",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              },
+              {
+                "path": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.primary.marks.W4.time",
+                "originalValue": "2025-04-09",
+                "originalType": "string",
+                "state": "DATE_ONLY_NO_INTRADAY_PRECISION",
+                "normalizedValue": null,
+                "ownerConfirmation": "UNKNOWN"
+              }
+            ]
+          },
+          {
+            "degree": "primary",
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.degrees.primary",
+            "available": false,
+            "selected": null,
+            "publicationHash": null,
+            "approval": "UNKNOWN",
+            "completeCountIdentity": "UNKNOWN",
+            "priceBasis": "UNKNOWN",
+            "timestampEvidence": []
+          }
+        ],
+        "nonApprovalBranches": [
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3NodeEvidence",
+            "hash": "36d64859eecd3a6f8f7fc0e699ffc6283cc87752520c4aa2464ed8b43d95ad0a",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3Shadow",
+            "hash": "25922f0bacfad8bdffd998fe935931860e03c641fd0832417aa1c19fe5015caf",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.engine22V3Projection",
+            "hash": "5f7a7f2d631851535cdc2feeef720ba9191329f2baa4cec899d5e96ada08c6c2",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          },
+          {
+            "sourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.microW3TouchW4Shadow",
+            "hash": "fbb02fdfe481ee453c7baed3b9ae1040f67902b997f9014dd21e23b324e69243",
+            "state": "NOT_USED_AS_OFFICIAL_FIB_SOURCE"
+          }
+        ],
+        "structuralEligible": false,
+        "renderingAuthorized": false
+      }
+    },
+    "overlay": {
+      "url": "https://engine2b-preview-api.onrender.com/api/v1/engine2/chart-overlays/v1?symbol=ES",
+      "startedAt": "2026-10-13T18:52:35.584Z",
+      "observedAt": "2026-10-13T18:52:51.680Z",
+      "httpStatus": 200,
+      "bodySha256": "62d1730d7735af8eef5e4159eeec335e52507dc9615a15234e2702dbae39046b",
+      "etag": "\"62d1730d7735af8eef5e4159eeec335e52507dc9615a15234e2702dbae39046b\"",
+      "selected": {
+        "ok": true,
+        "schemaVersion": "engine2.chartOverlays.v1",
+        "symbol": "ES",
+        "priceBasis": "ES_INDEX_POINTS",
+        "snapshot": {
+          "generatedAt": null,
+          "sourceTimestamp": null,
+          "authorityConflict": true
+        },
+        "degrees": {
+          "primary": {
+            "degree": "primary",
+            "sourceDegree": "primary",
+            "parentDegree": null,
+            "drawable": false,
+            "reason": "NO_DRAWABLE_CANONICAL_STRUCTURE",
+            "severity": "blocking",
+            "reasonCodes": [
+              "NO_DRAWABLE_CANONICAL_STRUCTURE"
+            ],
+            "wave": {
+              "current": "W5",
+              "direction": "UP",
+              "confirmationStatus": null,
+              "authorityConflict": false,
+              "status": "ACTIVE",
+              "role": null
+            },
+            "marks": [],
+            "lines": [],
+            "zones": [],
+            "componentAvailability": {
+              "waveMarks": false,
+              "fibLevels": false,
+              "historicalFibReferences": false,
+              "structuralLines": false
+            },
+            "model": {
+              "type": null,
+              "active": false
+            },
+            "provenance": {
+              "structuralSource": "engine22WaveStrategy.degreeStates.primary",
+              "sourcesChecked": [
+                "engine22WaveStrategy.degreeStates.primary"
+              ],
+              "sourceCountId": null,
+              "shadowMicroCanonicalRef": null,
+              "shadowAuthority": null,
+              "sourceMode": null,
+              "fallbackUsed": false
+            }
+          },
+          "intermediate": {
+            "degree": "intermediate",
+            "sourceDegree": "intermediate",
+            "parentDegree": "primary",
+            "drawable": true,
+            "reason": null,
+            "severity": null,
+            "reasonCodes": [],
+            "wave": {
+              "current": "W3",
+              "direction": "UP",
+              "confirmationStatus": null,
+              "authorityConflict": false,
+              "status": "ACTIVE",
+              "role": null
+            },
+            "marks": [],
+            "lines": [
+              {
+                "id": "1.000",
+                "key": "1.000",
+                "price": 8369.5,
+                "kind": "FIB",
+                "label": "1.000",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.000"
+              },
+              {
+                "id": "e100",
+                "key": "e100",
+                "price": 8369.5,
+                "kind": "FIB",
+                "label": "E100",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e100"
+              },
+              {
+                "id": "1.272",
+                "key": "1.272",
+                "price": 8903.25,
+                "kind": "FIB",
+                "label": "1.272",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.272"
+              },
+              {
+                "id": "e1272",
+                "key": "e1272",
+                "price": 8903.25,
+                "kind": "FIB",
+                "label": "E1272",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e1272"
+              },
+              {
+                "id": "1.618",
+                "key": "1.618",
+                "price": 9582.25,
+                "kind": "FIB",
+                "label": "1.618",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.618"
+              },
+              {
+                "id": "e1618",
+                "key": "e1618",
+                "price": 9582.25,
+                "kind": "FIB",
+                "label": "E1618",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e1618"
+              },
+              {
+                "id": "2.000",
+                "key": "2.000",
+                "price": 10332,
+                "kind": "FIB",
+                "label": "2.000",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.2.000"
+              },
+              {
+                "id": "e200",
+                "key": "e200",
+                "price": 10332,
+                "kind": "FIB",
+                "label": "E200",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e200"
+              },
+              {
+                "id": "2.618",
+                "key": "2.618",
+                "price": 11544.75,
+                "kind": "FIB",
+                "label": "2.618",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.2.618"
+              },
+              {
+                "id": "e2618",
+                "key": "e2618",
+                "price": 11544.75,
+                "kind": "FIB",
+                "label": "E2618",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e2618"
+              }
+            ],
+            "zones": [],
+            "componentAvailability": {
+              "waveMarks": false,
+              "fibLevels": true,
+              "historicalFibReferences": false,
+              "structuralLines": false
+            },
+            "model": {
+              "type": "EXTENSION_LADDER",
+              "active": true
+            },
+            "provenance": {
+              "structuralSource": "engine22WaveStrategy.degreeStates.intermediate",
+              "sourcesChecked": [
+                "engine22WaveStrategy.degreeStates.intermediate"
+              ],
+              "sourceCountId": null,
+              "shadowMicroCanonicalRef": null,
+              "shadowAuthority": null,
+              "sourceMode": null,
+              "fallbackUsed": false
+            }
+          },
+          "minor": {
+            "degree": "minor",
+            "sourceDegree": "minor",
+            "parentDegree": "intermediate",
+            "drawable": true,
+            "reason": null,
+            "severity": null,
+            "reasonCodes": [],
+            "wave": {
+              "current": "W5",
+              "direction": "UP",
+              "confirmationStatus": null,
+              "authorityConflict": false,
+              "status": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W2_PULLBACK_ACTIVE",
+              "role": null
+            },
+            "marks": [
+              {
+                "id": "W1",
+                "label": "W1",
+                "price": 6948.75,
+                "time": 1775833200,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.W1"
+              },
+              {
+                "id": "W2",
+                "label": "W2",
+                "price": 6829,
+                "time": 1776031200,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.W2"
+              },
+              {
+                "id": "W3",
+                "label": "W3",
+                "price": 7694.25,
+                "time": 1780452000,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.W3"
+              },
+              {
+                "id": "W4",
+                "label": "W4",
+                "price": 7398,
+                "time": 1785357000,
+                "status": "COMPLETED_CANDIDATE",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.W4"
+              },
+              {
+                "id": "A",
+                "label": "A",
+                "price": 7075.75,
+                "time": 1781136000,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.A"
+              },
+              {
+                "id": "B",
+                "label": "B",
+                "price": 7645,
+                "time": 1781542800,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.B"
+              },
+              {
+                "id": "C",
+                "label": "C",
+                "price": 7360,
+                "time": 1782475200,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.C"
+              },
+              {
+                "id": "D",
+                "label": "D",
+                "price": 7636.25,
+                "time": 1784142000,
+                "status": "CONFIRMED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.D"
+              },
+              {
+                "id": "E",
+                "label": "E",
+                "price": 7416,
+                "time": 1785171600,
+                "status": "ACTIVE_CANDIDATE",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minor.marks.E"
+              }
+            ],
+            "lines": [],
+            "zones": [],
+            "componentAvailability": {
+              "waveMarks": true,
+              "fibLevels": false,
+              "historicalFibReferences": false,
+              "structuralLines": false
+            },
+            "model": {
+              "type": null,
+              "active": false
+            },
+            "provenance": {
+              "structuralSource": "engine22WaveStrategy.degreeStates.minor",
+              "sourcesChecked": [
+                "engine22WaveStrategy.degreeStates.minor"
+              ],
+              "sourceCountId": null,
+              "shadowMicroCanonicalRef": null,
+              "shadowAuthority": null,
+              "sourceMode": null,
+              "fallbackUsed": false
+            }
+          },
+          "minute": {
+            "degree": "minute",
+            "sourceDegree": "minute",
+            "parentDegree": "minor",
+            "drawable": true,
+            "reason": null,
+            "severity": null,
+            "reasonCodes": [],
+            "wave": {
+              "current": "W2",
+              "direction": "DOWN",
+              "confirmationStatus": null,
+              "authorityConflict": false,
+              "status": "MINUTE_W2_ABC_PULLBACK_ACTIVE_C_DOWN_WATCH",
+              "role": null
+            },
+            "marks": [
+              {
+                "id": "A",
+                "label": "A",
+                "price": 7707.25,
+                "time": 1790285400,
+                "status": "COMPLETED",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minute.marks.A"
+              },
+              {
+                "id": "B",
+                "label": "B",
+                "price": 7810.75,
+                "time": 1790355600,
+                "status": "COMPLETED_CANDIDATE",
+                "sourcePath": "engine22WaveStrategy.degreeStates.minute.marks.B"
+              }
+            ],
+            "lines": [],
+            "zones": [],
+            "componentAvailability": {
+              "waveMarks": true,
+              "fibLevels": false,
+              "historicalFibReferences": false,
+              "structuralLines": false
+            },
+            "model": {
+              "type": null,
+              "active": false
+            },
+            "provenance": {
+              "structuralSource": "engine22WaveStrategy.degreeStates.minute",
+              "sourcesChecked": [
+                "engine22WaveStrategy.degreeStates.minute"
+              ],
+              "sourceCountId": null,
+              "shadowMicroCanonicalRef": null,
+              "shadowAuthority": null,
+              "sourceMode": null,
+              "fallbackUsed": false
+            }
+          },
+          "micro": {
+            "degree": "micro",
+            "sourceDegree": "micro",
+            "parentDegree": "subminute",
+            "drawable": true,
+            "reason": null,
+            "severity": null,
+            "reasonCodes": [],
+            "wave": {
+              "current": "W3_WATCH",
+              "direction": null,
+              "confirmationStatus": "W2_CONFIRMED_W3_PENDING",
+              "authorityConflict": true,
+              "status": "MICRO_W3_SETUP_WATCH",
+              "role": "TIMING_ONLY"
+            },
+            "marks": [
+              {
+                "id": "MICRO_ORIGIN",
+                "label": "ORIGIN",
+                "price": 7782.75,
+                "time": 1791468000,
+                "status": "SOURCE_ANCHOR",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.anchorProvenance"
+              },
+              {
+                "id": "MICRO_W1_HIGH",
+                "label": "W1",
+                "price": 7843,
+                "time": 1791525600,
+                "status": "LOCKED",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.w1Completion"
+              }
+            ],
+            "lines": [
+              {
+                "id": "projectedW1_e382",
+                "key": "0.382",
+                "price": 7832.5,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 0.382",
+                "status": "TOUCHED",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[0]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e500",
+                "key": "0.500",
+                "price": 7847.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 0.500",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[1]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e618",
+                "key": "0.618",
+                "price": 7863,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 0.618",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[2]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e1000",
+                "key": "1.000",
+                "price": 7912.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 1.000",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[3]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e1272",
+                "key": "1.272",
+                "price": 7948,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 1.272",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[4]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e1618",
+                "key": "1.618",
+                "price": 7993,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 1.618",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[5]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW1_e2000",
+                "key": "2.000",
+                "price": 8042.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W1 2.000",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW1[6]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW2_r236",
+                "key": "0.236",
+                "price": 7828.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W2 0.236",
+                "status": "TOUCHED",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW2[0]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW2_r382",
+                "key": "0.382",
+                "price": 7820,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W2 0.382",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW2[1]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW2_r500",
+                "key": "0.500",
+                "price": 7813,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W2 0.500",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW2[2]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW2_r618",
+                "key": "0.618",
+                "price": 7805.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W2 0.618",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW2[3]",
+                "referenceOnly": true
+              },
+              {
+                "id": "projectedW2_r786",
+                "key": "0.786",
+                "price": 7795.75,
+                "kind": "FIB_CONTEXT",
+                "label": "PRIOR W2 0.786",
+                "status": "WATCH",
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.microSequence.projectedW2[4]",
+                "referenceOnly": true
+              },
+              {
+                "id": "invalidation",
+                "key": "invalidation",
+                "price": 7782.75,
+                "kind": "INVALIDATION",
+                "label": "INVALIDATION",
+                "status": null,
+                "sourcePath": "engine22WaveStrategy.currentWavelength.degrees.micro.invalidation"
+              }
+            ],
+            "zones": [],
+            "componentAvailability": {
+              "waveMarks": true,
+              "fibLevels": false,
+              "historicalFibReferences": true,
+              "structuralLines": true
+            },
+            "model": {
+              "type": "MICRO_SEQUENTIAL",
+              "active": true
+            },
+            "provenance": {
+              "structuralSource": "engine22WaveStrategy.currentWavelength.degrees.micro",
+              "sourcesChecked": [
+                "engine22WaveStrategy.currentWavelength.degrees.micro"
+              ],
+              "sourceCountId": null,
+              "shadowMicroCanonicalRef": {
+                "sourceCountId": "ES-MICRO-202610080700-7782_75-COUNT",
+                "sequenceId": "ES-MICRO-202610080700-7782_75-SEQUENCE",
+                "canonicalStateVersion": 2,
+                "revision": 0,
+                "sourceTimestamp": 1791917519022
+              },
+              "shadowAuthority": "MICRO_V2_SHADOW_ONLY_NOT_USED",
+              "sourceMode": "OVERRIDE_DISPLAY_INTELLIGENCE",
+              "fallbackUsed": false
+            }
+          }
+        },
+        "diagnostics": {
+          "failedDegrees": [
+            "primary"
+          ]
+        }
+      }
+    },
+    "candles": {
+      "url": "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=3&debug=1",
+      "startedAt": "2026-10-13T18:52:51.680Z",
+      "observedAt": "2026-10-13T18:52:52.086Z",
+      "httpStatus": 200,
+      "bodySha256": "e6a317907d70d1055c1af8a49835870e301ca11db405e08ba43586f26ca92995",
+      "etag": null,
+      "selected": {
+        "requestedSymbol": "ES",
+        "resolvedSymbol": "ESZ6",
+        "productCode": "ES",
+        "timeframe": "10m",
+        "resolution": "10min",
+        "resolver": {
+          "productCode": "ES",
+          "requestedContract": null,
+          "resolvedSymbol": "ESZ6",
+          "selected": {
+            "ticker": "ESZ6",
+            "productCode": "ES",
+            "source": "env_override"
+          },
+          "selectionRule": "env_contract_override",
+          "candidateCount": 0,
+          "checkedAt": "2026-10-13T18:52:51.790Z"
+        },
+        "startDate": "2026-09-29",
+        "endDate": "2026-10-14",
+        "count": 3,
+        "firstBar": {
+          "time": 1791916200,
+          "open": 7853.5,
+          "high": 7854.5,
+          "low": 7850.5,
+          "close": 7851.25,
+          "volume": 13788
+        },
+        "lastBar": {
+          "time": 1791917400,
+          "open": 7847.5,
+          "high": 7850,
+          "low": 7847.5,
+          "close": 7849.75,
+          "volume": 3250
+        }
+      }
+    }
+  },
+  "comparison": {
+    "schemaVersion": "engine11.final-compatibility-comparison.v1",
+    "captureConsistency": "INDEPENDENT_HTTP_CAPTURES_NOT_ATOMIC",
+    "comparisons": [
+      {
+        "degree": "primary",
+        "state": "OWNER_PUBLICATION_HASH_MATCH",
+        "corePublicationHash": "bfd1571325ea9e31ebd1efe54b307aed042759e25b6db1baeff25b20e276a276",
+        "previewPublicationHash": "bfd1571325ea9e31ebd1efe54b307aed042759e25b6db1baeff25b20e276a276",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "1.000",
+        "publishedPrice": 8369.5,
+        "originalSourceValue": 8369.5,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.1.000",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.000",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "e100",
+        "publishedPrice": 8369.5,
+        "originalSourceValue": 8369.5,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.e100",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e100",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "1.272",
+        "publishedPrice": 8903.25,
+        "originalSourceValue": 8903.25,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.1.272",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.272",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "e1272",
+        "publishedPrice": 8903.25,
+        "originalSourceValue": 8903.25,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.e1272",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e1272",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "1.618",
+        "publishedPrice": 9582.25,
+        "originalSourceValue": 9582.25,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.1.618",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.1.618",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "e1618",
+        "publishedPrice": 9582.25,
+        "originalSourceValue": 9582.25,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.e1618",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e1618",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "2.000",
+        "publishedPrice": 10332,
+        "originalSourceValue": 10332,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.2.000",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.2.000",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "e200",
+        "publishedPrice": 10332,
+        "originalSourceValue": 10332,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.e200",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e200",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "2.618",
+        "publishedPrice": 11544.75,
+        "originalSourceValue": 11544.75,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.2.618",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.2.618",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "lineId": "e2618",
+        "publishedPrice": 11544.75,
+        "originalSourceValue": 11544.75,
+        "actualSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.degreeStates.intermediate.activeFibModel.levels.e2618",
+        "emittedSourcePath": "engine22WaveStrategy.degreeStates.intermediate.activeFibModel.e2618",
+        "state": "NUMERIC_VALUE_MATCH_NOT_AUTHORITY_APPROVAL",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "intermediate",
+        "state": "OWNER_PUBLICATION_HASH_MATCH",
+        "corePublicationHash": "35881a096bcd874bf383f667decb8a7679baf5143c46aea5474ad9f392051d2b",
+        "previewPublicationHash": "35881a096bcd874bf383f667decb8a7679baf5143c46aea5474ad9f392051d2b",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "minor",
+        "state": "OWNER_PUBLICATION_HASH_MATCH",
+        "corePublicationHash": "40dfb05c11e2c727aeda65f4c354cc6bc1c99e42418474071605cce91f637aba",
+        "previewPublicationHash": "40dfb05c11e2c727aeda65f4c354cc6bc1c99e42418474071605cce91f637aba",
+        "officialApproval": "UNKNOWN"
+      },
+      {
+        "degree": "minute",
+        "state": "OWNER_PUBLICATION_HASH_MATCH",
+        "corePublicationHash": "103d9363944b5deac8a10f35327f963b743eb69ef36d1a5e18e56fbed8a8d503",
+        "previewPublicationHash": "103d9363944b5deac8a10f35327f963b743eb69ef36d1a5e18e56fbed8a8d503",
+        "officialApproval": "UNKNOWN"
+      }
+    ],
+    "conflict": {
+      "emitted": true,
+      "exactSourcePath": "strategies[\"intraday_scalp@10m\"].engine22WaveStrategy.currentWavelength.canonicalWaveStateConflict",
+      "sourceValue": true,
+      "state": "FLAG_ORIGIN_MATCH_NOT_STRUCTURAL_RESOLUTION"
+    },
+    "chart": {
+      "resolvedSymbol": "ESZ6",
+      "requestedSymbol": "ES",
+      "resolution": "10min",
+      "resolverRule": "env_contract_override",
+      "fullYearContractIdentity": "UNKNOWN",
+      "priceBasisRelativeToApprovedFib": "UNKNOWN"
+    },
+    "overlayUnits": "ES_INDEX_POINTS",
+    "officialCountIdentity": "UNKNOWN",
+    "approval": "UNKNOWN",
+    "renderingAuthorized": false,
+    "canonicalEligible": false
+  },
+  "privateSourceArchiveTransferred": false,
+  "productionChanges": 0,
+  "annotationRevision": {
+    "version": 2,
+    "reason": "Exclude candidate price fields and timeframe labels from timestamp classification; original selected owner fields and HTTP-body hashes unchanged.",
+    "newProviderOrSnapshotObservation": false
+  }
+}

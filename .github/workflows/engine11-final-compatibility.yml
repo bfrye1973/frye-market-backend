@@ -1,0 +1,35 @@
+name: Engine 11 final compatibility decision packet
+on:
+  push:
+    branches: [engine11-final-compatibility-handoff-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/finalCompatibilityResearchV1/**
+      - services/core/tests/engine11/finalCompatibilityResearch/**
+      - .github/workflows/engine11-final-compatibility.yml
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs services/core/tests/engine11/calendarPrototype/*.test.mjs services/core/tests/engine11/twoYearResearch/*.test.mjs services/core/tests/engine11/finalityResearch/*.test.mjs services/core/tests/engine11/acceptanceResearch/*.test.mjs services/core/tests/engine11/evidenceTierResearch/*.test.mjs services/core/tests/engine11/finalCompatibilityResearch/*.test.mjs
+  live-read-only-handoff:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[compatibility-live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node services/core/tests/engine11/finalCompatibilityResearch/liveComparison.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine11-final-compatibility
+          path: research-evidence/final-compatibility.json
+          retention-days: 30
