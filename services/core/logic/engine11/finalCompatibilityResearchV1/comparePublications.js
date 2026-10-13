@@ -7,7 +7,7 @@ export function timestampEvidence(value,path='$'){
  const result=[];
  const visit=(x,p,key)=>{
   if(x&&typeof x==='object'){for(const [k,v] of Object.entries(x))visit(v,p+(Array.isArray(x)?'['+k+']':'.'+k),k);return;}
-  if(!/(timestamp|time|date|confirmedAt|completedAt|updatedAt|generatedAt)/i.test(key))return;
+  if(!/(timestamp|time|date|At|AtBarTime)$/i.test(key))return;
   if(x===null||x===undefined)return;
   let state='UNKNOWN_FORMAT';
   if(typeof x==='string'&&/^\d{4}-\d\d-\d\d$/.test(x))state='DATE_ONLY_NO_INTRADAY_PRECISION';
