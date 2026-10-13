@@ -12,6 +12,15 @@ const owner={
   W2_LOW:[7757.75,"2026-10-05 03:00"],W3_HIGH:[7897.75,"2026-10-06 07:00"],
   W4_LOW:[7782.75,"2026-10-08 07:00"]}},
 };
+function waveOneSequenceDirection(anchors){
+ const lo=anchors?.W1_LOW,hi=anchors?.W1_HIGH;
+ if(!lo || !hi || !Number.isFinite(Date.parse(lo.time)) ||
+    !Number.isFinite(Date.parse(hi.time)) ||
+    Date.parse(lo.time)===Date.parse(hi.time))return null;
+ // Elliott impulse direction is based on the temporal W1 endpoint sequence,
+ // not on price-label sorting or the current corrective market bias.
+ return Date.parse(lo.time)<Date.parse(hi.time)?"UP":"DOWN";
+}
 function marks(raw){
  const out={};
  for(const [wave,v] of Object.entries(raw??{})){
@@ -34,6 +43,7 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
    degreeId:d,countId:"ES-V3-BASELINE-"+d,sequenceId:"ES-V3-SEQUENCE-"+d,
    parentDegree:ENGINE22_V3_PARENT[d],parentWave:historical?.parentWave??null,
    activeWave:supplied?.activeWave??historical?.activeWave??null,
+   sequenceDirection:waveOneSequenceDirection(anchors),
    lifecycle:supplied?"DEVELOPING":historical?.stage??"DEVELOPING",
    anchors,history:[{event:"OWNER_V3_BASELINE" ,historicalTransitionsKnown:false,
      source:supplied?"OWNER_CONFIRMED_ANCHORS":"EXISTING_MANUAL_STRUCTURE",
