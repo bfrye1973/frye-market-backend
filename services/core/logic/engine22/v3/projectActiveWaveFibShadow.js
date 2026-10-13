@@ -35,7 +35,7 @@ function safeBars(bars,tf){
 }
 // Each degree receives its own pinned evidence manifest. No cross-degree borrowing.
 export function projectEngine22V3ActiveWaveFibShadow({
- canonical=null,degree=null,source=null,previous=null,tickSize=.25,
+ canonical=null,degree=null,source=null,previous=null,tickSize=.25,anchorOnly=false,
 }={}){
  const validation=validateEngine22V3Canonical(canonical);
  if(!validation.ok)return missing("CANONICAL_INVALID",degree);
@@ -47,12 +47,21 @@ export function projectEngine22V3ActiveWaveFibShadow({
  if(["INVALIDATED","RECOUNT_REQUIRED"].includes(s.lifecycle))
   return missing("INVALIDATED_OR_RECOUNT_REQUIRED",degree);
  if(s.lifecycle==="LOCKED")return missing("LOCKED_WAVE_NO_NEW_PROJECTION",degree);
- if(!source||source.structuralEligible!==true||source.coverageComplete!==true||
-    !source.seriesId||!source.datasetVersion||!source.priceBasis||
-    source.sourceCountId!==s.countId||source.timeframe!==TF[degree])
+ const sourceQualified=Boolean(source?.structuralEligible===true &&
+    source.coverageComplete===true && source.seriesId && source.datasetVersion &&
+    source.priceBasis && source.sourceCountId===s.countId &&
+    source.timeframe===TF[degree]);
+ // Explicitly restricted to owner-confirmed anchor baselines. Provisional
+ // projections may be WATCH only: no candle-touch evidence or source approval.
+ const ownerAnchorOnly=anchorOnly===true && !sourceQualified &&
+   s.provenance?.source==="OWNER_CONFIRMED_ANCHORS" &&
+   ["W2","W3","W4","W5"].includes(wave);
+ if(!sourceQualified && !ownerAnchorOnly)
   return missing("SOURCE_UNAVAILABLE",degree);
- const historyError=safeBars(source.bars,TF[degree]);
- if(historyError)return missing(historyError,degree);
+ if(sourceQualified){
+  const historyError=safeBars(source.bars,TF[degree]);
+  if(historyError)return missing(historyError,degree);
+ }
  const a=s.anchors||{},pos=dir==="UP"?"LOW":"HIGH",end=dir==="UP"?"HIGH":"LOW";
  const start=a["W1_"+pos],w1End=a["W1_"+end],
    w2End=a["W2_"+pos],w3End=a["W3_"+end],w4End=a["W4_"+pos];
@@ -62,8 +71,8 @@ export function projectEngine22V3ActiveWaveFibShadow({
    [start,w1End,w3End,w4End];
  if(!needed.every(anchor))return missing("VERIFIED_ANCHORS_REQUIRED",degree);
  const earliest=Math.min(...needed.map(x=>Date.parse(x.time)));
- const last=stamp(source.bars.at(-1));
- if(last<earliest)return missing("HISTORY_DOES_NOT_COVER_ANCHORS",degree);
+ const last=sourceQualified?stamp(source.bars.at(-1)):null;
+ if(sourceQualified && last<earliest)return missing("HISTORY_DOES_NOT_COVER_ANCHORS",degree);
  const impulseSign=dir==="UP"?1:-1;
  if(wave==="W1"){
   // W1 is an observed developing-range WATCH model, not an invented W1 endpoint.
@@ -89,15 +98,18 @@ export function projectEngine22V3ActiveWaveFibShadow({
  if(!valid(length)||length<=0)return missing("INCONSISTENT_IMPULSE_ANCHORS",degree);
  const waveOrigin=wave==="W1"?start:
   wave==="W2"?w1End:wave==="W3"?w2End:wave==="W4"?w3End:w4End;
- if(last<Date.parse(waveOrigin.time))return missing("NO_COMPLETED_WAVE_OBSERVATIONS",degree);
- const modelKey=[degree,s.countId,s.sequenceId,wave,dir,source.seriesId,
-  source.datasetVersion,source.priceBasis,
+ if(sourceQualified && last<Date.parse(waveOrigin.time))return missing("NO_COMPLETED_WAVE_OBSERVATIONS",degree);
+ const seriesId=sourceQualified?source.seriesId:"OWNER_ANCHOR_ONLY";
+ const datasetVersion=sourceQualified?source.datasetVersion:"PROVISIONAL_NO_CANDLE_SERIES";
+ const priceBasis=sourceQualified?source.priceBasis:"ANCHOR_PRICE_BASIS_ONLY";
+ const modelKey=[degree,s.countId,s.sequenceId,wave,dir,seriesId,
+  datasetVersion,priceBasis,
   ...keys.map(key=>key==="COMPLETED_RANGE_EXTREME"?"DEVELOPING":
    [key,a[key]?.price,a[key]?.time].join(":")),base,length,tickSize].join("|");
  const compatible=previous?.available===true&&previous.modelKey===modelKey&&
    previous.sourceCountId===s.countId&&previous.degree===degree&&
-   previous.seriesId===source.seriesId&&previous.datasetVersion===source.datasetVersion;
- const observations=source.bars.filter(b=>stamp(b)>=Date.parse(waveOrigin.time));
+   previous.seriesId===seriesId&&previous.datasetVersion===datasetVersion;
+ const observations=sourceQualified?source.bars.filter(b=>stamp(b)>=Date.parse(waveOrigin.time)):[];
  const levels=RATIOS[wave].map(([key,ratio])=>{
   const price=tick(base+sign*ratio*length,tickSize);
   const observed=observations.find(b=>sign>0?b.high>=price:b.low<=price);
@@ -110,14 +122,17 @@ export function projectEngine22V3ActiveWaveFibShadow({
   return {key,ratio,price,status:touched?"TOUCHED":"WATCH",
    firstTouchedAt:touchedAt,firstTouchedBarId:touchedBarId};
  });
- return {available:true,reasonCodes:provisional?["W1_RANGE_PROVISIONAL"]:[],
+ return {available:true,reasonCodes:ownerAnchorOnly?["OWNER_ANCHOR_ONLY_PROVISIONAL","NO_VALIDATED_TOUCH_EVIDENCE"]:
+   provisional?["W1_RANGE_PROVISIONAL"]:[],
   degree,activeWave:wave,sequenceDirection:dir,sourceCountId:s.countId,
-  sequenceId:s.sequenceId,seriesId:source.seriesId,datasetVersion:source.datasetVersion,
-  priceBasis:source.priceBasis,sourceTimeframe:source.timeframe,
+  sequenceId:s.sequenceId,seriesId,datasetVersion,
+  priceBasis,sourceTimeframe:TF[degree],
   modelKey,modelType:wave==="W1"?"DEVELOPING_RANGE":
    (wave==="W2"||wave==="W4"?"RETRACEMENT":"EXTENSION"),
   anchorKeys:keys,projectionBase:base,projectionLength:length,
-  provisional,levels,evidenceThrough:source.bars.at(-1).sourceTimestamp,
+  provisional:provisional||ownerAnchorOnly,anchorOnly:ownerAnchorOnly,
+  touchEvidenceAvailable:sourceQualified,levels,
+  evidenceThrough:sourceQualified?source.bars.at(-1).sourceTimestamp:null,
   waveCompletionConfirmed:false,shadowOnly:true,officialFibAuthorityChanged:false,
   noPermissionCreated:true,noExecution:true,publishAuthorized:false};
 }
