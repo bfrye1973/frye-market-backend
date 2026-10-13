@@ -2290,7 +2290,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   const engine22V3Shadow = input?.engine22V3Canonical
     ? buildEngine22V3ShadowSnapshot({
         canonical:input.engine22V3Canonical,
-        barsByTf:input.barsByTf,
+        barsByTf:input.engine22V3BarsByTf ?? input.barsByTf,
         evaluationTimeMs:input.evaluationTimeMs,
         sourceByDegree:input.engine22V3ValidatedSourceByDegree ?? null,
         previousFibByDegree:input.engine22V3PreviousFibByDegree ?? null,
@@ -2302,7 +2302,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   const engine22V3NodeEvidence = input?.engine22V3Canonical
     ? buildEngine22V3IndependentNodeShadow({
         canonical:input.engine22V3Canonical,
-        barsByTf:input.barsByTf,
+        barsByTf:input.engine22V3BarsByTf ?? input.barsByTf,
         evaluationTimeMs:input.evaluationTimeMs,
       })
     : null;
