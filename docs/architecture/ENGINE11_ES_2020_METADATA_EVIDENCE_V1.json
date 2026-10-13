@@ -1,0 +1,299 @@
+{
+  "provenance": {
+    "commit": "5e2b72546911987454ba3b50e5132abeaf086512",
+    "run": 38325590125,
+    "job": 115063380519
+  },
+  "metadata": [
+    {
+      "label": "ESH0-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 1,
+      "binding": null,
+      "bindingFailure": "V2_FULL_CONTRACT_BINDING_UNRESOLVED",
+      "returnedMetadata": [
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2018-12-21",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0",
+          "product_code": "ES",
+          "ticker": "ESH0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        }
+      ]
+    },
+    {
+      "label": "ESM0-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 1,
+      "binding": null,
+      "bindingFailure": "V2_FULL_CONTRACT_BINDING_UNRESOLVED",
+      "returnedMetadata": [
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-03-15",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0",
+          "product_code": "ES",
+          "ticker": "ESM0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        }
+      ]
+    },
+    {
+      "label": "ESH2020-full-code",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 0,
+      "binding": null,
+      "bindingFailure": null,
+      "returnedMetadata": []
+    },
+    {
+      "label": "ESM2020-full-code",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 0,
+      "binding": null,
+      "bindingFailure": null,
+      "returnedMetadata": []
+    },
+    {
+      "label": "ES-all-product-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 20,
+      "binding": null,
+      "bindingFailure": null,
+      "returnedMetadata": [
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2018-12-21",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0",
+          "product_code": "ES",
+          "ticker": "ESH0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-12-20",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0-ESH1",
+          "product_code": "ES",
+          "ticker": "ESH0-ESH1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-03-15",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0-ESM0",
+          "product_code": "ES",
+          "ticker": "ESH0-ESM0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-06-21",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0-ESU0",
+          "product_code": "ES",
+          "ticker": "ESH0-ESU0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-09-20",
+          "last_trade_date": "2020-03-20",
+          "name": "ESH0-ESZ0",
+          "product_code": "ES",
+          "ticker": "ESH0-ESZ0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-12-20",
+          "last_trade_date": "2021-03-19",
+          "name": "ESH1",
+          "product_code": "ES",
+          "ticker": "ESH1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": false,
+          "date": "2020-03-10",
+          "first_trade_date": "2020-03-20",
+          "last_trade_date": "2021-03-19",
+          "name": "ESH1-ESM1",
+          "product_code": "ES",
+          "ticker": "ESH1-ESM1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-03-15",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0",
+          "product_code": "ES",
+          "ticker": "ESM0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-12-20",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0-ESH1",
+          "product_code": "ES",
+          "ticker": "ESM0-ESH1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": false,
+          "date": "2020-03-10",
+          "first_trade_date": "2020-03-20",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0-ESM1",
+          "product_code": "ES",
+          "ticker": "ESM0-ESM1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-06-21",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0-ESU0",
+          "product_code": "ES",
+          "ticker": "ESM0-ESU0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-09-20",
+          "last_trade_date": "2020-06-19",
+          "name": "ESM0-ESZ0",
+          "product_code": "ES",
+          "ticker": "ESM0-ESZ0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": false,
+          "date": "2020-03-10",
+          "first_trade_date": "2020-03-20",
+          "last_trade_date": "2021-06-18",
+          "name": "ESM1",
+          "product_code": "ES",
+          "ticker": "ESM1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-06-21",
+          "last_trade_date": "2020-09-18",
+          "name": "ESU0",
+          "product_code": "ES",
+          "ticker": "ESU0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-12-20",
+          "last_trade_date": "2020-09-18",
+          "name": "ESU0-ESH1",
+          "product_code": "ES",
+          "ticker": "ESU0-ESH1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": false,
+          "date": "2020-03-10",
+          "first_trade_date": "2020-03-20",
+          "last_trade_date": "2020-09-18",
+          "name": "ESU0-ESM1",
+          "product_code": "ES",
+          "ticker": "ESU0-ESM1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-09-20",
+          "last_trade_date": "2020-09-18",
+          "name": "ESU0-ESZ0",
+          "product_code": "ES",
+          "ticker": "ESU0-ESZ0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-09-20",
+          "last_trade_date": "2020-12-18",
+          "name": "ESZ0",
+          "product_code": "ES",
+          "ticker": "ESZ0",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": true,
+          "date": "2020-03-10",
+          "first_trade_date": "2019-12-20",
+          "last_trade_date": "2020-12-18",
+          "name": "ESZ0-ESH1",
+          "product_code": "ES",
+          "ticker": "ESZ0-ESH1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        },
+        {
+          "active": false,
+          "date": "2020-03-10",
+          "first_trade_date": "2020-03-20",
+          "last_trade_date": "2020-12-18",
+          "name": "ESZ0-ESM1",
+          "product_code": "ES",
+          "ticker": "ESZ0-ESM1",
+          "trading_venue": "XCME",
+          "group_code": "ES"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,940 @@
+{
+  "provenance": {
+    "commit": "3ad24f9d6ee34346f9ea9904c0f587c77ba31682",
+    "run": 38325329705,
+    "job": 115062541130,
+    "evidenceKind": "AUTHENTIC_LOG_DERIVED_SUMMARY"
+  },
+  "samples": [
+    {
+      "name": "pause_before_change",
+      "ticker": "ESU1",
+      "resolution": "1min",
+      "from": "2021-06-25T20:00:00Z",
+      "to": "2021-06-25T20:45:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1624651200000000000",
+        "1624651260000000000",
+        "1624651320000000000",
+        "1624651380000000000",
+        "1624651440000000000",
+        "1624651500000000000",
+        "1624651560000000000",
+        "1624651620000000000",
+        "1624651680000000000",
+        "1624651740000000000",
+        "1624651800000000000",
+        "1624651860000000000",
+        "1624651920000000000",
+        "1624651980000000000",
+        "1624652040000000000",
+        "1624653000000000000",
+        "1624653060000000000",
+        "1624653120000000000",
+        "1624653180000000000",
+        "1624653240000000000",
+        "1624653300000000000",
+        "1624653360000000000",
+        "1624653420000000000",
+        "1624653480000000000",
+        "1624653540000000000",
+        "1624653600000000000",
+        "1624653660000000000",
+        "1624653720000000000",
+        "1624653780000000000",
+        "1624653840000000000"
+      ],
+      "sessionLabels": [
+        "2021-06-25"
+      ],
+      "collisions": [],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "pause_after_change",
+      "ticker": "ESU1",
+      "resolution": "1min",
+      "from": "2021-06-28T20:00:00Z",
+      "to": "2021-06-28T20:45:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1624910400000000000",
+        "1624910460000000000",
+        "1624910520000000000",
+        "1624910580000000000",
+        "1624910640000000000",
+        "1624910700000000000",
+        "1624910760000000000",
+        "1624910820000000000",
+        "1624910880000000000",
+        "1624910940000000000",
+        "1624911000000000000",
+        "1624911060000000000",
+        "1624911120000000000",
+        "1624911180000000000",
+        "1624911240000000000",
+        "1624911300000000000",
+        "1624911360000000000",
+        "1624911420000000000",
+        "1624911480000000000",
+        "1624911540000000000",
+        "1624911600000000000",
+        "1624911660000000000",
+        "1624911720000000000",
+        "1624911780000000000",
+        "1624911840000000000",
+        "1624911900000000000",
+        "1624911960000000000",
+        "1624912020000000000",
+        "1624912080000000000",
+        "1624912140000000000",
+        "1624912200000000000",
+        "1624912260000000000",
+        "1624912320000000000",
+        "1624912380000000000",
+        "1624912440000000000",
+        "1624912500000000000",
+        "1624912560000000000",
+        "1624912620000000000",
+        "1624912680000000000",
+        "1624912740000000000",
+        "1624912800000000000",
+        "1624912860000000000",
+        "1624912920000000000",
+        "1624912980000000000",
+        "1624913040000000000"
+      ],
+      "sessionLabels": [
+        "2021-06-28"
+      ],
+      "collisions": [],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "spring_2020_open",
+      "ticker": "ESH0",
+      "resolution": "1min",
+      "from": "2020-03-08T21:45:00Z",
+      "to": "2020-03-08T22:15:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1583704800000000000",
+        "1583704860000000000",
+        "1583704920000000000",
+        "1583704980000000000",
+        "1583705040000000000",
+        "1583705100000000000",
+        "1583705160000000000",
+        "1583705220000000000",
+        "1583705280000000000",
+        "1583705340000000000",
+        "1583705400000000000",
+        "1583705460000000000",
+        "1583705520000000000",
+        "1583705580000000000",
+        "1583705640000000000"
+      ],
+      "sessionLabels": [
+        "2020-03-09"
+      ],
+      "collisions": [],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "fall_2020_open",
+      "ticker": "ESZ0",
+      "resolution": "1min",
+      "from": "2020-11-01T22:45:00Z",
+      "to": "2020-11-01T23:15:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1604271600000000000",
+        "1604271660000000000",
+        "1604271720000000000",
+        "1604271780000000000",
+        "1604271840000000000",
+        "1604271900000000000",
+        "1604271960000000000",
+        "1604272020000000000",
+        "1604272080000000000",
+        "1604272140000000000",
+        "1604272200000000000",
+        "1604272260000000000",
+        "1604272320000000000",
+        "1604272380000000000",
+        "1604272440000000000"
+      ],
+      "sessionLabels": [
+        "2020-11-02"
+      ],
+      "collisions": [],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "maintenance_2026",
+      "ticker": "ESU6",
+      "resolution": "1min",
+      "from": "2026-09-10T20:55:00Z",
+      "to": "2026-09-10T22:05:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1789073700000000000",
+        "1789073760000000000",
+        "1789073820000000000",
+        "1789073880000000000",
+        "1789073940000000000",
+        "1789077600000000000",
+        "1789077660000000000",
+        "1789077720000000000",
+        "1789077780000000000",
+        "1789077840000000000"
+      ],
+      "sessionLabels": [
+        "2026-09-10",
+        "2026-09-11"
+      ],
+      "collisions": [],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "2020_conflict_1min",
+      "ticker": "ESH0",
+      "resolution": "1min",
+      "from": "2020-03-03T21:00:00Z",
+      "to": "2020-03-03T22:00:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1583269200000000000",
+        "1583269200000000000",
+        "1583269260000000000",
+        "1583269320000000000",
+        "1583269380000000000",
+        "1583269440000000000",
+        "1583269500000000000",
+        "1583269560000000000",
+        "1583269620000000000",
+        "1583269680000000000",
+        "1583269740000000000",
+        "1583269800000000000",
+        "1583269860000000000",
+        "1583269920000000000",
+        "1583269980000000000",
+        "1583270040000000000",
+        "1583271000000000000",
+        "1583271060000000000",
+        "1583271120000000000",
+        "1583271180000000000",
+        "1583271240000000000",
+        "1583271300000000000",
+        "1583271360000000000",
+        "1583271420000000000",
+        "1583271480000000000",
+        "1583271540000000000",
+        "1583271600000000000",
+        "1583271660000000000",
+        "1583271720000000000",
+        "1583271780000000000",
+        "1583271840000000000",
+        "1583271900000000000",
+        "1583271960000000000",
+        "1583272020000000000",
+        "1583272080000000000",
+        "1583272140000000000",
+        "1583272200000000000",
+        "1583272260000000000",
+        "1583272320000000000",
+        "1583272380000000000",
+        "1583272440000000000",
+        "1583272500000000000",
+        "1583272560000000000",
+        "1583272620000000000",
+        "1583272680000000000",
+        "1583272740000000000"
+      ],
+      "sessionLabels": [
+        "2020-03-02",
+        "2020-03-03"
+      ],
+      "collisions": [
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-02",
+          "open": 3000.25,
+          "high": 3002.5,
+          "low": 2996,
+          "close": 3001.75,
+          "transactions": 87,
+          "volume": 2708,
+          "dollar_volume": 8121801
+        },
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-03",
+          "open": 2998.75,
+          "high": 3008.75,
+          "low": 2995.25,
+          "close": 3002.5,
+          "transactions": 3924,
+          "volume": 18285,
+          "dollar_volume": 54892979
+        }
+      ],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "2020_conflict_5min",
+      "ticker": "ESH0",
+      "resolution": "5min",
+      "from": "2020-03-03T21:00:00Z",
+      "to": "2020-03-03T22:00:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1583269200000000000",
+        "1583269200000000000",
+        "1583269500000000000",
+        "1583269800000000000",
+        "1583271000000000000",
+        "1583271300000000000",
+        "1583271600000000000",
+        "1583271900000000000",
+        "1583272200000000000",
+        "1583272500000000000"
+      ],
+      "sessionLabels": [
+        "2020-03-02",
+        "2020-03-03"
+      ],
+      "collisions": [
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-02",
+          "open": 3000.25,
+          "high": 3002.5,
+          "low": 2996,
+          "close": 3001.75,
+          "transactions": 87,
+          "volume": 2708,
+          "dollar_volume": 8121801
+        },
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-03",
+          "open": 2998.75,
+          "high": 3015.75,
+          "low": 2995.25,
+          "close": 3014.5,
+          "transactions": 9076,
+          "volume": 43945,
+          "dollar_volume": 132093960
+        }
+      ],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "2020_conflict_10min",
+      "ticker": "ESH0",
+      "resolution": "10min",
+      "from": "2020-03-03T21:00:00Z",
+      "to": "2020-03-03T22:00:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1583269200000000000",
+        "1583269200000000000",
+        "1583269800000000000",
+        "1583271000000000000",
+        "1583271600000000000",
+        "1583272200000000000"
+      ],
+      "sessionLabels": [
+        "2020-03-02",
+        "2020-03-03"
+      ],
+      "collisions": [
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-02",
+          "open": 3000.25,
+          "high": 3002.5,
+          "low": 2996,
+          "close": 3001.75,
+          "transactions": 87,
+          "volume": 2708,
+          "dollar_volume": 8121801
+        },
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-03",
+          "open": 2998.75,
+          "high": 3018.25,
+          "low": 2995.25,
+          "close": 3015.25,
+          "transactions": 12804,
+          "volume": 59646,
+          "dollar_volume": 179417264.5
+        }
+      ],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    },
+    {
+      "name": "2020_conflict_1hour",
+      "ticker": "ESH0",
+      "resolution": "1hour",
+      "from": "2020-03-03T21:00:00Z",
+      "to": "2020-03-03T22:00:00Z",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "timestamps": [
+        "1583269200000000000",
+        "1583269200000000000"
+      ],
+      "sessionLabels": [
+        "2020-03-02",
+        "2020-03-03"
+      ],
+      "collisions": [
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-02",
+          "open": 3000.25,
+          "high": 3002.5,
+          "low": 2996,
+          "close": 3001.75,
+          "transactions": 87,
+          "volume": 2708,
+          "dollar_volume": 8121801
+        },
+        {
+          "ticker": "ESH0",
+          "window_start": "1583269200000000000",
+          "session_end_date": "2020-03-03",
+          "open": 2998.75,
+          "high": 3018.25,
+          "low": 2989.25,
+          "close": 2989.5,
+          "transactions": 24679,
+          "volume": 107994,
+          "dollar_volume": 324442410.25
+        }
+      ],
+      "structuralEligible": false,
+      "calendarAccepted": false,
+      "sourceFinality": "UNKNOWN"
+    }
+  ],
+  "metadata": [
+    {
+      "label": "ESH0-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 1
+    },
+    {
+      "label": "ESM0-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 1
+    },
+    {
+      "label": "ESH2020-full-code",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 0
+    },
+    {
+      "label": "ESM2020-full-code",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 0
+    },
+    {
+      "label": "ES-all-product-date",
+      "status": "COMPLETE_TRAVERSAL",
+      "failure": null,
+      "rows": 20
+    }
+  ],
+  "comparisons": [
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-02",
+        "open": 3000.25,
+        "high": 3002.5,
+        "low": 2996,
+        "close": 3001.75,
+        "transactions": 87,
+        "volume": 2708,
+        "dollar_volume": 8121801
+      },
+      "childCount": 1,
+      "aggregate": {
+        "open": 3000.25,
+        "close": 3001.75,
+        "high": 3002.5,
+        "low": 2996,
+        "volume": 2708,
+        "transactions": 87
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2998.75,
+        "high": 3015.75,
+        "low": 2995.25,
+        "close": 3014.5,
+        "transactions": 9076,
+        "volume": 43945,
+        "dollar_volume": 132093960
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2998.75,
+        "close": 3014.5,
+        "high": 3015.75,
+        "low": 2995.25,
+        "volume": 43945,
+        "transactions": 9076
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269500000000000",
+        "session_end_date": "2020-03-03",
+        "open": 3014.5,
+        "high": 3018.25,
+        "low": 3009.75,
+        "close": 3015.25,
+        "transactions": 3728,
+        "volume": 15701,
+        "dollar_volume": 47323304.5
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 3014.5,
+        "close": 3015.25,
+        "high": 3018.25,
+        "low": 3009.75,
+        "volume": 15701,
+        "transactions": 3728
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269800000000000",
+        "session_end_date": "2020-03-03",
+        "open": 3015.25,
+        "high": 3016.25,
+        "low": 2994,
+        "close": 2997,
+        "transactions": 5910,
+        "volume": 30381,
+        "dollar_volume": 91213210.75
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 3015.25,
+        "close": 2997,
+        "high": 3016.25,
+        "low": 2994,
+        "volume": 30381,
+        "transactions": 5910
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271000000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2997.75,
+        "high": 3001.75,
+        "low": 2991.75,
+        "close": 2999.75,
+        "transactions": 2008,
+        "volume": 6540,
+        "dollar_volume": 19598693.5
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2997.75,
+        "close": 2999.75,
+        "high": 3001.75,
+        "low": 2991.75,
+        "volume": 6540,
+        "transactions": 2008
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271300000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2999.5,
+        "high": 3000.5,
+        "low": 2996.5,
+        "close": 2998.25,
+        "transactions": 886,
+        "volume": 1932,
+        "dollar_volume": 5793648
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2999.5,
+        "close": 2998.25,
+        "high": 3000.5,
+        "low": 2996.5,
+        "volume": 1932,
+        "transactions": 886
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271600000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2998.25,
+        "high": 2998.75,
+        "low": 2994.5,
+        "close": 2996.25,
+        "transactions": 638,
+        "volume": 1838,
+        "dollar_volume": 5507631
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2998.25,
+        "close": 2996.25,
+        "high": 2998.75,
+        "low": 2994.5,
+        "volume": 1838,
+        "transactions": 638
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271900000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2996.75,
+        "high": 2996.75,
+        "low": 2992.5,
+        "close": 2992.5,
+        "transactions": 1035,
+        "volume": 3007,
+        "dollar_volume": 9003185.25
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2996.75,
+        "close": 2992.5,
+        "high": 2996.75,
+        "low": 2992.5,
+        "volume": 3007,
+        "transactions": 1035
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583272200000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2992.75,
+        "high": 2994,
+        "low": 2989.25,
+        "close": 2990.25,
+        "transactions": 938,
+        "volume": 3112,
+        "dollar_volume": 9308347.25
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2992.75,
+        "close": 2990.25,
+        "high": 2994,
+        "low": 2989.25,
+        "volume": 3112,
+        "transactions": 938
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_5min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583272500000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2990.5,
+        "high": 2993.5,
+        "low": 2989.25,
+        "close": 2989.5,
+        "transactions": 460,
+        "volume": 1538,
+        "dollar_volume": 4600430
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 2990.5,
+        "close": 2989.5,
+        "high": 2993.5,
+        "low": 2989.25,
+        "volume": 1538,
+        "transactions": 460
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-02",
+        "open": 3000.25,
+        "high": 3002.5,
+        "low": 2996,
+        "close": 3001.75,
+        "transactions": 87,
+        "volume": 2708,
+        "dollar_volume": 8121801
+      },
+      "childCount": 1,
+      "aggregate": {
+        "open": 3000.25,
+        "close": 3001.75,
+        "high": 3002.5,
+        "low": 2996,
+        "volume": 2708,
+        "transactions": 87
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2998.75,
+        "high": 3018.25,
+        "low": 2995.25,
+        "close": 3015.25,
+        "transactions": 12804,
+        "volume": 59646,
+        "dollar_volume": 179417264.5
+      },
+      "childCount": 10,
+      "aggregate": {
+        "open": 2998.75,
+        "close": 3015.25,
+        "high": 3018.25,
+        "low": 2995.25,
+        "volume": 59646,
+        "transactions": 12804
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269800000000000",
+        "session_end_date": "2020-03-03",
+        "open": 3015.25,
+        "high": 3016.25,
+        "low": 2994,
+        "close": 2997,
+        "transactions": 5910,
+        "volume": 30381,
+        "dollar_volume": 91213210.75
+      },
+      "childCount": 5,
+      "aggregate": {
+        "open": 3015.25,
+        "close": 2997,
+        "high": 3016.25,
+        "low": 2994,
+        "volume": 30381,
+        "transactions": 5910
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271000000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2997.75,
+        "high": 3001.75,
+        "low": 2991.75,
+        "close": 2998.25,
+        "transactions": 2894,
+        "volume": 8472,
+        "dollar_volume": 25392341.5
+      },
+      "childCount": 10,
+      "aggregate": {
+        "open": 2997.75,
+        "close": 2998.25,
+        "high": 3001.75,
+        "low": 2991.75,
+        "volume": 8472,
+        "transactions": 2894
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583271600000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2998.25,
+        "high": 2998.75,
+        "low": 2992.5,
+        "close": 2992.5,
+        "transactions": 1673,
+        "volume": 4845,
+        "dollar_volume": 14510816.25
+      },
+      "childCount": 10,
+      "aggregate": {
+        "open": 2998.25,
+        "close": 2992.5,
+        "high": 2998.75,
+        "low": 2992.5,
+        "volume": 4845,
+        "transactions": 1673
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_10min",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583272200000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2992.75,
+        "high": 2994,
+        "low": 2989.25,
+        "close": 2989.5,
+        "transactions": 1398,
+        "volume": 4650,
+        "dollar_volume": 13908777.25
+      },
+      "childCount": 10,
+      "aggregate": {
+        "open": 2992.75,
+        "close": 2989.5,
+        "high": 2994,
+        "low": 2989.25,
+        "volume": 4650,
+        "transactions": 1398
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_1hour",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-02",
+        "open": 3000.25,
+        "high": 3002.5,
+        "low": 2996,
+        "close": 3001.75,
+        "transactions": 87,
+        "volume": 2708,
+        "dollar_volume": 8121801
+      },
+      "childCount": 1,
+      "aggregate": {
+        "open": 3000.25,
+        "close": 3001.75,
+        "high": 3002.5,
+        "low": 2996,
+        "volume": 2708,
+        "transactions": 87
+      },
+      "matched": true
+    },
+    {
+      "name": "2020_conflict_1hour",
+      "parent": {
+        "ticker": "ESH0",
+        "window_start": "1583269200000000000",
+        "session_end_date": "2020-03-03",
+        "open": 2998.75,
+        "high": 3018.25,
+        "low": 2989.25,
+        "close": 2989.5,
+        "transactions": 24679,
+        "volume": 107994,
+        "dollar_volume": 324442410.25
+      },
+      "childCount": 45,
+      "aggregate": {
+        "open": 2998.75,
+        "close": 2989.5,
+        "high": 3018.25,
+        "low": 2989.25,
+        "volume": 107994,
+        "transactions": 24679
+      },
+      "matched": true
+    }
+  ]
+}
