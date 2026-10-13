@@ -1,0 +1,60 @@
+name: E22 Submicro W2 Five Level Live Acceptance
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/e22-submicro-w2-five-level-live.yml'
+permissions:
+  contents: read
+jobs:
+  read-live:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Read live ES V3 shadow and confirm exact W2 Fibs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            status=$(curl -sSL --max-time 90 -w '%{http_code}' -o "$RUNNER_TEMP/es.json" 'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1')
+            [ "$status" = 200 ] && break
+            echo "Waiting for ES snapshot: HTTP $status"; sleep 15
+          done
+          [ "$status" = 200 ]
+          node - "$RUNNER_TEMP/es.json" <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const j=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));
+          const p=j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.engine22V3Projection;
+          const d=p?.v3LiveShadow?.degrees;
+          const s=d?.intraday_submicro, m=d?.micro;
+          console.log('E22_SUBMICRO_W2_LIVE',JSON.stringify({
+            source:j.now,activeWave:s?.activeWave,high:s?.ownerW1High,
+            low:s?.ownerW1Low,levels:s?.levels,model:s?.fibonacci?.modelType,
+            ownerOnly:s?.fibonacci?.anchorOnly,shadow:s?.shadowOnly,
+            microWave:m?.activeWave,legacyPresent:!!j.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.degreeStates
+          }));
+          assert.equal(s.activeWave,'W2');
+          assert.equal(s.ownerW1Low.price,7787.5);
+          assert.equal(s.ownerW1Low.time,'2026-10-08 10:30');
+          assert.equal(s.ownerW1High.price,7887.25);
+          assert.equal(s.ownerW1High.time,'2026-10-11 20:00');
+          assert.equal(s.ownerW1LowPending,false);
+          assert.equal(s.fibonacci.modelType,'RETRACEMENT');
+          assert.equal(s.fibonacci.anchorOnly,true);
+          assert.equal(s.fibonacci.provisional,true);
+          assert.equal(s.fibonacci.touchEvidenceAvailable,false);
+          assert.equal(s.noExecution,true);
+          assert.deepEqual(s.levels.map(x=>[x.key,x.price,x.status]),[
+            ['r236',7863.75,'WATCH'],['r382',7849.25,'WATCH'],
+            ['r500',7837.5,'WATCH'],['r618',7825.5,'WATCH'],
+            ['r786',7808.75,'WATCH']
+          ]);
+          assert.equal(m.activeWave,'W5');
+          NODE
+      - name: Verify live frontend has been published
+        shell: bash
+        run: |
+          status=$(curl -sSL --max-time 60 -w '%{http_code}' -o "$RUNNER_TEMP/front.html" 'https://frye-dashboard.onrender.com/strategies?symbol=ES')
+          echo "FRONTEND_HTTP=$status"
+          [ "$status" = 200 ]
