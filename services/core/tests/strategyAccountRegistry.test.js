@@ -42,7 +42,9 @@ test("existing Schwab accounts resolve without rewriting legacy journal names", 
   const intraday = resolveStrategyAccountRole({ brokerAccountLabel: "SCHWAB_6380", legacyJournalAccount: "INTRADAY" });
   const subminute = resolveStrategyAccountRole({ brokerAccountLabel: "SCHWAB_0747", legacyJournalAccount: "SWING" });
   assert.equal(intraday.account.accountRole, "INTRADAY");
-  assert.equal(intraday.account.degree, "micro");
+  assert.equal(intraday.account.degree, "submicro");
+  assert.equal(intraday.account.structuralOwner, "SUBMICRO");
+  assert.deepEqual(intraday.account.parentContext, ["MICRO", "SUBMINUTE", "MINUTE"]);
   assert.equal(subminute.account.accountRole, "SUBMINUTE");
   assert.equal(subminute.account.degree, "subminute");
   assert.equal(subminute.account.brokerBinding.legacyJournalAccount, "SWING");
