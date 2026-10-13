@@ -11,6 +11,12 @@ test("actual manual ES source and owner anchors publish seven isolated V3 shadow
  const initialized=buildEngine22V3OwnerBootstrap({activeWaveState:raw});
  assert.equal(initialized.available,true,JSON.stringify(initialized.reasonCodes));
  assert.equal(initialized.canonical.degrees.MICRO.anchors.W4_LOW.price,7782.75);
+ assert.equal(initialized.canonical.degrees.MICRO.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.PRIMARY.sequenceDirection,"UP");
+ assert.equal(initialized.canonical.degrees.MINUTE.sequenceDirection,"UP");
+ // Current Minute correction bias cannot override the degree's earlier W1 impulse.
+ assert.equal(raw.activeStructures.minute.sequenceDirection,"DOWN");
  assert.equal(initialized.canonical.degrees.INTRADAY_SUBMICRO.anchors.W2_LOW.price,7826.25);
  const shadow=buildEngine22V3ShadowSnapshot({canonical:initialized.canonical});
  assert.equal(shadow.available,true,JSON.stringify(shadow.reasonCodes));
