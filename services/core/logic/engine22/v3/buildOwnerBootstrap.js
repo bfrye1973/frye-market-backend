@@ -22,6 +22,7 @@ const owner={
   activeWave:"W2",ownerCorrectionState:"MICRO_W2_OWNER_RECOUNT",
   sequenceDirection:"UP",correctionDirection:"DOWN",
   ownerW1HighPrice:7897.50,ownerW1HighTimeVerified:false,
+  ownerReportedTouchKeys:["r236"],
   anchors:{W1_LOW:[7677.25,"2026-10-01 08:30"]},
  },
  // User's Subminute W3 read is tracked as owner provisional context; former
@@ -68,6 +69,7 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
    correctionDirection:supplied?.correctionDirection??null,
    ownerW1HighPrice:supplied?.ownerW1HighPrice??null,
    ownerW1HighTimeVerified:supplied?.ownerW1HighTimeVerified??null,
+   ownerReportedTouchKeys:supplied?.ownerReportedTouchKeys?clone(supplied.ownerReportedTouchKeys):[],
    ownerApproxW2Low:supplied?.ownerApproxW2Low??null,
    ownerAbcTurns:supplied?.ownerAbcTurns?clone(supplied.ownerAbcTurns):null,
    lifecycle:supplied?"DEVELOPING":historical?.stage??"DEVELOPING",
