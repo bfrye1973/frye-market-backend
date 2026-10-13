@@ -63,7 +63,7 @@ jobs:
               const area=text.slice(text.indexOf('Engine 22 Wave Degrees'),text.indexOf('MICRO\nImmediate timing'));
               const good=area.includes('W2 DOWN')&&area.includes('7887.25')&&
                 area.includes('PENDING VERIFIED W1 LOW')&&!area.includes('W4 DOWN — CURRENT DEVELOPING')&&
-                !area.includes('W3 1.000 VERIFIED TOUCH');
+                !area.includes('W3 1.000 VERIFIED TOUCH') && !area.includes('FIB EXTENSIONS — W3_WATCH');
               console.log('SUBMICRO_VISUAL_W2',JSON.stringify({good,area:area.slice(0,2100)}));
               if(!good)process.exitCode=3;
             }finally{await browser.close();}
