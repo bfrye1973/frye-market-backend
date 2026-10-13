@@ -1,0 +1,40 @@
+name: Engine11 isolated raw candle foundation
+on:
+  push:
+    branches: [engine11-es-raw-candle-foundation-v1]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine11/**'
+      - 'services/core/tests/engine11/**'
+      - 'docs/architecture/ENGINE11_ES_RAW_FOUNDATION_V1.md'
+      - '.github/workflows/engine11-raw-candle-foundation.yml'
+permissions:
+  contents: read
+jobs:
+  fixture-and-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js
+  authentic-read-only-parity:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Read existing entitled provider data without writes
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ENGINE11_REQUIRE_LIVE_PROOF: '1'
+        run: node services/core/tests/engine11/liveProviderParity.mjs

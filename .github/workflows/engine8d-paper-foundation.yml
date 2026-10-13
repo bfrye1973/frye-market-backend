@@ -1,0 +1,53 @@
+name: Engine 8D PAPER Foundation (draft branch only)
+on:
+  push:
+    branches: [engine8a-manual-paper-foundation-repair]
+  pull_request:
+    paths:
+      - "services/core/logic/trading/engine8Paper*.js"
+      - "services/core/logic/trading/engine8DuplicateState.js"
+      - "services/core/logic/trading/engine8CanonicalPaperAdapter.js"
+      - "services/core/routes/trading.js"
+      - "services/core/tests/engine8*.test.js"
+      - ".github/workflows/engine8d-paper-foundation.yml"
+permissions:
+  contents: read
+jobs:
+  paper-simulated:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Isolate simulated Journal files
+        run: echo "TRADE_JOURNAL_DIR=$GITHUB_WORKSPACE/services/core/data" >> "$GITHUB_ENV"
+      - name: Dependencies
+        run: npm install --ignore-scripts
+      - name: Syntax
+        run: |
+          node --check services/core/logic/trading/engine8Paper.js
+          node --check services/core/logic/trading/engine8PaperExecutor.js
+          node --check services/core/logic/trading/engine8PaperDurableStore.js
+          node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
+          node --check services/core/routes/trading.js
+          node --check services/core/scripts/auditEngine8PaperStorage.js
+      - name: Admin authentication and PAPER-only contract checks
+        run: node --test services/core/tests/engine8DManualSecurity.test.js
+      - name: Fresh PAPER storage preflight (no history reads)
+        run: node --test services/core/tests/engine8DFreshStorePreflight.test.js
+      - name: Durable store, restart, historical migration
+        run: node --test services/core/tests/engine8PaperDurableStore.test.js
+      - name: Cross-process instruction serialization and crash fail-closed
+        run: node --test services/core/tests/engine8DCrossProcessLock.test.js
+      - name: Six interrupted-process fill and Journal recovery states
+        run: node --test services/core/tests/engine8DCrashStages.test.js
+      - name: Simulated Engine 10 outage, lost ack, restart and duplicate prevention
+        run: node --test services/core/tests/engine8DJournalRecovery.test.js
+      - name: Canonical Engine 7 and Engine 10 provenance
+        run: node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
+      - name: Lifecycle replay
+        run: node --test services/core/tests/engine8Engine10Strategy1LifecycleReplay.test.js
+      - name: REAL Journal contract identity regression (simulated)
+        run: node --test services/core/tests/engine10RealContractIdentity.test.js

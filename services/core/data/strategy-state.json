@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "updatedAt": "2026-01-25T00:00:00.000Z",
+  "global": {
+    "paperOnly": true
+  },
+  "symbols": {
+    "SPY": {
+      "updatedAt": "2026-01-25T00:00:00.000Z",
+      "strategies": {
+        "intraday_scalp@10m": {
+          "strategyId": "intraday_scalp",
+          "tf": "10m",
+          "enabled": true,
+          "sizeCapBand": "M"
+        },
+        "minor_swing@1h": {
+          "strategyId": "minor_swing",
+          "tf": "1h",
+          "enabled": true,
+          "sizeCapBand": "M"
+        },
+        "intermediate_long@4h": {
+          "strategyId": "intermediate_long",
+          "tf": "4h",
+          "enabled": true,
+          "sizeCapBand": "S"
+        }
+      }
+    }
+  }
+}

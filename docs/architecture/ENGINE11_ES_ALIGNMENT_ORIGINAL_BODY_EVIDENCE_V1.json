@@ -1,0 +1,375 @@
+{
+  "commit": "ad748606c1205e31f25615594e6d39f8e3c9fd04",
+  "run": 38322418049,
+  "job": 115053341067,
+  "observations": [
+    {
+      "ticker": "ESH0",
+      "from": "2020-03-09T20:00:00Z",
+      "to": "2020-03-10T00:00:00Z",
+      "observedAt": "2026-10-12T23:29:53.007Z",
+      "purpose": "ISOLATED_RESEARCH_ONLY",
+      "data": {
+        "4hour": {
+          "httpStatus": 200,
+          "requestDigest": "2ac8d5c4365540119789faa5cf0de623a16ba4441c55fe8f4f8a2d6df0d075dd",
+          "payload": {
+            "results": [
+              {
+                "ticker": "ESH0",
+                "window_start": "1583784000000000000",
+                "session_end_date": "2020-03-09",
+                "open": 2736,
+                "high": 2753,
+                "low": 2720.75,
+                "close": 2733.5,
+                "transactions": 41348,
+                "volume": 190845,
+                "dollar_volume": 522163680.25
+              },
+              {
+                "ticker": "ESH0",
+                "window_start": "1583784000000000000",
+                "session_end_date": "2020-03-10",
+                "open": 2733,
+                "high": 2809.5,
+                "low": 2695.25,
+                "close": 2795.75,
+                "transactions": 48772,
+                "volume": 119821,
+                "dollar_volume": 329898996
+              }
+            ],
+            "status": "OK",
+            "request_id": "f8b34d2247926f7d7ca28f6d1b8ed794"
+          },
+          "originalSuccessBodyText": "{\"results\":[{\"ticker\":\"ESH0\",\"window_start\":1583784000000000000,\"session_end_date\":\"2020-03-09\",\"open\":2736,\"high\":2753,\"low\":2720.75,\"close\":2733.5,\"transactions\":41348,\"volume\":190845,\"dollar_volume\":522163680.25},{\"ticker\":\"ESH0\",\"window_start\":1583784000000000000,\"session_end_date\":\"2020-03-10\",\"open\":2733,\"high\":2809.5,\"low\":2695.25,\"close\":2795.75,\"transactions\":48772,\"volume\":119821,\"dollar_volume\":329898996}],\"status\":\"OK\",\"request_id\":\"f8b34d2247926f7d7ca28f6d1b8ed794\"}",
+          "bodyUtf8Sha256": "ccf43eade35e81310d69daab6bd92232478da51bc2886a9059a8196f4e85b3a5",
+          "traversalComplete": true
+        },
+        "1hour": {
+          "httpStatus": 200,
+          "requestDigest": "e531aa1977c816ef290e66863ad885f0e245e436af1801e06dc284674db1f6f6",
+          "payload": {
+            "results": [
+              {
+                "ticker": "ESH0",
+                "window_start": "1583784000000000000",
+                "session_end_date": "2020-03-09",
+                "open": 2736,
+                "high": 2753,
+                "low": 2720.75,
+                "close": 2733.5,
+                "transactions": 41348,
+                "volume": 190845,
+                "dollar_volume": 522163680.25
+              },
+              {
+                "ticker": "ESH0",
+                "window_start": "1583791200000000000",
+                "session_end_date": "2020-03-10",
+                "open": 2733,
+                "high": 2768,
+                "low": 2695.25,
+                "close": 2764,
+                "transactions": 25381,
+                "volume": 63106,
+                "dollar_volume": 171912304.25
+              },
+              {
+                "ticker": "ESH0",
+                "window_start": "1583794800000000000",
+                "session_end_date": "2020-03-10",
+                "open": 2764.5,
+                "high": 2809.5,
+                "low": 2763,
+                "close": 2795.75,
+                "transactions": 23391,
+                "volume": 56715,
+                "dollar_volume": 157986691.75
+              }
+            ],
+            "status": "OK",
+            "request_id": "14bbd0673ae437aafa76626b334fbd63"
+          },
+          "originalSuccessBodyText": "{\"results\":[{\"ticker\":\"ESH0\",\"window_start\":1583784000000000000,\"session_end_date\":\"2020-03-09\",\"open\":2736,\"high\":2753,\"low\":2720.75,\"close\":2733.5,\"transactions\":41348,\"volume\":190845,\"dollar_volume\":522163680.25},{\"ticker\":\"ESH0\",\"window_start\":1583791200000000000,\"session_end_date\":\"2020-03-10\",\"open\":2733,\"high\":2768,\"low\":2695.25,\"close\":2764,\"transactions\":25381,\"volume\":63106,\"dollar_volume\":171912304.25},{\"ticker\":\"ESH0\",\"window_start\":1583794800000000000,\"session_end_date\":\"2020-03-10\",\"open\":2764.5,\"high\":2809.5,\"low\":2763,\"close\":2795.75,\"transactions\":23391,\"volume\":56715,\"dollar_volume\":157986691.75}],\"status\":\"OK\",\"request_id\":\"14bbd0673ae437aafa76626b334fbd63\"}",
+          "bodyUtf8Sha256": "92f8d2b430b0f467514755c3896275b96adb0427e242507612a434d16348d354",
+          "traversalComplete": true
+        }
+      },
+      "reconciliation": [
+        {
+          "parent": {
+            "ticker": "ESH0",
+            "window_start": "1583784000000000000",
+            "session_end_date": "2020-03-09",
+            "open": 2736,
+            "high": 2753,
+            "low": 2720.75,
+            "close": 2733.5,
+            "transactions": 41348,
+            "volume": 190845,
+            "dollar_volume": 522163680.25
+          },
+          "children": [
+            {
+              "ticker": "ESH0",
+              "window_start": "1583784000000000000",
+              "session_end_date": "2020-03-09",
+              "open": 2736,
+              "high": 2753,
+              "low": 2720.75,
+              "close": 2733.5,
+              "transactions": 41348,
+              "volume": 190845,
+              "dollar_volume": 522163680.25
+            }
+          ],
+          "aggregate": {
+            "open": 2736,
+            "high": 2753,
+            "low": 2720.75,
+            "close": 2733.5,
+            "volume": 190845,
+            "transactions": 41348
+          },
+          "matched": true
+        },
+        {
+          "parent": {
+            "ticker": "ESH0",
+            "window_start": "1583784000000000000",
+            "session_end_date": "2020-03-10",
+            "open": 2733,
+            "high": 2809.5,
+            "low": 2695.25,
+            "close": 2795.75,
+            "transactions": 48772,
+            "volume": 119821,
+            "dollar_volume": 329898996
+          },
+          "children": [
+            {
+              "ticker": "ESH0",
+              "window_start": "1583791200000000000",
+              "session_end_date": "2020-03-10",
+              "open": 2733,
+              "high": 2768,
+              "low": 2695.25,
+              "close": 2764,
+              "transactions": 25381,
+              "volume": 63106,
+              "dollar_volume": 171912304.25
+            },
+            {
+              "ticker": "ESH0",
+              "window_start": "1583794800000000000",
+              "session_end_date": "2020-03-10",
+              "open": 2764.5,
+              "high": 2809.5,
+              "low": 2763,
+              "close": 2795.75,
+              "transactions": 23391,
+              "volume": 56715,
+              "dollar_volume": 157986691.75
+            }
+          ],
+          "aggregate": {
+            "open": 2733,
+            "high": 2809.5,
+            "low": 2695.25,
+            "close": 2795.75,
+            "volume": 119821,
+            "transactions": 48772
+          },
+          "matched": true
+        }
+      ],
+      "conclusion": "Comparison is evidence only; no calendar, source identity, causality or analytical interval is approved."
+    },
+    {
+      "ticker": "ESU6",
+      "from": "2026-09-09T20:00:00Z",
+      "to": "2026-09-10T00:00:00Z",
+      "observedAt": "2026-10-12T23:29:53.147Z",
+      "purpose": "ISOLATED_RESEARCH_ONLY",
+      "data": {
+        "4hour": {
+          "httpStatus": 200,
+          "requestDigest": "d2f02324b5db56c13a12db2ba479589f7360a2575ba7b7728eef24449c735f46",
+          "payload": {
+            "results": [
+              {
+                "ticker": "ESU6",
+                "window_start": "1788984000000000000",
+                "session_end_date": "2026-09-09",
+                "open": 7644.5,
+                "high": 7648.25,
+                "low": 7642.5,
+                "close": 7648,
+                "transactions": 8428,
+                "volume": 37522,
+                "dollar_volume": 286868500.5
+              },
+              {
+                "ticker": "ESU6",
+                "window_start": "1788984000000000000",
+                "session_end_date": "2026-09-10",
+                "open": 7646.5,
+                "high": 7653,
+                "low": 7645.75,
+                "close": 7652,
+                "transactions": 3398,
+                "volume": 7678,
+                "dollar_volume": 58722549.25
+              }
+            ],
+            "status": "OK",
+            "request_id": "07c2c4e50fe66dd2d89deabfd1e0f50f"
+          },
+          "originalSuccessBodyText": "{\"results\":[{\"ticker\":\"ESU6\",\"window_start\":1788984000000000000,\"session_end_date\":\"2026-09-09\",\"open\":7644.5,\"high\":7648.25,\"low\":7642.5,\"close\":7648,\"transactions\":8428,\"volume\":37522,\"dollar_volume\":286868500.5},{\"ticker\":\"ESU6\",\"window_start\":1788984000000000000,\"session_end_date\":\"2026-09-10\",\"open\":7646.5,\"high\":7653,\"low\":7645.75,\"close\":7652,\"transactions\":3398,\"volume\":7678,\"dollar_volume\":58722549.25}],\"status\":\"OK\",\"request_id\":\"07c2c4e50fe66dd2d89deabfd1e0f50f\"}",
+          "bodyUtf8Sha256": "d29082acb6340a29dc060061776f5867ea4716a896ce3933aa42c463daa3ccf0",
+          "traversalComplete": true
+        },
+        "1hour": {
+          "httpStatus": 200,
+          "requestDigest": "4fdadb684e4b0c4d426b4b9a921ad4b2b5192c47e869bfcac486b9855f84b1c7",
+          "payload": {
+            "results": [
+              {
+                "ticker": "ESU6",
+                "window_start": "1788984000000000000",
+                "session_end_date": "2026-09-09",
+                "open": 7644.5,
+                "high": 7648.25,
+                "low": 7642.5,
+                "close": 7648,
+                "transactions": 8428,
+                "volume": 37522,
+                "dollar_volume": 286868500.5
+              },
+              {
+                "ticker": "ESU6",
+                "window_start": "1788991200000000000",
+                "session_end_date": "2026-09-10",
+                "open": 7646.5,
+                "high": 7651,
+                "low": 7645.75,
+                "close": 7647,
+                "transactions": 1814,
+                "volume": 3872,
+                "dollar_volume": 29611094.25
+              },
+              {
+                "ticker": "ESU6",
+                "window_start": "1788994800000000000",
+                "session_end_date": "2026-09-10",
+                "open": 7647,
+                "high": 7653,
+                "low": 7645.75,
+                "close": 7652,
+                "transactions": 1584,
+                "volume": 3806,
+                "dollar_volume": 29111455
+              }
+            ],
+            "status": "OK",
+            "request_id": "93ddc9a5968a4b7df69157fdf7b4e7ad"
+          },
+          "originalSuccessBodyText": "{\"results\":[{\"ticker\":\"ESU6\",\"window_start\":1788984000000000000,\"session_end_date\":\"2026-09-09\",\"open\":7644.5,\"high\":7648.25,\"low\":7642.5,\"close\":7648,\"transactions\":8428,\"volume\":37522,\"dollar_volume\":286868500.5},{\"ticker\":\"ESU6\",\"window_start\":1788991200000000000,\"session_end_date\":\"2026-09-10\",\"open\":7646.5,\"high\":7651,\"low\":7645.75,\"close\":7647,\"transactions\":1814,\"volume\":3872,\"dollar_volume\":29611094.25},{\"ticker\":\"ESU6\",\"window_start\":1788994800000000000,\"session_end_date\":\"2026-09-10\",\"open\":7647,\"high\":7653,\"low\":7645.75,\"close\":7652,\"transactions\":1584,\"volume\":3806,\"dollar_volume\":29111455}],\"status\":\"OK\",\"request_id\":\"93ddc9a5968a4b7df69157fdf7b4e7ad\"}",
+          "bodyUtf8Sha256": "5e9a1fca912a972722619e397a68fc1f4e07d36221b361657b3f0411556037e9",
+          "traversalComplete": true
+        }
+      },
+      "reconciliation": [
+        {
+          "parent": {
+            "ticker": "ESU6",
+            "window_start": "1788984000000000000",
+            "session_end_date": "2026-09-09",
+            "open": 7644.5,
+            "high": 7648.25,
+            "low": 7642.5,
+            "close": 7648,
+            "transactions": 8428,
+            "volume": 37522,
+            "dollar_volume": 286868500.5
+          },
+          "children": [
+            {
+              "ticker": "ESU6",
+              "window_start": "1788984000000000000",
+              "session_end_date": "2026-09-09",
+              "open": 7644.5,
+              "high": 7648.25,
+              "low": 7642.5,
+              "close": 7648,
+              "transactions": 8428,
+              "volume": 37522,
+              "dollar_volume": 286868500.5
+            }
+          ],
+          "aggregate": {
+            "open": 7644.5,
+            "high": 7648.25,
+            "low": 7642.5,
+            "close": 7648,
+            "volume": 37522,
+            "transactions": 8428
+          },
+          "matched": true
+        },
+        {
+          "parent": {
+            "ticker": "ESU6",
+            "window_start": "1788984000000000000",
+            "session_end_date": "2026-09-10",
+            "open": 7646.5,
+            "high": 7653,
+            "low": 7645.75,
+            "close": 7652,
+            "transactions": 3398,
+            "volume": 7678,
+            "dollar_volume": 58722549.25
+          },
+          "children": [
+            {
+              "ticker": "ESU6",
+              "window_start": "1788991200000000000",
+              "session_end_date": "2026-09-10",
+              "open": 7646.5,
+              "high": 7651,
+              "low": 7645.75,
+              "close": 7647,
+              "transactions": 1814,
+              "volume": 3872,
+              "dollar_volume": 29611094.25
+            },
+            {
+              "ticker": "ESU6",
+              "window_start": "1788994800000000000",
+              "session_end_date": "2026-09-10",
+              "open": 7647,
+              "high": 7653,
+              "low": 7645.75,
+              "close": 7652,
+              "transactions": 1584,
+              "volume": 3806,
+              "dollar_volume": 29111455
+            }
+          ],
+          "aggregate": {
+            "open": 7646.5,
+            "high": 7653,
+            "low": 7645.75,
+            "close": 7652,
+            "volume": 7678,
+            "transactions": 3398
+          },
+          "matched": true
+        }
+      ],
+      "conclusion": "Comparison is evidence only; no calendar, source identity, causality or analytical interval is approved."
+    }
+  ]
+}

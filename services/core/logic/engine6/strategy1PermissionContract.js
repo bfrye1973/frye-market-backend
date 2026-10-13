@@ -1,0 +1,976 @@
+const REQUIRED_SYMBOL = "ES";
+const REQUIRED_LANE_ID = "minute";
+const REQUIRED_STRATEGY_ID = "intraday_scalp@10m";
+const REQUIRED_SETUP_CLASS = "NEGOTIATED_ZONE_ROTATION";
+const REQUIRED_IDENTITY_SETUP_KEY = "NEGOTIATED_ZONE_ROTATION";
+const REQUIRED_CANDIDATE_IDENTITY_VERSION = "engine26.strategy1.v2";
+const COMPATIBLE_IDENTITY_PREFIX = "engine26.strategy1.v2";
+
+function text(value) {
+  const v = String(value ?? "").trim();
+  return v || null;
+}
+
+function upper(value) {
+  const v = text(value);
+  return v ? v.toUpperCase() : null;
+}
+
+function num(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    const v = text(value);
+    if (v) return v;
+  }
+  return null;
+}
+
+function firstUpper(...values) {
+  const v = firstText(...values);
+  return v ? v.toUpperCase() : null;
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = num(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function unique(values = []) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+export function isEngine6FastLaneId(laneId) {
+  const lane =
+    String(laneId || "")
+      .trim()
+      .toLowerCase();
+
+  return [
+    "subminute",
+    "minute",
+    "minor",
+  ].includes(lane);
+}
+
+function isEngine15Artifact(value) {
+  return String(value || "")
+    .toUpperCase()
+    .includes("ENGINE15");
+}
+
+function removeEngine15Artifacts(values = []) {
+  return Array.isArray(values)
+    ? values.filter((value) => !isEngine15Artifact(value))
+    : [];
+}
+
+function onlyEngine15Artifacts(values = []) {
+  return Array.isArray(values)
+    ? values.filter((value) => isEngine15Artifact(value))
+    : [];
+}
+
+export function filterEngine15ArtifactsForFastLane({
+  laneId,
+  blockers = [],
+  warnings = [],
+  reasonCodes = [],
+} = {}) {
+  if (!isEngine6FastLaneId(laneId)) {
+    return {
+      engine15Excluded: false,
+      blockers,
+      warnings,
+      reasonCodes,
+      removedBlockers: [],
+      removedWarnings: [],
+      removedReasonCodes: [],
+    };
+  }
+
+  return {
+    engine15Excluded: true,
+
+    blockers:
+      removeEngine15Artifacts(blockers),
+
+    warnings:
+      removeEngine15Artifacts(warnings),
+
+    reasonCodes:
+      removeEngine15Artifacts(reasonCodes),
+
+    removedBlockers:
+      onlyEngine15Artifacts(blockers),
+
+    removedWarnings:
+      onlyEngine15Artifacts(warnings),
+
+    removedReasonCodes:
+      onlyEngine15Artifacts(reasonCodes),
+  };
+}
+
+function allPresentAndSame(...values) {
+  const populated = values.filter(Boolean);
+  if (populated.length !== values.length) return false;
+  return populated.every((value) => value === populated[0]);
+}
+
+function metadataMatchOrMissing({
+  ownerValue,
+  engine3Value,
+  engine4Value,
+  fieldName,
+}) {
+  const blockers = [];
+  const reasonCodes = [];
+
+  if (!ownerValue) {
+    blockers.push(`ENGINE26A_${fieldName}_MISSING`);
+    return {
+      valid: false,
+      blockers,
+      reasonCodes,
+    };
+  }
+
+  if (!engine3Value) {
+    reasonCodes.push(`ENGINE3_${fieldName}_NOT_REPEATED`);
+  } else if (engine3Value !== ownerValue) {
+    blockers.push(`ENGINE3_${fieldName}_CONFLICT`);
+  }
+
+  if (!engine4Value) {
+    reasonCodes.push(`ENGINE4_${fieldName}_NOT_REPEATED`);
+  } else if (engine4Value !== ownerValue) {
+    blockers.push(`ENGINE4_${fieldName}_CONFLICT`);
+  }
+
+  reasonCodes.push("ENGINE26A_CANONICAL_SETUP_IDENTITY_USED");
+
+  return {
+    valid: blockers.length === 0,
+    blockers,
+    reasonCodes,
+  };
+}
+
+function versionMatchOrMissing({
+  ownerValue,
+  engine3Value,
+  engine4Value,
+}) {
+  const blockers = [];
+  const reasonCodes = [];
+
+  if (!compatibleVersion(ownerValue)) {
+    blockers.push("ENGINE26A_CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE");
+    return {
+      valid: false,
+      blockers,
+      reasonCodes,
+    };
+  }
+
+  if (!engine3Value) {
+    reasonCodes.push("ENGINE3_CANDIDATE_IDENTITY_VERSION_NOT_REPEATED");
+  } else if (!compatibleVersion(engine3Value) || engine3Value !== ownerValue) {
+    blockers.push("ENGINE3_CANDIDATE_IDENTITY_VERSION_CONFLICT");
+  }
+
+  if (!engine4Value) {
+    reasonCodes.push("ENGINE4_CANDIDATE_IDENTITY_VERSION_NOT_REPEATED");
+  } else if (!compatibleVersion(engine4Value) || engine4Value !== ownerValue) {
+    blockers.push("ENGINE4_CANDIDATE_IDENTITY_VERSION_CONFLICT");
+  }
+
+  reasonCodes.push("ENGINE26A_CANONICAL_SETUP_IDENTITY_USED");
+
+  return {
+    valid: blockers.length === 0,
+    blockers,
+    reasonCodes,
+  };
+}
+
+function compatibleVersion(value) {
+  const v = text(value);
+  return Boolean(v && v.startsWith(COMPATIBLE_IDENTITY_PREFIX));
+}
+
+function entryZoneMidline(candidate) {
+  return firstNumber(
+    candidate?.entryZone?.midline,
+    candidate?.entryZone?.mid,
+    candidate?.entryZone?.zoneMid,
+    candidate?.entryZoneMidline,
+    candidate?.entryZoneMid,
+    candidate?.zone?.midline,
+    candidate?.zone?.mid
+  );
+}
+
+function candidateInvalidated(candidate) {
+  return (
+    candidate?.candidateInvalidated === true ||
+    candidate?.invalidated === true ||
+    candidate?.isInvalidated === true ||
+    candidate?.invalidationFacts?.invalidated === true ||
+    candidate?.invalidation?.invalidated === true ||
+    candidate?.invalidationFacts?.completedCloseInvalidationConfirmed === true ||
+    candidate?.completedCloseInvalidated === true ||
+    String(candidate?.candidateState || "")
+      .toUpperCase()
+      .includes("INVALIDATED")
+  );
+}
+
+function locationInvalidated(candidate) {
+  return (
+    candidate?.locationInvalidated === true ||
+    candidate?.locationInvalidation?.invalidated === true ||
+    candidate?.location?.invalidated === true ||
+    candidate?.invalidationFacts?.locationInvalidated === true
+  );
+}
+
+function readEngine26(candidate) {
+  return {
+    present: candidate != null && typeof candidate === "object",
+    laneId: firstText(candidate?.laneId, candidate?.lane),
+    strategyId: text(candidate?.strategyId),
+    symbol: upper(candidate?.symbol),
+    candidateId: text(candidate?.candidateId),
+    zoneId: text(candidate?.zoneId),
+    setupClass: upper(candidate?.setupClass),
+    setupGrade: text(candidate?.setupGrade),
+    identitySetupKey: text(candidate?.identitySetupKey),
+    candidateIdentityVersion: text(candidate?.candidateIdentityVersion),
+    direction: firstUpper(candidate?.direction, candidate?.directionBias),
+    directionState: firstUpper(candidate?.directionState),
+    currentPrice: firstNumber(candidate?.currentPrice, candidate?.price),
+    entryZoneMidline: entryZoneMidline(candidate),
+
+    objectiveCompletedAt: text(
+      candidate?.zoneMemorySummary?.objectiveCompletedAt ||
+      candidate?.objectiveCompletedAt
+    ),
+
+    targetTouchedAt: text(
+      candidate?.zoneMemorySummary?.targetTouchedAt ||
+      candidate?.targetTouchedAt
+    ),
+
+    releaseReason: text(
+      candidate?.zoneMemorySummary?.releaseReason ||
+      candidate?.releaseReason
+    ),
+
+    priorRotationFullyComplete:
+      candidate?.priorRotationFullyComplete === true ||
+      candidate?.zoneMemorySummary?.priorRotationFullyComplete === true,
+
+    promotedFromTargetCompletion:
+      candidate?.promotedFromTargetCompletion === true ||
+      candidate?.zoneMemorySummary?.promotedFromTargetCompletion === true,
+
+    candidateInvalidated: candidateInvalidated(candidate),
+    locationInvalidated: locationInvalidated(candidate),
+  };
+}
+
+export function resolveEngine3Strategy1Qualification({
+  reaction = null,
+  legacyQualified = false,
+} = {}) {
+  const explicitlyPublished =
+    reaction != null &&
+    typeof reaction === "object" &&
+    Object.prototype.hasOwnProperty.call(
+      reaction,
+      "engine3Strategy1QualifiedForEngine6"
+    );
+
+  const qualified =
+    explicitlyPublished
+      ? reaction?.engine3Strategy1QualifiedForEngine6 === true
+      : legacyQualified === true;
+
+  return {
+    explicitlyPublished,
+    qualified,
+    source:
+      explicitlyPublished
+        ? "ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT"
+        : "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK",
+    reactionConfirmedDiagnosticOnly:
+      explicitlyPublished &&
+      qualified &&
+      reaction?.reactionConfirmed !== true,
+  };
+}
+
+function readEngine3(reaction) {
+  const qualificationExplicitlyPublished =
+    reaction != null &&
+    typeof reaction === "object" &&
+    Object.prototype.hasOwnProperty.call(
+      reaction,
+      "engine3Strategy1QualifiedForEngine6"
+    );
+
+  return {
+    present: reaction != null && typeof reaction === "object",
+    laneId: firstText(reaction?.laneId, reaction?.lane),
+    strategyId: text(reaction?.strategyId),
+    symbol: upper(reaction?.symbol),
+    candidateId: text(reaction?.candidateId),
+    zoneId: text(reaction?.zoneId),
+    setupClass: upper(reaction?.setupClass),
+    setupGrade: text(reaction?.setupGrade),
+    identitySetupKey: text(reaction?.identitySetupKey),
+    candidateIdentityVersion: text(reaction?.candidateIdentityVersion),
+
+    evaluationAuthorized: reaction?.evaluationAuthorized === true,
+    reactionConfirmed: reaction?.reactionConfirmed === true,
+
+    qualificationExplicitlyPublished,
+    strategy1Qualified:
+      reaction?.engine3Strategy1QualifiedForEngine6 === true,
+
+    confirmed: reaction?.confirmed === true,
+    allowed: reaction?.allowed === true,
+    authorized: reaction?.authorized === true,
+
+    reactionState: firstUpper(
+      reaction?.reactionState,
+      reaction?.state,
+      reaction?.fastReactionState
+    ),
+
+    authorizedReactionState: upper(reaction?.authorizedReactionState),
+    direction: firstUpper(reaction?.direction, reaction?.tradeDirectionBias),
+    quality: firstUpper(reaction?.quality, reaction?.reactionQuality),
+  };
+}
+
+function readEngine4(participation) {
+  const state = firstUpper(
+    participation?.participationState,
+    participation?.state,
+    participation?.status
+  );
+
+  return {
+    present: participation != null && typeof participation === "object",
+    laneId: firstText(participation?.laneId, participation?.lane),
+    strategyId: text(participation?.strategyId),
+    symbol: upper(participation?.symbol),
+    candidateId: text(participation?.candidateId),
+    zoneId: text(participation?.zoneId),
+    setupClass: upper(participation?.setupClass),
+    setupGrade: text(participation?.setupGrade),
+    identitySetupKey: text(participation?.identitySetupKey),
+    candidateIdentityVersion: text(participation?.candidateIdentityVersion),
+
+    participationConfirmed: participation?.participationConfirmed === true,
+    confirmed: participation?.confirmed === true,
+    allowed: participation?.allowed === true,
+    hardBlocked: participation?.hardBlocked === true,
+
+    participationDeveloping:
+      participation?.participationDeveloping === true ||
+      String(state || "").includes("DEVELOPING"),
+
+    completedAdverseParticipation:
+      participation?.completedAdverseParticipation === true ||
+      participation?.adverseParticipationCompleted === true ||
+      String(state || "").includes("ADVERSE"),
+
+    participationState: state,
+    participationQuality: firstUpper(
+      participation?.participationQuality,
+      participation?.quality
+    ),
+
+    direction: firstUpper(
+      participation?.intendedDirection,
+      participation?.direction
+    ),
+  };
+}
+
+function isNeutralObservation(e26, e3 = null, e4 = null) {
+  const engine3ResolvedDirection =
+    ["LONG", "SHORT"].includes(e3?.direction);
+
+  const engine3Qualified =
+    e3?.strategy1Qualified === true ||
+    e3?.engine3Strategy1QualifiedForEngine6 === true;
+
+  /*
+   * Engine 26A neutral means the prior Engine 26 trip has cleared
+   * and Engine 26A is no longer carrying the old direction.
+   *
+   * Engine 26A still owns location.
+   * Engine 3 owns fresh reaction direction.
+   * Engine 4 owns participation confirmation.
+   * Engine 6 owns final permission.
+   *
+   * Once Engine 3 qualifies LONG/SHORT, Engine 6 must leave
+   * observation-only mode and evaluate the directional branch.
+   * Engine 4 remains a downstream permission gate inside Phase 4.
+   */
+  if (
+    e26.direction === "NEUTRAL" &&
+    engine3ResolvedDirection === true &&
+    engine3Qualified === true
+  ) {
+    return false;
+  }
+
+  return (
+    e26.direction === "NEUTRAL" &&
+    [
+      "LONG_REVERSAL_WATCH",
+      "OBSERVING_ZONE_REACTION",
+      "OBSERVING_PROMOTED_ZONE",
+      "NEUTRAL_NO_DIRECTIONAL_EDGE",
+    ].includes(e26.directionState)
+  );
+}
+
+function midlineTrigger({
+  direction,
+  currentPrice,
+  midline,
+  neutralObservation = false,
+}) {
+  const dir = upper(direction);
+  const price = num(currentPrice);
+  const line = num(midline);
+
+  if (neutralObservation) {
+    return {
+      satisfied: false,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason: "MIDLINE_TRIGGER_DEFERRED_DURING_NEUTRAL_OBSERVATION",
+    };
+  }
+
+  if (price === null || line === null) {
+    return {
+      satisfied: false,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason: "MIDLINE_TRIGGER_MISSING_PRICE_OR_MIDLINE",
+    };
+  }
+
+  if (dir === "LONG") {
+    return {
+      satisfied: price >= line,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason:
+        price >= line
+          ? "LONG_ENTRY_ZONE_MIDLINE_REACHED"
+          : "LONG_ENTRY_ZONE_MIDLINE_NOT_REACHED",
+    };
+  }
+
+  if (dir === "SHORT") {
+    return {
+      satisfied: price <= line,
+      direction: dir,
+      currentPrice: price,
+      entryZoneMidline: line,
+      reason:
+        price <= line
+          ? "SHORT_ENTRY_ZONE_MIDLINE_REACHED"
+          : "SHORT_ENTRY_ZONE_MIDLINE_NOT_REACHED",
+    };
+  }
+
+  return {
+    satisfied: false,
+    direction: dir,
+    currentPrice: price,
+    entryZoneMidline: line,
+    reason: "MIDLINE_TRIGGER_DIRECTION_UNRESOLVED",
+  };
+}
+
+export function evaluateEngine6Strategy1Phase4Contract({
+  symbol,
+  strategyId,
+  engine26LocationCandidate = null,
+  engine3Reaction = null,
+  engine4Participation = null,
+  engine26ImbalanceWatch = null,
+  confluence = null,
+  direction = null,
+} = {}) {
+  const applies =
+    upper(symbol) === REQUIRED_SYMBOL &&
+    text(strategyId) === REQUIRED_STRATEGY_ID;
+
+  const e26 = readEngine26(engine26LocationCandidate);
+  const e3 = readEngine3(engine3Reaction);
+  const e4 = readEngine4(engine4Participation);
+
+  const legacyEngine3Qualified =
+    e3.evaluationAuthorized === true &&
+    e3.reactionConfirmed === true &&
+    e3.allowed === true;
+
+  const engine3Qualification =
+    resolveEngine3Strategy1Qualification({
+      reaction: engine3Reaction,
+      legacyQualified: legacyEngine3Qualified,
+    });
+
+  const neutralObservation =
+    applies && isNeutralObservation(e26, e3, e4);
+  const finalDirection = neutralObservation
+    ? "NEUTRAL"
+    : firstUpper(
+        direction,
+        e26.direction,
+        e3.direction,
+        e4.direction
+      );
+
+  const currentPrice = firstNumber(
+    e26.currentPrice,
+    engine3Reaction?.currentPrice,
+    engine4Participation?.currentPrice,
+    engine26ImbalanceWatch?.currentPrice,
+    confluence?.price,
+    confluence?.currentPrice
+  );
+
+  const midline = midlineTrigger({
+    direction: finalDirection,
+    currentPrice,
+    midline: e26.entryZoneMidline,
+    neutralObservation,
+  });
+
+  const blockers = [];
+  const warnings = [];
+  const reasonCodes = [
+    "ENGINE6_PHASE4_STRATEGY1_V2_CONTRACT_EVALUATED",
+    applies
+      ? "ENGINE6_PHASE4_APPLIES_TO_ES_MINUTE_SCALP"
+      : "ENGINE6_PHASE4_NOT_APPLICABLE",
+  ];
+
+  if (!applies) {
+    return {
+      engine: "engine6.strategy1.phase4.contract.v2",
+      applies: false,
+      allowed: false,
+      decision: null,
+      permissionState: "PHASE4_NOT_APPLICABLE",
+      neutralObservation: false,
+      blockers,
+      warnings,
+      reasonCodes,
+      midlineTrigger: midline,
+    };
+  }
+
+  if (!e26.present) blockers.push("ENGINE26A_CANDIDATE_MISSING");
+  if (!e3.present) blockers.push("ENGINE3_CONTRACT_MISSING");
+  if (!e4.present) blockers.push("ENGINE4_AUTHORIZED_PARTICIPATION_MISSING");
+
+  const laneOk =
+    (!e26.laneId || e26.laneId === REQUIRED_LANE_ID) &&
+    (!e3.laneId || e3.laneId === REQUIRED_LANE_ID) &&
+    (!e4.laneId || e4.laneId === REQUIRED_LANE_ID);
+
+  if (!laneOk) blockers.push("LANE_ID_MISMATCH_OR_NON_MINUTE_IDENTITY");
+
+  const strategyOk =
+    allPresentAndSame(e26.strategyId, e3.strategyId, e4.strategyId) &&
+    e26.strategyId === REQUIRED_STRATEGY_ID;
+
+  if (!strategyOk) blockers.push("STRATEGY_ID_MISMATCH");
+
+  const symbolOk =
+    allPresentAndSame(e26.symbol, e3.symbol, e4.symbol) &&
+    e26.symbol === REQUIRED_SYMBOL;
+
+  if (!symbolOk) blockers.push("SYMBOL_MISMATCH");
+
+  const candidateIdMatches =
+    allPresentAndSame(e26.candidateId, e3.candidateId, e4.candidateId);
+
+  if (!candidateIdMatches) blockers.push("CANDIDATE_ID_MISMATCH");
+
+  const zoneIdMatches =
+    allPresentAndSame(e26.zoneId, e3.zoneId, e4.zoneId);
+
+  if (!zoneIdMatches) blockers.push("ZONE_ID_MISMATCH");
+
+  const setupClassCheck =
+    metadataMatchOrMissing({
+      ownerValue: e26.setupClass,
+      engine3Value: e3.setupClass,
+      engine4Value: e4.setupClass,
+      fieldName: "SETUP_CLASS",
+    });
+
+  const setupClassMatches =
+    e26.setupClass === REQUIRED_SETUP_CLASS &&
+    setupClassCheck.valid === true;
+
+  if (!setupClassMatches) {
+    blockers.push(
+      ...setupClassCheck.blockers,
+      "SETUP_CLASS_MISMATCH"
+    );
+  }
+
+  reasonCodes.push(
+    ...setupClassCheck.reasonCodes
+  );
+
+  const identitySetupKeyCheck =
+    metadataMatchOrMissing({
+      ownerValue: e26.identitySetupKey,
+      engine3Value: e3.identitySetupKey,
+      engine4Value: e4.identitySetupKey,
+      fieldName: "IDENTITY_SETUP_KEY",
+    });
+
+  const identitySetupKeyMatches =
+    e26.identitySetupKey === REQUIRED_IDENTITY_SETUP_KEY &&
+    identitySetupKeyCheck.valid === true;
+
+  if (!identitySetupKeyMatches) {
+    blockers.push(
+      ...identitySetupKeyCheck.blockers,
+      "IDENTITY_SETUP_KEY_MISMATCH"
+    );
+  }
+
+  reasonCodes.push(
+    ...identitySetupKeyCheck.reasonCodes
+  );
+
+  const candidateIdentityVersionCheck =
+    versionMatchOrMissing({
+      ownerValue: e26.candidateIdentityVersion,
+      engine3Value: e3.candidateIdentityVersion,
+      engine4Value: e4.candidateIdentityVersion,
+    });
+
+  const candidateIdentityVersionCompatible =
+    e26.candidateIdentityVersion === REQUIRED_CANDIDATE_IDENTITY_VERSION &&
+    candidateIdentityVersionCheck.valid === true;
+
+  if (!candidateIdentityVersionCompatible) {
+    blockers.push(
+      ...candidateIdentityVersionCheck.blockers,
+      "CANDIDATE_IDENTITY_VERSION_INCOMPATIBLE"
+    );
+  }
+
+  reasonCodes.push(
+    ...candidateIdentityVersionCheck.reasonCodes
+  );
+
+  if (e26.candidateInvalidated) blockers.push("CANDIDATE_INVALIDATED");
+  if (e26.locationInvalidated) blockers.push("LOCATION_INVALIDATED");
+
+  if (neutralObservation) {
+    blockers.push("ENGINE26_NEUTRAL_OBSERVATION_ONLY");
+    warnings.push("ENGINE26_DIRECTION_NEUTRAL_OBSERVATION");
+    reasonCodes.push("ENGINE26_NEUTRAL_LOCATION_PRESERVED_AS_OBSERVATION");
+    reasonCodes.push("NO_DIRECTION_FALLBACK_DURING_NEUTRAL_OBSERVATION");
+  } else {
+    if (e3.evaluationAuthorized !== true) {
+      blockers.push("ENGINE3_EVALUATION_NOT_AUTHORIZED");
+    }
+
+    if (engine3Qualification.explicitlyPublished) {
+      if (engine3Qualification.qualified !== true) {
+        blockers.push("ENGINE3_STRATEGY1_NOT_QUALIFIED");
+      } else {
+        reasonCodes.push("ENGINE3_STRATEGY1_QUALIFIED_EXPLICIT");
+
+        if (e3.reactionConfirmed !== true) {
+          reasonCodes.push("ENGINE3_REACTION_CONFIRMED_DIAGNOSTIC_ONLY");
+        }
+      }
+    } else {
+      reasonCodes.push(
+        "ENGINE3_STRATEGY1_QUALIFICATION_LEGACY_FALLBACK"
+      );
+
+      if (e3.reactionConfirmed !== true) {
+        if (
+          e3.reactionState &&
+          (
+            e3.reactionState.includes("DEVELOP") ||
+            e3.reactionState.includes("PENDING") ||
+            e3.reactionState.includes("WAIT")
+          )
+        ) {
+          warnings.push("ENGINE3_REACTION_DEVELOPING");
+          blockers.push("ENGINE3_REACTION_WAITING");
+        } else {
+          blockers.push("ENGINE3_REACTION_NOT_CONFIRMED");
+        }
+      }
+
+      if (e3.allowed !== true) {
+        blockers.push("ENGINE3_PAPER_REACTION_NOT_ALLOWED");
+      }
+    }
+
+    if (
+      e3.authorizedReactionState === "REACTION_FAILED" ||
+      e3.authorizedReactionState === "REACTION_INVALIDATED"
+    ) {
+      blockers.push(`ENGINE3_${e3.authorizedReactionState}`);
+    }
+
+    if (!["LONG", "SHORT"].includes(finalDirection)) {
+      blockers.push("REACTION_DIRECTION_UNRESOLVED");
+    }
+
+    if (
+      ["LONG", "SHORT"].includes(finalDirection) &&
+      e3.direction &&
+      e4.direction &&
+      e4.direction !== "NEUTRAL" &&
+      e3.direction !== e4.direction
+    ) {
+      blockers.push("REACTION_PARTICIPATION_DIRECTION_MISMATCH");
+    }
+
+    if (e4.participationConfirmed !== true) {
+      if (
+        e4.participationDeveloping === true ||
+        (
+          e4.participationState &&
+          (
+            e4.participationState.includes("DEVELOP") ||
+            e4.participationState.includes("PENDING") ||
+            e4.participationState.includes("WAIT")
+          )
+        )
+      ) {
+        warnings.push("ENGINE4_PARTICIPATION_DEVELOPING");
+        blockers.push("ENGINE4_PARTICIPATION_WAITING");
+      } else {
+        blockers.push("ENGINE4_PARTICIPATION_NOT_CONFIRMED");
+      }
+    }
+
+    if (e4.hardBlocked === true) blockers.push("ENGINE4_HARD_BLOCKED");
+
+    if (e4.completedAdverseParticipation === true) {
+      blockers.push("ENGINE4_COMPLETED_ADVERSE_PARTICIPATION");
+    }
+
+const engine26TripAlreadyCleared =
+  (
+    e26.direction === "NEUTRAL" &&
+    (
+      e26.directionState === "NEUTRAL" ||
+      e26.directionState === "NEUTRAL_NO_DIRECTIONAL_EDGE"
+    )
+  ) ||
+  e26.objectiveCompletedAt != null ||
+  e26.releaseReason != null ||
+  e26.priorRotationFullyComplete === true ||
+  e26.promotedFromTargetCompletion === true;
+
+const freshEngine3BranchConfirmed =
+  ["LONG", "SHORT"].includes(e3.direction) &&
+  engine3Qualification.qualified === true &&
+  e3.allowed === true &&
+  e3.reactionConfirmed === true &&
+  e3.authorizedReactionState === "REACTION_CONFIRMED";
+
+const freshEngine4BranchConfirmed =
+  e4.participationConfirmed === true &&
+  e4.allowed === true &&
+  e4.hardBlocked !== true &&
+  (
+    !e4.direction ||
+    e4.direction === e3.direction ||
+    e4.direction === finalDirection
+  );
+
+const freshConfirmedBranchAfterMidline =
+  freshEngine3BranchConfirmed === true &&
+  freshEngine4BranchConfirmed === true &&
+  ["LONG", "SHORT"].includes(finalDirection);
+
+if (
+  midline.satisfied === true &&
+  engine26TripAlreadyCleared !== true &&
+  freshConfirmedBranchAfterMidline !== true
+) {
+  blockers.push("ENGINE26_NEGOTIATED_MIDLINE_ALREADY_REACHED");
+  reasonCodes.push("ENGINE26_TRIP_COMPLETION_BOUNDARY_REACHED");
+} else if (
+  midline.satisfied === true &&
+  engine26TripAlreadyCleared === true
+) {
+  reasonCodes.push("ENGINE26_PRIOR_TRIP_ALREADY_CLEARED");
+  reasonCodes.push("FRESH_ENGINE3_ENGINE4_BRANCH_MAY_REQUALIFY");
+} else if (
+  midline.satisfied === true &&
+  freshConfirmedBranchAfterMidline === true
+) {
+  reasonCodes.push("ENGINE26_MIDLINE_COMPLETION_NOT_BLOCKING_FRESH_BRANCH");
+  reasonCodes.push("FRESH_ENGINE3_ENGINE4_BRANCH_CONFIRMED_AFTER_MIDLINE");
+} else {
+  reasonCodes.push("ENGINE26_NEGOTIATED_MIDLINE_NOT_YET_REACHED");
+  reasonCodes.push("TARGET_ROOM_REMAINS_TO_MIDLINE");
+}
+  }
+
+  const finalBlockers = unique(blockers);
+  const allowed = neutralObservation ? false : finalBlockers.length === 0;
+
+  if (allowed) {
+    reasonCodes.push("ENGINE6_PHASE4_ALL_GATES_PASSED");
+    reasonCodes.push("FAST_INTRADAY_PAPER_ALLOW");
+    reasonCodes.push("PLANNING_PERMISSION_ONLY");
+    reasonCodes.push("PAPER_ONLY_SAFETY_ACTIVE");
+    reasonCodes.push("NO_EXECUTION_AUTHORITY");
+  } else {
+    reasonCodes.push("ENGINE6_PHASE4_PERMISSION_NOT_ALLOWED");
+  }
+
+  return {
+    engine: "engine6.strategy1.phase4.contract.v2",
+    applies: true,
+    decision:
+      allowed
+        ? "FAST_INTRADAY_PAPER_ALLOW"
+        : neutralObservation
+        ? "STRATEGY1_OBSERVATION_WAIT"
+        : "PAPER_STAND_DOWN",
+
+    permissionState:
+      allowed
+        ? "FAST_INTRADAY_PAPER_ALLOW"
+        : neutralObservation
+        ? "STRATEGY1_OBSERVATION_WAIT"
+        : warnings.length
+        ? "WATCH_ONLY_CONFIRMATION_REQUIRED"
+        : "PHASE4_STAND_DOWN",
+
+    allowed,
+    paperAllowed: allowed,
+    planningAllowed: allowed,
+
+    realExecutionAllowed: false,
+    executable: false,
+    brokerExecutionAllowed: false,
+    schwabExecutionAllowed: false,
+    noExecution: true,
+
+    neutralObservation,
+
+    canonicalInputs: {
+      engine3: "confluence.context.reaction.paperScalpReaction",
+      engine4: "confluence.context.volume.engine4AuthorizedReactionParticipation",
+      engine26A: "engine26LocationCandidate",
+    },
+
+    identity: {
+      laneId: REQUIRED_LANE_ID,
+      strategyId: REQUIRED_STRATEGY_ID,
+      symbol: REQUIRED_SYMBOL,
+      candidateId: e26.candidateId,
+      zoneId: e26.zoneId,
+      setupClass: e26.setupClass,
+      setupGrade: e26.setupGrade,
+      identitySetupKey: e26.identitySetupKey,
+      candidateIdentityVersion: e26.candidateIdentityVersion,
+      candidateIdMatches,
+      zoneIdMatches,
+      setupClassMatches,
+      identitySetupKeyMatches,
+      candidateIdentityVersionCompatible,
+      direction: e26.direction,
+      directionState: e26.directionState,
+      objectiveCompletedAt: e26.objectiveCompletedAt,
+      targetTouchedAt: e26.targetTouchedAt,
+      releaseReason: e26.releaseReason,
+      priorRotationFullyComplete: e26.priorRotationFullyComplete,
+      promotedFromTargetCompletion: e26.promotedFromTargetCompletion,
+    },
+
+    reaction: {
+      evaluationAuthorized: e3.evaluationAuthorized,
+      engine3Strategy1QualifiedForEngine6:
+        e3.strategy1Qualified,
+      qualificationExplicitlyPublished:
+        engine3Qualification.explicitlyPublished,
+      qualificationSource:
+        engine3Qualification.source,
+      engine3Qualified:
+        engine3Qualification.qualified,
+      reactionConfirmed: e3.reactionConfirmed,
+      reactionState: e3.reactionState,
+      authorizedReactionState: e3.authorizedReactionState,
+      direction: e3.direction,
+      quality: e3.quality,
+      confirmed: e3.confirmed,
+      allowed: e3.allowed,
+      authorized: e3.authorized,
+    },
+
+    participation: {
+      participationConfirmed: e4.participationConfirmed,
+      participationDeveloping: e4.participationDeveloping,
+      participationState: e4.participationState,
+      participationQuality: e4.participationQuality,
+      hardBlocked: e4.hardBlocked,
+      allowed: e4.allowed,
+      confirmed: e4.confirmed,
+      completedAdverseParticipation: e4.completedAdverseParticipation,
+    },
+
+    invalidation: {
+      candidateInvalidated: e26.candidateInvalidated,
+      locationInvalidated: e26.locationInvalidated,
+      objectiveCompletedAt: e26.objectiveCompletedAt,
+      targetTouchedAt: e26.targetTouchedAt,
+      releaseReason: e26.releaseReason,
+      priorRotationFullyComplete: e26.priorRotationFullyComplete,
+      promotedFromTargetCompletion: e26.promotedFromTargetCompletion,
+    },
+
+    midlineTrigger: midline,
+
+    blockers: finalBlockers,
+    warnings: unique(warnings),
+    reasonCodes: unique(reasonCodes),
+  };
+}
+
+export default evaluateEngine6Strategy1Phase4Contract;

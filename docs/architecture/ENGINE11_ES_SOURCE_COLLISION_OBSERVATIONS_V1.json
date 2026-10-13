@@ -1,0 +1,551 @@
+{
+  "provenance": {
+    "commit": "b2661bdd85dcfa08dc2f17783d80e9d27ebe5be1",
+    "run": "https://github.com/bfrye1973/frye-market-backend/actions/runs/38321193041",
+    "jobId": 115049412817,
+    "kind": "AUTHENTIC_LOG_DERIVED_DIAGNOSTICS"
+  },
+  "observations": [
+    {
+      "ticker": "ESH0",
+      "from": "2020-03-09T00:00:00.000Z",
+      "to": "2020-03-11T00:00:00.000Z",
+      "resolution": "4hour",
+      "pages": [
+        {
+          "number": 1,
+          "status": 200,
+          "requestDigest": "d212e878e769bd865139b5d8a7f47d927363e044da2c1f4cbcc660188c9a2100",
+          "rows": 14
+        }
+      ],
+      "traversalComplete": true,
+      "failure": null,
+      "observedAt": "2026-10-12T23:15:52.617Z",
+      "sourceRows": 14,
+      "inRangeRows": 14,
+      "excluded": 0,
+      "duplicates": 0,
+      "conflicts": 2,
+      "errors": [],
+      "first": "2020-03-09T00:00:00.000Z",
+      "last": "2020-03-10T20:00:00.000Z",
+      "rowDigest": "143cf0d9b7491a877b875b56546e07102ebd6fb1384ec0b4343bbb5f9c657bfb",
+      "fields": [
+        "close",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "session_end_date",
+        "ticker",
+        "transactions",
+        "volume",
+        "window_start"
+      ],
+      "observationSamples": [
+        {
+          "window_start": "1583712000000000000",
+          "session_end_date": "2020-03-09",
+          "close": 2819,
+          "transactions": 36942,
+          "volume": 105676
+        },
+        {
+          "window_start": "1583726400000000000",
+          "session_end_date": "2020-03-09",
+          "close": 2819,
+          "transactions": 450,
+          "volume": 3032
+        },
+        {
+          "window_start": "1583740800000000000",
+          "session_end_date": "2020-03-09",
+          "close": 2819,
+          "transactions": 2652,
+          "volume": 16987
+        }
+      ],
+      "gapCount": 0,
+      "gapSamples": [],
+      "conflictSamples": [
+        {
+          "window_start": "1583784000000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESH0",
+            "window_start": "1583784000000000000",
+            "session_end_date": "2020-03-09",
+            "open": 2736,
+            "high": 2753,
+            "low": 2720.75,
+            "close": 2733.5,
+            "transactions": 41348,
+            "volume": 190845,
+            "dollar_volume": 522163680.25
+          },
+          "observed": {
+            "ticker": "ESH0",
+            "window_start": "1583784000000000000",
+            "session_end_date": "2020-03-10",
+            "open": 2733,
+            "high": 2809.5,
+            "low": 2695.25,
+            "close": 2795.75,
+            "transactions": 48772,
+            "volume": 119821,
+            "dollar_volume": 329898996
+          }
+        },
+        {
+          "window_start": "1583870400000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESH0",
+            "window_start": "1583870400000000000",
+            "session_end_date": "2020-03-10",
+            "open": 2881,
+            "high": 2884.75,
+            "low": 2859.75,
+            "close": 2876.75,
+            "transactions": 28342,
+            "volume": 142001,
+            "dollar_volume": 408069929.5
+          },
+          "observed": {
+            "ticker": "ESH0",
+            "window_start": "1583870400000000000",
+            "session_end_date": "2020-03-11",
+            "open": 2859.5,
+            "high": 2869.5,
+            "low": 2811.75,
+            "close": 2827,
+            "transactions": 29983,
+            "volume": 73529,
+            "dollar_volume": 208732379.75
+          }
+        }
+      ],
+      "sourceFinality": "UNKNOWN",
+      "calendarAccepted": false,
+      "structuralEligible": false,
+      "coverageComplete": false
+    },
+    {
+      "ticker": "ESU6",
+      "from": "2026-09-09T00:00:00.000Z",
+      "to": "2026-09-12T00:00:00.000Z",
+      "resolution": "4hour",
+      "pages": [
+        {
+          "number": 1,
+          "status": 200,
+          "requestDigest": "17254a92a2baff7edf99856be856e2bde9060d28ab3271b94aa270c392ac63e2",
+          "rows": 20
+        }
+      ],
+      "traversalComplete": true,
+      "failure": null,
+      "observedAt": "2026-10-12T23:15:52.722Z",
+      "sourceRows": 20,
+      "inRangeRows": 20,
+      "excluded": 0,
+      "duplicates": 0,
+      "conflicts": 2,
+      "errors": [],
+      "first": "2026-09-09T00:00:00.000Z",
+      "last": "2026-09-11T20:00:00.000Z",
+      "rowDigest": "e091ac4f11ce12ddd667a972cd2e658c8bc3aeee291e716b3636c05108d2089e",
+      "fields": [
+        "close",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "session_end_date",
+        "ticker",
+        "transactions",
+        "volume",
+        "window_start"
+      ],
+      "observationSamples": [
+        {
+          "window_start": "1788912000000000000",
+          "session_end_date": "2026-09-09",
+          "close": 7682.5,
+          "transactions": 14910,
+          "volume": 34559
+        },
+        {
+          "window_start": "1788926400000000000",
+          "session_end_date": "2026-09-09",
+          "close": 7685.25,
+          "transactions": 16170,
+          "volume": 35484
+        },
+        {
+          "window_start": "1788940800000000000",
+          "session_end_date": "2026-09-09",
+          "close": 7652.75,
+          "transactions": 38182,
+          "volume": 98376
+        }
+      ],
+      "gapCount": 0,
+      "gapSamples": [],
+      "conflictSamples": [
+        {
+          "window_start": "1788984000000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESU6",
+            "window_start": "1788984000000000000",
+            "session_end_date": "2026-09-09",
+            "open": 7644.5,
+            "high": 7648.25,
+            "low": 7642.5,
+            "close": 7648,
+            "transactions": 8428,
+            "volume": 37522,
+            "dollar_volume": 286868500.5
+          },
+          "observed": {
+            "ticker": "ESU6",
+            "window_start": "1788984000000000000",
+            "session_end_date": "2026-09-10",
+            "open": 7646.5,
+            "high": 7653,
+            "low": 7645.75,
+            "close": 7652,
+            "transactions": 3398,
+            "volume": 7678,
+            "dollar_volume": 58722549.25
+          }
+        },
+        {
+          "window_start": "1789070400000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESU6",
+            "window_start": "1789070400000000000",
+            "session_end_date": "2026-09-10",
+            "open": 7598.5,
+            "high": 7606.5,
+            "low": 7595.75,
+            "close": 7602,
+            "transactions": 10438,
+            "volume": 44778,
+            "dollar_volume": 340354038.5
+          },
+          "observed": {
+            "ticker": "ESU6",
+            "window_start": "1789070400000000000",
+            "session_end_date": "2026-09-11",
+            "open": 7599.5,
+            "high": 7607.25,
+            "low": 7594.5,
+            "close": 7595,
+            "transactions": 5453,
+            "volume": 12725,
+            "dollar_volume": 96719255.25
+          }
+        }
+      ],
+      "sourceFinality": "UNKNOWN",
+      "calendarAccepted": false,
+      "structuralEligible": false,
+      "coverageComplete": false
+    },
+    {
+      "ticker": "ESH0",
+      "from": "2020-03-01T00:00:00.000Z",
+      "to": "2020-04-01T00:00:00.000Z",
+      "resolution": "5min",
+      "pages": [
+        {
+          "number": 1,
+          "status": 200,
+          "requestDigest": "60bec53a6fc97e5ff4ec9971558a0ec95457f32a8b9bf25f1fda471020247baf",
+          "rows": 3449
+        }
+      ],
+      "traversalComplete": true,
+      "failure": null,
+      "observedAt": "2026-10-12T23:15:53.000Z",
+      "sourceRows": 3449,
+      "inRangeRows": 3449,
+      "excluded": 0,
+      "duplicates": 0,
+      "conflicts": 1,
+      "errors": [],
+      "first": "2020-03-01T23:00:00.000Z",
+      "last": "2020-03-20T13:25:00.000Z",
+      "rowDigest": "d8c89cf22e22e6684c769a9d9a4bfa1bc92ba11bd6253b8c1c15208182251782",
+      "fields": [
+        "close",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "session_end_date",
+        "ticker",
+        "transactions",
+        "volume",
+        "window_start"
+      ],
+      "observationSamples": [
+        {
+          "window_start": "1583103600000000000",
+          "session_end_date": "2020-03-02",
+          "close": 2904.75,
+          "transactions": 9928,
+          "volume": 31095
+        },
+        {
+          "window_start": "1583103900000000000",
+          "session_end_date": "2020-03-02",
+          "close": 2914.5,
+          "transactions": 3855,
+          "volume": 11029
+        },
+        {
+          "window_start": "1583104200000000000",
+          "session_end_date": "2020-03-02",
+          "close": 2914.75,
+          "transactions": 3072,
+          "volume": 8647
+        }
+      ],
+      "gapCount": 0,
+      "gapSamples": [],
+      "conflictSamples": [
+        {
+          "window_start": "1583269200000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESH0",
+            "window_start": "1583269200000000000",
+            "session_end_date": "2020-03-02",
+            "open": 3000.25,
+            "high": 3002.5,
+            "low": 2996,
+            "close": 3001.75,
+            "transactions": 87,
+            "volume": 2708,
+            "dollar_volume": 8121801
+          },
+          "observed": {
+            "ticker": "ESH0",
+            "window_start": "1583269200000000000",
+            "session_end_date": "2020-03-03",
+            "open": 2998.75,
+            "high": 3015.75,
+            "low": 2995.25,
+            "close": 3014.5,
+            "transactions": 9076,
+            "volume": 43945,
+            "dollar_volume": 132093960
+          }
+        }
+      ],
+      "sourceFinality": "UNKNOWN",
+      "calendarAccepted": false,
+      "structuralEligible": false,
+      "coverageComplete": false
+    },
+    {
+      "ticker": "ESH5",
+      "from": "2025-01-01T00:00:00.000Z",
+      "to": "2025-04-01T00:00:00.000Z",
+      "resolution": "5min",
+      "pages": [
+        {
+          "number": 1,
+          "status": 200,
+          "requestDigest": "8a5e4841a1f2d93f4a7ff20b32176a179362affeecc2f09685373feb4e8aa2c3",
+          "rows": 15398
+        }
+      ],
+      "traversalComplete": true,
+      "failure": null,
+      "observedAt": "2026-10-12T23:15:53.595Z",
+      "sourceRows": 15398,
+      "inRangeRows": 15398,
+      "excluded": 0,
+      "duplicates": 0,
+      "conflicts": 1,
+      "errors": [],
+      "first": "2025-01-01T23:00:00.000Z",
+      "last": "2025-03-21T13:25:00.000Z",
+      "rowDigest": "f84ce33083e1c8f50b1b674d2cd412295663fe5b873e94cd17c985cb1bb61080",
+      "fields": [
+        "close",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "session_end_date",
+        "ticker",
+        "transactions",
+        "volume",
+        "window_start"
+      ],
+      "observationSamples": [
+        {
+          "window_start": "1735772400000000000",
+          "session_end_date": "2025-01-02",
+          "close": 5954.25,
+          "transactions": 1161,
+          "volume": 3185
+        },
+        {
+          "window_start": "1735772700000000000",
+          "session_end_date": "2025-01-02",
+          "close": 5953,
+          "transactions": 492,
+          "volume": 1119
+        },
+        {
+          "window_start": "1735773000000000000",
+          "session_end_date": "2025-01-02",
+          "close": 5950.25,
+          "transactions": 284,
+          "volume": 526
+        }
+      ],
+      "gapCount": 0,
+      "gapSamples": [],
+      "conflictSamples": [
+        {
+          "window_start": "1738274100000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESH5",
+            "window_start": "1738274100000000000",
+            "session_end_date": "2025-01-30",
+            "open": 6092.75,
+            "high": 6094.5,
+            "low": 6092.25,
+            "close": 6092.75,
+            "transactions": 92,
+            "volume": 219,
+            "dollar_volume": 1334394.25
+          },
+          "observed": {
+            "ticker": "ESH5",
+            "window_start": "1738274100000000000",
+            "session_end_date": "2025-01-31",
+            "open": 6092.75,
+            "high": 6093.5,
+            "low": 6089.75,
+            "close": 6093.25,
+            "transactions": 690,
+            "volume": 2080,
+            "dollar_volume": 12669838.25
+          }
+        }
+      ],
+      "sourceFinality": "UNKNOWN",
+      "calendarAccepted": false,
+      "structuralEligible": false,
+      "coverageComplete": false
+    },
+    {
+      "ticker": "ESH0",
+      "from": "2020-03-01T00:00:00.000Z",
+      "to": "2020-04-01T00:00:00.000Z",
+      "resolution": "1hour",
+      "pages": [
+        {
+          "number": 1,
+          "status": 200,
+          "requestDigest": "6c557149e720fe28df3bd6e33ef7fc4df72db817231e62bc5d26a301a8fedb4a",
+          "rows": 300
+        }
+      ],
+      "traversalComplete": true,
+      "failure": null,
+      "observedAt": "2026-10-12T23:15:53.918Z",
+      "sourceRows": 300,
+      "inRangeRows": 300,
+      "excluded": 0,
+      "duplicates": 0,
+      "conflicts": 1,
+      "errors": [],
+      "first": "2020-03-01T23:00:00.000Z",
+      "last": "2020-03-20T13:00:00.000Z",
+      "rowDigest": "17fc45e55538bead05ff8a4878fac21565333850631daf4f2620c12537fdc538",
+      "fields": [
+        "close",
+        "dollar_volume",
+        "high",
+        "low",
+        "open",
+        "session_end_date",
+        "ticker",
+        "transactions",
+        "volume",
+        "window_start"
+      ],
+      "observationSamples": [
+        {
+          "window_start": "1583103600000000000",
+          "session_end_date": "2020-03-02",
+          "close": 2919.25,
+          "transactions": 34322,
+          "volume": 101216
+        },
+        {
+          "window_start": "1583244000000000000",
+          "session_end_date": "2020-03-02",
+          "close": 3057.75,
+          "transactions": 39610,
+          "volume": 117544
+        },
+        {
+          "window_start": "1583247600000000000",
+          "session_end_date": "2020-03-02",
+          "close": 3102,
+          "transactions": 202524,
+          "volume": 596457
+        }
+      ],
+      "gapCount": 0,
+      "gapSamples": [],
+      "conflictSamples": [
+        {
+          "window_start": "1583269200000000000",
+          "classification": "SOURCE_BUCKET_COLLISION_ACROSS_SESSION_LABELS",
+          "prior": {
+            "ticker": "ESH0",
+            "window_start": "1583269200000000000",
+            "session_end_date": "2020-03-02",
+            "open": 3000.25,
+            "high": 3002.5,
+            "low": 2996,
+            "close": 3001.75,
+            "transactions": 87,
+            "volume": 2708,
+            "dollar_volume": 8121801
+          },
+          "observed": {
+            "ticker": "ESH0",
+            "window_start": "1583269200000000000",
+            "session_end_date": "2020-03-03",
+            "open": 2998.75,
+            "high": 3018.25,
+            "low": 2989.25,
+            "close": 2989.5,
+            "transactions": 24679,
+            "volume": 107994,
+            "dollar_volume": 324442410.25
+          }
+        }
+      ],
+      "sourceFinality": "UNKNOWN",
+      "calendarAccepted": false,
+      "structuralEligible": false,
+      "coverageComplete": false
+    }
+  ]
+}

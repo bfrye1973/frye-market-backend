@@ -1,0 +1,28 @@
+name: index-sector-volume-v1-tests
+
+on:
+  push:
+    branches:
+      - index-sector-volume-v1
+  workflow_dispatch:
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Syntax check changed producers
+        run: |
+          python -m py_compile \
+            scripts/sector_volume.py \
+            scripts/build_outlook_source_from_polygon.py \
+            scripts/build_outlook_hourly_source.py \
+            scripts/build_outlook_source_daily.py \
+            scripts/build_outlook_4h_source.py \
+            tests/test_sector_volume_contract.py
+      - name: Run sector volume contract tests
+        run: python -m unittest tests/test_sector_volume_contract.py

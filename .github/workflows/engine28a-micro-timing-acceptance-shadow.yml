@@ -1,0 +1,53 @@
+name: Engine28A Micro Timing Acceptance Shadow
+
+on:
+  push:
+    branches:
+      - engine22-micro-v2-paper-acceptance-shadow
+  pull_request:
+    paths:
+      - "services/core/logic/engine28a/buildMicroTimingAutomationShadow.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine28AMicroTimingAutomationShadow.test.js"
+      - "services/core/tests/engine28AMicroTimingAutomationShadowWiring.test.js"
+      - ".github/workflows/engine28a-micro-timing-acceptance-shadow.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine28a/buildMicroTimingAutomationShadow.js
+          node --check services/core/jobs/buildStrategySnapshot.js
+
+      - name: Acceptance-shadow tests
+        run: |
+          node --test \
+            services/core/tests/engine28AMicroTimingAutomationShadow.test.js \
+            services/core/tests/engine28AMicroTimingAutomationShadowWiring.test.js
+
+      - name: Ownership regressions
+        run: |
+          node --test \
+            services/core/tests/engine26MicroTimingShadow.test.js \
+            services/core/tests/engine26Strategy1DirectionRegression.test.js \
+            services/core/tests/engine26BPipeline.test.js \
+            services/core/tests/engine28APipelineDoctor.test.js
+
+      - name: Engine22 and Engine27 regressions
+        run: |
+          node --test \
+            services/core/tests/engine22MicroProductionMigrationV2.test.js \
+            services/core/tests/engine22MicroConsistencyReplayV2.test.js \
+            services/core/tests/engine27TraderIntelligenceV2.test.js

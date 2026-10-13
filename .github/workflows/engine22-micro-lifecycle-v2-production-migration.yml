@@ -1,0 +1,56 @@
+name: Engine22 Micro Lifecycle V2 Production Migration
+
+on:
+  push:
+    branches:
+      - engine22-micro-lifecycle-v2-production-migration
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/microV2/**"
+      - "services/core/logic/engine22/wave/buildEngine22WaveStrategy.js"
+      - "services/core/tests/engine22MicroProductionMigrationV2.test.js"
+      - ".github/workflows/engine22-micro-lifecycle-v2-production-migration.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/buildCanonicalMicroMigrationShadow.js
+          node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+
+      - name: Migration shadow tests
+        run: |
+          node --test \
+            services/core/tests/engine22MicroProductionMigrationV2.test.js \
+            services/core/tests/engine22MicroConsistencyReplayV2.test.js \
+            services/core/tests/engine22MicroExecutionContextV2.test.js \
+            services/core/tests/engine22MicroDurableCountsV2.test.js
+
+      - name: Existing Micro regressions
+        run: |
+          node --test \
+            services/core/tests/engine22MicroWaveSequence.test.js \
+            services/core/tests/engine22MicroFiveMinuteEvidence.test.js \
+            services/core/tests/engine22MicroRuntimePersistence.test.js
+
+      - name: Engine27 regression
+        run: |
+          node --test services/core/tests/engine27TraderIntelligenceV2.test.js
+
+      - name: Prove migration stays shadow-only
+        run: |
+          grep -q 'migrationStatus: "SHADOW_ONLY"' services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+          grep -q 'automationEligible: false' services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+          grep -q 'ENGINE26_NOT_AUTHORIZED' services/core/logic/engine22/wave/buildEngine22WaveStrategy.js

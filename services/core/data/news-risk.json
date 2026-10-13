@@ -1,0 +1,35 @@
+{
+  "ok": true,
+  "active": false,
+  "stale": true,
+  "riskLevel": "MEDIUM",
+  "category": "OIL",
+  "headline": "UAE's Fujairah says fire breaks out at petroleum complex after Iranian drone attack - Reuters",
+  "source": "Reuters",
+  "publishedAt": 1777910039,
+  "ageMinutes": 94,
+  "maxAgeMinutes": 30,
+  "affected": {
+    "SPY": "NEUTRAL",
+    "QQQ": "NEUTRAL",
+    "VIX": "NEUTRAL",
+    "OIL": "BULLISH",
+    "USD": "NEUTRAL"
+  },
+  "engineAction": {
+    "blockNewLongs": false,
+    "blockNewShorts": false,
+    "pauseScalpsMinutes": 0,
+    "tightenStops": false,
+    "reasonCode": "STALE_NEWS_RISK"
+  },
+  "reasonCodes": [
+    "STALE_NEWS_RISK",
+    "STALE_MATCHED_DRONE",
+    "STALE_MATCHED_ATTACK",
+    "STALE_MATCHED_PETROLEUM",
+    "STALE_MATCHED_IRAN"
+  ],
+  "checkedAt": "2026-05-04T17:28:02.836Z",
+  "rawHeadlineCount": 100
+}

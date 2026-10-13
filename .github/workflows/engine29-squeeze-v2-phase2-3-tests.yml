@@ -1,0 +1,52 @@
+name: Engine29 Squeeze v2 Phase 2-3 tests
+
+on:
+  push:
+    branches:
+      - engine29-squeeze-v2-phase2-scoring
+      - engine29-squeeze-v2-prod-sync
+  workflow_dispatch: {}
+
+jobs:
+  squeeze-v2-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine29/tacticalCharacter/squeezeV2Scoring.js
+          node --check services/core/tests/engine29SqueezeV2Scoring.test.js
+          node --check services/core/tests/engine29SqueezeV2Synthetic.test.js
+          node --check services/core/tests/engine29SqueezeV2FalsePositive.test.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeV2Observation.js
+          node --check services/core/logic/engine29/tacticalCharacter/buildSqueezeV2Campaign.js
+          node --check services/core/logic/engine29/tacticalCharacter/squeezeV2CampaignStore.js
+          node --check services/core/tests/engine29SqueezeV2Campaign.test.js
+          node --check services/core/tests/engine13SqueezeAlert.test.js
+          node --check services/core/jobs/updateEngine29CrossMarketStress.js
+          node --check services/core/routes/engine29CrossMarketStress.js
+          node --check services/core/logic/alerts/squeezeLedger.js
+          node --check services/core/jobs/alertEngine29Squeeze.js
+
+      - name: Deterministic scoring unit tests
+        run: node --test services/core/tests/engine29SqueezeV2Scoring.test.js
+
+      - name: Synthetic squeeze regression matrix
+        run: node --test services/core/tests/engine29SqueezeV2Synthetic.test.js
+
+      - name: False-positive broad-move matrix
+        run: node --test services/core/tests/engine29SqueezeV2FalsePositive.test.js
+
+      - name: Squeeze campaign contract tests
+        run: node --test services/core/tests/engine29SqueezeV2Campaign.test.js
+
+      - name: Engine 13 squeeze alert tests
+        run: node --test services/core/tests/engine13SqueezeAlert.test.js

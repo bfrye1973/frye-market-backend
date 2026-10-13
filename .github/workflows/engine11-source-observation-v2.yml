@@ -1,0 +1,40 @@
+name: Engine 11 source observation V2 prototype
+on:
+  push:
+    branches: [engine11-source-observation-v2-prototype]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/sourceObservationsV2/**
+      - services/core/tests/engine11/sourceV2/**
+      - .github/workflows/engine11-source-observation-v2.yml
+      - docs/architecture/ENGINE11_SOURCE_OBSERVATION_V2_PROTOTYPE.md
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs
+  authentic-prototype:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[source-v2-live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node services/core/tests/engine11/sourceV2/livePrototype.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-source-v2-authentic-evidence
+          path: research-evidence/engine11-source-v2.json
+          if-no-files-found: error
+          retention-days: 30

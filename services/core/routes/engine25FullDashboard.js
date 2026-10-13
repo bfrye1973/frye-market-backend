@@ -1,0 +1,1099 @@
+// services/core/routes/engine25FullDashboard.js
+
+import express from "express";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import { buildEngine25PlainEnglishNarrator } from "../logic/engine25/buildPlainEnglishNarrator.js";
+import {
+  buildRedlineCurrentMarketBrief,
+  buildRedlineIntradayBrief,
+} from "../logic/engine25/buildRedlineMarketBrief.js";
+
+const router = express.Router();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DATA_DIR = path.join(__dirname, "..", "data");
+
+const COMPOSITE_FILE = path.join(
+  DATA_DIR,
+  "engine25-composite-overlay-6mo.json"
+);
+
+const ZONE_READ_FILE = path.join(
+  DATA_DIR,
+  "engine25-es-zone-aware-read.json"
+);
+
+const MARKET_HEALTH_FILE = path.join(
+  DATA_DIR,
+  "engine25-market-health.json"
+);
+
+const SECTOR_BREADTH_FILE = path.join(
+  DATA_DIR,
+  "engine25-sector-card-breadth-snapshots.json"
+);
+
+const ZONE_CLASSIFICATION_FILE = path.join(
+  DATA_DIR,
+  "engine25-zone-classification.json"
+);
+const ENGINE25_CONTEXT_FILE = path.join(
+  DATA_DIR,
+  "engine25-context.json"
+);
+
+const INTRADAY_MACRO_FILE = path.join(
+  DATA_DIR,
+  "engine25-intraday-macro.json"
+);
+
+const ENGINE25_NEWS_EVENTS_FILE = path.join(
+  DATA_DIR,
+  "engine25-news-events.json"
+);
+
+const PARTICIPATION_FILE = path.join(
+  DATA_DIR,
+  "engine25-participation.json"
+);
+
+const ENGINE29_FILE = path.join(
+  DATA_DIR,
+  "engine29-cross-market-stress.json"
+);
+
+const ES_STRATEGY_SNAPSHOT_FILE = path.join(
+  DATA_DIR,
+  "strategy-snapshot-es.json"
+);
+
+function readJsonFile(filePath) {
+  if (!fs.existsSync(filePath)) return null;
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function safeNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null;
+  }
+
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function componentScore(component) {
+  return safeNumber(component?.score ?? component);
+}
+
+function normalizeStressItem(key, label, input) {
+  const raw = input && typeof input === "object" ? input : {};
+  const value = safeNumber(raw.value ?? raw.latestValue ?? raw.close ?? input);
+  const close = safeNumber(raw.close);
+  const priorValue = safeNumber(raw.priorValue ?? raw.previousValue);
+  const change = safeNumber(
+    raw.change ??
+      (Number.isFinite(value) && Number.isFinite(priorValue)
+        ? value - priorValue
+        : null)
+  );
+
+  const available =
+    Number.isFinite(value) ||
+    Number.isFinite(close) ||
+    Number.isFinite(safeNumber(raw.pctChange5d)) ||
+    Number.isFinite(safeNumber(raw.pctChange20d)) ||
+    Number.isFinite(safeNumber(raw.pctChange50d));
+
+  return {
+    key,
+    label,
+    available,
+    value,
+    close,
+    priorValue,
+    change,
+    observationDate:
+      raw.observationDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
+    aboveEma10: typeof raw.aboveEma10 === "boolean" ? raw.aboveEma10 : null,
+    aboveEma20: typeof raw.aboveEma20 === "boolean" ? raw.aboveEma20 : null,
+    aboveEma50: typeof raw.aboveEma50 === "boolean" ? raw.aboveEma50 : null,
+    aboveEma200: typeof raw.aboveEma200 === "boolean" ? raw.aboveEma200 : null,
+    pctChange5d: safeNumber(raw.pctChange5d),
+    pctChange20d: safeNumber(raw.pctChange20d),
+    pctChange50d: safeNumber(raw.pctChange50d),
+    state: raw.state || raw.status || (available ? "WATCH" : "UNAVAILABLE"),
+    read:
+      raw.read ||
+      raw.interpretation ||
+      (available
+        ? "Existing Engine 25 observation available."
+        : "Latest observation unavailable."),
+  };
+}
+
+function buildCreditStressDetail(marketHealth) {
+  const components = marketHealth?.components || {};
+
+  const creditFragility = components.creditFragility || {};
+  const creditStress = components.creditStress || {};
+  const bondMarket = components.bondMarket || {};
+  const liquidity = components.liquidity || {};
+  const tlt = components.macroPressure?.inputs?.TLT || null;
+
+  const creditInputs = creditFragility.inputs || {};
+  const creditStressInputs = creditStress.inputs || {};
+  const bondInputs = bondMarket.inputs || {};
+  const liquidityInputs = liquidity.inputs || {};
+
+  const creditEtfItems = [
+    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG),
+    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK),
+    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD),
+    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE),
+    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM),
+  ];
+
+  const macroStressItems = [
+    normalizeStressItem(
+      "BAMLH0A0HYM2",
+      "High Yield Credit Spread",
+      creditStressInputs.highYieldSpread
+    ),
+    normalizeStressItem(
+      "NFCI",
+      "Chicago Fed National Financial Conditions Index",
+      creditStressInputs.nfci
+    ),
+    normalizeStressItem(
+      "STLFSI4",
+      "St. Louis Fed Financial Stress Index",
+      creditStressInputs.stlfsi
+    ),
+  ];
+
+  const ratesCurveItems = [
+    normalizeStressItem(
+      "DGS10",
+      "10-Year Treasury Rate",
+      bondInputs.tenYear
+    ),
+    normalizeStressItem(
+      "DGS2",
+      "2-Year Treasury Rate",
+      bondInputs.twoYear
+    ),
+    normalizeStressItem(
+      "T10Y2Y",
+      "10Y minus 2Y Yield Spread",
+      bondInputs.tenMinusTwo
+    ),
+    normalizeStressItem(
+      "T10Y3M",
+      "10Y minus 3M Yield Spread",
+      bondInputs.tenMinusThreeMonth
+    ),
+    normalizeStressItem(
+      "TLT",
+      "20+ Year Treasury Bond ETF",
+      tlt
+    ),
+  ];
+
+  const liquidityItems = [
+    normalizeStressItem(
+      "WRESBAL",
+      "Bank Reserves",
+      liquidityInputs.bankReserves
+    ),
+    normalizeStressItem(
+      "RRPONTSYD",
+      "Reverse Repo",
+      liquidityInputs.reverseRepo
+    ),
+    normalizeStressItem(
+      "WALCL",
+      "Fed Balance Sheet",
+      liquidityInputs.fedBalanceSheet
+    ),
+    normalizeStressItem(
+      "M2SL",
+      "M2 Money Supply",
+      liquidityInputs.m2
+    ),
+  ];
+
+  const scores = {
+    creditFragility: componentScore(creditFragility),
+    creditStress: componentScore(creditStress),
+    bondMarket: componentScore(bondMarket),
+    liquidity: componentScore(liquidity),
+  };
+
+  const creditFragilityWeak =
+    Number.isFinite(scores.creditFragility) && scores.creditFragility < 50;
+  const systemicStressLow =
+    Number.isFinite(scores.creditStress) && scores.creditStress >= 70;
+
+  const displayLabel =
+    creditFragilityWeak && systemicStressLow
+      ? "CREDIT_FRAGILITY_WITHOUT_SYSTEMIC_STRESS"
+      : "CREDIT_RATES_LIQUIDITY_MIXED";
+
+  const interpretation =
+    displayLabel === "CREDIT_FRAGILITY_WITHOUT_SYSTEMIC_STRESS"
+      ? "Market credit proxies are fragile, but broader macro financial stress is not confirming systemic stress."
+      : "Credit, rates, and liquidity are mixed. Use the available observations without assuming direction when comparison data is unavailable.";
+
+  const byKey = Object.fromEntries(
+    [...creditEtfItems, ...macroStressItems, ...ratesCurveItems, ...liquidityItems].map(
+      (item) => [item.key, item]
+    )
+  );
+
+  const up = (key) => Number.isFinite(byKey[key]?.change) && byKey[key].change > 0;
+  const down = (key) => Number.isFinite(byKey[key]?.change) && byKey[key].change < 0;
+
+  const warningFlags = {
+    bondsSellingOff: (up("DGS10") || up("DGS2")) && down("TLT"),
+    creditSpreadsWidening: up("BAMLH0A0HYM2"),
+    financialStressRising: up("NFCI") || up("STLFSI4"),
+    banksBreakingDown:
+      byKey.KRE?.aboveEma20 === false ||
+      byKey.KRE?.aboveEma50 === false ||
+      down("KRE"),
+    liquidityDeteriorating:
+      down("WRESBAL") || down("WALCL") || down("M2SL"),
+  };
+
+  const reasonCodes = [];
+  if (creditFragilityWeak) reasonCodes.push("CREDIT_ETF_FRAGILITY_WEAK");
+  if (systemicStressLow) reasonCodes.push("SYSTEMIC_CREDIT_STRESS_LOW");
+  if (warningFlags.bondsSellingOff) reasonCodes.push("TREASURY_BOND_SELLOFF_CONFIRMED");
+  if (warningFlags.creditSpreadsWidening) reasonCodes.push("HIGH_YIELD_SPREAD_WIDENING");
+  if (warningFlags.financialStressRising) reasonCodes.push("FINANCIAL_STRESS_RISING");
+  if (warningFlags.banksBreakingDown) reasonCodes.push("REGIONAL_BANKS_WEAKENING");
+  if (warningFlags.liquidityDeteriorating) reasonCodes.push("LIQUIDITY_BACKDROP_DETERIORATING");
+
+  return {
+    available:
+      Object.values(scores).some(Number.isFinite) ||
+      [...creditEtfItems, ...macroStressItems, ...ratesCurveItems, ...liquidityItems].some(
+        (item) => item.available
+      ),
+    displayLabel,
+    interpretation,
+    scores,
+    groups: {
+      creditEtfFragility: {
+        label: "Credit ETF Fragility",
+        score: scores.creditFragility,
+        items: creditEtfItems,
+      },
+      macroCreditStress: {
+        label: "Macro Credit Stress",
+        score: scores.creditStress,
+        items: macroStressItems,
+      },
+      ratesCurvePressure: {
+        label: "Rates / Yield Curve Pressure",
+        score: scores.bondMarket,
+        items: ratesCurveItems,
+      },
+      liquidityBackdrop: {
+        label: "Liquidity Backdrop",
+        score: scores.liquidity,
+        items: liquidityItems,
+      },
+    },
+    warningFlags,
+    reasonCodes,
+  };
+}
+
+function diff(current, prior) {
+  const c = safeNumber(current);
+  const p = safeNumber(prior);
+
+  if (!Number.isFinite(c) || !Number.isFinite(p)) return null;
+
+  return Number((c - p).toFixed(3));
+}
+
+function scoreColor(score, inverse = false) {
+  const n = safeNumber(score);
+
+  if (!Number.isFinite(n)) return "gray";
+
+  if (inverse) {
+    if (n < 30) return "green";
+    if (n < 50) return "orange";
+    if (n < 70) return "red";
+    return "darkRed";
+  }
+
+  if (n >= 70) return "green";
+  if (n >= 50) return "yellow";
+  if (n >= 35) return "orange";
+  return "red";
+}
+
+function normalizePermission(value) {
+  return String(value || "UNKNOWN")
+    .replaceAll("_", " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildComponentBreakdown(row) {
+  const components = row?.components || {};
+
+  return [
+    {
+      key: "macroAwareScore",
+      label: "Macro Aware",
+      score: safeNumber(components.macroAwareScore),
+      color: scoreColor(components.macroAwareScore),
+      direction: "higher_is_better",
+    },
+    {
+      key: "breadthParticipation",
+      label: "Breadth Participation",
+      score: safeNumber(components.breadthParticipation),
+      color: scoreColor(components.breadthParticipation),
+      direction: "higher_is_better",
+    },
+    {
+      key: "distributionPressure",
+      label: "Distribution Pressure",
+      score: safeNumber(components.distributionPressure),
+      color: scoreColor(components.distributionPressure, true),
+      direction: "lower_is_better",
+    },
+    {
+      key: "marketTrend",
+      label: "Market Trend",
+      score: safeNumber(components.marketTrend),
+      color: scoreColor(components.marketTrend),
+      direction: "higher_is_better",
+    },
+    {
+      key: "creditFragility",
+      label: "Credit Fragility",
+      score: safeNumber(components.creditFragility),
+      color: scoreColor(components.creditFragility),
+      direction: "higher_is_better",
+    },
+    {
+      key: "aiLeadership",
+      label: "AI Leadership",
+      score: safeNumber(components.aiLeadership),
+      color: scoreColor(components.aiLeadership),
+      direction: "higher_is_better",
+    },
+  ];
+}
+
+function buildLiveComponentBreakdown(marketHealth) {
+  const components = marketHealth?.components || {};
+
+  return [
+    {
+      key: "labor",
+      label: "Labor",
+      score: componentScore(components.labor),
+      color: scoreColor(componentScore(components.labor)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "creditStress",
+      label: "Credit Stress",
+      score: componentScore(components.creditStress),
+      color: scoreColor(componentScore(components.creditStress)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "creditFragility",
+      label: "Credit Fragility",
+      score: componentScore(components.creditFragility),
+      color: scoreColor(componentScore(components.creditFragility)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "bondMarket",
+      label: "Bond Market",
+      score: componentScore(components.bondMarket),
+      color: scoreColor(componentScore(components.bondMarket)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "liquidity",
+      label: "Liquidity",
+      score: componentScore(components.liquidity),
+      color: scoreColor(componentScore(components.liquidity)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "marketTrend",
+      label: "Market Trend",
+      score: componentScore(components.marketTrend),
+      color: scoreColor(componentScore(components.marketTrend)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "distributionPressure",
+      label: "Distribution Pressure",
+      score: componentScore(components.distributionPressure),
+      color: scoreColor(componentScore(components.distributionPressure), true),
+      direction: "lower_is_better",
+    },
+    {
+      key: "breadthParticipation",
+      label: "Breadth Participation",
+      score: componentScore(components.breadthParticipation),
+      color: scoreColor(componentScore(components.breadthParticipation)),
+      direction: "higher_is_better",
+    },
+    {
+      key: "aiLeadership",
+      label: "AI Leadership",
+      score: componentScore(components.aiLeadership),
+      color: scoreColor(componentScore(components.aiLeadership)),
+      direction: "higher_is_better",
+    },
+  ];
+}
+
+function pickComparisonRow(rows, offsetFromEnd) {
+  if (!Array.isArray(rows) || !rows.length) return null;
+  return rows[Math.max(0, rows.length - 1 - offsetFromEnd)] || null;
+}
+
+function buildMetricRow(label, current, oneDayAgo, threeDaysAgo) {
+  return {
+    label,
+    current,
+    oneDayAgo,
+    oneDayChange: diff(current, oneDayAgo),
+    threeDaysAgo,
+    threeDayChange: diff(current, threeDaysAgo),
+  };
+}
+
+function buildUnderTheHoodComparison({ current, oneDayAgo, threeDaysAgo }) {
+  const c = current || {};
+  const d1 = oneDayAgo || {};
+  const d3 = threeDaysAgo || {};
+
+  const rows = [
+    buildMetricRow("ES Close", c.esClose, d1.esClose, d3.esClose),
+    buildMetricRow(
+      "Composite",
+      c.engine25CompositeScore,
+      d1.engine25CompositeScore,
+      d3.engine25CompositeScore
+    ),
+    buildMetricRow(
+      "Macro Aware",
+      c.components?.macroAwareScore,
+      d1.components?.macroAwareScore,
+      d3.components?.macroAwareScore
+    ),
+    buildMetricRow(
+      "Breadth",
+      c.components?.breadthParticipation,
+      d1.components?.breadthParticipation,
+      d3.components?.breadthParticipation
+    ),
+    buildMetricRow(
+      "Distribution",
+      c.components?.distributionPressure,
+      d1.components?.distributionPressure,
+      d3.components?.distributionPressure
+    ),
+    buildMetricRow(
+      "Market Trend",
+      c.components?.marketTrend,
+      d1.components?.marketTrend,
+      d3.components?.marketTrend
+    ),
+    buildMetricRow(
+      "Credit Fragility",
+      c.components?.creditFragility,
+      d1.components?.creditFragility,
+      d3.components?.creditFragility
+    ),
+    buildMetricRow(
+      "AI Leadership",
+      c.components?.aiLeadership,
+      d1.components?.aiLeadership,
+      d3.components?.aiLeadership
+    ),
+  ];
+
+  const esChange = diff(c.esClose, d1.esClose);
+  const compositeChange = diff(
+    c.engine25CompositeScore,
+    d1.engine25CompositeScore
+  );
+  const breadthChange = diff(
+    c.components?.breadthParticipation,
+    d1.components?.breadthParticipation
+  );
+  const distributionChange = diff(
+    c.components?.distributionPressure,
+    d1.components?.distributionPressure
+  );
+
+  let interpretation = "Engine 25 comparison is mixed.";
+
+  if (
+    Number.isFinite(esChange) &&
+    esChange > 0 &&
+    Number.isFinite(compositeChange) &&
+    compositeChange < 0
+  ) {
+    interpretation =
+      "Price improved, but the Engine 25 composite weakened. This looks more like tactical/news-driven strength than broad market confirmation.";
+  } else if (
+    Number.isFinite(esChange) &&
+    esChange > 0 &&
+    Number.isFinite(compositeChange) &&
+    compositeChange > 0 &&
+    Number.isFinite(breadthChange) &&
+    breadthChange > 0
+  ) {
+    interpretation =
+      "Price improved and internals improved. This is stronger confirmation than a price-only rally.";
+  } else if (
+    Number.isFinite(esChange) &&
+    esChange < 0 &&
+    Number.isFinite(compositeChange) &&
+    compositeChange < 0
+  ) {
+    interpretation =
+      "Price and Engine 25 weakened together. Market health confirms defensive conditions.";
+  }
+
+  if (Number.isFinite(distributionChange) && distributionChange > 0) {
+    interpretation += " Distribution pressure increased.";
+  }
+
+  return {
+    rows,
+    interpretation,
+  };
+}
+
+function buildLiveFallbackUnderTheHood(marketHealth) {
+  return {
+    rows: [
+      {
+        label: "Live Score",
+        current: marketHealth?.score ?? null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Regime",
+        current: marketHealth?.regime || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Bias",
+        current: marketHealth?.bias || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+      {
+        label: "Live Risk Level",
+        current: marketHealth?.riskLevel || null,
+        oneDayAgo: null,
+        oneDayChange: null,
+        threeDaysAgo: null,
+        threeDayChange: null,
+      },
+    ],
+    interpretation:
+      "Daily composite overlay is unavailable, so Engine 25 is using live market-health fallback data for the dashboard headline.",
+  };
+}
+
+function buildLiveMarketHealthSummary(marketHealth) {
+  if (!marketHealth) return null;
+
+  return {
+    score: marketHealth.score ?? null,
+    regime: marketHealth.regime ?? null,
+    bias: marketHealth.bias ?? null,
+    riskLevel: marketHealth.riskLevel ?? null,
+    updatedAt: marketHealth.updatedAt || marketHealth.generatedAtUtc || null,
+  };
+}
+
+function buildSectorBreadthSummary(raw) {
+  const latest = raw?.latest || null;
+
+  if (!latest) {
+    return {
+      available: false,
+      sourceFile: "engine25-sector-card-breadth-snapshots.json",
+      historicalSectorCardBreadthAvailable: false,
+      disabledReason: "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
+      latest: null,
+      tactical1h: null,
+      regime4h: null,
+      combinedRead: {
+        available: false,
+        score: null,
+        label: "SECTOR_CARD_BREADTH_UNAVAILABLE",
+        permissionImpact: "NO_IMPACT_DATA_UNAVAILABLE",
+        reasonCodes: ["NO_SECTOR_CARD_BREADTH_SNAPSHOT"],
+      },
+    };
+  }
+
+  return {
+    available: true,
+    sourceFile: "engine25-sector-card-breadth-snapshots.json",
+    engine: raw?.engine || null,
+    latestSnapshotDate: raw?.latestSnapshotDate || latest.date || null,
+    latestSnapshotKey: raw?.latestSnapshotKey || latest.snapshotKey || null,
+    historicalSectorCardBreadthAvailable:
+      raw?.historicalSectorCardBreadthAvailable === true,
+    disabledReason:
+      raw?.disabledReason ||
+      latest.disabledReason ||
+      "NO_HISTORICAL_SECTOR_CARD_SNAPSHOTS",
+    sourceType: raw?.sourceType || latest.sourceType || "sectorCardProxyBreadth",
+    latest,
+    tactical1h: latest.tactical1h || null,
+    regime4h: latest.regime4h || null,
+    combinedRead: latest.combinedRead || null,
+  };
+}
+
+function buildZoneDecisionRead(zoneRead) {
+  const zs = zoneRead?.zoneState || null;
+
+  if (!zs) {
+    return {
+      available: false,
+      label: "ZONE_READ_UNAVAILABLE",
+      permission: "UNKNOWN",
+      priorityRead: "No zone-aware read is available yet.",
+      nextConfirmation: [],
+    };
+  }
+
+  const nextConfirmation = [];
+
+  if (zs.failureInstitutional !== null && zs.failureInstitutional !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim institutional floor",
+      level: zs.failureInstitutional,
+      note: "First repair level after losing manual institutional value.",
+    });
+  }
+
+  if (zs.reclaimNegotiated !== null && zs.reclaimNegotiated !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim negotiated value",
+      level: zs.reclaimNegotiated,
+      note: "Better signal that value is being accepted again.",
+    });
+  }
+
+  if (zs.reclaimInstitutional !== null && zs.reclaimInstitutional !== undefined) {
+    nextConfirmation.push({
+      label: "Reclaim institutional high",
+      level: zs.reclaimInstitutional,
+      note: "Stronger confirmation above the manual institutional zone.",
+    });
+  }
+
+  nextConfirmation.push({
+    label: "Engine 6 final permission",
+    level: null,
+    note: "Engine 25 is context only. Engine 6 remains final trade referee.",
+  });
+
+  let priorityRead = "Engine 25 is reading current zone context.";
+
+  if (zs.secondaryShelfDefense?.value === true) {
+    priorityRead =
+      "Manual institutional zone controls. Auto accumulation shelf defense is secondary and does not override manual zone risk.";
+  } else if (zs.accumulationWatch?.value === true) {
+    priorityRead =
+      "Engine 3 reaction is constructive enough for accumulation watch, but reclaim confirmation is still required.";
+  } else if (zs.state === "INSTITUTIONAL_SUPPORT_AT_RISK") {
+    priorityRead =
+      "ES is below manual institutional support. No blind longs until value is reclaimed.";
+  } else if (zs.state === "FAILED_RECLAIM_WEAK_CLOSE") {
+    priorityRead =
+      "Engine 25 has a provisional failed-reclaim / weak-close read. Treat longs as blocked until reclaim.";
+  }
+
+  return {
+    available: true,
+    label: zs.state || "UNKNOWN",
+    permission: zs.permission || "UNKNOWN",
+    tone: zs.tone || null,
+    priorityRead,
+    nextConfirmation,
+    secondaryShelfDefense: zs.secondaryShelfDefense || null,
+    accumulationWatch: zs.accumulationWatch || null,
+    failedReclaim: zs.failedReclaim || null,
+    weakClose: zs.weakClose || null,
+    highVolumeRejection: zs.highVolumeRejection || null,
+    zoneAwareVolumeAvailable: zs.zoneAwareVolumeAvailable === true,
+    zoneAwareVolumeSource: zs.zoneAwareVolumeSource || null,
+    engine3Reaction: zs.engine3Reaction || null,
+    engine4VolumeContext: zs.engine4VolumeContext || null,
+    reasonCodes: Array.isArray(zs.reasonCodes) ? zs.reasonCodes : [],
+  };
+}
+
+function buildDeskNote({
+  zoneRead,
+  sectorBreadth,
+  underTheHood,
+  current,
+  intradayProxyDamage,
+  liveEsPermission,
+}) {
+  const intradayLabel = intradayProxyDamage?.label || null;
+  const liveMode = liveEsPermission?.mode || null;
+  const sectorCombined = sectorBreadth?.combinedRead || null;
+  const sectorImpact = sectorCombined?.permissionImpact || null;
+
+  const parts = [];
+
+  if (intradayLabel === "INTRADAY_DISTRIBUTION_ACTIVE") {
+    parts.push(
+      "Engine 25 daily/EOD read is risk-off and the live intraday layer confirms active distribution."
+    );
+
+    if (liveMode) {
+      parts.push(`Live ES permission: ${normalizePermission(liveMode)}.`);
+    }
+
+    parts.push(
+      "Normal ES longs should stay blocked until reclaim, seller exhaustion, or a separate Engine 22 / Engine 6 confirmation appears."
+    );
+  } else if (intradayLabel === "INTRADAY_DAMAGE_ELEVATED") {
+    parts.push(
+      "Engine 25 daily/EOD read is available, but intraday damage is elevated."
+    );
+
+    if (liveMode) {
+      parts.push(`Live ES permission: ${normalizePermission(liveMode)}.`);
+    }
+
+    parts.push("Require A+ confirmation before improving ES long permission.");
+  } else {
+    parts.push(
+      zoneRead?.plainEnglish ||
+        underTheHood?.interpretation ||
+        current?.overlayInterpretation ||
+        "Engine 25 market-health read is available."
+    );
+  }
+
+  if (sectorCombined?.available) {
+    parts.push(
+      `Sector breadth read: ${normalizePermission(
+        sectorCombined.label
+      )}. Permission impact: ${normalizePermission(sectorImpact)}.`
+    );
+  }
+
+  return parts.filter(Boolean).join(" ");
+}
+
+function buildFallbackHeadline({
+  marketHealth,
+  liveEsPermission,
+  liveTradePermission,
+  sectorBreadth,
+  zoneDecisionRead,
+}) {
+  const livePermission =
+    liveEsPermission?.mode || liveTradePermission?.engine22Mode || null;
+
+  return {
+    score: marketHealth?.score ?? null,
+    state: marketHealth?.regime || "LIVE_MARKET_HEALTH_FALLBACK",
+    label: marketHealth?.bias || marketHealth?.riskLevel || "Live market health fallback",
+    color: scoreColor(marketHealth?.score),
+
+    date:
+      marketHealth?.latestEodDate ||
+      marketHealth?.date ||
+      marketHealth?.updatedAt ||
+      marketHealth?.generatedAtUtc ||
+      null,
+    latestEodDate: marketHealth?.latestEodDate || marketHealth?.date || null,
+    cashProxyDate: marketHealth?.cashProxyDate || marketHealth?.date || null,
+    esSessionDate: marketHealth?.esSessionDate || marketHealth?.date || null,
+    requiredEodDate: marketHealth?.requiredEodDate || null,
+    dateAlignment: marketHealth?.dateAlignment || "COMPOSITE_OVERLAY_MISSING",
+
+    esClose:
+      marketHealth?.esClose ||
+      marketHealth?.esTechnicalContext?.latestClose ||
+      null,
+
+    permission:
+      livePermission || marketHealth?.permission || marketHealth?.bias || null,
+    permissionText: normalizePermission(
+      livePermission || marketHealth?.permission || marketHealth?.bias
+    ),
+    size:
+      liveEsPermission?.sizeMultiplier ??
+      liveTradePermission?.sizeMultiplier ??
+      marketHealth?.sizeMultiplier ??
+      null,
+
+    livePermission,
+    livePermissionText: normalizePermission(livePermission),
+    liveSize:
+      liveEsPermission?.sizeMultiplier ??
+      liveTradePermission?.sizeMultiplier ??
+      null,
+
+    sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
+    sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
+    sectorBreadthPermissionImpact:
+      sectorBreadth?.combinedRead?.permissionImpact || null,
+
+    zoneState: zoneDecisionRead.label,
+    zonePermission: zoneDecisionRead.permission,
+
+    interpretation:
+      "Daily composite overlay is unavailable. Engine 25 is using live market-health fallback while preserving sector breadth, zone classification, and zone-aware context.",
+  };
+}
+
+router.get("/engine25/full-dashboard", (_req, res) => {
+  try {
+    const composite = readJsonFile(COMPOSITE_FILE);
+    const zoneRead = readJsonFile(ZONE_READ_FILE);
+    const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
+    const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
+    const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
+    const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
+    const intradayMacro = readJsonFile(INTRADAY_MACRO_FILE);
+    const newsEvents = readJsonFile(ENGINE25_NEWS_EVENTS_FILE);
+    const participationArtifact = readJsonFile(PARTICIPATION_FILE);
+    const engine29 = readJsonFile(ENGINE29_FILE);
+    const esStrategySnapshot = readJsonFile(ES_STRATEGY_SNAPSHOT_FILE);
+
+    const rows = Array.isArray(composite?.rows) ? composite.rows : [];
+    const dailyCompositeAvailable = Boolean(composite && rows.length);
+
+    const current = dailyCompositeAvailable ? pickComparisonRow(rows, 0) : null;
+    const oneDayAgo = dailyCompositeAvailable ? pickComparisonRow(rows, 1) : null;
+    const threeDaysAgo = dailyCompositeAvailable ? pickComparisonRow(rows, 3) : null;
+
+    const intradayProxyDamage = marketHealth?.intradayProxyDamage || null;
+    const liveEsPermission = marketHealth?.esPermission || null;
+    const liveTradePermission = marketHealth?.tradePermission || null;
+    const liveMarketHealth = buildLiveMarketHealthSummary(marketHealth);
+
+    const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
+    const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
+    const creditStressDetail = buildCreditStressDetail(marketHealth);
+
+    const componentBreakdown = dailyCompositeAvailable
+      ? buildComponentBreakdown(current)
+      : buildLiveComponentBreakdown(marketHealth);
+
+    const underTheHood = dailyCompositeAvailable
+      ? buildUnderTheHoodComparison({
+          current,
+          oneDayAgo,
+          threeDaysAgo,
+        })
+      : buildLiveFallbackUnderTheHood(marketHealth);
+
+    const headline = dailyCompositeAvailable
+      ? {
+          score: current.engine25CompositeScore,
+          state: current.overlayState,
+          label: current.overlayLabel,
+          color: current.overlayColor,
+
+          date: current.latestEodDate || current.cashProxyDate || current.date,
+          latestEodDate:
+            current.latestEodDate || current.cashProxyDate || current.date,
+          cashProxyDate:
+            current.cashProxyDate || current.latestEodDate || current.date,
+          esSessionDate: current.esSessionDate || current.date,
+          requiredEodDate: current.requiredEodDate || null,
+          dateAlignment: current.dateAlignment || null,
+
+          esClose: current.esClose,
+
+          permission: current.permissions?.finalPermission || null,
+          permissionText: normalizePermission(current.permissions?.finalPermission),
+          size: current.permissions?.finalSize ?? null,
+
+          livePermission:
+            liveEsPermission?.mode || liveTradePermission?.engine22Mode || null,
+          livePermissionText: normalizePermission(
+            liveEsPermission?.mode || liveTradePermission?.engine22Mode
+          ),
+          liveSize:
+            liveEsPermission?.sizeMultiplier ??
+            liveTradePermission?.sizeMultiplier ??
+            null,
+
+          sectorBreadthLabel: sectorBreadth?.combinedRead?.label || null,
+          sectorBreadthScore: sectorBreadth?.combinedRead?.score ?? null,
+          sectorBreadthPermissionImpact:
+            sectorBreadth?.combinedRead?.permissionImpact || null,
+
+          zoneState: zoneDecisionRead.label,
+          zonePermission: zoneDecisionRead.permission,
+
+          interpretation: current.overlayInterpretation,
+        }
+      : buildFallbackHeadline({
+          marketHealth,
+          liveEsPermission,
+          liveTradePermission,
+          sectorBreadth,
+          zoneDecisionRead,
+        });
+
+    const deskNote = buildDeskNote({
+      zoneRead,
+      sectorBreadth,
+      underTheHood,
+      current,
+      intradayProxyDamage,
+      liveEsPermission,
+    });
+
+    const plainEnglishNarrator = buildEngine25PlainEnglishNarrator({
+      participationArtifact,
+      sectorBreadth,
+      creditStressDetail,
+      intradayMacro,
+      engine25Context,
+    });
+
+    const redlineCurrentMarketBrief = buildRedlineCurrentMarketBrief({
+      participationArtifact,
+      sectorBreadth,
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      creditStressDetail,
+      intradayMacro,
+      macroPressure: marketHealth?.components?.macroPressure || null,
+      newsEvents,
+      engine25Context,
+      strategySnapshot: esStrategySnapshot,
+      engine29,
+    });
+
+    const redlineIntradayBrief = buildRedlineIntradayBrief({
+      participationArtifact,
+      sectorBreadth,
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      creditStressDetail,
+      intradayMacro,
+      macroPressure: marketHealth?.components?.macroPressure || null,
+      newsEvents,
+      engine25Context,
+      strategySnapshot: esStrategySnapshot,
+      engine29,
+    });
+
+    return res.json({
+      ok: true,
+      engine: "engine25.fullDashboard.v0.5",
+      modelType: "ENGINE25_FULL_DASHBOARD_VIEW",
+      generatedAtUtc: new Date().toISOString(),
+
+      dailyCompositeAvailable,
+      compositeFallbackActive: !dailyCompositeAvailable,
+      compositeFallbackReason: dailyCompositeAvailable
+        ? null
+        : composite
+          ? "EMPTY_ENGINE25_COMPOSITE_OVERLAY"
+          : "MISSING_ENGINE25_COMPOSITE_OVERLAY",
+
+      source: {
+        compositeFile: "engine25-composite-overlay-6mo.json",
+        zoneReadFile: "engine25-es-zone-aware-read.json",
+        marketHealthFile: "engine25-market-health.json",
+        sectorBreadthFile: "engine25-sector-card-breadth-snapshots.json",
+        zoneClassificationFile: "engine25-zone-classification.json",
+        engine25ContextFile: "engine25-context.json",
+        intradayMacroFile: "engine25-intraday-macro.json",
+        newsEventsFile: "engine25-news-events.json",
+        participationFile: "engine25-participation.json",
+        engine29File: "engine29-cross-market-stress.json",
+        esStrategySnapshotFile: "strategy-snapshot-es.json",
+      },
+      headline,
+      componentBreakdown,
+      underTheHood,
+      creditStressDetail,
+
+      intradayProxyDamage,
+      liveEsPermission,
+      liveTradePermission,
+      liveMarketHealth,
+
+      zoneRead: zoneRead || null,
+      zoneDecisionRead,
+
+      sectorBreadth,
+      zoneClassification: zoneClassification || null,
+      engine25Context: engine25Context || null,
+      intradayMacro: intradayMacro || null,
+      newsEvents: newsEvents || null,
+      participationArtifact: participationArtifact || null,
+      fastParticipation: participationArtifact?.fastParticipation || null,
+      blendedParticipation: participationArtifact?.blendedParticipation || null,
+      sourceDiagnostics: participationArtifact?.sourceDiagnostics || null,
+      macroPressure: marketHealth?.components?.macroPressure || null,
+      marketInternals: engine25Context?.marketInternals || null,
+
+      narratorEvidence: plainEnglishNarrator.narratorEvidence,
+      plainEnglishNarrator,
+      redlineCurrentMarketBrief,
+      redlineIntradayBrief,
+
+      overlay: {
+        available: dailyCompositeAvailable,
+        summary: dailyCompositeAvailable ? composite.summary || null : null,
+        rows: dailyCompositeAvailable ? rows : [],
+      },
+
+      deskNote,
+    });
+  } catch (err) {
+    console.error("[engine25FullDashboard] failed:", err?.stack || err);
+
+    return res.status(500).json({
+      ok: false,
+      error: "engine25_full_dashboard_error",
+      detail: String(err?.message || err),
+    });
+  }
+});
+
+export default router;

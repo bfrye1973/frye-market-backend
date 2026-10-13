@@ -1,0 +1,1945 @@
+// services/core/logic/engine27/wave/buildWaveIntelligence.js
+// Engine 27A — Wave Intelligence
+// Consumes only engine22WaveStrategy.degreeStates.
+
+const DEGREE_KEYS = [
+  "subminute",
+  "minute",
+  "minor",
+  "intermediate",
+  "primary",
+];
+
+const DEGREE_LABELS = {
+  subminute: "Subminute",
+  minute: "Minute",
+  minor: "Minor",
+  intermediate: "Intermediate",
+  primary: "Primary",
+};
+
+const PARENT_DEGREES = {
+  subminute: "minute",
+  minute: "minor",
+  minor: "intermediate",
+  intermediate: "primary",
+  primary: null,
+};
+
+const PREVIOUS_WAVE = {
+  W1: "C",
+  W2: "W1",
+  W3: "W2",
+  W4: "W3",
+  W5: "W4",
+  A: "W5",
+  B: "A",
+  C: "B",
+  D: "C",
+  E: "D",
+  UNKNOWN: "UNKNOWN",
+};
+
+const NEXT_WAVE = {
+  W1: "W2",
+  W2: "W3",
+  W3: "W4",
+  W4: "W5",
+  W5: "A",
+  A: "B",
+  B: "C",
+  C: "W1",
+  D: "E",
+  E: "UNKNOWN",
+  UNKNOWN: "UNKNOWN",
+};
+
+const VALID_WAVES = new Set([
+  "W1",
+  "W2",
+  "W3",
+  "W4",
+  "W5",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+]);
+
+const VALID_INTERNAL_WAVES = new Set([
+  "i",
+  "ii",
+  "iii",
+  "iv",
+  "v",
+]);
+
+function isObject(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value)
+  );
+}
+
+function upper(value) {
+  return String(value ?? "")
+    .trim()
+    .toUpperCase();
+}
+
+function lower(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function unique(values) {
+  return [
+    ...new Set(
+      values.filter(Boolean)
+    ),
+  ];
+}
+
+function numberOrNull(value) {
+  if (
+    value === null ||
+    value === undefined ||
+    value === ""
+  ) {
+    return null;
+  }
+
+  const number = Number(value);
+
+  return Number.isFinite(number)
+    ? number
+    : null;
+}
+
+function booleanOrNull(value) {
+  return typeof value === "boolean"
+    ? value
+    : null;
+}
+
+function normalizeWave(value) {
+  const text = upper(value);
+
+  if (!text) {
+    return "UNKNOWN";
+  }
+
+  if (VALID_WAVES.has(text)) {
+    return text;
+  }
+
+  const impulseMatch = text.match(
+    /(?:^|[^A-Z0-9])W(?:AVE)?[\s_-]*([1-5])(?:$|[^A-Z0-9])/
+  );
+
+  if (impulseMatch) {
+    return `W${impulseMatch[1]}`;
+  }
+
+  const correctionMatch = text.match(
+    /(?:^|[^A-Z0-9])(?:WAVE[\s_-]*)?([A-E])(?:$|[^A-Z0-9])/
+  );
+
+  if (correctionMatch) {
+    return correctionMatch[1];
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizeInternalWave(value) {
+  const raw = String(value ?? "").trim();
+
+  if (!raw) {
+    return "UNKNOWN";
+  }
+
+  const text = raw.toLowerCase();
+
+  if (VALID_INTERNAL_WAVES.has(text)) {
+    return text;
+  }
+
+  const cWaveMatch =
+    text.match(/^c[-_\s]?([a-e])$/i);
+
+  if (cWaveMatch) {
+    return `C-${cWaveMatch[1].toLowerCase()}`;
+  }
+
+  const romanMatch = text.match(
+    /(?:^|[^a-z0-9])(i{1,3}|iv|v)(?:$|[^a-z0-9])/
+  );
+
+  if (
+    romanMatch &&
+    VALID_INTERNAL_WAVES.has(
+      romanMatch[1]
+    )
+  ) {
+    return romanMatch[1];
+  }
+
+  return "UNKNOWN";
+}
+
+function normalizePullbackClassification(
+  value
+) {
+  const text = upper(value);
+
+  if (!text) {
+    return "NONE";
+  }
+
+  if (
+    text.includes(
+      "INTERNAL_PULLBACK"
+    ) ||
+    (
+      text.includes("INTERNAL") &&
+      text.includes("PULLBACK")
+    )
+  ) {
+    return "INTERNAL_PULLBACK";
+  }
+
+  if (
+    text === "NONE" ||
+    text === "UNKNOWN"
+  ) {
+    return "NONE";
+  }
+
+  return text.replace(
+    /[^A-Z0-9]+/g,
+    "_"
+  );
+}
+
+function normalizeTransitionRisk(
+  value
+) {
+  const text = upper(value);
+
+  if (!text) {
+    return "UNKNOWN";
+  }
+
+  const allowed = new Set([
+    "LOW",
+    "MODERATE",
+    "HIGH",
+    "VERY_HIGH",
+    "UNKNOWN",
+  ]);
+
+  return allowed.has(text)
+    ? text
+    : "UNKNOWN";
+}
+
+function getInternalStructure(state) {
+  if (
+    isObject(
+      state?.cWaveInternalStructure
+    )
+  ) {
+    return state.cWaveInternalStructure;
+  }
+
+  return isObject(
+    state?.internalStructure
+  )
+    ? state.internalStructure
+    : null;
+}
+
+function resolveCurrentWave(state) {
+  if (!isObject(state)) {
+    return "UNKNOWN";
+  }
+
+  const candidates = [
+    state.activeWave,
+    state.currentWave,
+    state.wave,
+    state.lifecycle?.currentWave,
+    state.currentRead,
+  ];
+
+  for (const candidate of candidates) {
+    const normalized =
+      normalizeWave(candidate);
+
+    if (normalized !== "UNKNOWN") {
+      return normalized;
+    }
+  }
+
+  return "UNKNOWN";
+}
+
+function isTriangleState(state) {
+  if (!isObject(state)) {
+    return false;
+  }
+
+  const candidates = [
+    state.correctionType,
+    state.correctionModel?.type,
+    state.correctionModel?.preferredType,
+    state.correctionModels?.type,
+    state.correctionModels?.preferredType,
+    state.lifecycle?.correctionType,
+    state.lifecycle?.modelType,
+    state.nestedCorrectionContext
+      ?.correctionType,
+    state.nestedCorrectionContext
+      ?.parentCorrectionType,
+    state.headline,
+    state.currentRead,
+  ];
+
+  return candidates.some((value) => {
+    const text = upper(value);
+
+    return (
+      text.includes("TRIANGLE") ||
+      text.includes("ABCDE")
+    );
+  });
+}
+
+function resolveNextWave(
+  currentWave,
+  state
+) {
+  if (
+    currentWave === "C" &&
+    isTriangleState(state)
+  ) {
+    return "D";
+  }
+
+  return (
+    NEXT_WAVE[currentWave] ||
+    "UNKNOWN"
+  );
+}
+
+function normalizeTradeDirection(
+  value,
+  {
+    allowUpDown = true,
+  } = {}
+) {
+  const text = upper(value);
+
+  if (!text) {
+    return null;
+  }
+
+  const longPattern =
+    /(?:^|[^A-Z0-9])(LONG|BULLISH|BULL|BUY)(?:$|[^A-Z0-9])/;
+
+  const shortPattern =
+    /(?:^|[^A-Z0-9])(SHORT|BEARISH|BEAR|SELL)(?:$|[^A-Z0-9])/;
+
+  const neutralPattern =
+    /(?:^|[^A-Z0-9])(NEUTRAL|SIDEWAYS|NONE|UNKNOWN|WAIT)(?:$|[^A-Z0-9])/;
+
+  if (
+    longPattern.test(text) ||
+    (
+      allowUpDown &&
+      /(?:^|[^A-Z0-9])UP(?:$|[^A-Z0-9])/.test(
+        text
+      )
+    )
+  ) {
+    return "LONG";
+  }
+
+  if (
+    shortPattern.test(text) ||
+    (
+      allowUpDown &&
+      /(?:^|[^A-Z0-9])DOWN(?:$|[^A-Z0-9])/.test(
+        text
+      )
+    )
+  ) {
+    return "SHORT";
+  }
+
+  if (neutralPattern.test(text)) {
+    return "NEUTRAL";
+  }
+
+  return null;
+}
+
+function normalizeLegDirection(value) {
+  const text = upper(value);
+
+  if (!text) {
+    return null;
+  }
+
+  const tokens = text.match(
+    /LONG|SHORT|BULLISH|BEARISH|BULL|BEAR|BUY|SELL|\bUP\b|\bDOWN\b|NEUTRAL|SIDEWAYS|NONE|UNKNOWN/g
+  );
+
+  if (!tokens?.length) {
+    return null;
+  }
+
+  const token =
+    tokens[tokens.length - 1];
+
+  if (
+    [
+      "LONG",
+      "BULLISH",
+      "BULL",
+      "BUY",
+      "UP",
+    ].includes(token)
+  ) {
+    return "UP";
+  }
+
+  if (
+    [
+      "SHORT",
+      "BEARISH",
+      "BEAR",
+      "SELL",
+      "DOWN",
+    ].includes(token)
+  ) {
+    return "DOWN";
+  }
+
+  return "NEUTRAL";
+}
+
+function firstNormalized(
+  candidates,
+  normalizer,
+  fallback
+) {
+  for (const candidate of candidates) {
+    const normalized =
+      normalizer(candidate);
+
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return fallback;
+}
+
+function resolveStructuralDirection(
+  state
+) {
+  if (!isObject(state)) {
+    return "NEUTRAL";
+  }
+
+  const internalStructure =
+    getInternalStructure(state);
+
+  return firstNormalized(
+    [
+      internalStructure
+        ?.parentWaveDirection,
+      state.structuralDirection,
+      state.structureDirection,
+      state.lifecycle
+        ?.structuralDirection,
+      state.lifecycle
+        ?.structureDirection,
+      state.trendDirection,
+      state.trendBias,
+      state.biasDirection,
+      state.bias,
+      state.direction,
+    ],
+    (value) =>
+      normalizeTradeDirection(
+        value,
+        {
+          allowUpDown: true,
+        }
+      ),
+    "NEUTRAL"
+  );
+}
+
+function resolveCurrentLegDirection(
+  state
+) {
+  if (!isObject(state)) {
+    return "NEUTRAL";
+  }
+
+  const internalStructure =
+    getInternalStructure(state);
+
+  const explicit =
+    firstNormalized(
+      [
+        internalStructure
+          ?.internalLegDirection,
+        internalStructure
+          ?.direction,
+        internalStructure
+          ?.downstreamTravelDirection,
+        state.currentLegDirection,
+        state.legDirection,
+        state.activeLegDirection,
+        state.currentDirection,
+        state.lifecycle
+          ?.currentLegDirection,
+        state.lifecycle
+          ?.legDirection,
+        state.lifecycle
+          ?.currentDirection,
+        state.nestedCorrectionContext
+          ?.currentLegDirection,
+        state.nestedCorrectionContext
+          ?.currentDirection,
+        state.nestedCorrectionContext
+          ?.currentChildDirection,
+        state.correctionModel
+          ?.currentLegDirection,
+        state.correctionModel
+          ?.direction,
+      ],
+      normalizeLegDirection,
+      null
+    );
+
+  if (explicit) {
+    return explicit;
+  }
+
+  return (
+    normalizeLegDirection(
+      state.direction
+    ) ||
+    "NEUTRAL"
+  );
+}
+
+function deriveNextExpectedDirection({
+  currentWave,
+  structuralDirection,
+}) {
+  const bullishImpulse = {
+    W1: "DOWN",
+    W2: "UP",
+    W3: "DOWN",
+    W4: "UP",
+    W5: "DOWN",
+  };
+
+  const bearishImpulse = {
+    W1: "UP",
+    W2: "DOWN",
+    W3: "UP",
+    W4: "DOWN",
+    W5: "UP",
+  };
+
+  if (
+    structuralDirection === "LONG"
+  ) {
+    return (
+      bullishImpulse[currentWave] ||
+      "NEUTRAL"
+    );
+  }
+
+  if (
+    structuralDirection === "SHORT"
+  ) {
+    return (
+      bearishImpulse[currentWave] ||
+      "NEUTRAL"
+    );
+  }
+
+  return "NEUTRAL";
+}
+
+function resolveNextExpectedDirection(
+  state,
+  currentWave,
+  structuralDirection
+) {
+  if (!isObject(state)) {
+    return "NEUTRAL";
+  }
+
+  const explicit = firstNormalized(
+    [
+      state.nextExpectedDirection,
+      state.nextDirection,
+      state.lifecycle
+        ?.nextExpectedDirection,
+      state.lifecycle
+        ?.nextDirection,
+      state.nestedCorrectionContext
+        ?.nextExpectedDirection,
+      state.nestedCorrectionContext
+        ?.nextDirection,
+      state.nestedCorrectionContext
+        ?.nextExpected,
+      state.nestedCorrectionContext
+        ?.expectedPath,
+    ],
+    normalizeLegDirection,
+    null
+  );
+
+  if (explicit) {
+    return explicit;
+  }
+
+  return deriveNextExpectedDirection({
+    currentWave,
+    structuralDirection,
+  });
+}
+
+function resolvePreferredTradeDirection(
+  state,
+  structuralDirection
+) {
+  if (!isObject(state)) {
+    return "NEUTRAL";
+  }
+
+  return firstNormalized(
+    [
+      state.cWaveInternalStructure
+        ?.downstreamTravelDirection,
+      state.preferredTradeDirection,
+      state.tradeDirection,
+      state.preferredDirection,
+      state.lifecycle
+        ?.preferredTradeDirection,
+      state.lifecycle
+        ?.preferredDirection,
+      structuralDirection,
+    ],
+    (value) =>
+      normalizeTradeDirection(value),
+    "NEUTRAL"
+  );
+}
+
+function collectStageText(state) {
+  return [
+    state?.stage,
+    state?.status,
+    state?.state,
+    state?.lifecycle?.stage,
+    state?.lifecycle?.status,
+    state?.activeWave,
+    state?.currentWave,
+  ].map(upper);
+}
+
+function resolveStage(
+  state,
+  hasWave
+) {
+  if (!isObject(state)) {
+    return "WATCH";
+  }
+
+  const internalStructure =
+    getInternalStructure(state);
+
+  const stageValues =
+    collectStageText(state);
+
+  const hasText = (pattern) =>
+    stageValues.some((value) =>
+      pattern.test(value)
+    );
+
+  const invalidated =
+    internalStructure
+      ?.invalidationBreached === true ||
+    state.invalidated === true ||
+    state.isInvalidated === true ||
+    state.lifecycle
+      ?.invalidated === true ||
+    hasText(/INVALID/);
+
+  if (invalidated) {
+    return "INVALIDATED";
+  }
+
+  const complete =
+    internalStructure
+      ?.parentWaveComplete === true ||
+    state.complete === true ||
+    state.completed === true ||
+    state.isComplete === true ||
+    state.lifecycle?.complete === true ||
+    state.lifecycle
+      ?.completed === true ||
+    hasText(/COMPLETE|COMPLETED/);
+
+  if (complete) {
+    return "COMPLETE";
+  }
+
+  const active =
+    state.active === true ||
+    state.isActive === true ||
+    state.lifecycle?.active === true ||
+    hasText(
+      /(?:^|[^A-Z0-9])ACTIVE(?:$|[^A-Z0-9])/
+    );
+
+  if (
+    active &&
+    hasWave
+  ) {
+    return "ACTIVE";
+  }
+
+  const watch =
+    state.watch === true ||
+    state.watchOnly === true ||
+    state.lifecycle?.watch === true ||
+    hasText(/WATCH/);
+
+  if (watch) {
+    return "WATCH";
+  }
+
+  const projected =
+    state.projected === true ||
+    state.isProjected === true ||
+    state.lifecycle
+      ?.projected === true ||
+    hasText(/PROJECTED/);
+
+  if (projected) {
+    return "PROJECTED";
+  }
+
+  return "WATCH";
+}
+
+function normalizeMaturity(value) {
+  const text = upper(value);
+
+  if (!text) {
+    return null;
+  }
+
+  if (text.includes("INVALID")) {
+    return "INVALIDATED";
+  }
+
+  if (
+    text.includes("COMPLETE") ||
+    text.includes("COMPLETED")
+  ) {
+    return "COMPLETE";
+  }
+
+  if (
+    /(?:^|[^A-Z0-9])EARLY(?:$|[^A-Z0-9])/.test(
+      text
+    ) ||
+    text.includes("FORMING") ||
+    text.includes("STARTING")
+  ) {
+    return "EARLY";
+  }
+
+  if (
+    /(?:^|[^A-Z0-9])MID(?:$|[^A-Z0-9])/.test(
+      text
+    ) ||
+    text.includes("MIDDLE") ||
+    text.includes("DEVELOPING") ||
+    text.includes("IN_PROGRESS") ||
+    text.includes("IN PROGRESS")
+  ) {
+    return "MID";
+  }
+
+  if (
+    /(?:^|[^A-Z0-9])LATE(?:$|[^A-Z0-9])/.test(
+      text
+    ) ||
+    text.includes("MATURE") ||
+    text.includes("EXTENDED") ||
+    text.includes("EXHAUST") ||
+    text.includes("NEAR_COMPLETE") ||
+    text.includes("NEAR COMPLETE") ||
+    text.includes("COMPLETING")
+  ) {
+    return "LATE";
+  }
+
+  if (
+    text === "UNKNOWN" ||
+    text === "NONE"
+  ) {
+    return "UNKNOWN";
+  }
+
+  return null;
+}
+
+function resolveMaturity({
+  state,
+  currentWave,
+  stage,
+}) {
+  if (stage === "INVALIDATED") {
+    return "INVALIDATED";
+  }
+
+  if (stage === "COMPLETE") {
+    return "COMPLETE";
+  }
+
+  if (currentWave === "UNKNOWN") {
+    return "UNKNOWN";
+  }
+
+  const waveState =
+    state?.waveStates?.[
+      currentWave
+    ] ||
+    state?.waves?.[
+      currentWave
+    ] ||
+    state?.marks?.[
+      currentWave
+    ] ||
+    state?.activeWaveState ||
+    null;
+
+  return firstNormalized(
+    [
+      state?.maturity,
+      state?.waveMaturity,
+      state?.lifecycle?.maturity,
+      state?.lifecycle
+        ?.waveMaturity,
+      waveState?.maturity,
+      waveState?.waveMaturity,
+      waveState?.status,
+      waveState?.stage,
+      state?.correctionModel
+        ?.maturity,
+      state?.correctionModel?.stage,
+    ],
+    normalizeMaturity,
+    "UNKNOWN"
+  );
+}
+
+function buildInternalStructureRead(
+  state
+) {
+  const internalStructure =
+    getInternalStructure(state);
+
+  if (!internalStructure) {
+    return {
+      active: false,
+
+      internalWave: "UNKNOWN",
+      previousInternalWave:
+        "UNKNOWN",
+      nextExpectedInternalWave:
+        "UNKNOWN",
+
+      pullbackClassification:
+        "NONE",
+
+      parentWaveStillValid:
+        null,
+      parentWaveComplete:
+        null,
+      parentTransitionPossible:
+        null,
+
+      transitionRisk:
+        "UNKNOWN",
+
+      invalidationLevel:
+        null,
+      invalidationBreached:
+        false,
+
+      supportLevel:
+        null,
+
+      direction:
+        "NEUTRAL",
+
+      downstreamTravelDirection:
+        "NEUTRAL",
+
+      directionalContextValidForEngine26:
+        false,
+
+      engine26TravelContextRole:
+        null,
+
+      engine26CarryAllowed:
+        false,
+
+      cWaveState:
+        null,
+
+      activeCompletionZone:
+        null,
+
+      activeDestinations:
+        [],
+
+      currentPrice:
+        null,
+
+      cB: {
+        active: false,
+        state: null,
+        direction: "NEUTRAL",
+        projectionPending: false,
+        reclaimTrigger: null,
+        reclaimConfirmed: false,
+        retestHold: false,
+        fastNoRetestBreak: false,
+        firstTarget: null,
+        normalZone: null,
+        retracementLevels: {},
+      },
+    };
+  }
+
+  const cWaveState =
+    upper(
+      internalStructure
+        .cWaveState
+    ) ||
+    null;
+
+  const engine26CarryAllowed =
+    internalStructure
+      .engine26CarryAllowed ===
+      true;
+
+  const active =
+    internalStructure.active ===
+      true ||
+    engine26CarryAllowed ===
+      true ||
+    (
+      cWaveState != null &&
+      cWaveState.includes(
+        "ACTIVE"
+      )
+    );
+
+  const cBSource =
+    isObject(
+      internalStructure?.cB
+    )
+      ? internalStructure.cB
+      : {};
+
+  const cBRetrace =
+    isObject(
+      cBSource?.retraceOfCADown
+    )
+      ? cBSource.retraceOfCADown
+      : {};
+
+  const cBLevels =
+    isObject(
+      cBRetrace?.levels
+    )
+      ? cBRetrace.levels
+      : {};
+
+  const cBNormalZone =
+    isObject(
+      cBRetrace?.normalZone
+    )
+      ? cBRetrace.normalZone
+      : null;
+
+  return {
+    active,
+
+    internalWave:
+      normalizeInternalWave(
+        internalStructure
+          .currentInternalWave
+      ),
+
+    previousInternalWave:
+      normalizeInternalWave(
+        internalStructure
+          .previousInternalWave
+      ),
+
+    nextExpectedInternalWave:
+      normalizeInternalWave(
+        internalStructure
+          .nextExpectedInternalWave
+      ),
+
+    pullbackClassification:
+      normalizePullbackClassification(
+        internalStructure
+          .classification
+      ),
+
+    parentWaveStillValid:
+      booleanOrNull(
+        internalStructure
+          .parentWaveStillValid
+      ),
+
+    parentWaveComplete:
+      booleanOrNull(
+        internalStructure
+          .parentWaveComplete
+      ),
+
+    parentTransitionPossible:
+      booleanOrNull(
+        internalStructure
+          .parentTransitionPossible
+      ),
+
+    transitionRisk:
+      normalizeTransitionRisk(
+        internalStructure
+          .transitionRisk
+      ),
+
+    invalidationLevel:
+      numberOrNull(
+        internalStructure
+          .invalidationLevel
+      ),
+
+    invalidationBreached:
+      internalStructure
+        .invalidationBreached ===
+        true,
+
+    supportLevel:
+      numberOrNull(
+        internalStructure
+          .supportLevel
+      ),
+
+    direction:
+      firstNormalized(
+        [
+          internalStructure
+            .direction,
+          internalStructure
+            .currentLegDirection,
+        ],
+        normalizeLegDirection,
+        "NEUTRAL"
+      ),
+
+    downstreamTravelDirection:
+      firstNormalized(
+        [
+          internalStructure
+            .downstreamTravelDirection,
+          internalStructure
+            .direction,
+        ],
+        (value) =>
+          normalizeTradeDirection(
+            value,
+            {
+              allowUpDown: true,
+            }
+          ),
+        "NEUTRAL"
+      ),
+
+    directionalContextValidForEngine26:
+      internalStructure
+        .directionalContextValidForEngine26 ===
+        true,
+
+    engine26TravelContextRole:
+      internalStructure
+        .engine26TravelContextRole ||
+      null,
+
+    engine26CarryAllowed,
+
+    cWaveState,
+
+    activeCompletionZone:
+      isObject(
+        internalStructure
+          .activeCompletionZone
+      )
+        ? internalStructure
+            .activeCompletionZone
+        : null,
+
+    activeDestinations:
+      Array.isArray(
+        internalStructure
+          .activeDestinations
+      )
+        ? internalStructure
+            .activeDestinations
+        : [],
+
+    currentPrice:
+      numberOrNull(
+        internalStructure
+          .currentPrice
+      ),
+
+    cB: {
+      active:
+        cBSource.active === true,
+
+      state:
+        upper(
+          cBSource.state
+        ) ||
+        null,
+
+      direction:
+        firstNormalized(
+          [
+            cBSource.direction,
+            internalStructure
+              .downstreamTravelDirection,
+          ],
+          (value) =>
+            normalizeTradeDirection(
+              value,
+              {
+                allowUpDown: true,
+              }
+            ),
+          "NEUTRAL"
+        ),
+
+      projectionPending:
+        cBSource
+          .projectionPending === true,
+
+      reclaimTrigger:
+        numberOrNull(
+          cBSource.reclaimTrigger
+        ),
+
+      reclaimConfirmed:
+        cBSource
+          .reclaimConfirmed === true,
+
+      retestHold:
+        cBSource
+          .retestHold === true,
+
+      fastNoRetestBreak:
+        cBSource
+          .fastNoRetestBreak === true,
+
+      firstTarget:
+        numberOrNull(
+          cBSource.firstCBTarget
+        ),
+
+      normalZone:
+        cBNormalZone
+          ? {
+              lo:
+                numberOrNull(
+                  cBNormalZone.lo
+                ),
+
+              hi:
+                numberOrNull(
+                  cBNormalZone.hi
+                ),
+
+              label:
+                cBNormalZone.label ||
+                null,
+            }
+          : null,
+
+      retracementLevels: {
+        cb236:
+          numberOrNull(
+            cBLevels.cb236 ??
+            cBLevels["C-b 0.236"]
+          ),
+
+        cb382:
+          numberOrNull(
+            cBLevels.cb382 ??
+            cBLevels["C-b 0.382"]
+          ),
+
+        cb500:
+          numberOrNull(
+            cBLevels.cb500 ??
+            cBLevels["C-b 0.500"]
+          ),
+
+        cb618:
+          numberOrNull(
+            cBLevels.cb618 ??
+            cBLevels["C-b 0.618"]
+          ),
+
+        cb786:
+          numberOrNull(
+            cBLevels.cb786 ??
+            cBLevels["C-b 0.786"]
+          ),
+      },
+    },
+  };
+}
+
+function isActiveValidInternalPullback(
+  internalRead
+) {
+  return (
+    internalRead?.active === true &&
+    internalRead
+      ?.pullbackClassification ===
+      "INTERNAL_PULLBACK" &&
+    internalRead
+      ?.parentWaveStillValid === true &&
+    internalRead
+      ?.parentWaveComplete !== true &&
+    internalRead
+      ?.invalidationBreached !== true
+  );
+}
+
+function waveText(wave) {
+  if (/^W[1-5]$/.test(wave)) {
+    return `Wave ${wave.slice(1)}`;
+  }
+
+  if (
+    [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+    ].includes(wave)
+  ) {
+    return `Wave ${wave}`;
+  }
+
+  return "an unknown wave";
+}
+
+function stageText(stage) {
+  const labels = {
+    ACTIVE: "Active",
+    WATCH: "Watch",
+    PROJECTED: "Projected",
+    COMPLETE: "Complete",
+    INVALIDATED: "Invalidated",
+  };
+
+  return labels[stage] || stage;
+}
+
+function buildHeadline({
+  degree,
+  currentWave,
+  stage,
+  unavailable,
+  internalRead,
+}) {
+  if (unavailable) {
+    return `${degree} Wave State Unavailable`;
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    return `${degree} ${currentWave} Internal Pullback`;
+  }
+
+  return `${degree} ${currentWave} ${stageText(
+    stage
+  )}`;
+}
+
+function buildCurrentRead({
+  degree,
+  currentWave,
+  currentLegDirection,
+  stage,
+  unavailable,
+  internalRead,
+}) {
+  if (unavailable) {
+    return `${degree} wave state is unavailable.`;
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    const currentInternalWave =
+      internalRead.internalWave;
+
+    const nextInternalWave =
+      internalRead
+        .nextExpectedInternalWave;
+
+    const currentText =
+      currentInternalWave !==
+      "UNKNOWN"
+        ? `internal wave ${currentInternalWave}`
+        : "an internal wave";
+
+    const nextText =
+      nextInternalWave !==
+      "UNKNOWN"
+        ? `Internal wave ${nextInternalWave} remains possible`
+        : "The next internal wave remains possible";
+
+    return `${degree} remains in ${currentWave} while ${currentText} pulls back. ${nextText} if support holds.`;
+  }
+
+  const wave =
+    waveText(currentWave);
+
+  if (stage === "INVALIDATED") {
+    return `${degree} ${wave} is invalidated.`;
+  }
+
+  if (stage === "COMPLETE") {
+    return `${degree} ${wave} is complete.`;
+  }
+
+  if (stage === "PROJECTED") {
+    return `${degree} ${wave} is projected.`;
+  }
+
+  if (stage === "WATCH") {
+    return `${degree} ${wave} is on watch.`;
+  }
+
+  if (
+    currentLegDirection === "UP"
+  ) {
+    return `${degree} is currently advancing in ${wave}.`;
+  }
+
+  if (
+    currentLegDirection === "DOWN"
+  ) {
+    return `${degree} is currently declining in ${wave}.`;
+  }
+
+  return `${degree} is currently in ${wave}.`;
+}
+
+function buildAction({
+  currentWave,
+  nextExpectedWave,
+  stage,
+  unavailable,
+  internalRead,
+}) {
+  if (unavailable) {
+    return "WAIT_FOR_ENGINE22_STATE";
+  }
+
+  if (stage === "INVALIDATED") {
+    return "WAIT_FOR_NEW_ENGINE22_STRUCTURE";
+  }
+
+  if (
+    isActiveValidInternalPullback(
+      internalRead
+    )
+  ) {
+    return "WAIT_FOR_INTERNAL_PULLBACK_COMPLETION";
+  }
+
+  if (stage === "COMPLETE") {
+    if (currentWave === "E") {
+      return "WAIT_FOR_TRIANGLE_RESOLUTION";
+    }
+
+    if (
+      nextExpectedWave ===
+      "UNKNOWN"
+    ) {
+      return "WAIT_FOR_ENGINE22_CONFIRMATION";
+    }
+
+    return `WATCH_FOR_${nextExpectedWave}`;
+  }
+
+  if (stage === "PROJECTED") {
+    return `WATCH_PROJECTED_${currentWave}`;
+  }
+
+  if (stage === "WATCH") {
+    return `WATCH_${currentWave}`;
+  }
+
+  if (
+    [
+      "W2",
+      "W4",
+    ].includes(currentWave)
+  ) {
+    return `WAIT_FOR_${currentWave}_COMPLETION`;
+  }
+
+  if (
+    [
+      "W1",
+      "W3",
+      "W5",
+    ].includes(currentWave)
+  ) {
+    return "TRACK_CONTINUATION";
+  }
+
+  if (
+    [
+      "A",
+      "B",
+      "C",
+      "D",
+      "E",
+    ].includes(currentWave)
+  ) {
+    return "TRACK_CORRECTION";
+  }
+
+  return "TRACK_STRUCTURE";
+}
+
+function buildReasonCodes({
+  degreeKey,
+  currentWave,
+  structuralDirection,
+  currentLegDirection,
+  nextExpectedWave,
+  nextExpectedDirection,
+  preferredTradeDirection,
+  stage,
+  maturity,
+  active,
+  invalidated,
+  unavailable,
+  internalRead,
+}) {
+  return unique([
+    unavailable
+      ? "ENGINE27_WAVE_STATE_UNAVAILABLE"
+      : null,
+
+    `ENGINE27_DEGREE_${degreeKey.toUpperCase()}`,
+
+    `ENGINE27_WAVE_${currentWave}`,
+
+    `ENGINE27_STAGE_${stage}`,
+
+    `ENGINE27_DIRECTION_${structuralDirection}`,
+
+    `ENGINE27_CURRENT_LEG_${currentLegDirection}`,
+
+    `ENGINE27_NEXT_${nextExpectedWave}`,
+
+    `ENGINE27_NEXT_DIRECTION_${nextExpectedDirection}`,
+
+    `ENGINE27_PREFERRED_${preferredTradeDirection}`,
+
+    `ENGINE27_MATURITY_${maturity}`,
+
+    active
+      ? "ENGINE27_WAVE_ACTIVE"
+      : "ENGINE27_WAVE_INACTIVE",
+
+    invalidated
+      ? "ENGINE27_WAVE_INVALIDATED"
+      : null,
+
+    internalRead?.active === true
+      ? "ENGINE27_INTERNAL_STRUCTURE_ACTIVE"
+      : null,
+
+    internalRead?.internalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_INTERNAL_WAVE_${upper(
+          internalRead.internalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.previousInternalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_PREVIOUS_INTERNAL_WAVE_${upper(
+          internalRead
+            .previousInternalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.nextExpectedInternalWave !==
+    "UNKNOWN"
+      ? `ENGINE27_NEXT_INTERNAL_WAVE_${upper(
+          internalRead
+            .nextExpectedInternalWave
+        )}`
+      : null,
+
+    internalRead
+      ?.pullbackClassification !==
+    "NONE"
+      ? `ENGINE27_${internalRead.pullbackClassification}`
+      : null,
+
+    internalRead
+      ?.parentWaveStillValid === true
+      ? "ENGINE27_PARENT_WAVE_STILL_VALID"
+      : null,
+
+    internalRead
+      ?.parentWaveComplete === true
+      ? "ENGINE27_PARENT_WAVE_COMPLETE"
+      : null,
+
+    internalRead
+      ?.parentTransitionPossible === true
+      ? "ENGINE27_PARENT_TRANSITION_POSSIBLE"
+      : null,
+
+    internalRead
+      ?.invalidationBreached === true
+      ? "ENGINE27_INTERNAL_INVALIDATION_BREACHED"
+      : null,
+
+    internalRead
+      ?.directionalContextValidForEngine26 ===
+      true
+      ? "ENGINE27_ENGINE26_DIRECTIONAL_CONTEXT_VALID"
+      : null,
+
+    internalRead
+      ?.engine26TravelContextRole ===
+      "STRUCTURAL_TRAVEL_CONTEXT"
+      ? "ENGINE27_ENGINE26_STRUCTURAL_TRAVEL_CONTEXT"
+      : null,
+
+    internalRead
+      ?.engine26CarryAllowed === true
+      ? "ENGINE27_ENGINE26_CARRY_ALLOWED"
+      : null,
+
+    internalRead
+      ?.cWaveState
+      ? `ENGINE27_${internalRead.cWaveState}`
+      : null,
+
+    internalRead
+      ?.cB
+      ?.active === true
+      ? "ENGINE27_C_B_ACTIVE"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.reclaimConfirmed === true
+      ? "ENGINE27_C_B_RECLAIM_CONFIRMED"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.fastNoRetestBreak === true
+      ? "ENGINE27_C_B_FAST_NO_RETEST"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.firstTarget != null
+      ? "ENGINE27_C_B_FIRST_TARGET_AVAILABLE"
+      : null,
+
+    internalRead
+      ?.cB
+      ?.normalZone
+      ? "ENGINE27_C_B_NORMAL_ZONE_AVAILABLE"
+      : null,
+
+    internalRead
+      ?.transitionRisk !==
+    "UNKNOWN"
+      ? `ENGINE27_TRANSITION_RISK_${internalRead.transitionRisk}`
+      : null,
+  ]);
+}
+
+function buildDegreeIntelligence(
+  degreeKey,
+  state
+) {
+  const degree =
+    DEGREE_LABELS[degreeKey];
+
+  const currentWave =
+    resolveCurrentWave(state);
+
+  const hasWave =
+    currentWave !== "UNKNOWN";
+
+  const unavailable =
+    !isObject(state) ||
+    !hasWave;
+
+  const internalRead =
+    buildInternalStructureRead(
+      state
+    );
+
+  const stage =
+    resolveStage(
+      state,
+      hasWave
+    );
+
+  const invalidated =
+    stage === "INVALIDATED";
+
+  const active =
+    stage === "ACTIVE" &&
+    hasWave &&
+    !invalidated;
+
+  const structuralDirection =
+    resolveStructuralDirection(
+      state
+    );
+
+  const currentLegDirection =
+    resolveCurrentLegDirection(
+      state
+    );
+
+  const nextExpectedWave =
+    resolveNextWave(
+      currentWave,
+      state
+    );
+
+  const nextExpectedDirection =
+    resolveNextExpectedDirection(
+      state,
+      currentWave,
+      structuralDirection
+    );
+
+  const preferredTradeDirection =
+    resolvePreferredTradeDirection(
+      state,
+      structuralDirection
+    );
+
+  const maturity =
+    resolveMaturity({
+      state,
+      currentWave,
+      stage,
+    });
+
+  const parentKey =
+    PARENT_DEGREES[
+      degreeKey
+    ];
+
+  const output = {
+    degree,
+
+    currentWave,
+
+    previousWave:
+      PREVIOUS_WAVE[
+        currentWave
+      ] ||
+      "UNKNOWN",
+
+    nextExpectedWave,
+
+    structuralDirection,
+
+    currentLegDirection,
+
+    nextExpectedDirection,
+
+    preferredTradeDirection,
+
+    stage,
+
+    maturity,
+
+    active,
+
+    invalidated,
+
+    parentDegree:
+      parentKey || null,
+
+    parentWave: null,
+
+    internalWave:
+      internalRead.internalWave,
+
+    previousInternalWave:
+      internalRead
+        .previousInternalWave,
+
+    nextExpectedInternalWave:
+      internalRead
+        .nextExpectedInternalWave,
+
+    pullbackClassification:
+      internalRead
+        .pullbackClassification,
+
+    parentWaveStillValid:
+      internalRead
+        .parentWaveStillValid,
+
+    parentWaveComplete:
+      internalRead
+        .parentWaveComplete,
+
+    parentTransitionPossible:
+      internalRead
+        .parentTransitionPossible,
+
+    transitionRisk:
+      internalRead
+        .transitionRisk,
+
+    invalidationLevel:
+      internalRead
+        .invalidationLevel,
+
+    invalidationBreached:
+      internalRead
+        .invalidationBreached,
+
+    supportLevel:
+      internalRead
+        .supportLevel,
+
+    downstreamTravelDirection:
+      internalRead
+        .downstreamTravelDirection,
+
+    directionalContextValidForEngine26:
+      internalRead
+        .directionalContextValidForEngine26,
+
+    engine26TravelContextRole:
+      internalRead
+        .engine26TravelContextRole,
+
+    engine26CarryAllowed:
+      internalRead
+        .engine26CarryAllowed,
+
+    cWaveState:
+      internalRead
+        .cWaveState,
+
+    activeCompletionZone:
+      internalRead
+        .activeCompletionZone,
+
+    activeDestinations:
+      internalRead
+        .activeDestinations,
+
+    currentPrice:
+      internalRead
+        .currentPrice ??
+      numberOrNull(
+        state?.currentPrice
+      ),
+
+    cB:
+      internalRead.cB,
+
+    currentRead:
+      buildCurrentRead({
+        degree,
+        currentWave,
+        currentLegDirection,
+        stage,
+        unavailable,
+        internalRead,
+      }),
+
+    action:
+      buildAction({
+        currentWave,
+        nextExpectedWave,
+        stage,
+        unavailable,
+        internalRead,
+      }),
+
+    headline:
+      buildHeadline({
+        degree,
+        currentWave,
+        stage,
+        unavailable,
+        internalRead,
+      }),
+
+    reasonCodes: [],
+  };
+
+  output.reasonCodes =
+    buildReasonCodes({
+      degreeKey,
+      currentWave,
+      structuralDirection,
+      currentLegDirection,
+      nextExpectedWave,
+      nextExpectedDirection,
+      preferredTradeDirection,
+      stage,
+      maturity,
+      active,
+      invalidated,
+      unavailable,
+      internalRead,
+    });
+
+  return output;
+}
+
+export function buildWaveIntelligence({
+  degreeStates,
+} = {}) {
+  const states =
+    isObject(degreeStates)
+      ? degreeStates
+      : {};
+
+  const engine27WaveIntelligence =
+    {};
+
+  for (
+    const degreeKey
+    of DEGREE_KEYS
+  ) {
+    engine27WaveIntelligence[
+      degreeKey
+    ] =
+      buildDegreeIntelligence(
+        degreeKey,
+        states[
+          degreeKey
+        ] ||
+          null
+      );
+  }
+
+  for (
+    const degreeKey
+    of DEGREE_KEYS
+  ) {
+    const parentKey =
+      PARENT_DEGREES[
+        degreeKey
+      ];
+
+    if (!parentKey) {
+      engine27WaveIntelligence[
+        degreeKey
+      ].parentDegree = null;
+
+      engine27WaveIntelligence[
+        degreeKey
+      ].parentWave = null;
+
+      continue;
+    }
+
+    const parentWave =
+      engine27WaveIntelligence[
+        parentKey
+      ]?.currentWave ||
+      "UNKNOWN";
+
+    engine27WaveIntelligence[
+      degreeKey
+    ].parentWave =
+      parentWave;
+
+    engine27WaveIntelligence[
+      degreeKey
+    ].reasonCodes =
+      unique([
+        ...engine27WaveIntelligence[
+          degreeKey
+        ].reasonCodes,
+
+        `ENGINE27_PARENT_${parentKey.toUpperCase()}_${parentWave}`,
+      ]);
+  }
+
+  return engine27WaveIntelligence;
+}
+
+export default buildWaveIntelligence;

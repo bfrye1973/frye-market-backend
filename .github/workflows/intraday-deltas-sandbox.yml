@@ -1,0 +1,100 @@
+name: Intraday DELTAS (5-minute)
+
+on:
+  # Only runs when triggered via workflow_dispatch
+  # (your Windows scheduler / trigger_deltas_5m.py)
+  workflow_dispatch: {}
+
+jobs:
+  build-and-publish:
+    name: Build & Publish 5m DELTAS
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    concurrency:
+      group: intraday-deltas-5m
+      cancel-in-progress: true
+
+    permissions:
+      contents: write
+
+    env:
+      LIVE_URL: https://frye-market-backend-1.onrender.com/live/intraday
+      BRANCH: data-live-5min-deltas
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      # Checkout the repo (default branch)
+      - name: Checkout (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # ------------------------------------------------------------------
+      # 1) Run official 5-minute DELTAS builder
+      #    This script must:
+      #      - read LIVE_URL
+      #      - generate 5-minute deltas
+      #      - write data/pills.json
+      # ------------------------------------------------------------------
+      - name: Run 5m DELTAS Builder
+        env:
+          LIVE_URL: ${{ env.LIVE_URL }}
+        run: |
+          set -e
+          python -u scripts/build_5m_deltas.py
+
+          if [ ! -f data/pills.json ]; then
+            echo "ERROR: data/pills.json not found after build_5m_deltas.py"
+            exit 1
+          fi
+
+          # Stash the generated pills file in /tmp so we can switch branches
+          mkdir -p /tmp
+          cp data/pills.json /tmp/pills_5m.json
+
+      # ------------------------------------------------------------------
+      # 2) Publish pills.json to data-live-5min-deltas branch
+      #    - NEVER force-push
+      #    - Always base local branch on remote HEAD when it exists
+      # ------------------------------------------------------------------
+      - name: Publish to branch
+        env:
+          BRANCH: ${{ env.BRANCH }}
+        run: |
+          set -e
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Remove the local untracked pills file so checkout won't complain
+          rm -f data/pills.json || true
+
+          # Make sure we have the remote branch info
+          git fetch origin "$BRANCH" || true
+
+          if git show-ref --quiet "refs/remotes/origin/$BRANCH"; then
+            echo "Remote branch $BRANCH exists – basing local branch on origin/$BRANCH"
+            git checkout -B "$BRANCH" "origin/$BRANCH"
+          else
+            echo "Remote branch $BRANCH does not exist – creating from current HEAD"
+            git checkout -b "$BRANCH"
+          fi
+
+          # Restore the generated pills file into this branch
+          mkdir -p data
+          cp /tmp/pills_5m.json data/pills.json
+
+          git add data/pills.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit – skipping push."
+          else
+            git commit -m "5m deltas update $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            git push origin "$BRANCH"
+          fi
