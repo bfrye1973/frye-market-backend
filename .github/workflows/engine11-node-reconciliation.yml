@@ -9,6 +9,7 @@ on:
       - .github/workflows/engine11-node-reconciliation.yml
 permissions:
   contents: read
+  actions: read
 jobs:
   regression:
     runs-on: ubuntu-latest
@@ -39,3 +40,23 @@ jobs:
           name: engine11-node-reconciliation-original
           path: research-evidence/node-reconciliation-*
           retention-days: 30
+  authentic-archive-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/checkout@v4
+        with:
+          ref: 482ef74bc46367718fb207148d5e92a7b0cc248a
+          path: registry-source
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-node-reconciliation-original
+          run-id: 38482575971
+          github-token: ${{ github.token }}
+          path: research-source
+      - run: node services/core/tests/engine11/nodeReconciliationResearch/analyze.mjs research-source/node-reconciliation-original.json.gz research-source/node-reconciliation-manifest.json research-source/replayed.json registry-source/services/core/data/waves/active/active-wave-state-es.json registry-source
+      - run: node services/core/tests/engine11/nodeReconciliationResearch/verifyReplay.mjs research-source/replayed.json docs/architecture/evidence/engine11-seven-degree-reconciliation-v1.json.zlib.b64 docs/architecture/evidence/engine11-seven-degree-reconciliation-integrity-v1.json

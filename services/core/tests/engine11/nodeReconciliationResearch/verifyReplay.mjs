@@ -1,0 +1,8 @@
+import fs from 'node:fs/promises';import assert from 'node:assert/strict';import {inflateSync} from 'node:zlib';
+import {hash} from '../../../logic/engine11/acceptanceResearchV1/eligibility.js';
+const [replayed,encoded,integrity]=process.argv.slice(2);const a=JSON.parse(await fs.readFile(replayed,'utf8')),bytes=inflateSync(Buffer.from((await fs.readFile(encoded,'utf8')).trim(),'base64')),m=JSON.parse(await fs.readFile(integrity,'utf8'));
+assert.equal(hash(bytes),m.reportSha256);assert.deepEqual(a,JSON.parse(bytes));assert.equal(a.nodes.length,40);assert.equal(a.fibs.length,34);assert.equal(a.workbookAudit.populatedSourceCells,1113);assert.equal(a.workbookAudit.worksheets.length,11);assert.equal(new Set(a.nodes.map(n=>n.degree)).size,7);
+const corrected=a.nodes.find(n=>n.registryNodeId==='WB-ALL-024');assert.equal(corrected.original.price,6496);assert.equal(corrected.original.rawDate,46111);assert.equal(corrected.coordinateInterpretation.recordedLocalTime,'2026-03-30T16:00:00');
+const malformed=a.nodes.find(n=>n.registryNodeId==='WB-ALL-018');assert.equal(malformed.original.rawDate,'7/29/206');assert.equal(malformed.rawCandidates.length,0);assert.equal(a.nodes.filter(n=>n.original.price===null).length,16);
+assert.ok(a.nodes.every(n=>n.structuralEligible===false&&n.derivedChartCoordinate===null));assert.ok(a.fibs.every(f=>f.officialRecalculation===false&&f.officialPromotion===false));assert.equal(a.summary.verifiedCanonicalCandles,0);
+console.log(JSON.stringify({authenticReplay:'EXACT_REPORT_MATCH',workbookCells:1113,nodes:40,fibs:34,originalEvidenceSha256:a.originalEvidenceSha256,reportSha256:m.reportSha256,structuralEligible:false}));
