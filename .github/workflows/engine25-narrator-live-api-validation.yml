@@ -1,0 +1,39 @@
+name: Engine25 Narrator Live API Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  live-api:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate production Engine25 narrator
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 5 --retry-delay 4             https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard             -o /tmp/engine25.json
+
+          jq -e '.ok == true' /tmp/engine25.json
+          jq -e '.narratorEvidence != null' /tmp/engine25.json
+          jq -e '.plainEnglishNarrator != null' /tmp/engine25.json
+          jq -e '.plainEnglishNarrator.readOnly == true' /tmp/engine25.json
+          jq -e '.plainEnglishNarrator.predictive == false' /tmp/engine25.json
+          jq -e '.plainEnglishNarrator.createsTradingSignal == false' /tmp/engine25.json
+          jq -e '(.plainEnglishNarrator.sentences | type == "array")' /tmp/engine25.json
+          jq -e '(.plainEnglishNarrator.sentences | length) <= 5' /tmp/engine25.json
+
+          jq '{
+            confidence: .narratorEvidence.confidence,
+            usableFamilyCount: .narratorEvidence.usableFamilyCount,
+            contradictionCount: .narratorEvidence.contradictionCount,
+            freshness: .narratorEvidence.freshness.state,
+            participation: .narratorEvidence.participation,
+            volumeDistribution: .narratorEvidence.volumeDistribution,
+            sectors: .narratorEvidence.sectors,
+            macro: .narratorEvidence.macro,
+            esVsBroader: .narratorEvidence.esVsBroader,
+            conflicts: .narratorEvidence.conflicts,
+            sentences: .plainEnglishNarrator.sentences
+          }' /tmp/engine25.json
