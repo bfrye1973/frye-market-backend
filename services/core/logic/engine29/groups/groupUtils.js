@@ -93,6 +93,7 @@ export function memberSnapshot(symbolEntry, timeframeKey) {
     state: view?.classification?.state ?? null,
     stage: view?.classification?.stage ?? null,
     confidence: view?.classification?.confidence ?? ENGINE29_CONFIDENCE.LOW,
+    freshness: view?.freshness ?? null,
     latest: view?.latest ?? null,
   };
 }

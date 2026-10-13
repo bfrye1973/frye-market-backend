@@ -1,0 +1,26 @@
+name: Engine29 market internals freshness
+
+on:
+  push:
+    branches:
+      - engine29-market-internals-freshness-fix
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine29/data/providers/futuresProductMarketData.js
+          node --check services/core/logic/engine29/data/buildMarketDataBundle.js
+          node --check services/core/logic/engine29/symbolRegistry.js
+          node --check services/core/logic/engine29/groups/groupUtils.js
+      - name: Freshness regression tests
+        run: node --test services/core/tests/engine29MarketInternalsFreshness.test.js
+      - name: MOVE v2 regression
+        run: node --test services/core/tests/engine29MoveV2Authority.test.js
