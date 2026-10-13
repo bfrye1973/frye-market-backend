@@ -1,0 +1,35 @@
+{
+  "schemaVersion": "engine11.historical-identity-evidence.research.v1",
+  "contract": "ESZ2024",
+  "proposedInstrumentId": "CME:ES:2024-12",
+  "providerTicker": "ESZ4",
+  "firstTradeDate": "2021-06-04",
+  "lastTradeDate": "2024-12-20",
+  "settlementDate": null,
+  "metadataReceiptId": "receipt:v2:6efac2e82687559531529cfc6dc211439f596278c326a67c2998e26c181d8b33",
+  "metadataObservationId": "observation:v2:10994eac2951c0105b30a9b66bcc5ba7767b88e540c60d1238b0f5f9136b1fd7",
+  "metadataRowDigest": "467d7403e4e67e178d0bf98b017587eba85394f3d5f16e3005ca7aaf8bf0783e",
+  "metadataBodySha256": "3bf8c577e4a3a8f8d8ddc486036b33cf3b48158e3c63a4bead50d05881a50ee3",
+  "originalUnresolvedReferences": [
+    {
+      "observationId": "observation:v2:fe44ee02660a27efcbc2accbfe03e4efc7fc9063f66e364fd86dbc20081adcd1",
+      "receiptId": "receipt:v2:d4688d19b6960fb81aa8b94dc40dedd84b9bf4846c138179e70a7aceccf0435e",
+      "identityState": "UNRESOLVED"
+    },
+    {
+      "observationId": "observation:v2:e713aaa919363d7328cd9a6445e15623eb516d20f7cf775219ba5d12153d9aa9",
+      "receiptId": "receipt:v2:d4688d19b6960fb81aa8b94dc40dedd84b9bf4846c138179e70a7aceccf0435e",
+      "identityState": "UNRESOLVED"
+    }
+  ],
+  "expiryEvidence": null,
+  "confidence": "PROVIDER_LIFESPAN_ONLY",
+  "corroborationState": "LIFESPAN_CANDIDATE_OFFICIAL_EVIDENCE_MISSING",
+  "originalV2IdentityChanged": false,
+  "acceptedBinding": false,
+  "canonicalEligibility": false,
+  "structuralEligible": false,
+  "policyApproval": "ADDITIVE_RESEARCH_TIER_ONLY",
+  "sourceAcceptance": "PENDING_SEPARATE_GATE",
+  "evidenceTierId": "historical-evidence-tier:44bde672110a8e76071e3bcbcaef199785c143d29251adc3cdcc31e3dec7f472"
+}

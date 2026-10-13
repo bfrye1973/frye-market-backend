@@ -1,0 +1,35 @@
+name: Engine 11 evidence tier and chart handoff research
+on:
+  push:
+    branches: [engine11-source-verification-chart-handoff-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/evidenceTierResearchV1/**
+      - services/core/tests/engine11/evidenceTierResearch/**
+      - .github/workflows/engine11-evidence-tier-handoff.yml
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/research/*.test.mjs services/core/tests/engine11/sourceV2/*.test.mjs services/core/tests/engine11/calendarResearch/*.test.mjs services/core/tests/engine11/calendarPrototype/*.test.mjs services/core/tests/engine11/twoYearResearch/*.test.mjs services/core/tests/engine11/finalityResearch/*.test.mjs services/core/tests/engine11/acceptanceResearch/*.test.mjs services/core/tests/engine11/evidenceTierResearch/*.test.mjs
+  live-read-only-handoff:
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, '[handoff-live]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node services/core/tests/engine11/evidenceTierResearch/liveHandoff.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine11-live-chart-handoff
+          path: research-evidence/live-chart-handoff.json
+          retention-days: 30
