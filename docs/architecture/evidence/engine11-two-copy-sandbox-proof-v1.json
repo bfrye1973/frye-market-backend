@@ -1,0 +1,57 @@
+{
+  "schemaVersion": "engine11.two-copy-sandbox-proof.v1",
+  "version": "source-evidence-b4cdafb8a4c1f3c5ceacd4c2fcddda4f930c202f490852d2598f35349bc14450",
+  "manifest": {
+    "schemaVersion": "engine11.research-archive.v1",
+    "files": [
+      {
+        "name": "two-year-original-receipts.json",
+        "rawBytes": 74028287,
+        "rawSha256": "174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9",
+        "gzipBytes": 9179132,
+        "gzipSha256": "138f666afb70afb8ba9e95dba3fe413e769575e5335516347fc6dcb8d51962c2"
+      }
+    ],
+    "totalRawBytes": 74028287,
+    "purpose": "LOCAL_OR_CI_SANDBOX_ONLY",
+    "durable": false,
+    "structuralEligible": false
+  },
+  "copies": [
+    {
+      "label": "copy-a",
+      "archiveSha256": "74acff0631682b0b02a748f9a159fddbfd28063638555ca0ca7a32090db51890",
+      "restoredRawHashes": [
+        {
+          "name": "two-year-original-receipts.json",
+          "sha256": "174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9"
+        }
+      ],
+      "exactRestore": true
+    },
+    {
+      "label": "copy-b",
+      "archiveSha256": "74acff0631682b0b02a748f9a159fddbfd28063638555ca0ca7a32090db51890",
+      "restoredRawHashes": [
+        {
+          "name": "two-year-original-receipts.json",
+          "sha256": "174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9"
+        }
+      ],
+      "exactRestore": true
+    }
+  ],
+  "archiveFileBytes": 12239614,
+  "backupIndependenceVerified": false,
+  "durable": false,
+  "privateDestinationApproved": false,
+  "storageTransferAuthorized": false,
+  "productionStorageTouched": false,
+  "rawFileBytes": 74028287,
+  "originalDecodedBodyBytes": 55454297,
+  "originalReceiptHashesVerified": 128,
+  "sourceRun": 38333722706,
+  "sourceArtifact": 11783458871,
+  "sourceRawFileSha256": "174886f9b80a1363dc4bd87262b2a4e5fbe004185157c928b4c42a9535e3b1b9",
+  "observedAt": "2026-10-13T17:27:35.167Z"
+}
