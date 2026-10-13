@@ -1,0 +1,31 @@
+name: Engine22 V3 Phase1 Lifecycle Shadow
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/v3/replayConfirmedLifecycleShadow.js'
+      - 'services/core/logic/engine22/v3/verifyWaveCompletion.js'
+      - 'services/core/tests/engine22V3ConfirmedLifecycleShadow.test.js'
+      - '.github/workflows/engine22-v3-phase1-lifecycle-shadow.yml'
+permissions:
+  contents: read
+jobs:
+  phase1-shadow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run isolated V3 Phase1 safety and W1-W5 regression tests
+        working-directory: services/core
+        run: |
+          node --test tests/engine22V3ConfirmedLifecycleShadow.test.js tests/engine22V3WaveCompletion.test.js tests/engine22V3WaveTransition.test.js tests/engine22V3IndependentNodeShadow.test.js
+      - name: Verify no protected production files changed in this Phase1 branch
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin engine22-v3-independent-candle-node-shadow-20261012
+          git diff --name-only FETCH_HEAD HEAD
+          changed=$(git diff --name-only FETCH_HEAD HEAD)
+          if echo "$changed" | grep -E '(^services/core/jobs/buildStrategySnapshot.js$|^services/core/logic/engine(6|26|27|28|8|10)/|^services/core/data/waves/|^src/)'; then
+            echo "Protected files modified"; exit 1
+          fi
