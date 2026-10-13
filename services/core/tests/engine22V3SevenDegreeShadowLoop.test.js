@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {ENGINE22_V3_SCHEMA,ENGINE22_V3_DEGREES,ENGINE22_V3_PARENT} from "../logic/engine22/v3/canonicalStructure.js";
 import {buildEngine22V3ShadowSnapshot} from "../logic/engine22/v3/buildShadowSnapshot.js";
+import {buildEngine22V3ContractProjection} from "../logic/engine22/v3/compareProtectedContracts.js";
 const tf={INTRADAY_SUBMICRO:"5m",MICRO:"10m",SUBMINUTE:"1h",
  MINUTE:"4h",MINOR:"1d",INTERMEDIATE:"1w",PRIMARY:"1mo"};
 const stamp=i=>new Date(Date.UTC(2026,9,1,0,i*5)).toISOString();
@@ -88,4 +89,18 @@ test("shadow touch may be TOUCHED, but canonical lifecycle never advances on Fib
  assert.equal(out.v3LiveShadow.degrees.micro.fibonacci.waveCompletionConfirmed,false);
  assert.equal(out.v3LiveShadow.degrees.micro.lifecycle,"DEVELOPING");
  assert.deepEqual(c,original);
+});
+
+test("existing V3 compatibility projection forwards seven-degree sidecar without replacing legacy fields",()=>{
+ const c=canonical();
+ const shadow=buildEngine22V3ShadowSnapshot({canonical:c,sourceByDegree:{MICRO:source("MICRO")}});
+ const projected=buildEngine22V3ContractProjection({shadow});
+ assert.equal(projected.available,true);
+ assert.equal(projected.v3LiveShadow.shadowOnly,true);
+ assert.equal(Object.keys(projected.v3LiveShadow.degrees).length,7);
+ assert.equal(projected.v3LiveShadow.degrees.micro.dataStatus,"SHADOW_READY");
+ assert.equal(projected.v3LiveShadow.degrees.primary.dataStatus,"INSUFFICIENT_HISTORY");
+ assert.equal(projected.engine22Display.version,"engine22Display.v3");
+ assert.equal(projected.publicationEligible,false);
+ assert.equal(projected.noExecution,true);
 });
