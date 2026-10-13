@@ -4,19 +4,27 @@
 import {ENGINE22_V3_SCHEMA,ENGINE22_V3_DEGREES,ENGINE22_V3_PARENT,validateEngine22V3Canonical} from "./canonicalStructure.js";
 const clone=x=>structuredClone(x);
 const owner={
- // Owner correction 2026-10-12: former W3/W4 hypothesis advanced too early.
- // Owner confirmed final W1 endpoints 2026-10-12: October 8 10:30
- // to October 11 20:00. Supersedes the incorrectly entered August 11 date.
- // Only owner-provided structural anchors; no candle-touch promotions.
- INTRADAY_SUBMICRO:{activeWave:"W2",ownerCorrectionState:"SUBMICRO_W2_OWNER_CORRECTED",
-  sequenceDirection:"UP",anchors:{
-    W1_LOW:[7787.50,"2026-10-08 10:30"],
-    W1_HIGH:[7887.25,"2026-10-11 20:00"]
-  }},
- MICRO:{activeWave:"W5",anchors:{
-  W1_LOW:[7675,"2026-10-01 07:00"],W1_HIGH:[7805,"2026-10-02 07:00"],
-  W2_LOW:[7757.75,"2026-10-05 03:00"],W3_HIGH:[7897.75,"2026-10-06 07:00"],
-  W4_LOW:[7782.75,"2026-10-08 07:00"]}},
+ // Owner-directed OCT 13 V3 research count. Does not rewrite official wave files.
+ // Internal A/B/C turns are unconfirmed: do not recycle superseded Submicro W1/W2.
+ INTRADAY_SUBMICRO:{
+  activeWave:null,ownerCorrectionState:"SUBMICRO_ABC_INSIDE_MICRO_W2",
+  role:"MICRO_W2_INTERNAL_ABC_DOWN",sequenceDirection:"DOWN",
+  correctionDirection:"DOWN",parentWave:"W2",anchors:{},
+ },
+ // Only W1 low has a supplied timestamp. W1 high *price* is accepted from the
+ // owner, but its date/time remains unverified; never mark a dated high locked.
+ MICRO:{
+  activeWave:"W2",ownerCorrectionState:"MICRO_W2_OWNER_RECOUNT",
+  sequenceDirection:"UP",correctionDirection:"DOWN",
+  ownerW1HighPrice:7897.50,ownerW1HighTimeVerified:false,
+  anchors:{W1_LOW:[7677.25,"2026-10-01 08:30"]},
+ },
+ // User's Subminute W3 read is tracked as owner provisional context; former
+ // dated manual source has no confirmed W2 low or W3 anchor to promote.
+ SUBMINUTE:{
+  activeWave:"W3",ownerCorrectionState:"SUBMINUTE_W3_OWNER_CONTEXT",
+  sequenceDirection:"UP",ownerApproxW2Low:7700,anchors:{},
+ },
 };
 function waveOneSequenceDirection(anchors){
  const lo=anchors?.W1_LOW,hi=anchors?.W1_HIGH;
@@ -47,10 +55,15 @@ export function buildEngine22V3OwnerBootstrap({activeWaveState=null}={}){
   const anchors=supplied?Object.fromEntries(Object.entries(supplied.anchors).map(([k,[price,time]])=>[k,{price,time,status:"CONFIRMED"}])):marks(historical.marks);
   degrees[d]={
    degreeId:d,countId:"ES-V3-BASELINE-"+d,sequenceId:"ES-V3-SEQUENCE-"+d,
-   parentDegree:ENGINE22_V3_PARENT[d],parentWave:historical?.parentWave??null,
+   parentDegree:ENGINE22_V3_PARENT[d],parentWave:supplied?.parentWave??historical?.parentWave??null,
    activeWave:supplied?.activeWave??historical?.activeWave??null,
    sequenceDirection:supplied?.sequenceDirection??waveOneSequenceDirection(anchors),
    ownerCorrectionState:supplied?.ownerCorrectionState??null,
+   ownerRole:supplied?.role??null,
+   correctionDirection:supplied?.correctionDirection??null,
+   ownerW1HighPrice:supplied?.ownerW1HighPrice??null,
+   ownerW1HighTimeVerified:supplied?.ownerW1HighTimeVerified??null,
+   ownerApproxW2Low:supplied?.ownerApproxW2Low??null,
    lifecycle:supplied?"DEVELOPING":historical?.stage??"DEVELOPING",
    anchors,history:[{event:"OWNER_V3_BASELINE" ,historicalTransitionsKnown:false,
      source:supplied?"OWNER_CONFIRMED_ANCHORS":"EXISTING_MANUAL_STRUCTURE",
