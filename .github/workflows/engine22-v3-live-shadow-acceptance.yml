@@ -59,3 +59,33 @@ jobs:
           echo "DASHBOARD_HTTP=$status"
           [ "$status" = "200" ]
           grep -Eqi '<html|<!doctype' "$RUNNER_TEMP/ui.html"
+      - name: Verify rendered seven-card V3 shadow and capture screenshot
+        shell: bash
+        run: |
+          npm install --no-save --no-package-lock playwright@1.57.0
+          npx playwright install chromium
+          node <<'NODE'
+          const { chromium } = require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            try {
+              const page=await browser.newPage({viewport:{width:1800,height:1000},deviceScaleFactor:1});
+              const url='https://frye-dashboard.onrender.com/strategies?symbol=ES';
+              await page.goto(url,{waitUntil:'domcontentloaded',timeout:60000});
+              await page.waitForTimeout(20000);
+              const body=await page.locator('body').innerText();
+              await page.screenshot({path:process.env.RUNNER_TEMP+'/v3-seven-cards.png',fullPage:true});
+              const assertions=['V3 SHADOW','SUBMICRO','MICRO','SUBMINUTE','MINUTE','MINOR','INTERMEDIATE','PRIMARY'];
+              const state=Object.fromEntries(assertions.map(x=>[x,body.toUpperCase().includes(x)]));
+              console.log('V3_VISUAL_DOM_CHECK',JSON.stringify({url,checks:state,headline:body.slice(0,1500)}));
+              if(assertions.some(x=>!state[x]))process.exitCode=3;
+            } finally {await browser.close();}
+          })().catch(e=>{console.error('V3_BROWSER_ERROR',e.message);process.exitCode=2;});
+          NODE
+      - name: Preserve V3 seven-card screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-live-seven-card-screenshot
+          path: ${{ runner.temp }}/v3-seven-cards.png
+          if-no-files-found: warn
