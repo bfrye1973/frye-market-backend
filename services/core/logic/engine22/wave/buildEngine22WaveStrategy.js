@@ -2330,19 +2330,21 @@ export function buildEngine22WaveStrategy(input = {}) {
       qualifiedResearchObservations[degree]=qualification.observations;
     }
   }
-  const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
-    degreeModels:researchModels,
-    observationsByDegree:qualifiedResearchObservations,
-  });
-
   // Explicit research opt-in only; no default path or production writes.
+  // Persist before deriving display so a first touch survives a later retreat.
   const sevenDegreeTouchPersistentResearch = input?.engine22TouchResearchRootPath
     ? persistSevenDegreeTouchPreviewV1({
         rootPath: input.engine22TouchResearchRootPath,
-        degreeModels: context.engine22TouchResearchModels ?? {},
+        degreeModels: researchModels,
         observationsByDegree: qualifiedResearchObservations,
       })
     : {enabled:false,shadowOnly:true,reason:"RESEARCH_PERSISTENCE_NOT_ENABLED"};
+
+  const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
+    degreeModels:researchModels,
+    observationsByDegree:qualifiedResearchObservations,
+    persistentResults:sevenDegreeTouchPersistentResearch,
+  });
 
   return {
     sevenDegreeTouchPersistentResearch,
