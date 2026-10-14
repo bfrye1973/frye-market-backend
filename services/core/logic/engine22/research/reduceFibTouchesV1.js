@@ -16,7 +16,7 @@ function identity(level) {
   if (!fields.every(k => nonempty(level[k]))) return null;
   if (!price(level.price) || !["UP","DOWN"].includes(level.direction)) return null;
   if (timeMs(level.originAt) === null) return null;
-  return fields.map(k=>level[k]).concat(level.degree,String(level.price)).join("|");
+  return fields.map(k=>level[k]).concat(level.degree,String(level.price),level.originAt,level.direction).join("|");
 }
 export function reduceFibTouchObservationV1({level, candle, previous=null}={}) {
   const id=identity(level), bar=obj(candle), old=obj(previous);
