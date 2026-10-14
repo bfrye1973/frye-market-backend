@@ -1,0 +1,44 @@
+name: Engine 11 research preview handoff
+on:
+  push:
+    branches: [engine11-research-chart-preview-handoff-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/previewHandoffResearchV1/**
+      - services/core/tests/engine11/previewHandoffResearch/**
+      - docs/architecture/ENGINE11_ES_RESEARCH_CHART_PREVIEW_*.md
+      - docs/architecture/evidence/engine11-research-chart-preview-handoff-v1.json.zlib.b64
+      - .github/workflows/engine11-preview-handoff.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/*/*.test.mjs
+  accepted-artifact-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-es-continuous-chart-research-datasets
+          run-id: 38580266173
+          github-token: ${{ github.token }}
+          path: accepted-datasets
+      - run: node --max-old-space-size=4096 services/core/tests/engine11/previewHandoffResearch/verify.mjs accepted-datasets
+      - run: node --max-old-space-size=4096 services/core/tests/engine11/previewHandoffResearch/build.mjs accepted-datasets research-preview-fixture-bundle.json.zlib.b64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine11-preview-fixture-bundle
+          path: research-preview-fixture-bundle.json.zlib.b64
+          retention-days: 30

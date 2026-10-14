@@ -1,0 +1,25 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {gunzipSync,inflateSync,deflateSync} from 'node:zlib';
+import {hash,pageDataset} from '../../../logic/engine11/continuousChartResearchV1/series.js';
+import {VIEWS,DEGREES,FOUNDATION_SHA,ARTIFACT_SHA,bookmark,nodeLayers,previewSession} from '../../../logic/engine11/previewHandoffResearchV1/interface.js';
+export function handoffFromArtifact(dir){
+ const checksums=JSON.parse(fs.readFileSync(path.join(dir,'dataset-files.json'),'utf8')),summary=JSON.parse(fs.readFileSync(path.join(dir,'continuous-summary.json'),'utf8'));
+ assert.equal(hash(summary),'2d8c808ee13e6fa543cc7b4360b235bbc6f3033cb0343aa2c6f9d2349bf11143');
+ for(const f of checksums){assert.ok(/^[A-Za-z0-9.-]+\.json\.gz$/.test(f.name));const b=fs.readFileSync(path.join(dir,f.name));assert.equal(b.length,f.bytes);assert.equal(hash(b),f.sha256);}
+ const source=JSON.parse(gunzipSync(fs.readFileSync(path.join(dir,'continuous-source-observations.json.gz')))),sourceIndex=new Map(source.observations.map(o=>[o.observationId,o])),datasets={},views={},fixtures={},sampleIds=new Set();
+ for(const [view,{dataset,label}] of Object.entries(VIEWS)){
+  const d=JSON.parse(gunzipSync(fs.readFileSync(path.join(dir,dataset+'.json.gz'))));assert.equal(d.datasetVersion,summary.datasets[dataset].datasetVersion);assert.equal(d.manifest.rowVectorSha256,hash(d.rows.map(r=>r.researchCandleId)));assert.equal(d.manifest.structuralEligible,false);datasets[view]=d;
+  views[view]={label,datasetName:dataset,datasetVersion:d.datasetVersion,priceBasisVersion:d.manifest.priceBasisVersion,manifest:summary.datasets[dataset].manifest,rollPolicyVersion:d.policy.policyVersion,archivedSnapshotOnly:true,rollSegmentationApplies:view!=='ACTUAL_CONTRACT',officialOverlayEligible:false};fixtures[view]={};
+  for(const frame of Object.values(DEGREES)){
+   const base={datasetVersion:d.datasetVersion,priceBasisVersion:d.manifest.priceBasisVersion,frame,limit:5,direction:'DESC'},first=pageDataset(d,base),second=first.nextCursor?pageDataset(d,{...base,cursor:first.nextCursor}):null,rr=d.rows.filter(r=>r.frame===frame),boundary=d.policy.transitions.at(-1).effectiveUtc,at=rr.findIndex(r=>Date.parse(r.timestampUtc)>=Date.parse(boundary)),before=at>4?rr[at-5]:null;
+   const rollRequest={...base,direction:'ASC',limit:8,cursor:before?bookmark(d,frame,before.key):null},rollPage=pageDataset(d,rollRequest);
+   fixtures[view][frame]={firstRequest:base,firstPage:first,secondRequest:first.nextCursor?{...base,cursor:first.nextCursor}:null,secondPage:second,candidateRolloverUtc:boundary,rollRequest,rollPage};
+   for(const row of [...first.rows,...(second?.rows??[]),...rollPage.rows])for(const id of row.sourceObservationIds)sampleIds.add(id);
+  }
+ }
+ const report=JSON.parse(inflateSync(Buffer.from(fs.readFileSync('docs/architecture/evidence/engine11-seven-degree-reconciliation-v1.json.zlib.b64','utf8').trim(),'base64')));assert.equal(hash(report),'2aa5700c8672456fd9a86a91d9a019ba630e90df02befb39c35a4acee187a119');
+ const handoff={schemaVersion:'engine11.es-continuous-preview-handoff.research.v1',foundationSha:FOUNDATION_SHA,sourceArtifact:{runId:38580266173,artifactId:11901549711,zipSha256:ARTIFACT_SHA,bytes:151687665,expiresAt:'2026-11-13T14:26:13Z',compressedFiles:checksums},sourceSummarySha256:hash(summary),views,availableFrames:Object.values(DEGREES),fixtures,rollAndBasisManifests:summary.policyManifests,nodeLayers:nodeLayers(report,summary),sampleSourceEvidence:[...sampleIds].sort().map(id=>{const o=sourceIndex.get(id);assert.ok(o);return o;}),unavailability:{perViewFrame:summary.datasets,calendarVerified:false,completionVerified:false},browserAcceptance:{T24:'SOURCE_INTERFACE_ONLY_PASSED_BROWSER_PENDING',T25:'BROWSER_ZOOM_SCROLL_RESPONSIVENESS_PENDING',T26:'BROWSER_STALE_REQUEST_LIVE_SEAM_PENDING',T27:'BROWSER_25000_BAR_MEMORY_ROLLBACK_PENDING',ownership:'ENGINE2B'},researchOnly:true,structuralEligible:false,executionPriceAuthority:false};
+ // Exercise the real accepted pages through the stale/basis guard, not a fixture-only response.
+ for(const view of Object.keys(VIEWS))for(const frame of Object.values(DEGREES)){const session=previewSession(handoff);session.configure({view,frame});assert.deepEqual(session.accept(session.request(),fixtures[view][frame].firstPage),fixtures[view][frame].firstPage);}
+ return {...handoff,handoffVersion:'preview-handoff:'+hash(handoff)};
+}
+if(process.argv[1]?.endsWith('build.mjs')){const [input,output]=process.argv.slice(2);if(!output)throw Error('Usage: build.mjs ACCEPTED_ARTIFACT_DIRECTORY OUTPUT_ZLIB_B64');const p=handoffFromArtifact(input);fs.writeFileSync(output,deflateSync(JSON.stringify(p),{level:9}).toString('base64')+'\n');console.log(JSON.stringify({handoffVersion:p.handoffVersion,sourceEvidence:p.sampleSourceEvidence.length,views:Object.keys(p.views).length,frames:p.availableFrames.length,nodes:Object.values(p.nodeLayers.degrees).flat().length,fibWithheld:p.nodeLayers.withheldFibonacciReferences.length}));}
