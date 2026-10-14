@@ -10,3 +10,13 @@ test("new model identity does not inherit old touch",()=>{const prior=reduceFibT
 test("wrong series, price basis and pre-origin candles cannot touch",()=>{for(const bar of [{...candle(),seriesId:"ESU2026"},{...candle(),priceBasis:"ADJUSTED"},{...candle(),sourceTimestamp:"2026-10-14T13:55:00Z"},{...candle(),eligible:false}])assert.equal(reduceFibTouchObservationV1({level:level(),candle:bar}).status,"WATCH")});
 test("missing count/price/source identity fails closed",()=>{assert.equal(reduceFibTouchObservationV1({level:{...level(),countId:null},candle:candle()}).status,"UNAVAILABLE");});
 test("upward and downward touches use directionally correct candle extrema",()=>{const up={...level(),direction:"UP",price:7811};assert.equal(reduceFibTouchObservationV1({level:up,candle:candle()}).status,"WATCH");assert.equal(reduceFibTouchObservationV1({level:up,candle:{...candle(),high:7812}}).status,"TOUCHED")});
+
+test("a changed wave origin or direction cannot inherit prior touch",()=>{
+ const first=reduceFibTouchObservationV1({level:level(),candle:candle()});
+ const originChanged=reduceFibTouchObservationV1({level:{...level(),originAt:"2026-10-14T14:04:00Z"},candle:candle(7801),previous:first});
+ const directionChanged=reduceFibTouchObservationV1({level:{...level(),direction:"UP"},candle:candle(7801),previous:first});
+ assert.equal(originChanged.status,"WATCH");
+ assert.equal(directionChanged.status,"TOUCHED");
+ assert.notEqual(directionChanged.identity,first.identity);
+ assert.equal(directionChanged.firstTouchedBarId,"bar-1");
+});
