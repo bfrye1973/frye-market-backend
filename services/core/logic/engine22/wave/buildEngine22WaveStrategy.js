@@ -43,6 +43,7 @@ import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
+import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -2316,7 +2317,17 @@ export function buildEngine22WaveStrategy(input = {}) {
     observationsByDegree: context.engine22TouchResearchObservations ?? {},
   });
 
+  // Explicit research opt-in only; no default path or production writes.
+  const sevenDegreeTouchPersistentResearch = input?.engine22TouchResearchRootPath
+    ? persistSevenDegreeTouchPreviewV1({
+        rootPath: input.engine22TouchResearchRootPath,
+        degreeModels: context.engine22TouchResearchModels ?? {},
+        observationsByDegree: context.engine22TouchResearchObservations ?? {},
+      })
+    : {enabled:false,shadowOnly:true,reason:"RESEARCH_PERSISTENCE_NOT_ENABLED"};
+
   return {
+    sevenDegreeTouchPersistentResearch,
     sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
     engine22V3Shadow,
