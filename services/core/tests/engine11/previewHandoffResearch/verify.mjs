@@ -1,0 +1,2 @@
+import assert from 'node:assert/strict';import {handoffFromArtifact} from './build.mjs';import {readHandoff} from './read.mjs';
+const expected=readHandoff(),actual=handoffFromArtifact(process.argv[2]);assert.deepEqual(actual,expected);console.log(JSON.stringify({result:'EXACT_ACCEPTED_ARTIFACT_HANDOFF_REPLAY',handoffVersion:actual.handoffVersion,views:3,frames:7,degreeNodes:40,withheldFibReferences:34,officialLevels:0}));
