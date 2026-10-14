@@ -1,0 +1,39 @@
+name: Engine 11 targeted TradingView basis research
+on:
+  push:
+    branches: [engine11-tradingview-basis-verification-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/tradingViewBasisResearchV1/**
+      - services/core/tests/engine11/tradingViewBasisResearch/**
+      - docs/architecture/ENGINE11_TRADINGVIEW_*.md
+      - docs/architecture/ENGINE11_CHART_COORDINATE_COMPATIBILITY_PROPOSAL_V1.md
+      - docs/architecture/evidence/engine11-tradingview-five-node-comparison-v1.json.zlib.b64
+      - .github/workflows/engine11-tradingview-basis.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/*/*.test.mjs
+  authentic-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-node-reconciliation-original
+          run-id: 38482575971
+          github-token: ${{ github.token }}
+          path: research-source
+      - run: node services/core/tests/engine11/tradingViewBasisResearch/replay.mjs research-source/node-reconciliation-original.json.gz
