@@ -16,7 +16,7 @@ test("a changed wave origin or direction cannot inherit prior touch",()=>{
  const originChanged=reduceFibTouchObservationV1({level:{...level(),originAt:"2026-10-14T14:04:00Z"},candle:candle(7801),previous:first});
  const directionChanged=reduceFibTouchObservationV1({level:{...level(),direction:"UP"},candle:candle(7801),previous:first});
  assert.equal(originChanged.status,"WATCH");
- assert.equal(directionChanged.status,"TOUCHED");
+ assert.equal(directionChanged.status,"WATCH");
  assert.notEqual(directionChanged.identity,first.identity);
  assert.equal(directionChanged.firstTouchedBarId,"bar-1");
 });
