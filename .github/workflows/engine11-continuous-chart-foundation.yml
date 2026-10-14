@@ -1,0 +1,51 @@
+name: Engine 11 continuous chart foundation research
+on:
+  push:
+    branches: [engine11-es-continuous-chart-foundation-v1]
+  pull_request:
+    paths:
+      - services/core/logic/engine11/continuousChartResearchV1/**
+      - services/core/tests/engine11/continuousChartResearch/**
+      - docs/architecture/ENGINE11_ES_CONTINUOUS_*.md
+      - docs/architecture/evidence/engine11-continuous-chart-foundation-summary-v1.json.zlib.b64
+      - .github/workflows/engine11-continuous-chart-foundation.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --test services/core/tests/engine11/*.test.js services/core/tests/engine11/*/*.test.mjs
+  authentic-dataset-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-two-year-original-evidence
+          run-id: 38333722706
+          github-token: ${{ github.token }}
+          path: baseline-source
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine11-node-reconciliation-original
+          run-id: 38482575971
+          github-token: ${{ github.token }}
+          path: node-source
+      - run: node -e "const fs=require('fs'),z=require('zlib'); fs.writeFileSync('node-source/original.json',z.gunzipSync(fs.readFileSync('node-source/node-reconciliation-original.json.gz')));"
+      - run: node --max-old-space-size=4096 services/core/tests/engine11/continuousChartResearch/build.mjs baseline-source/two-year-receipts.json node-source/original.json continuous-datasets
+      - run: node --max-old-space-size=4096 services/core/tests/engine11/continuousChartResearch/verify.mjs continuous-datasets
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine11-es-continuous-chart-research-datasets
+          path: continuous-datasets/*
+          retention-days: 30
