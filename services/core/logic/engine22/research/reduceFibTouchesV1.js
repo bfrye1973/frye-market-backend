@@ -34,7 +34,7 @@ export function reduceFibTouchObservationV1({level, candle, previous=null}={}) {
       reason:"ELIGIBLE_POST_ORIGIN_CANDLE_REQUIRED"};
   // For an upward extension the bar high must reach the line;
   // for a downward extension the bar low must reach the line.
-  const touched=level.direction==="UP" ? bar.high>=level.price : bar.low<=level.price;
+  const touched=bar.low<=level.price && level.price<=bar.high;
   return {identity:id,status:touched?"TOUCHED":"WATCH",
     firstTouchedAt:touched?bar.sourceTimestamp:null,
     firstTouchedBarId:touched?bar.sourceBarId:null,
