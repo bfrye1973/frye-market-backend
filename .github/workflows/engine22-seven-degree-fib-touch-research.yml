@@ -19,4 +19,4 @@ jobs:
         with:
           node-version: '22'
       - name: Validate isolated touch and display research contracts
-        run: node --test services/core/tests/engine22SevenDegreeDisplayResearchV1.test.js services/core/tests/engine22SevenDegreeFibTouchResearchV1.test.js services/core/tests/engine22SubminuteOwnerFibComparisonResearchV1.test.js services/core/tests/engine22SubmicroCCandidateResearchV1.test.js services/core/tests/engine22FibTouchReplayResearchV1.test.js
+        run: node --test services/core/tests/engine22SevenDegreeDisplayResearchV1.test.js services/core/tests/engine22SevenDegreeFibTouchResearchV1.test.js services/core/tests/engine22SubminuteOwnerFibComparisonResearchV1.test.js services/core/tests/engine22SubmicroCCandidateResearchV1.test.js services/core/tests/engine22FibTouchReplayResearchV1.test.js services/core/tests/engine22TouchSnapshotPreviewResearchV1.test.js
