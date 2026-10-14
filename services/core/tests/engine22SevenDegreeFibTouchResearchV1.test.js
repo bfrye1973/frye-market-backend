@@ -18,5 +18,5 @@ test("a changed wave origin or direction cannot inherit prior touch",()=>{
  assert.equal(originChanged.status,"WATCH");
  assert.equal(directionChanged.status,"WATCH");
  assert.notEqual(directionChanged.identity,first.identity);
- assert.equal(directionChanged.firstTouchedBarId,"bar-1");
+ assert.equal(directionChanged.firstTouchedBarId,null);
 });
