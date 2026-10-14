@@ -2312,8 +2312,8 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Caller-provided models/observations must already be source-qualified;
   // missing identities fail closed to UNAVAILABLE/WATCH.
   const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
-    degreeModels: input?.engine22TouchResearchModels ?? {},
-    observationsByDegree: input?.engine22TouchResearchObservations ?? {},
+    degreeModels: context.engine22TouchResearchModels ?? {},
+    observationsByDegree: context.engine22TouchResearchObservations ?? {},
   });
 
   return {
