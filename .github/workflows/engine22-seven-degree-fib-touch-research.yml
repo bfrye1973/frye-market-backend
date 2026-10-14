@@ -1,0 +1,22 @@
+name: Engine22 Seven Degree Fib Touch Research
+on:
+  push:
+    branches:
+      - engine22-seven-degree-touch-contract-audit-20261014
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'services/core/logic/engine22/research/**'
+      - 'services/core/tests/engine22SevenDegree*ResearchV1.test.js'
+      - '.github/workflows/engine22-seven-degree-fib-touch-research.yml'
+jobs:
+  research-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate isolated touch and display research contracts
+        run: node --test services/core/tests/engine22SevenDegreeDisplayResearchV1.test.js services/core/tests/engine22SevenDegreeFibTouchResearchV1.test.js
