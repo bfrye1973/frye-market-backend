@@ -42,6 +42,7 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
+import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -2307,7 +2308,16 @@ export function buildEngine22WaveStrategy(input = {}) {
       })
     : null;
 
+  // Additive research-only preview. No official status or Fib is modified.
+  // Caller-provided models/observations must already be source-qualified;
+  // missing identities fail closed to UNAVAILABLE/WATCH.
+  const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
+    degreeModels: input?.engine22TouchResearchModels ?? {},
+    observationsByDegree: input?.engine22TouchResearchObservations ?? {},
+  });
+
   return {
+    sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
     engine22V3Shadow,
     engine22V3Projection: engine22V3Shadow?.available === true
