@@ -141,6 +141,10 @@ export function buildFuturesWaveContext(input = {}) {
     barsByTf = {},
     evaluationTimeMs = null,
     previousMicroSequence = null,
+    // Optional, source-qualified Engine22 research observations only.
+    // Never infer eligibility from barsByTf or last trade price.
+    engine22TouchResearchModels = null,
+    engine22TouchResearchObservations = null,
   } = input || {};
 
   const symbol = normalizeSymbol(rawSymbol);
@@ -196,6 +200,8 @@ export function buildFuturesWaveContext(input = {}) {
     barsByTf,
     evaluationTimeMs,
     previousMicroSequence,
+    engine22TouchResearchModels,
+    engine22TouchResearchObservations,
 
     reasonCodes: [
       "FUTURES_WAVE_CONTEXT_BUILT",
