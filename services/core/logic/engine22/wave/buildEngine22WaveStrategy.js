@@ -43,6 +43,7 @@ import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
+import { buildSevenDegreeTouchDisplayV1 } from "../research/buildSevenDegreeTouchDisplayV1.js";
 import { qualifyExistingEsBarsForFibTouchV1 } from "../research/qualifyExistingEsBarsForFibTouchV1.js";
 import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
@@ -2346,7 +2347,12 @@ export function buildEngine22WaveStrategy(input = {}) {
     persistentResults:sevenDegreeTouchPersistentResearch,
   });
 
+  const sevenDegreeTouchDisplayV1 = buildSevenDegreeTouchDisplayV1({
+    models:researchModels,touchSnapshot:sevenDegreeTouchResearch,
+  });
+
   return {
+    sevenDegreeTouchDisplayV1,
     sevenDegreeTouchPersistentResearch,
     sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
