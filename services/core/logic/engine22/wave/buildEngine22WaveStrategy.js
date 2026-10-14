@@ -43,6 +43,7 @@ import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
+import { qualifyExistingEsBarsForFibTouchV1 } from "../research/qualifyExistingEsBarsForFibTouchV1.js";
 import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
@@ -2312,9 +2313,26 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive research-only preview. No official status or Fib is modified.
   // Caller-provided models/observations must already be source-qualified;
   // missing identities fail closed to UNAVAILABLE/WATCH.
+  const researchModels=context.engine22TouchResearchModels ?? {};
+  const qualifiedResearchObservations={...context.engine22TouchResearchObservations};
+  // Existing ES bars are used only when the caller supplies the actual resolved
+  // contract and explicitly model-compatible raw price basis. No ES -> ESZ6 guess.
+  if(context.marketType==="FUTURES" && context.symbol==="ES"){
+    for(const [degree,model] of Object.entries(researchModels)){
+      if(Array.isArray(qualifiedResearchObservations[degree]))continue;
+      const qualification=qualifyExistingEsBarsForFibTouchV1({
+        bars:context.barsByTf?.["10m"] ?? [],
+        resolvedSymbol:input.engine22TouchResolvedContract ?? null,
+        priceBasis:input.engine22TouchPriceBasis ?? null,
+        timeframe:"10m",evaluationTimeMs:context.evaluationTimeMs,
+        model,
+      });
+      qualifiedResearchObservations[degree]=qualification.observations;
+    }
+  }
   const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
-    degreeModels: context.engine22TouchResearchModels ?? {},
-    observationsByDegree: context.engine22TouchResearchObservations ?? {},
+    degreeModels:researchModels,
+    observationsByDegree:qualifiedResearchObservations,
   });
 
   // Explicit research opt-in only; no default path or production writes.
@@ -2322,7 +2340,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     ? persistSevenDegreeTouchPreviewV1({
         rootPath: input.engine22TouchResearchRootPath,
         degreeModels: context.engine22TouchResearchModels ?? {},
-        observationsByDegree: context.engine22TouchResearchObservations ?? {},
+        observationsByDegree: qualifiedResearchObservations,
       })
     : {enabled:false,shadowOnly:true,reason:"RESEARCH_PERSISTENCE_NOT_ENABLED"};
 
