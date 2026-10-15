@@ -1,7 +1,18 @@
-name: dashboard-4h
+from pathlib import Path
+
+content = r'''name: dashboard-4h
 
 on:
   workflow_dispatch:
+
+  # Reliable intraday handoff:
+  # every successful dashboard-hourly completion can launch the 4H refresh.
+  workflow_run:
+    workflows:
+      - dashboard-hourly
+    types:
+      - completed
+
   schedule:
     # ES futures clock — Phoenix / MST (UTC-7 year-round)
     # Weekly cadence:
@@ -16,15 +27,10 @@ on:
     - cron: "30 21 * * 1-4"       # Mon-Thu 2:30 PM Phoenix
     - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix — final weekly run
 
-    # Intraday 4H developing-bar refresh — once per hour.
-    # Broad UTC window + New York gate below keeps DST correct.
-    - cron: "35 13-21 * * 1-5"     # hourly; gate to regular equity session
-
 jobs:
   build_and_publish_4h:
     name: Build and Publish 4H
     runs-on: ubuntu-latest
-    # baseline needs more time; incremental stays fast
     timeout-minutes: 180
     permissions:
       contents: write
@@ -39,10 +45,10 @@ jobs:
       FD_MAX_WORKERS: "16"
       H4_INCLUDE_DEVELOPING: "false"
 
-      # ✅ Your choice: 14 day cushion
+      # 14 day cushion
       H4_LOOKBACK_DAYS: "14"
 
-      # IMPORTANT: MUST MATCH your 1H NH/NL BAR COUNT WINDOW (do not change concept)
+      # IMPORTANT: MUST MATCH your 1H NH/NL BAR COUNT WINDOW
       H4_LOOKBACK_BARS: "20"
 
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -75,28 +81,44 @@ jobs:
           from zoneinfo import ZoneInfo
 
           now = datetime.now(ZoneInfo("America/New_York"))
+
           event_name = os.environ.get("GITHUB_EVENT_NAME", "")
           schedule = os.environ.get("GITHUB_SCHEDULE", "")
+          upstream_conclusion = os.environ.get("UPSTREAM_CONCLUSION", "")
+          upstream_branch = os.environ.get("UPSTREAM_BRANCH", "")
 
           minutes = now.hour * 60 + now.minute
           cash_active = (9 * 60 + 30) <= minutes < (16 * 60)
-          close_capture = False
 
-          # Hourly intraday candidates use the developing 4H bar.
-          intraday_candidate = schedule == "35 13-21 * * 1-5"
+          # The reliable hourly intraday trigger is now dashboard-hourly.
+          hourly_handoff = event_name == "workflow_run"
 
-          if intraday_candidate and cash_active:
-              mode = "baseline"
-              include_developing = True
-              run = True
-              reason = "EQUITY_INTRADAY_4H_REFRESH"
-          elif intraday_candidate:
-              mode = "incremental"
-              include_developing = False
-              run = False
-              reason = "OUTSIDE_EQUITY_INTRADAY_WINDOW"
+          if hourly_handoff:
+              if upstream_branch and upstream_branch != "main":
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_NON_MAIN_BRANCH"
+              elif upstream_conclusion != "success":
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_UPSTREAM_NOT_SUCCESS"
+              elif cash_active:
+                  # During the equity session, refresh the current developing
+                  # 4H bar each time the reliable 1H workflow completes.
+                  mode = "baseline"
+                  include_developing = True
+                  run = True
+                  reason = "HOURLY_HANDOFF_DEVELOPING_4H_REFRESH"
+              else:
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_OUTSIDE_EQUITY_SESSION"
           else:
-              # Existing 4H cadence and manual runs keep completed-bar behavior.
+              # Manual runs and the existing normal 4H checkpoints retain
+              # completed-bar behavior.
               mode = "incremental"
               include_developing = False
               run = True
@@ -104,19 +126,35 @@ jobs:
 
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
               f.write(f"MODE={mode}\n")
-              f.write(f"H4_INCLUDE_DEVELOPING={'true' if include_developing else 'false'}\n")
+              f.write(
+                  f"H4_INCLUDE_DEVELOPING={'true' if include_developing else 'false'}\n"
+              )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
               f.write(f"run={'true' if run else 'false'}\n")
               f.write(f"reason={reason}\n")
 
           print("NY time:", now.isoformat())
-          print("schedule:", schedule or "manual")
-          print("run:", run, "mode:", mode, "includeDeveloping:", include_developing, "reason:", reason)
+          print("event:", event_name or "unknown")
+          print("schedule:", schedule or "none")
+          print("upstream conclusion:", upstream_conclusion or "none")
+          print("upstream branch:", upstream_branch or "none")
+          print(
+              "run:",
+              run,
+              "mode:",
+              mode,
+              "includeDeveloping:",
+              include_developing,
+              "reason:",
+              reason,
+          )
           PY
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
           GITHUB_SCHEDULE: ${{ github.event.schedule }}
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
 
       # Pull prior cache from live branch if exists (for incremental)
       - name: Restore prior cache if exists
@@ -149,13 +187,21 @@ jobs:
             --lookback-days "${H4_LOOKBACK_DAYS}" \
             --cache "data/4h_cache.json" \
             --out   "data/outlook_source_4h.json"
+
           python - <<'PY'
-          import json,sys
-          s=json.load(open("data/outlook_source_4h.json","r",encoding="utf-8"))
-          cards=s.get("sectorCards") or []
-          if not isinstance(cards,list) or len(cards)==0:
-            print("INVALID 4H source sectorCards"); sys.exit(2)
-          print("OK source cards=",len(cards))
+          import json
+          import sys
+
+          s = json.load(
+              open("data/outlook_source_4h.json", "r", encoding="utf-8")
+          )
+          cards = s.get("sectorCards") or []
+
+          if not isinstance(cards, list) or len(cards) == 0:
+              print("INVALID 4H source sectorCards")
+              sys.exit(2)
+
+          print("OK source cards=", len(cards))
           PY
 
       # 2) Build 4H payload
@@ -180,14 +226,28 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json,sys
-          j=json.load(open("data/outlook_4h.json","r",encoding="utf-8"))
-          m=j.get("metrics") or {}
-          need=("breadth_4h_pct","momentum_4h_pct","squeeze_4h_pct","liquidity_4h","volatility_4h_pct","trend_strength_4h_pct")
-          miss=[k for k in need if k not in m]
-          sc=j.get("sectorCards") or []
-          if miss or not isinstance(sc,list) or len(sc)!=11:
-              print("missing:", miss, "len(sectorCards)=",len(sc)); sys.exit(1)
+          import json
+          import sys
+
+          j = json.load(open("data/outlook_4h.json", "r", encoding="utf-8"))
+          m = j.get("metrics") or {}
+
+          need = (
+              "breadth_4h_pct",
+              "momentum_4h_pct",
+              "squeeze_4h_pct",
+              "liquidity_4h",
+              "volatility_4h_pct",
+              "trend_strength_4h_pct",
+          )
+
+          miss = [k for k in need if k not in m]
+          sc = j.get("sectorCards") or []
+
+          if miss or not isinstance(sc, list) or len(sc) != 11:
+              print("missing:", miss, "len(sectorCards)=", len(sc))
+              sys.exit(1)
+
           print("OK metrics & sectorCards")
           PY
 
@@ -205,9 +265,9 @@ jobs:
           set -euo pipefail
 
           TMP_DIR="$(mktemp -d)"
-          cp -f data/outlook_4h.json    "${TMP_DIR}/outlook_4h.json"
-          cp -f data/heartbeat_4h.txt   "${TMP_DIR}/heartbeat_4h.txt"
-          cp -f data/4h_cache.json      "${TMP_DIR}/4h_cache.json"
+          cp -f data/outlook_4h.json  "${TMP_DIR}/outlook_4h.json"
+          cp -f data/heartbeat_4h.txt "${TMP_DIR}/heartbeat_4h.txt"
+          cp -f data/4h_cache.json    "${TMP_DIR}/4h_cache.json"
 
           git config user.email "user@local"
           git config user.name  "CI Bot"
@@ -223,6 +283,7 @@ jobs:
           else
             git checkout -B "${LIVE_BRANCH}"
           fi
+
           git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
 
           mkdir -p data
@@ -231,6 +292,7 @@ jobs:
           mv "${TMP_DIR}/4h_cache.json"    data/4h_cache.json
 
           git add -A
+
           if git diff --cached --quiet; then
             echo "No changes to commit"
             exit 0
@@ -238,3 +300,8 @@ jobs:
 
           git commit -m "4h publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
           git push origin "${LIVE_BRANCH}"
+'''
+
+path = Path("/mnt/data/dashboard-4h_REWRITE.txt")
+path.write_text(content, encoding="utf-8")
+print(path)
