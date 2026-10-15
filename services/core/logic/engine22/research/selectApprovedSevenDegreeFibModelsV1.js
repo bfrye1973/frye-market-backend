@@ -5,7 +5,7 @@ import {FIB_TOUCH_DEGREES_V1} from "./reduceFibTouchesV1.js";
 const text=x=>typeof x==="string"&&x.trim()?x.trim():null;
 const number=x=>typeof x==="number"&&Number.isFinite(x)&&x>0?x:null;
 export function selectApprovedSevenDegreeFibModelsV1({degreeStates={},resolvedContract=null,priceBasis=null}={}){
- const models={},reasons={};
+ const models={},reasons={},missingFieldsByDegree={};
  for(const degree of FIB_TOUCH_DEGREES_V1){
   const state=degreeStates?.[degree];
   const fib=state?.activeFibModel;
@@ -20,9 +20,22 @@ export function selectApprovedSevenDegreeFibModelsV1({degreeStates={},resolvedCo
     raw&&typeof raw==="object"?Object.entries(raw).map(([key,price])=>({key,label:key,price})):[];
   const normalized=levels.map(x=>({key:text(x.key),label:text(x.label)||text(x.key),price:number(x.price)}))
    .filter(x=>x.key&&x.price!==null);
-  if(!approval||!countId||!modelKey||!seriesId||!basis||!originAt||
-     !["UP","DOWN"].includes(direction)||seriesId!==resolvedContract||
-     basis!==priceBasis||!normalized.length){
+  const missing=[
+    ...(!approval?["explicitApproval"]:[]),
+    ...(!countId?["countId"]:[]),
+    ...(!modelKey?["modelKey"]:[]),
+    ...(!seriesId?["seriesId"]:[]),
+    ...(!basis?["priceBasis"]:[]),
+    ...(!originAt?["modelOriginTime"]:[]),
+    ...(!["UP","DOWN"].includes(direction)?["direction"]:[]),
+    ...(!normalized.length?["levels"]:[]),
+    ...(seriesId&&resolvedContract&&seriesId!==resolvedContract?["sourceContractMismatch"]:[]),
+    ...(basis&&priceBasis&&basis!==priceBasis?["sourcePriceBasisMismatch"]:[]),
+    ...(!resolvedContract?["resolvedContract"]:[]),
+    ...(!priceBasis?["verifiedCandlePriceBasis"]:[]),
+  ];
+  if(missing.length){
+   missingFieldsByDegree[degree]=missing;
    reasons[degree]=!approval?"MODEL_NOT_APPROVED":
      "MODEL_IDENTITY_OR_SOURCE_INCOMPATIBLE";
    continue;
@@ -30,5 +43,5 @@ export function selectApprovedSevenDegreeFibModelsV1({degreeStates={},resolvedCo
   models[degree]={approved:true,provisional:false,activeWave:state.activeWave,
    countId,modelKey,seriesId,priceBasis:basis,originAt,direction,levels:normalized};
  }
- return {models,reasons,degreeOrder:[...FIB_TOUCH_DEGREES_V1]};
+ return {models,reasons,missingFieldsByDegree,degreeOrder:[...FIB_TOUCH_DEGREES_V1]};
 }
