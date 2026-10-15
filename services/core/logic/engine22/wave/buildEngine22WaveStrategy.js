@@ -44,6 +44,7 @@ import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
 import { buildSevenDegreeTouchDisplayV1 } from "../research/buildSevenDegreeTouchDisplayV1.js";
+import { selectApprovedSevenDegreeFibModelsV1 } from "../research/selectApprovedSevenDegreeFibModelsV1.js";
 import { qualifyExistingEsBarsForFibTouchV1 } from "../research/qualifyExistingEsBarsForFibTouchV1.js";
 import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
@@ -2314,7 +2315,14 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive research-only preview. No official status or Fib is modified.
   // Caller-provided models/observations must already be source-qualified;
   // missing identities fail closed to UNAVAILABLE/WATCH.
-  const researchModels=context.engine22TouchResearchModels ?? {};
+  const modelSelection=selectApprovedSevenDegreeFibModelsV1({
+    degreeStates:publishedDegreeStates,
+    resolvedContract:input.engine22TouchResolvedContract??null,
+    priceBasis:input.engine22TouchPriceBasis??null,
+  });
+  // Caller may supply explicit evidence in research, but only validated and
+  // approved canonical active models are eligible for live publication.
+  const researchModels={...modelSelection.models};
   const qualifiedResearchObservations={...context.engine22TouchResearchObservations};
   // Existing ES bars are used only when the caller supplies the actual resolved
   // contract and explicitly model-compatible raw price basis. No ES -> ESZ6 guess.
