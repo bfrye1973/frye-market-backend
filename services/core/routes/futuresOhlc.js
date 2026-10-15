@@ -419,7 +419,12 @@ async function fetchFuturesAggs({
   url.searchParams.set("window_start.gte", startDate);
   url.searchParams.set("window_start.lte", endDate);
   url.searchParams.set("sort", "asc");
-  url.searchParams.set("limit", "50000");
+  // Bound the upstream payload: asking for 50,000 candles on every request
+  // can return a very large or incomplete response even when the caller only
+  // needs a small recent window. Preserve the requested chart limit, with a
+  // small headroom for gaps, and never ask Massive for more than 5,000 rows.
+  const providerLimit = Math.min(5000, Math.max(1000, limit + 250));
+  url.searchParams.set("limit", String(providerLimit));
   url.searchParams.set("apiKey", POLY_KEY);
 
   const r = await fetch(url.toString(), {
