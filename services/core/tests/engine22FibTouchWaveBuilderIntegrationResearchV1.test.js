@@ -12,6 +12,8 @@ test("production wave strategy builder publishes seven-degree shadow without ove
 });
 test("shadow input is optional and publication is isolated",()=>{
  assert.match(source,/selectApprovedSevenDegreeFibModelsV1\(/);
+ assert.match(source,/sevenDegreeTouchModelReadiness,/);
+ assert.match(source,/allSevenApproved:Object\.keys\(researchModels\)\.length===7/);
  assert.match(source,/context\.engine22TouchResearchObservations/);
  assert.doesNotMatch(source,/persistSevenDegreeFibTouch/);
 });
