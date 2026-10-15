@@ -2330,6 +2330,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     degreeOrder:modelSelection.degreeOrder,
     approvedDegrees:Object.keys(researchModels),
     unavailableByDegree:modelSelection.reasons,
+    missingFieldsByDegree:modelSelection.missingFieldsByDegree,
     allSevenApproved:Object.keys(researchModels).length===7,
     noExecution:true,
   };
