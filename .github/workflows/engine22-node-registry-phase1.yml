@@ -1,0 +1,44 @@
+name: Engine22 Node Registry Phase1 Immutable Source Tests
+on:
+  pull_request:
+    paths:
+      - 'services/core/data/engine22/node-registry/**'
+      - 'services/core/scripts/auditEngine22NodeRegistryV1.mjs'
+      - 'services/core/tests/engine22NodeRegistryPhase1.test.js'
+      - '.github/workflows/engine22-node-registry-phase1.yml'
+permissions:
+  contents: read
+jobs:
+  evidence-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify immutable 11-sheet owner evidence and conflicts
+        run: |
+          node --test services/core/tests/engine22NodeRegistryPhase1.test.js
+          node services/core/scripts/auditEngine22NodeRegistryV1.mjs > "$RUNNER_TEMP/engine22-node-registry-audit.json"
+          node - "$RUNNER_TEMP/engine22-node-registry-audit.json" <<'NODE'
+          const a=require(process.argv[2]).audit;
+          if(a.sheetCount!==11||a.nodeCount!==40||a.fibCount!==34)
+            throw Error('SOURCE_INVENTORY_CHANGED');
+          if(!a.issues.some(i=>i.type==='MINUTE_W1_DATE_MALFORMED_DO_NOT_INFER'))
+            throw Error('MISSING_KNOWN_UNRESOLVED_DATE');
+          if(!a.crossSheetPriceConflicts.length)
+            throw Error('CROSS_SHEET_CONFLICTS_SUPPRESSED');
+          console.log('REGISTRY_PHASE1_ACCEPTANCE',JSON.stringify({
+            sheets:a.sheetCount,nodes:a.nodeCount,fibs:a.fibCount,
+            conflicts:a.crossSheetPriceConflicts.length,missing:a.missingDateOrTime.length,
+            knownIssues:a.issues.length
+          }));
+          NODE
+      - name: Prove upstream operational files unchanged in this PR
+        run: |
+          git fetch --no-tags origin "${{ github.base_ref }}" --depth=1
+          git diff --name-only "origin/${{ github.base_ref }}" HEAD > "$RUNNER_TEMP/changed-paths.txt"
+          cat "$RUNNER_TEMP/changed-paths.txt"
+          if grep -Ev '^(services/core/data/engine22/node-registry/|services/core/scripts/auditEngine22NodeRegistryV1\.mjs$|services/core/tests/engine22NodeRegistryPhase1\.test\.js$|\.github/workflows/engine22-node-registry-phase1\.yml$)' "$RUNNER_TEMP/changed-paths.txt" | grep -q .; then
+            echo "PROTECTED_CODE_CHANGED"; exit 1
+          fi
