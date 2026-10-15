@@ -18,3 +18,12 @@ test("missing or unverified OHLC price basis does not become RAW_UNADJUSTED_CONT
  assert.match(src,/r\?\.json\?\.priceBasisSeriesId === r\.json\.resolvedSymbol/);
  assert.doesNotMatch(src,/typeof r\?\.json\?\.resolvedSymbol === "string"\s*\? "RAW_UNADJUSTED_CONTRACT"/);
 });
+
+test("ES raw basis evidence originates at individual-contract aggregate endpoint",()=>{
+ const route=fs.readFileSync(new URL("../routes/futuresOhlc.js",import.meta.url),"utf8");
+ assert.match(route,/\/futures\/v1\/aggs\/\$\{encodeURIComponent\(resolvedSymbol\)\}/);
+ assert.match(route,/priceBasis: "RAW_UNADJUSTED_CONTRACT"/);
+ assert.match(route,/priceBasisVerified: \/\^ES\[A-Z\]\[0-9\]\{1,4\}\$\//);
+ assert.match(route,/priceBasisSeriesId: resolvedSymbol/);
+ assert.match(route,/priceBasisEvidence: "DIRECT_CONTRACT_POLYGON_FUTURES_AGGS"/);
+});
