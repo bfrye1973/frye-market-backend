@@ -895,6 +895,7 @@ function buildReasons({
   fast,
   contextVsParent,
   consolidation,
+  recentImpulse,
 }) {
   const reasons = [];
 
@@ -1011,6 +1012,7 @@ function displayFor({
   fast,
   contextVsParent,
   consolidation,
+  recentImpulse,
 }) {
   const why = [];
 
