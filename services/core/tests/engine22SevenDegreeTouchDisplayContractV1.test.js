@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {buildSevenDegreeTouchDisplayV1 as build} from "../logic/engine22/research/buildSevenDegreeTouchDisplayV1.js";
 const model={approved:true,provisional:false,activeWave:"W3",countId:"count1",
  modelKey:"model1",seriesId:"ESZ6",priceBasis:"RAW_UNADJUSTED_CONTRACT",
- originAt:"2026-10-14T14:00:00Z",levels:[{key:"e1000",label:"1.000",price:7800}]};
+ originAt:"2026-10-14T14:00:00Z",direction:"UP",levels:[{key:"e1000",label:"1.000",price:7800}]};
 const touched={degrees:{micro:{levels:[{key:"e1000",price:7800,touchResearch:{
  status:"TOUCHED",persisted:true,identity:"count1|model1|ESZ6|RAW_UNADJUSTED_CONTRACT|e1000|micro|7800|2026-10-14T14:00:00Z|UP",firstTouchedAt:"2026-10-14T14:40:00Z",
  firstTouchedBarId:"ESZ6:10m:1791988800"}}]}}};
