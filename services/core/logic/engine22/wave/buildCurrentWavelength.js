@@ -205,11 +205,42 @@ export function buildCurrentWavelength({
     w1Low: 6417.00, w1High: 6948.75, start: 7398.00, currentPrice: price,
     anchorSource: "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
   });
+  // Owner-locked Micro W3 projection, October 15, 2026. Timestamp is
+  // chart-local as supplied; never silently assign a UTC offset.
+  // This is a distinct display read from the legacy Micro lifecycle state.
+  const ownerMicroW3Anchors = {
+    w1Low: 7706.25,
+    w1High: 7897.25,
+    w2Low: 7718.00,
+    w2LowLocalTime: "2026-10-15 06:30",
+    source: "OWNER_LOCKED_MICRO_W3_20261015",
+  };
+  const ownerMicroW3Levels = waveProjectionLevels({
+    w1Low: ownerMicroW3Anchors.w1Low,
+    w1High: ownerMicroW3Anchors.w1High,
+    start: ownerMicroW3Anchors.w2Low,
+    currentPrice: price,
+    anchorSource: ownerMicroW3Anchors.source,
+  }).map(fib => ({
+    ...fib,
+    status: "WATCH",
+    provisional: true,
+    touchEvidenceAvailable: false,
+    note: "Owner-locked geometry; verified candle touch evidence pending.",
+  }));
   const degrees = {
     micro: {
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
       anchorProvenance: microSequence.anchorProvenance,
       microSequence,
+      ownerMicroW3: {
+        version: "engine22.microW3OwnerProjection.v1",
+        activeWave: "W3", direction: "UP",
+        status: "OWNER_LOCKED_GEOMETRY_TOUCH_VERIFICATION_PENDING",
+        anchors: ownerMicroW3Anchors,
+        levels: ownerMicroW3Levels,
+        noExecution: true,
+      },
       state: microStatus, origin: 7782.75, invalidation: 7782.75,
       confirmation: null, confirmationStatus: microConfirmationStatus,
       invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
