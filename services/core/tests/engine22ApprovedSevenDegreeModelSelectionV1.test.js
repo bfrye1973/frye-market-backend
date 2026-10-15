@@ -27,3 +27,12 @@ test("source mismatch, missing origin or missing count blocks touch",()=>{
   assert.equal(r.models.subminute,undefined);
  }
 });
+
+test("shows missing source approval fields without promoting provisional structural models",()=>{
+ const r=select({degreeStates:{subminute:{activeWave:"W3",activeFibModel:{active:true,modelKey:"W3_EXTENSION_LADDER",levels:{e1000:7904},direction:"UP"}}},resolvedContract:"ESZ6",priceBasis:"RAW_UNADJUSTED_CONTRACT"});
+ assert.deepEqual(r.models,{});
+ assert.ok(r.missingFieldsByDegree.subminute.includes("explicitApproval"));
+ assert.ok(r.missingFieldsByDegree.subminute.includes("countId"));
+ assert.ok(r.missingFieldsByDegree.subminute.includes("seriesId"));
+ assert.ok(r.missingFieldsByDegree.subminute.includes("modelOriginTime"));
+});
