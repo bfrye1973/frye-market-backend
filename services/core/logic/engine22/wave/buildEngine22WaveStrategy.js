@@ -2323,6 +2323,16 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Caller may supply explicit evidence in research, but only validated and
   // approved canonical active models are eligible for live publication.
   const researchModels={...modelSelection.models};
+  // Expose precise missing approval/identity reasons; never silently present
+  // an empty seven-degree model packet as successfully integrated.
+  const sevenDegreeTouchModelReadiness={
+    schema:"engine22.touchModelReadiness.v1",
+    degreeOrder:modelSelection.degreeOrder,
+    approvedDegrees:Object.keys(researchModels),
+    unavailableByDegree:modelSelection.reasons,
+    allSevenApproved:Object.keys(researchModels).length===7,
+    noExecution:true,
+  };
   const qualifiedResearchObservations={...context.engine22TouchResearchObservations};
   // Existing ES bars are used only when the caller supplies the actual resolved
   // contract and explicitly model-compatible raw price basis. No ES -> ESZ6 guess.
@@ -2361,6 +2371,7 @@ export function buildEngine22WaveStrategy(input = {}) {
 
   return {
     sevenDegreeTouchDisplayV1,
+    sevenDegreeTouchModelReadiness,
     sevenDegreeTouchPersistentResearch,
     sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
