@@ -1,0 +1,37 @@
+name: P0 LIVE ES OHLC payload boundary
+on:
+  pull_request:
+    paths:
+      - "services/core/routes/futuresOhlc.js"
+      - "services/core/tests/liveEsOhlcPayloadBoundary.test.mjs"
+      - ".github/workflows/live-es-ohlc-p0.yml"
+  workflow_dispatch:
+jobs:
+  source-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --test services/core/tests/liveEsOhlcPayloadBoundary.test.mjs
+      - run: node --check services/core/routes/futuresOhlc.js
+      - name: Probe public LIVE ES 10m endpoint (read-only)
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request
+          url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=1500&debug=1"
+          try:
+              with urllib.request.urlopen(url, timeout=30) as resp:
+                  status = resp.status
+                  payload = json.load(resp)
+              bars = payload.get("bars", []) if isinstance(payload, dict) else payload
+              print("http_status=", status, "count=", len(bars),
+                    "resolved_symbol=", payload.get("resolvedSymbol","unknown") if isinstance(payload,dict) else "array",
+                    "latest_bar_time=", bars[-1].get("time") if bars else None)
+              if status != 200 or not bars:
+                  raise RuntimeError("Production ES candles unavailable")
+          except Exception as exc:
+              print("PRODUCTION_ES_PROBE_FAILURE:", type(exc).__name__, str(exc)[:250])
+              raise
+          PY
