@@ -491,6 +491,13 @@ router.get("/", async (req, res) => {
         requestedSymbol,
         productCode,
         resolvedSymbol,
+        // The direct /futures/v1/aggs/{resolvedSymbol} request supplies
+        // individual-contract OHLC without a continuous-series roll transform.
+        // This does NOT validate any historical TradingView ES1! anchor basis.
+        priceBasis: "RAW_UNADJUSTED_CONTRACT",
+        priceBasisVerified: /^ES[A-Z][0-9]{1,4}$/.test(resolvedSymbol),
+        priceBasisSeriesId: resolvedSymbol,
+        priceBasisEvidence: "DIRECT_CONTRACT_POLYGON_FUTURES_AGGS",
         timeframe: tf,
         resolution,
         limit,

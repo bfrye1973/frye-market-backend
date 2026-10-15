@@ -42,6 +42,12 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
+import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
+import { buildSevenDegreeTouchDisplayV1 } from "../research/buildSevenDegreeTouchDisplayV1.js";
+import { selectApprovedSevenDegreeFibModelsV1 } from "../research/selectApprovedSevenDegreeFibModelsV1.js";
+import { buildCanonicalSevenDegreeTouchSourcesV1 } from "../research/buildCanonicalSevenDegreeTouchSourcesV1.js";
+import { qualifyExistingEsBarsForFibTouchV1 } from "../research/qualifyExistingEsBarsForFibTouchV1.js";
+import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -2307,7 +2313,75 @@ export function buildEngine22WaveStrategy(input = {}) {
       })
     : null;
 
+  // Additive research-only preview. No official status or Fib is modified.
+  // Caller-provided models/observations must already be source-qualified;
+  // missing identities fail closed to UNAVAILABLE/WATCH.
+  const canonicalTouchSources = buildCanonicalSevenDegreeTouchSourcesV1({
+    degreeStates:publishedDegreeStates,
+    activeStructures:waveFibState?.activeStructures ?? {},
+    v3Canonical:input?.engine22V3Canonical ?? null,
+  });
+  const modelSelection=selectApprovedSevenDegreeFibModelsV1({
+    degreeStates:canonicalTouchSources.degrees,
+    resolvedContract:input.engine22TouchResolvedContract??null,
+    priceBasis:input.engine22TouchPriceBasis??null,
+  });
+  // Caller may supply explicit evidence in research, but only validated and
+  // approved canonical active models are eligible for live publication.
+  const researchModels={...modelSelection.models};
+  // Expose precise missing approval/identity reasons; never silently present
+  // an empty seven-degree model packet as successfully integrated.
+  const sevenDegreeTouchModelReadiness={
+    schema:"engine22.touchModelReadiness.v1",
+    degreeOrder:modelSelection.degreeOrder,
+    approvedDegrees:Object.keys(researchModels),
+    unavailableByDegree:modelSelection.reasons,
+    missingFieldsByDegree:modelSelection.missingFieldsByDegree,
+    allSevenApproved:Object.keys(researchModels).length===7,
+    noExecution:true,
+  };
+  const qualifiedResearchObservations={...context.engine22TouchResearchObservations};
+  // Existing ES bars are used only when the caller supplies the actual resolved
+  // contract and explicitly model-compatible raw price basis. No ES -> ESZ6 guess.
+  if(context.marketType==="FUTURES" && context.symbol==="ES"){
+    for(const [degree,model] of Object.entries(researchModels)){
+      if(Array.isArray(qualifiedResearchObservations[degree]))continue;
+      const qualification=qualifyExistingEsBarsForFibTouchV1({
+        bars:context.barsByTf?.["10m"] ?? [],
+        resolvedSymbol:input.engine22TouchResolvedContract ?? null,
+        priceBasis:input.engine22TouchPriceBasis ?? null,
+        timeframe:"10m",evaluationTimeMs:context.evaluationTimeMs,
+        model,
+      });
+      qualifiedResearchObservations[degree]=qualification.observations;
+    }
+  }
+  // Explicit research opt-in only; no default path or production writes.
+  // Persist before deriving display so a first touch survives a later retreat.
+  const sevenDegreeTouchPersistentResearch = input?.engine22TouchResearchRootPath
+    ? persistSevenDegreeTouchPreviewV1({
+        rootPath: input.engine22TouchResearchRootPath,
+        degreeModels: researchModels,
+        observationsByDegree: qualifiedResearchObservations,
+      })
+    : {enabled:false,shadowOnly:true,reason:"RESEARCH_PERSISTENCE_NOT_ENABLED"};
+
+  const sevenDegreeTouchResearch = previewSevenDegreeTouchSnapshotV1({
+    degreeModels:researchModels,
+    observationsByDegree:qualifiedResearchObservations,
+    persistentResults:sevenDegreeTouchPersistentResearch,
+  });
+
+  const sevenDegreeTouchDisplayV1 = buildSevenDegreeTouchDisplayV1({
+    models:researchModels,touchSnapshot:sevenDegreeTouchResearch,
+  });
+
   return {
+    sevenDegreeTouchDisplayV1,
+    sevenDegreeTouchModelReadiness,
+    sevenDegreeTouchSourceDiagnostics:canonicalTouchSources.diagnostics,
+    sevenDegreeTouchPersistentResearch,
+    sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
     engine22V3Shadow,
     engine22V3Projection: engine22V3Shadow?.available === true

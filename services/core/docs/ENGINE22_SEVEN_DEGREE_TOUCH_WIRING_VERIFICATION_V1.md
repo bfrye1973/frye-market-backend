@@ -1,0 +1,13 @@
+# Engine22 seven-degree touch wiring verification — October 14, 2026
+
+**Evidence-backed implementation blocker, not a production release authorization.**
+
+1. In `services/core/logic/engine22/wave/buildEngine22WaveStrategy.js` around lines 1953–1963 the caller constructs `buildCurrentWavelength` with `currentPrice`, `degreeStates`, `engine22Display`, `waveFibState`, `currentLifecycleState`, 5m Micro bars, evaluation timestamp and Micro sequence history. It does **not** provide a canonical per-degree persisted Fib-touch record or eligible OHLC observation carrying count/model/series identity.
+2. The neighboring persistence call around lines 1965–1979 calls `persistEngine22MicroWaveRuntimeState` for **Micro wave sequence**, not a seven-degree Fib-touch memory store.
+3. `wave/buildCurrentWavelength.js` uses `currentPrice >= target` when deriving projected levels and openly notes that it does not maintain historical touch state. A rebuilt WATCH after price retreats can therefore be consistent with existing implementation rather than a frontend-only fault.
+4. Frontend draft PR #62 makes the provisional SUBMINUTE ladder visible and colors status rows consistently. This does not solve persistence. Backend research PR #139 provides a model-keyed reducer (standalone, not runtime-wired) and thirteen source/status tests, including all seven degrees.
+5. Verified GitHub workflows on `d236b72a5fe525a3a03ee2bc3b047ed7c09e16ad`: Engine22 Seven Degree Fib Touch Research run `38618274655` SUCCESS; Engine27 V2 Validation run `38618274399` SUCCESS. Frontend draft SHA `30719b1ec4c1caf2ae675c760845bdce518d5121`, Micro Copilot Transition Position UI V1 run `38618100765` SUCCESS.
+
+**Required next engineering gate:** Agree on a durable Fib-touch store keyed by (degree, canonical countId, modelKey, seriesId, priceBasis, level key/price), and identify exact eligible per-degree completed or raw intrabar ES candle source/firstTouchedAt/sourceBarId. Then a scoped Engine22 runtime integration can pass those certified records to `currentWavelength`/`engine22Display`, and Engine27/frontend can display green TOUCHED consistently. Do not key touch history on currentPrice alone or reuse touch from an older/incompatible wave model. Respect existing Engine22 provisional source/canonical authority and Engine11 evidence requirements.
+
+**No merges, deploys, model/level recalculation, Journal/Replay or permission changes.**

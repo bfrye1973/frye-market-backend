@@ -4234,6 +4234,9 @@ async function buildEma10Posture({
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("timeframe", tf);
   u.searchParams.set("limit", String(limit));
+  // Engine 22 touch evidence needs the resolved ES contract from the SAME
+  // candle response. Debug returns identical bars plus resolver provenance.
+  if (symbol === "ES" && tf === "10m") u.searchParams.set("debug", "1");
 
   const r = await fetchJson(u.toString(), 15000);
   const bars = normalizeOhlcBars(r?.json);
@@ -4310,6 +4313,19 @@ return {
   lastBarTime: lastBar ? barTime(lastBar) : null,
   barCount: bars.length,
   bars,
+  // Metadata is authoritative only when supplied with these exact bars.
+  resolvedContract: symbol === "ES" && tf === "10m" &&
+    r?.ok === true && typeof r?.json?.resolvedSymbol === "string"
+    ? r.json.resolvedSymbol : null,
+  // Engine22: no price-basis assertion from resolvedSymbol alone.
+  // A resolved ticker proves contract identity, not adjustment methodology.
+  // Require explicit same-response provider evidence; otherwise fail closed.
+  candlePriceBasis: symbol === "ES" && tf === "10m" &&
+    r?.ok === true && typeof r?.json?.resolvedSymbol === "string" &&
+    r?.json?.priceBasis === "RAW_UNADJUSTED_CONTRACT" &&
+    r?.json?.priceBasisVerified === true &&
+    r?.json?.priceBasisSeriesId === r.json.resolvedSymbol
+    ? "RAW_UNADJUSTED_CONTRACT" : null,
   ...(completionTruth
   ? {
       completedBars: completionTruth.completedBars,
@@ -8427,6 +8443,16 @@ const strategy1TenMinuteEma10 =
         breakoutContext: engine22Scalp?.breakoutContext || null,
 
         evaluationTimeMs,
+        // Existing 10m ES fetch includes these same-response provenance fields.
+        // Missing contract is deliberately NOT inferred from symbol ES.
+        engine22TouchResolvedContract:
+          marketMeter?.layers?.emaPosture?.tenMinute?.resolvedContract || null,
+        engine22TouchPriceBasis:
+          marketMeter?.layers?.emaPosture?.tenMinute?.candlePriceBasis || null,
+        // Render persistent disk is mounted at /var/data/replay. Keep Engine22
+        // model-specific touch history separate from immutable replay files.
+        engine22TouchResearchRootPath:
+          process.env.ENGINE22_TOUCH_HISTORY_PATH || "/var/data/replay/engine22-fib-touches",
         microW3EvidenceBars: engine22MicroW3EvidenceBars,
         engine22V3BarsByTf: {
           "5m": engine22V3FiveMinuteBars,
