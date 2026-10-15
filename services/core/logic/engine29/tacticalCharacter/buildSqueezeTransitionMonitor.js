@@ -37,6 +37,9 @@ export const ENGINE29_SQUEEZE_MONITOR_STATES = Object.freeze({
   UPSIDE_MOMENTUM_WEAKENING: "UPSIDE_MOMENTUM_WEAKENING",
   DOWNSIDE_MOMENTUM_WEAKENING: "DOWNSIDE_MOMENTUM_WEAKENING",
 
+  PULLBACK_WITHIN_UPSIDE_IMPULSE: "PULLBACK_WITHIN_UPSIDE_IMPULSE",
+  BOUNCE_WITHIN_DOWNSIDE_IMPULSE: "BOUNCE_WITHIN_DOWNSIDE_IMPULSE",
+
   COUNTERTREND_BUYING_BROADENING: "COUNTERTREND_BUYING_BROADENING",
   COUNTERTREND_SELLING_BROADENING: "COUNTERTREND_SELLING_BROADENING",
   COUNTERTREND_RALLY_FADING: "COUNTERTREND_RALLY_FADING",
@@ -118,6 +121,132 @@ function moveFromBars(bars) {
     prior10: pct(closeOf(b2), closeOf(b1)),
     latestClose: closeOf(b0),
     latestTime: barTime(b0),
+  };
+}
+
+
+function detectRecentImpulseContext(bars, parent, fast) {
+  const usable = (Array.isArray(bars) ? bars : [])
+    .filter((bar) =>
+      [closeOf(bar), barTime(bar)].every(finite)
+    )
+    .slice(-7);
+
+  if (usable.length < 4) {
+    return {
+      available: false,
+      activePullback: false,
+      direction: null,
+      reason: "INSUFFICIENT_RECENT_10M_BARS",
+    };
+  }
+
+  // The newest bar is the current reaction. Measure the dominant move that
+  // happened immediately before it so one counter-bar cannot erase the path.
+  const prior = usable.slice(0, -1);
+  let best = null;
+
+  for (let i = 0; i < prior.length - 1; i += 1) {
+    for (let j = i + 1; j < prior.length; j += 1) {
+      const from = closeOf(prior[i]);
+      const to = closeOf(prior[j]);
+      const movePct = pct(from, to);
+
+      if (!finite(movePct)) continue;
+
+      const candidate = {
+        direction: movePct > 0 ? "UP" : movePct < 0 ? "DOWN" : "FLAT",
+        movePct,
+        absMovePct: Math.abs(movePct),
+        originClose: from,
+        extremeClose: to,
+        originTime: barTime(prior[i]),
+        extremeTime: barTime(prior[j]),
+      };
+
+      if (
+        candidate.direction !== "FLAT" &&
+        (!best || candidate.absMovePct > best.absMovePct)
+      ) {
+        best = candidate;
+      }
+    }
+  }
+
+  if (!best || best.absMovePct < MATERIAL_ES_20M_PCT) {
+    return {
+      available: Boolean(best),
+      activePullback: false,
+      direction: best?.direction ?? null,
+      movePct: best?.movePct ?? null,
+      absMovePct: best?.absMovePct ?? null,
+      reason: "NO_MATERIAL_RECENT_IMPULSE",
+    };
+  }
+
+  const latestClose = closeOf(usable.at(-1));
+  const priorClose = closeOf(usable.at(-2));
+  const current10Pct = pct(priorClose, latestClose);
+  const denominator = Math.abs(best.extremeClose - best.originClose);
+
+  const retainedFraction =
+    denominator > EPS
+      ? best.direction === "UP"
+        ? (latestClose - best.originClose) / denominator
+        : (best.originClose - latestClose) / denominator
+      : null;
+
+  const retracementFraction =
+    finite(retainedFraction)
+      ? 1 - retainedFraction
+      : null;
+
+  const currentOpposesImpulse =
+    finite(current10Pct) &&
+    (
+      (best.direction === "UP" && current10Pct < 0) ||
+      (best.direction === "DOWN" && current10Pct > 0)
+    );
+
+  // Parent authority wins when present. Without a parent, the existing 30m
+  // fast-tactical direction is the context owner for whether the prior impulse
+  // is still the dominant short-horizon move.
+  const contextAligned =
+    parent?.active === true
+      ? parent.direction === best.direction
+      : fast?.direction === best.direction;
+
+  // Midpoint retention is structural, not a tuned momentum threshold:
+  // if more than half of the dominant impulse remains intact, one opposing
+  // 10m bar is a pullback/bounce inside that impulse, not a new acceleration.
+  const midpointRetained =
+    finite(retainedFraction) &&
+    retainedFraction >= 0.5;
+
+  return {
+    available: true,
+    activePullback:
+      currentOpposesImpulse &&
+      contextAligned &&
+      midpointRetained,
+    direction: best.direction,
+    movePct: best.movePct,
+    absMovePct: best.absMovePct,
+    originClose: best.originClose,
+    extremeClose: best.extremeClose,
+    originTime: best.originTime,
+    extremeTime: best.extremeTime,
+    latestClose,
+    current10Pct,
+    retainedFraction,
+    retracementFraction,
+    currentOpposesImpulse,
+    contextAligned,
+    midpointRetained,
+    reason:
+      currentOpposesImpulse && contextAligned && midpointRetained
+        ? "COUNTER_BAR_WITHIN_RETAINED_DOMINANT_IMPULSE"
+        : "RECENT_IMPULSE_NOT_PROTECTING_CURRENT_MOVE",
   };
 }
 
@@ -596,6 +725,7 @@ function resolveState({
   fast,
   contextVsParent,
   consolidation,
+  recentImpulse,
 }) {
   if (
     consolidation?.active &&
@@ -703,7 +833,18 @@ function resolveState({
       : ENGINE29_SQUEEZE_MONITOR_STATES.COUNTERTREND_SELLOFF_FADING;
   }
 
-  // 4) Broadening when 10m agrees with 30m/neutral context.
+  // 4) Preserve the dominant recent path when a single opposing 10m bar
+  // is still only a pullback/bounce and more than half of that impulse remains.
+  if (
+    contextVsParent === "NO_ACTIVE_PARENT" &&
+    recentImpulse?.activePullback === true
+  ) {
+    return recentImpulse.direction === "UP"
+      ? ENGINE29_SQUEEZE_MONITOR_STATES.PULLBACK_WITHIN_UPSIDE_IMPULSE
+      : ENGINE29_SQUEEZE_MONITOR_STATES.BOUNCE_WITHIN_DOWNSIDE_IMPULSE;
+  }
+
+  // 5) Broadening when 10m agrees with 30m/neutral context.
   if (
     contextVsParent !== "COUNTERTREND_TO_PARENT" &&
     participation === ENGINE29_PARTICIPATION_STATES.BROAD &&
@@ -714,7 +855,7 @@ function resolveState({
       : ENGINE29_SQUEEZE_MONITOR_STATES.BROADENING_INTO_SELLOFF;
   }
 
-  // 5) Non-squeeze momentum semantics.
+  // 6) Non-squeeze momentum semantics.
   if (
     esAligned20 &&
     (
@@ -754,6 +895,7 @@ function buildReasons({
   fast,
   contextVsParent,
   consolidation,
+  recentImpulse,
 }) {
   const reasons = [];
 
@@ -763,6 +905,20 @@ function buildReasons({
     reasons.push("ES_10M_CONSOLIDATION_ACTIVE");
     if (consolidation.nearHigh) reasons.push("ES_10M_CONSOLIDATING_NEAR_HIGHS");
     if (consolidation.nearLow) reasons.push("ES_10M_CONSOLIDATING_NEAR_LOWS");
+  }
+
+  if (recentImpulse?.available) {
+    reasons.push(
+      `RECENT_DOMINANT_IMPULSE_${recentImpulse.direction || "UNKNOWN"}`
+    );
+  }
+
+  if (recentImpulse?.activePullback) {
+    reasons.push(
+      recentImpulse.direction === "UP"
+        ? "CURRENT_10M_PULLBACK_WITHIN_RETAINED_UPSIDE_IMPULSE"
+        : "CURRENT_10M_BOUNCE_WITHIN_RETAINED_DOWNSIDE_IMPULSE"
+    );
   }
 
   if (parent.squeezeActive) reasons.push("PARENT_30M_SQUEEZE_ACTIVE");
@@ -856,6 +1012,7 @@ function displayFor({
   fast,
   contextVsParent,
   consolidation,
+  recentImpulse,
 }) {
   const why = [];
 
@@ -865,6 +1022,18 @@ function displayFor({
 
   if (fast.state) {
     why.push(`The 30-minute tactical state is ${fast.state}.`);
+  }
+
+  if (recentImpulse?.activePullback) {
+    const moveText = finite(recentImpulse.movePct)
+      ? Math.abs(recentImpulse.movePct).toFixed(3)
+      : "—";
+    const retainedText = finite(recentImpulse.retainedFraction)
+      ? (recentImpulse.retainedFraction * 100).toFixed(0)
+      : "—";
+    why.push(
+      `The prior dominant ES 10-minute impulse was ${recentImpulse.direction} (${moveText}%), and about ${retainedText}% of that move is still retained.`
+    );
   }
 
   if (consolidation?.active) {
@@ -929,6 +1098,11 @@ function displayFor({
     DOWNSIDE_MOMENTUM_ACCELERATING: "Downside momentum is accelerating.",
     UPSIDE_MOMENTUM_WEAKENING: "Upside momentum is weakening.",
     DOWNSIDE_MOMENTUM_WEAKENING: "Downside momentum is weakening.",
+
+    PULLBACK_WITHIN_UPSIDE_IMPULSE:
+      "ES is pulling back inside a still-dominant upside impulse.",
+    BOUNCE_WITHIN_DOWNSIDE_IMPULSE:
+      "ES is bouncing inside a still-dominant downside impulse.",
 
     COUNTERTREND_BUYING_BROADENING:
       "Countertrend buying is broadening, but 30-minute authority has not turned bullish.",
@@ -1000,6 +1174,12 @@ export function buildEngine29SqueezeTransitionMonitor(
     fast
   );
 
+  const recentImpulse = detectRecentImpulseContext(
+    esLiveMonitor?.bars,
+    parent,
+    fast
+  );
+
   const participation = participationFor({
     direction,
     headline10: headline.move10,
@@ -1032,6 +1212,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     fast,
     contextVsParent,
     consolidation,
+    recentImpulse,
   });
 
   const reasonCodes = buildReasons({
@@ -1045,6 +1226,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     fast,
     contextVsParent,
     consolidation,
+    recentImpulse,
   });
 
   const display = displayFor({
@@ -1058,10 +1240,11 @@ export function buildEngine29SqueezeTransitionMonitor(
     fast,
     contextVsParent,
     consolidation,
+    recentImpulse,
   });
 
   return {
-    version: "engine29.squeezeTransitionMonitor.v1.5.consolidation",
+    version: "engine29.squeezeTransitionMonitor.v1.6.recentImpulseContext",
     generatedAt:
       marketDataBundle?.generatedAt ||
       new Date().toISOString(),
@@ -1097,6 +1280,7 @@ export function buildEngine29SqueezeTransitionMonitor(
     metrics: {
       es: primary,
       consolidation,
+      recentImpulse,
       headline,
       breadth,
       leadership,

@@ -5,6 +5,7 @@ on:
     branches:
       - engine29-move-v2-authority
       - engine29-squeeze-v2-prod-sync
+      - engine29-recent-impulse-context
   workflow_dispatch:
 
 jobs:
@@ -41,6 +42,9 @@ jobs:
 
       - name: Historical and replay acceptance
         run: node --test services/core/tests/engine29MoveV2ReplayAcceptance.test.js
+
+      - name: Recent impulse context regressions
+        run: node --test services/core/tests/engine29RecentImpulseContext.test.js
 
       - name: Existing adaptive MOVE and parent persistence
         run: node --test services/core/tests/engine29MoveLaneActive.test.js
