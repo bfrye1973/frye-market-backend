@@ -34,4 +34,4 @@ jobs:
 
       - name: Micro lifecycle tests
         run: |
-          node --test             services/core/tests/engine22MicroWaveSequence.test.js             services/core/tests/engine22MicroFiveMinuteEvidence.test.js             services/core/tests/engine22MicroRuntimePersistence.test.js
+          node --test             services/core/tests/engine22MicroWaveSequence.test.js             services/core/tests/engine22MicroFiveMinuteEvidence.test.js             services/core/tests/engine22MicroRuntimePersistence.test.js             services/core/tests/engine22SubmicroOwnerW1ToW2WatchV1.test.js
