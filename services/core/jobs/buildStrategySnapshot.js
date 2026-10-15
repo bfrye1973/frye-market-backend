@@ -8443,6 +8443,10 @@ const strategy1TenMinuteEma10 =
           marketMeter?.layers?.emaPosture?.tenMinute?.resolvedContract || null,
         engine22TouchPriceBasis:
           marketMeter?.layers?.emaPosture?.tenMinute?.candlePriceBasis || null,
+        // Render persistent disk is mounted at /var/data/replay. Keep Engine22
+        // model-specific touch history separate from immutable replay files.
+        engine22TouchResearchRootPath:
+          process.env.ENGINE22_TOUCH_HISTORY_PATH || "/var/data/replay/engine22-fib-touches",
         microW3EvidenceBars: engine22MicroW3EvidenceBars,
         engine22V3BarsByTf: {
           "5m": engine22V3FiveMinuteBars,
