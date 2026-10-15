@@ -20,7 +20,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, urllib.request
-          url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=50&debug=1"
+          url = "https://frye-market-backend-1.onrender.com/api/v1/futures/ohlc?symbol=ES&timeframe=10m&limit=1500&debug=1"
           try:
               with urllib.request.urlopen(url, timeout=30) as resp:
                   status = resp.status
