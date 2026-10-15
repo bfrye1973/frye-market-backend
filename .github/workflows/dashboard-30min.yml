@@ -136,10 +136,10 @@ jobs:
           ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
           if [ -e "$ARCH_PATH" ]; then
             EXISTING_RAW="$ARCH_PATH/outlook_30m_internals.json"
-            if [ -s "$EXISTING_RAW" ] && cmp -s "$EXISTING_RAW" /tmp/engine25-30m-archive-stage/outlook_30m_internals.json; then
-              echo "identical snapshot already exists: $ARCH_PATH"
+            if [ -s "$EXISTING_RAW" ] && python /tmp/archive_engine25_30m.py compare               --existing "$EXISTING_RAW"               --candidate /tmp/engine25-30m-archive-stage/outlook_30m_internals.json; then
+              echo "equivalent canonical snapshot already exists: $ARCH_PATH"
             else
-              echo "::error::archive collision: same canonical timestamp has different data at $ARCH_PATH"
+              echo "::error::archive collision: same canonical timestamp has different market data at $ARCH_PATH"
               exit 1
             fi
           else

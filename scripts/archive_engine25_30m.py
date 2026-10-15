@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 PHOENIX = ZoneInfo("America/Phoenix")
 SCHEMA = "engine25.marketInternals30mArchive@1"
+EXECUTION_METADATA_FIELDS = {"generatedAt", "updated_at_utc"}
 
 
 def parse_source_timestamp(payload):
@@ -24,6 +25,24 @@ def parse_source_timestamp(payload):
 def archive_relative_path(payload, root="data/engine25-30m-history"):
     dt = parse_source_timestamp(payload).astimezone(PHOENIX)
     return Path(root) / dt.strftime("%Y-%m-%d") / dt.strftime("%H%M%S")
+
+
+def semantic_market_payload(payload):
+    """Return only canonical market-observation content for immutability checks.
+
+    Execution timestamps are intentionally excluded. All actual market data,
+    source identity, sector cards, breadth, volume, NH/NL, coverage, and schema
+    fields remain part of the comparison.
+    """
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in EXECUTION_METADATA_FIELDS
+    }
+
+
+def market_payloads_equivalent(existing, candidate):
+    return semantic_market_payload(existing) == semantic_market_payload(candidate)
 
 
 def build_archive_record(payload, archived_at=None):
@@ -68,6 +87,10 @@ def main():
     prune.add_argument("--history-root", default="data/engine25-30m-history")
     prune.add_argument("--retention-days", type=int, default=30)
 
+    compare = sub.add_parser("compare")
+    compare.add_argument("--existing", required=True)
+    compare.add_argument("--candidate", required=True)
+
     args = parser.parse_args()
 
     if args.command == "build":
@@ -100,6 +123,16 @@ def main():
             "sector_count": len(payload["sectorCards"]),
         }))
         return
+
+    if args.command == "compare":
+        existing = json.loads(Path(args.existing).read_text(encoding="utf-8"))
+        candidate = json.loads(Path(args.candidate).read_text(encoding="utf-8"))
+        equivalent = market_payloads_equivalent(existing, candidate)
+        print(json.dumps({
+            "equivalent": equivalent,
+            "ignoredExecutionMetadata": sorted(EXECUTION_METADATA_FIELDS),
+        }))
+        raise SystemExit(0 if equivalent else 1)
 
     removed = enforce_retention(args.history_root, args.retention_days)
     print(json.dumps({"removed": removed}))

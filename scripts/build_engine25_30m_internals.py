@@ -175,20 +175,31 @@ def fetch_30m_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
     return bars
 
 
-def todays_completed_30m(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def todays_completed_30m(
+    bars: List[Dict[str, Any]],
+    cutoff_boundary: datetime,
+) -> List[Dict[str, Any]]:
+    """Return bars completed before one frozen 30m cutoff.
+
+    The cutoff is captured once at scan start and reused for every stock so a
+    long-running scan cannot change bar eligibility if the wall clock crosses a
+    30-minute boundary while the universe is still being processed.
+    """
     if not bars:
         return []
-    today = now_utc().date()
-    current_bucket = int(now_utc().timestamp()) // BAR_SECONDS
+
+    cutoff_boundary = cutoff_boundary.astimezone(UTC)
+    cutoff_epoch = int(cutoff_boundary.timestamp())
+    session_date = cutoff_boundary.date()
 
     out = []
     for bar in bars:
         start_sec = int(bar["t"] / 1000)
-        if datetime.fromtimestamp(start_sec, UTC).date() != today:
+        if datetime.fromtimestamp(start_sec, UTC).date() != session_date:
             continue
-        # Polygon aggregate timestamp is the bar start. A bar is completed only
-        # when its bucket is strictly before the current bucket.
-        if start_sec // BAR_SECONDS >= current_bucket:
+        # Polygon aggregate timestamp is the bar start. For a cutoff of 13:00,
+        # the 12:30 bar is eligible and the 13:00 developing bar is not.
+        if start_sec >= cutoff_epoch:
             continue
         out.append(bar)
     return out
@@ -247,9 +258,17 @@ def compute_flags(bars: List[Dict[str, Any]], lookback: int) -> Tuple[int, int, 
     return nh, nl, up, down
 
 
-def process_symbol(ticker: str, lookback: int, days: int):
+def process_symbol(
+    ticker: str,
+    lookback: int,
+    days: int,
+    cutoff_boundary: datetime,
+):
     try:
-        bars = todays_completed_30m(fetch_30m_bars(ticker, days))
+        bars = todays_completed_30m(
+            fetch_30m_bars(ticker, days),
+            cutoff_boundary,
+        )
         if not bars:
             return 0, 0, 0, 0, None, None
         nh, nl, up, down = compute_flags(bars, lookback)
@@ -261,14 +280,26 @@ def process_symbol(ticker: str, lookback: int, days: int):
         return 0, 0, 0, 0, None, None
 
 
-def process_sector(sector: str, symbols: List[str], lookback: int, days: int) -> Dict[str, Any]:
+def process_sector(
+    sector: str,
+    symbols: List[str],
+    lookback: int,
+    days: int,
+    cutoff_boundary: datetime,
+) -> Dict[str, Any]:
     nh = nl = up = down = 0
     volume_observations = []
     last_bar_starts = []
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(process_symbol, symbol, lookback, days): symbol
+            executor.submit(
+                process_symbol,
+                symbol,
+                lookback,
+                days,
+                cutoff_boundary,
+            ): symbol
             for symbol in symbols
         }
         for future in as_completed(futures):
@@ -310,7 +341,16 @@ def classify_state(breadth: float, momentum: float) -> str:
     return "NEUTRAL"
 
 
-def build_payload(sectors_dir: str, lookback: int, days: int) -> Dict[str, Any]:
+def build_payload(
+    sectors_dir: str,
+    lookback: int,
+    days: int,
+    scan_started_at: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    # Freeze one canonical cutoff before any stock requests begin.
+    generated = (scan_started_at or now_utc()).astimezone(UTC)
+    source_boundary = completed_boundary_utc(generated)
+
     sectors = discover_sectors(sectors_dir)
     print("[30m-internals] sectors:", ", ".join(sorted(sectors)), flush=True)
 
@@ -318,7 +358,13 @@ def build_payload(sectors_dir: str, lookback: int, days: int) -> Dict[str, Any]:
     for sector in ORDER:
         symbols = sectors.get(sector, [])
         print(f"[30m-internals] {sector}: {len(symbols)} symbols", flush=True)
-        raw_cards[sector] = process_sector(sector, symbols, lookback, days)
+        raw_cards[sector] = process_sector(
+            sector,
+            symbols,
+            lookback,
+            days,
+            source_boundary,
+        )
 
     cards = []
     latest_starts = []
@@ -353,12 +399,8 @@ def build_payload(sectors_dir: str, lookback: int, days: int) -> Dict[str, Any]:
             )},
         })
 
-    # Canonical market identity is the end of the latest completed 30m bar.
-    if latest_starts:
-        source_boundary = datetime.fromtimestamp(max(latest_starts) + BAR_SECONDS, UTC)
-    else:
-        source_boundary = completed_boundary_utc()
-
+    # Canonical market identity is the frozen scan-start boundary. Do not
+    # derive it from whichever symbol happened to finish last.
     generated = now_utc()
 
     advancing = sum(int(card["up"]) for card in cards)
