@@ -4317,8 +4317,14 @@ return {
   resolvedContract: symbol === "ES" && tf === "10m" &&
     r?.ok === true && typeof r?.json?.resolvedSymbol === "string"
     ? r.json.resolvedSymbol : null,
+  // Engine22: no price-basis assertion from resolvedSymbol alone.
+  // A resolved ticker proves contract identity, not adjustment methodology.
+  // Require explicit same-response provider evidence; otherwise fail closed.
   candlePriceBasis: symbol === "ES" && tf === "10m" &&
-    r?.ok === true && typeof r?.json?.resolvedSymbol === "string"
+    r?.ok === true && typeof r?.json?.resolvedSymbol === "string" &&
+    r?.json?.priceBasis === "RAW_UNADJUSTED_CONTRACT" &&
+    r?.json?.priceBasisVerified === true &&
+    r?.json?.priceBasisSeriesId === r.json.resolvedSymbol
     ? "RAW_UNADJUSTED_CONTRACT" : null,
   ...(completionTruth
   ? {
