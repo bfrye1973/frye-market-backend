@@ -3,8 +3,8 @@ name: dashboard-4h
 on:
   workflow_dispatch:
 
-  # Reliable intraday handoff:
-  # every successful dashboard-hourly completion can launch the 4H refresh.
+  # Every successful 1H workflow completion can trigger
+  # an intraday developing-bar 4H refresh.
   workflow_run:
     workflows:
       - dashboard-hourly
@@ -12,26 +12,22 @@ on:
       - completed
 
   schedule:
-    # ES futures clock — Phoenix / MST (UTC-7 year-round)
-    # Weekly cadence:
-    #   Start Sunday 2:30 PM Phoenix.
-    #   Continue every 4 hours through the trading week.
-    #   Friday uses a special final refresh at 1:00 PM Phoenix.
-    #
-    # GitHub cron is UTC, so evening Phoenix runs land on the next UTC day.
+    # Normal 4H backup schedule — Phoenix / MST (UTC-7 year-round)
     - cron: "30 21 * * 0"         # Sunday 2:30 PM Phoenix
     - cron: "30 1,5 * * 1-5"      # Sun-Thu 6:30 PM / 10:30 PM Phoenix
     - cron: "30 9,13,17 * * 1-5"  # Mon-Fri 2:30 AM / 6:30 AM / 10:30 AM Phoenix
     - cron: "30 21 * * 1-4"       # Mon-Thu 2:30 PM Phoenix
-    - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix — final weekly run
+    - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix
 
 jobs:
   build_and_publish_4h:
     name: Build and Publish 4H
     runs-on: ubuntu-latest
     timeout-minutes: 180
+
     permissions:
       contents: write
+
     concurrency:
       group: dashboard-4h
       cancel-in-progress: true
@@ -43,10 +39,7 @@ jobs:
       FD_MAX_WORKERS: "16"
       H4_INCLUDE_DEVELOPING: "false"
 
-      # 14 day cushion
       H4_LOOKBACK_DAYS: "14"
-
-      # IMPORTANT: MUST MATCH your 1H NH/NL BAR COUNT WINDOW
       H4_LOOKBACK_BARS: "20"
 
       POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
@@ -73,6 +66,7 @@ jobs:
         id: mode
         run: |
           set -euo pipefail
+
           python - <<'PY'
           import os
           from datetime import datetime
@@ -81,14 +75,12 @@ jobs:
           now = datetime.now(ZoneInfo("America/New_York"))
 
           event_name = os.environ.get("GITHUB_EVENT_NAME", "")
-          schedule = os.environ.get("GITHUB_SCHEDULE", "")
           upstream_conclusion = os.environ.get("UPSTREAM_CONCLUSION", "")
           upstream_branch = os.environ.get("UPSTREAM_BRANCH", "")
 
           minutes = now.hour * 60 + now.minute
           cash_active = (9 * 60 + 30) <= minutes < (16 * 60)
 
-          # The reliable hourly intraday trigger is now dashboard-hourly.
           hourly_handoff = event_name == "workflow_run"
 
           if hourly_handoff:
@@ -97,26 +89,28 @@ jobs:
                   include_developing = False
                   run = False
                   reason = "HOURLY_HANDOFF_NON_MAIN_BRANCH"
+
               elif upstream_conclusion != "success":
                   mode = "incremental"
                   include_developing = False
                   run = False
                   reason = "HOURLY_HANDOFF_UPSTREAM_NOT_SUCCESS"
+
               elif cash_active:
-                  # During the equity session, refresh the current developing
-                  # 4H bar each time the reliable 1H workflow completes.
                   mode = "baseline"
                   include_developing = True
                   run = True
                   reason = "HOURLY_HANDOFF_DEVELOPING_4H_REFRESH"
+
               else:
                   mode = "incremental"
                   include_developing = False
                   run = False
                   reason = "HOURLY_HANDOFF_OUTSIDE_EQUITY_SESSION"
+
           else:
-              # Manual runs and the existing normal 4H checkpoints retain
-              # completed-bar behavior.
+              # Manual runs and normal 4H scheduled checkpoints
+              # retain completed-bar behavior.
               mode = "incremental"
               include_developing = False
               run = True
@@ -125,7 +119,8 @@ jobs:
           with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
               f.write(f"MODE={mode}\n")
               f.write(
-                  f"H4_INCLUDE_DEVELOPING={'true' if include_developing else 'false'}\n"
+                  f"H4_INCLUDE_DEVELOPING="
+                  f"{'true' if include_developing else 'false'}\n"
               )
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
@@ -134,7 +129,6 @@ jobs:
 
           print("NY time:", now.isoformat())
           print("event:", event_name or "unknown")
-          print("schedule:", schedule or "none")
           print("upstream conclusion:", upstream_conclusion or "none")
           print("upstream branch:", upstream_branch or "none")
           print(
@@ -150,19 +144,23 @@ jobs:
           PY
         env:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-          GITHUB_SCHEDULE: ${{ github.event.schedule }}
           UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
 
-      # Pull prior cache from live branch if exists (for incremental)
       - name: Restore prior cache if exists
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
+
           mkdir -p data
+
           if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
             git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
-            git show "origin/${LIVE_BRANCH}:data/4h_cache.json" > data/4h_cache.json 2>/dev/null || true
+
+            git show \
+              "origin/${LIVE_BRANCH}:data/4h_cache.json" \
+              > data/4h_cache.json 2>/dev/null || true
+
             if [ -s data/4h_cache.json ]; then
               echo "::notice:: Restored prior 4H cache"
             else
@@ -172,65 +170,75 @@ jobs:
             echo "::notice:: Live branch ${LIVE_BRANCH} does not exist yet"
           fi
 
-      # 1) Build 4H sectorCards source (baseline or incremental)
-      - name: Build 4H sectorCards source (baseline/incremental)
+      - name: Build 4H sectorCards source
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
+
           mkdir -p data
+
           python -u scripts/build_outlook_4h_source.py \
             --mode "${MODE}" \
             --sectors-dir "data/sectors" \
             --lookback-bars "${H4_LOOKBACK_BARS}" \
             --lookback-days "${H4_LOOKBACK_DAYS}" \
             --cache "data/4h_cache.json" \
-            --out   "data/outlook_source_4h.json"
+            --out "data/outlook_source_4h.json"
 
           python - <<'PY'
           import json
           import sys
 
-          s = json.load(
-              open("data/outlook_source_4h.json", "r", encoding="utf-8")
-          )
-          cards = s.get("sectorCards") or []
+          with open(
+              "data/outlook_source_4h.json",
+              "r",
+              encoding="utf-8",
+          ) as f:
+              source = json.load(f)
+
+          cards = source.get("sectorCards") or []
 
           if not isinstance(cards, list) or len(cards) == 0:
               print("INVALID 4H source sectorCards")
               sys.exit(2)
 
-          print("OK source cards=", len(cards))
+          print("OK source cards =", len(cards))
           PY
 
-      # 2) Build 4H payload
       - name: Build 4H payload
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
+
           python -u scripts/make_dashboard_4h.py \
             --source "data/outlook_source_4h.json" \
-            --out    "data/outlook_4h.json"
+            --out "data/outlook_4h.json"
 
-      # 3) Post-process 4H (colors + mirrors)
       - name: Compute 4H trend capsule
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
           python -u scripts/compute_trend_4h.py
 
-      # 4) Validate payload
       - name: Validate required keys
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
+
           python - <<'PY'
           import json
           import sys
 
-          j = json.load(open("data/outlook_4h.json", "r", encoding="utf-8"))
-          m = j.get("metrics") or {}
+          with open(
+              "data/outlook_4h.json",
+              "r",
+              encoding="utf-8",
+          ) as f:
+              payload = json.load(f)
 
-          need = (
+          metrics = payload.get("metrics") or {}
+
+          required = (
               "breadth_4h_pct",
               "momentum_4h_pct",
               "squeeze_4h_pct",
@@ -239,36 +247,58 @@ jobs:
               "trend_strength_4h_pct",
           )
 
-          miss = [k for k in need if k not in m]
-          sc = j.get("sectorCards") or []
+          missing = [
+              key
+              for key in required
+              if key not in metrics
+          ]
 
-          if miss or not isinstance(sc, list) or len(sc) != 11:
-              print("missing:", miss, "len(sectorCards)=", len(sc))
+          cards = payload.get("sectorCards") or []
+
+          if (
+              missing
+              or not isinstance(cards, list)
+              or len(cards) != 11
+          ):
+              print(
+                  "missing:",
+                  missing,
+                  "len(sectorCards)=",
+                  len(cards),
+              )
               sys.exit(1)
 
           print("OK metrics & sectorCards")
           PY
 
-      # 5) Heartbeat
       - name: Write heartbeat
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
-          date -u +'%Y-%m-%dT%H:%M:%SZ' > data/heartbeat_4h.txt
+          date -u +'%Y-%m-%dT%H:%M:%SZ' \
+            > data/heartbeat_4h.txt
 
-      # 6) Publish live branch
       - name: Publish live branch
         if: steps.mode.outputs.run == 'true'
         run: |
           set -euo pipefail
 
           TMP_DIR="$(mktemp -d)"
-          cp -f data/outlook_4h.json  "${TMP_DIR}/outlook_4h.json"
-          cp -f data/heartbeat_4h.txt "${TMP_DIR}/heartbeat_4h.txt"
-          cp -f data/4h_cache.json    "${TMP_DIR}/4h_cache.json"
+
+          cp -f \
+            data/outlook_4h.json \
+            "${TMP_DIR}/outlook_4h.json"
+
+          cp -f \
+            data/heartbeat_4h.txt \
+            "${TMP_DIR}/heartbeat_4h.txt"
+
+          cp -f \
+            data/4h_cache.json \
+            "${TMP_DIR}/4h_cache.json"
 
           git config user.email "user@local"
-          git config user.name  "CI Bot"
+          git config user.name "CI Bot"
 
           git fetch --depth=1 origin "${LIVE_BRANCH}" || true
 
@@ -276,18 +306,38 @@ jobs:
           git reset --hard
           git clean -fdx
 
-          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
-            git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          if git ls-remote \
+            --exit-code \
+            --heads \
+            origin \
+            "${LIVE_BRANCH}" \
+            >/dev/null 2>&1
+          then
+            git checkout \
+              -B "${LIVE_BRANCH}" \
+              "origin/${LIVE_BRANCH}"
           else
             git checkout -B "${LIVE_BRANCH}"
           fi
 
-          git branch --set-upstream-to="origin/${LIVE_BRANCH}" "${LIVE_BRANCH}" || true
+          git branch \
+            --set-upstream-to="origin/${LIVE_BRANCH}" \
+            "${LIVE_BRANCH}" \
+            || true
 
           mkdir -p data
-          mv "${TMP_DIR}/outlook_4h.json"  data/outlook_4h.json
-          mv "${TMP_DIR}/heartbeat_4h.txt" data/heartbeat_4h.txt
-          mv "${TMP_DIR}/4h_cache.json"    data/4h_cache.json
+
+          mv \
+            "${TMP_DIR}/outlook_4h.json" \
+            data/outlook_4h.json
+
+          mv \
+            "${TMP_DIR}/heartbeat_4h.txt" \
+            data/heartbeat_4h.txt
+
+          mv \
+            "${TMP_DIR}/4h_cache.json" \
+            data/4h_cache.json
 
           git add -A
 
@@ -296,5 +346,7 @@ jobs:
             exit 0
           fi
 
-          git commit -m "4h publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          git commit \
+            -m "4h publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
           git push origin "${LIVE_BRANCH}"
