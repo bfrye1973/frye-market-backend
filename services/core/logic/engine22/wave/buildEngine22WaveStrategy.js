@@ -45,6 +45,7 @@ import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { previewSevenDegreeTouchSnapshotV1 } from "../research/previewSevenDegreeTouchSnapshotV1.js";
 import { buildSevenDegreeTouchDisplayV1 } from "../research/buildSevenDegreeTouchDisplayV1.js";
 import { selectApprovedSevenDegreeFibModelsV1 } from "../research/selectApprovedSevenDegreeFibModelsV1.js";
+import { buildCanonicalSevenDegreeTouchSourcesV1 } from "../research/buildCanonicalSevenDegreeTouchSourcesV1.js";
 import { qualifyExistingEsBarsForFibTouchV1 } from "../research/qualifyExistingEsBarsForFibTouchV1.js";
 import { persistSevenDegreeTouchPreviewV1 } from "../research/persistSevenDegreeTouchPreviewV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
@@ -2315,8 +2316,13 @@ export function buildEngine22WaveStrategy(input = {}) {
   // Additive research-only preview. No official status or Fib is modified.
   // Caller-provided models/observations must already be source-qualified;
   // missing identities fail closed to UNAVAILABLE/WATCH.
-  const modelSelection=selectApprovedSevenDegreeFibModelsV1({
+  const canonicalTouchSources = buildCanonicalSevenDegreeTouchSourcesV1({
     degreeStates:publishedDegreeStates,
+    activeStructures:waveFibState?.activeStructures ?? {},
+    v3Canonical:input?.engine22V3Canonical ?? null,
+  });
+  const modelSelection=selectApprovedSevenDegreeFibModelsV1({
+    degreeStates:canonicalTouchSources.degrees,
     resolvedContract:input.engine22TouchResolvedContract??null,
     priceBasis:input.engine22TouchPriceBasis??null,
   });
@@ -2373,6 +2379,7 @@ export function buildEngine22WaveStrategy(input = {}) {
   return {
     sevenDegreeTouchDisplayV1,
     sevenDegreeTouchModelReadiness,
+    sevenDegreeTouchSourceDiagnostics:canonicalTouchSources.diagnostics,
     sevenDegreeTouchPersistentResearch,
     sevenDegreeTouchResearch,
     engine22V3NodeEvidence,
