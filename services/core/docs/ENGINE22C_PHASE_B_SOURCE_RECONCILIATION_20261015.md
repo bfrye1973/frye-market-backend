@@ -23,6 +23,10 @@ Status: **DRAFT, READ-ONLY EVIDENCE**. Do not merge/deploy without Engine 2B acc
 | INTERMEDIATE | five-degree publisher | Owner/manual differences; model approval/basis absent |
 | PRIMARY | five-degree publisher | Owner/manual differences; model approval/basis absent |
 
+## Additional Engine 11 source-boundary finding
+
+The draft `buildStrategySnapshot.js` currently labels ten-minute ES data `RAW_UNADJUSTED_CONTRACT` when `r.json.resolvedSymbol` exists, without receiving a distinct explicit `priceBasis` field from the OHLC response. The underlying `services/core/routes/futuresOhlc.js` fetches Polygon aggregates for a resolved individual ticker, but the mere existence of the symbol does not independently establish the historical workbook's price-basis or roll-adjustment equivalence. This is a **verification gap**, not permission to add a synthetic offset or certify historical touches. Source and contract lineage must be demonstrated before a model may qualify.
+
 ## Source-specific safety rules
 
 1. Never set `approved:true` from the presence of chart coordinates, workbook Fib cells, or V3 shadow baseline IDs.
