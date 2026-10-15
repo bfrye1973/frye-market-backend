@@ -210,7 +210,41 @@ export function buildCurrentWavelength({
     w1Low: 6417.00, w1High: 6948.75, start: 7398.00, currentPrice: price,
     anchorSource: "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
   });
+  // Owner-locked Submicro W1 after the ABC C low at 7718.00.
+  // This is a distinct owner-directed read-only wave state, not a
+  // candle-confirmed V3 recount or trading authorization.
+  const submicroW1Low = 7718.00;
+  const submicroW1High = 8000.00;
+  const submicroW2Ratios = [
+    ["r236","0.236",0.236],["r382","0.382",0.382],
+    ["r500","0.500",0.5],["r618","0.618",0.618],
+    ["r786","0.786",0.786],
+  ];
+  const submicroW2Levels = submicroW2Ratios.map(([key,label,ratio]) => ({
+    key,label,price:Math.round((submicroW1High -
+      (submicroW1High-submicroW1Low)*ratio)*4)/4,
+    status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    anchorSource:"OWNER_LOCKED_SUBMICRO_W1_20261015",
+  }));
+  const ownerSubmicroW2 = {
+    version:"engine22.submicroW2OwnerProjection.v1",
+    previousWave:"C",previousWaveEnd:7718.00,
+    completedWave:"W1",activeWave:"W2",direction:"DOWN",
+    lifecycle:"W1_COMPLETED_OWNER_READ_W2_WATCH",
+    anchors:{w1Low:submicroW1Low,w1High:submicroW1High},
+    levels:submicroW2Levels,
+    confirmationStatus:"OWNER_COUNT_CANDLE_CONFIRMATION_PENDING",
+    noExecution:true,provisional:true,
+  };
   const degrees = {
+    submicro:{
+      degree:"submicro",activeWave:"W2",direction:"DOWN",
+      state:"SUBMICRO_W2_DOWN_WATCH_OWNER_READ",
+      ownerSubmicroW2,
+      levels:submicroW2Levels,
+      nextLevel:null,lastTouchedLevel:null,
+      noExecution:true,
+    },
     micro: {
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
       anchorProvenance: microSequence.anchorProvenance,
