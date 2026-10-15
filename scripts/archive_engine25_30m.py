@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -41,8 +42,38 @@ def semantic_market_payload(payload):
     }
 
 
+def _semantic_equal(left, right):
+    if isinstance(left, bool) or isinstance(right, bool):
+        return left is right
+
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        if isinstance(left, int) and isinstance(right, int):
+            return left == right
+        return math.isclose(
+            float(left),
+            float(right),
+            rel_tol=1e-12,
+            abs_tol=1e-6,
+        )
+
+    if isinstance(left, dict) and isinstance(right, dict):
+        if left.keys() != right.keys():
+            return False
+        return all(_semantic_equal(left[key], right[key]) for key in left)
+
+    if isinstance(left, list) and isinstance(right, list):
+        if len(left) != len(right):
+            return False
+        return all(_semantic_equal(a, b) for a, b in zip(left, right))
+
+    return left == right
+
+
 def market_payloads_equivalent(existing, candidate):
-    return semantic_market_payload(existing) == semantic_market_payload(candidate)
+    return _semantic_equal(
+        semantic_market_payload(existing),
+        semantic_market_payload(candidate),
+    )
 
 
 def build_archive_record(payload, archived_at=None):

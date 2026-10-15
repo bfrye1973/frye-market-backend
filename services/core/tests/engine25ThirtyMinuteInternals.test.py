@@ -139,6 +139,22 @@ class Engine2530mInternalsTests(unittest.TestCase):
 
         self.assertTrue(archiver.market_payloads_equivalent(first, second))
 
+
+    def test_microscopic_float_drift_is_equivalent(self):
+        first = archive_payload()
+        second = copy.deepcopy(first)
+        second["generatedAt"] = "2026-10-15T14:25:29Z"
+        second["updated_at_utc"] = "2026-10-15T14:25:29Z"
+        second["decliningVolume"] = first["decliningVolume"] + 0.0000002
+        second["advancingVolume"] = first["advancingVolume"] - 0.0000002
+        self.assertTrue(archiver.market_payloads_equivalent(first, second))
+
+    def test_material_float_change_is_not_equivalent(self):
+        first = archive_payload()
+        second = copy.deepcopy(first)
+        second["decliningVolume"] = first["decliningVolume"] + 0.01
+        self.assertFalse(archiver.market_payloads_equivalent(first, second))
+
     def test_genuine_market_change_is_archive_collision(self):
         first = archive_payload()
         second = copy.deepcopy(first)
