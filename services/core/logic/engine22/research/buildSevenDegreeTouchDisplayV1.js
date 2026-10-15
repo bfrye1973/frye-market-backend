@@ -18,9 +18,15 @@ export function buildSevenDegreeTouchDisplayV1({models={},touchSnapshot=null}={}
    const original=read?.levels?.[index]?.touchResearch;
    const same=read?.levels?.[index]?.key===level.key &&
      read?.levels?.[index]?.price===level.price;
-   const verified=qualified&&same&&original?.status==="TOUCHED"&&
+   // Never trust array position alone: every persisted event must match the
+   // entire active degree/count/model/series/basis/level/origin identity.
+   const expectedIdentity=[model?.countId,model?.modelKey,model?.seriesId,
+     model?.priceBasis,level?.key,degree,String(level?.price),
+     model?.originAt,model?.direction].join("|");
+   const verified=Boolean(qualified&&same&&
+     original?.identity===expectedIdentity&&original?.status==="TOUCHED"&&
      original?.persisted===true&&str(original.firstTouchedBarId)&&
-     str(original.firstTouchedAt)&&num(level.price);
+     str(original.firstTouchedAt)&&num(level.price));
    return {key:str(level.key),label:str(level.label)||str(level.key),
      price:num(level.price),status:verified?"TOUCHED":"WATCH",
      firstTouchedAt:verified?original.firstTouchedAt:null,
