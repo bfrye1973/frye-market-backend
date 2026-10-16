@@ -12,6 +12,8 @@ import { buildEngine29TrapDetection } from "../trapDetection/buildTrapDetection.
 import { resolveEngine29StructuralState } from "./resolveStructuralState.js";
 import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
+import { readEngine25Participation } from "../participation/readEngine25Participation.js";
+import { buildEngine29StructuralParticipationContext } from "../participation/buildStructuralParticipationContext.js";
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
@@ -219,6 +221,7 @@ export async function buildEngine29CrossMarketStress({
   moveCharacter = null,
   priorMoveParent = null,
   financialConditions = {},
+  engine25Participation = null,
 } = {}) {
   const market =
     marketDataBundle ||
@@ -265,6 +268,15 @@ export async function buildEngine29CrossMarketStress({
 
   const structural =
     resolveEngine29StructuralState(groups);
+
+  const canonicalEngine25Participation =
+    engine25Participation ||
+    readEngine25Participation();
+
+  const structuralParticipation =
+    buildEngine29StructuralParticipationContext(
+      canonicalEngine25Participation
+    );
 
   const tactical =
     resolveEngine29TacticalState(
@@ -355,6 +367,7 @@ export async function buildEngine29CrossMarketStress({
       structural.backdrop,
 
     structural,
+    structuralParticipation,
     tactical,
     fastTactical,
     moveCharacter: move,
@@ -363,6 +376,21 @@ export async function buildEngine29CrossMarketStress({
     trapDetection,
 
     marketCharacter: {
+      biggerPicture: {
+        structuralState: structural.state,
+        priceBreadth: {
+          owner: "ENGINE29",
+          authority: "WEEKLY_PRICE_STRUCTURE",
+          state:
+            groups?.groups?.breadth?.structural?.state ?? null,
+          confidence:
+            groups?.groups?.breadth?.structural?.confidence ?? null,
+          members:
+            groups?.groups?.breadth?.structural?.members || [],
+        },
+        structuralParticipation,
+      },
+
       liquidity:
         trapDetection?.liquidity || null,
 
@@ -484,6 +512,13 @@ export async function buildEngine29CrossMarketStress({
         market?.summary
           ?.liveMonitorAvailableSymbols || [],
 
+      engine25StructuralParticipationAvailable:
+        structuralParticipation?.available === true,
+      engine25ParticipationContractValid:
+        structuralParticipation?.contractValid === true,
+      engine25DistributionEngine:
+        structuralParticipation?.distribution?.canonicalEngine || null,
+
       trapDetectionAvailable:
         Boolean(trapDetection),
       trapPrimaryParticipationAvailable:
@@ -511,6 +546,39 @@ export async function buildEngine29CrossMarketStress({
           structuralSummary(
             structural.state
           ),
+
+        priceBreadth: {
+          state:
+            groups?.groups?.breadth?.structural?.state ?? null,
+          confidence:
+            groups?.groups?.breadth?.structural?.confidence ?? null,
+        },
+
+        structuralParticipation: {
+          available:
+            structuralParticipation?.available === true,
+          owner:
+            structuralParticipation?.owner || "ENGINE25",
+          role:
+            structuralParticipation?.role ||
+            "STRUCTURAL_PARTICIPATION_CONTEXT_ONLY",
+          distributionLabel:
+            structuralParticipation?.distribution?.label || null,
+          distributionPressure:
+            structuralParticipation?.distribution?.rawPressure ?? null,
+          distributionScore:
+            structuralParticipation?.distribution?.score ?? null,
+          distributionPersistence:
+            structuralParticipation?.distribution?.persistence || null,
+          breadth:
+            structuralParticipation?.breadth || null,
+          stockVolume:
+            structuralParticipation?.stockVolume || null,
+          sectorParticipation:
+            structuralParticipation?.sectorParticipation || null,
+          freshness:
+            structuralParticipation?.freshness || null,
+        },
       },
 
       oneHour: {
