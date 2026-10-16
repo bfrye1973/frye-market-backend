@@ -14,6 +14,7 @@ import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
 import { readEngine25Participation } from "../participation/readEngine25Participation.js";
 import { buildEngine29StructuralParticipationContext } from "../participation/buildStructuralParticipationContext.js";
+import { buildEngine29EsPriceActionContext } from "../structure/buildEsPriceActionContext.js";
 import { resolveEngine29BiggerPictureCharacter } from "./resolveBiggerPictureCharacter.js";
 
 function unique(values = []) {
@@ -279,6 +280,12 @@ export async function buildEngine29CrossMarketStress({
       canonicalEngine25Participation
     );
 
+  const esPriceAction =
+    buildEngine29EsPriceActionContext(
+      esAnchor,
+      { now }
+    );
+
   const biggerPictureCharacter =
     resolveEngine29BiggerPictureCharacter({
       structuralState: structural.state,
@@ -374,6 +381,7 @@ export async function buildEngine29CrossMarketStress({
       structural.backdrop,
 
     structural,
+    esPriceAction,
     structuralParticipation,
     biggerPictureCharacter,
     tactical,
@@ -387,6 +395,7 @@ export async function buildEngine29CrossMarketStress({
       biggerPicture: {
         structuralState: structural.state,
         character: biggerPictureCharacter,
+        esPriceAction,
         priceBreadth: {
           owner: "ENGINE29",
           authority: "WEEKLY_PRICE_STRUCTURE",
@@ -521,6 +530,11 @@ export async function buildEngine29CrossMarketStress({
         market?.summary
           ?.liveMonitorAvailableSymbols || [],
 
+      esDailyPriceActionAvailable:
+        esPriceAction?.daily?.available === true,
+      esWeeklyPriceActionAvailable:
+        esPriceAction?.weekly?.available === true,
+
       engine25StructuralParticipationAvailable:
         structuralParticipation?.available === true,
       engine25ParticipationContractValid:
@@ -565,6 +579,8 @@ export async function buildEngine29CrossMarketStress({
 
         character:
           biggerPictureCharacter,
+
+        esPriceAction,
 
         structuralParticipation: {
           available:
