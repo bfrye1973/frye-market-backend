@@ -1,0 +1,25 @@
+name: Engine2C hosted historical page integration verification
+on:
+  push:
+    branches: [engine2c-hosted-history-direct-20261016]
+  pull_request:
+    branches: [main]
+    paths:
+      - services/core/logic/engine2c/**
+      - services/core/routes/engine2cResearchHistory.js
+      - services/core/tests/engine2c/**
+      - .github/workflows/engine2c-hosted-history.yml
+permissions:
+  contents: read
+jobs:
+  research-handler:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check services/core/server.js
+      - run: node --check services/core/routes/engine2cResearchHistory.js
+      - run: node --check services/core/logic/engine2c/prepareHistoryPages.mjs
+      - run: node --test services/core/tests/engine2c/researchHistoricalServingV2.test.mjs
