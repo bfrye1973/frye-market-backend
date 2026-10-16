@@ -65,7 +65,8 @@ function classifyPriceAction(bars = []) {
     close > ema10 &&
     ema10 > ema20 &&
     ema10SlopePct > 0 &&
-    ema20SlopePct > 0;
+    ema20SlopePct > 0 &&
+    swing.trend === "BULLISH";
 
   const red =
     close !== null &&
@@ -76,7 +77,8 @@ function classifyPriceAction(bars = []) {
     close < ema10 &&
     ema10 < ema20 &&
     ema10SlopePct < 0 &&
-    ema20SlopePct < 0;
+    ema20SlopePct < 0 &&
+    swing.trend === "BEARISH";
 
   const state = green
     ? "UPTREND_SUPPORTIVE"
