@@ -130,6 +130,6 @@ test("Engine25 contract failure cannot create participation character", () => {
   });
 
   assert.equal(r.state, "STRUCTURE_ONLY");
-  assert.equal(r.currentParticipationPromotionEligible, true);
+  assert.equal(r.currentParticipationPromotionEligible, false);
   assert.equal(r.participationDiagnostic.state, null);
 });
