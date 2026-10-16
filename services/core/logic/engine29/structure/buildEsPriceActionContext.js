@@ -56,6 +56,22 @@ function classifyPriceAction(bars = []) {
   });
   const swing = summarizeSwingTrend(swings);
 
+  const lastThreeCloses = enriched
+    .slice(-3)
+    .map((bar) => finite(bar?.close));
+
+  const threeRising =
+    lastThreeCloses.length === 3 &&
+    lastThreeCloses.every((value) => value !== null) &&
+    lastThreeCloses[0] < lastThreeCloses[1] &&
+    lastThreeCloses[1] < lastThreeCloses[2];
+
+  const threeFalling =
+    lastThreeCloses.length === 3 &&
+    lastThreeCloses.every((value) => value !== null) &&
+    lastThreeCloses[0] > lastThreeCloses[1] &&
+    lastThreeCloses[1] > lastThreeCloses[2];
+
   const green =
     close !== null &&
     ema10 !== null &&
@@ -66,7 +82,7 @@ function classifyPriceAction(bars = []) {
     ema10 > ema20 &&
     ema10SlopePct > 0 &&
     ema20SlopePct > 0 &&
-    swing.trend === "BULLISH";
+    threeRising;
 
   const red =
     close !== null &&
@@ -78,7 +94,7 @@ function classifyPriceAction(bars = []) {
     ema10 < ema20 &&
     ema10SlopePct < 0 &&
     ema20SlopePct < 0 &&
-    swing.trend === "BEARISH";
+    threeFalling;
 
   const state = green
     ? "UPTREND_SUPPORTIVE"
@@ -108,6 +124,11 @@ function classifyPriceAction(bars = []) {
         close !== null && ema10 !== null ? close > ema10 : null,
       closeAboveEma20:
         close !== null && ema20 !== null ? close > ema20 : null,
+    },
+    recentCloseSequence: {
+      threeRising,
+      threeFalling,
+      closes: lastThreeCloses,
     },
     swings: {
       trend: swing.trend,
