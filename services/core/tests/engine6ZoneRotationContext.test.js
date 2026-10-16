@@ -34,7 +34,7 @@ test("Engine 3 directional conflict fails closed",()=>{
 });
 test("missing and stale Engine25 data cannot turn into supportive market evidence",()=>{
   const r=buildEngine6ZoneRotationContext({...inputs,engine25Participation:null});
-  assert.equal(r.internals.directionalAssessment,"MIXED");
+  assert.equal(r.internals.directionalAssessment,"UNAVAILABLE");
   assert.ok(r.warnings.includes("ENGINE25_PARTICIPATION_UNAVAILABLE"));
 });
 test("recovery evidence cautions against new SHORT",()=>{
@@ -57,6 +57,22 @@ test("stale intraday observations are flagged, not treated as fresh confirmation
   updating.participation.distributionPressure.observations["10m"].available=false;
   const r=buildEngine6ZoneRotationContext({...inputs,engine25Participation:updating});
   assert.equal(r.internals.intradayFresh,false);
+  assert.equal(r.internals.directionalAssessment,"UNAVAILABLE");
   assert.ok(r.warnings.includes("ENGINE25_TIMEFRAME_EVIDENCE_INCOMPLETE"));
   assert.ok(r.warnings.includes("ENGINE25_INTRADAY_FRESHNESS_UNCONFIRMED"));
+});
+
+test("Micro W2 completion never proves Micro W3 confirmed",()=>{
+  const edited=structuredClone(wave);
+  edited.currentWavelength.degrees.micro.microSequence.w2Completion.state="LOCKED";
+  const r=buildEngine6ZoneRotationContext({...inputs,engine22WaveStrategy:edited});
+  assert.equal(r.wave.micro.w2CompletionLocked,true);
+  assert.equal(r.wave.micro.structurallyConfirmed,false);
+});
+test("10m selling alone is not a fully confirmed supportive market context",()=>{
+  const edited=structuredClone(internals);
+  edited.participation.distributionPressure.oneHourTrend.state="STABLE";
+  edited.participation.distributionPressure.thirtyMinuteConfirmation.state="SELLING_PRESSURE_PENDING";
+  const r=buildEngine6ZoneRotationContext({...inputs,engine25Participation:edited});
+  assert.equal(r.internals.directionalAssessment,"MIXED");
 });
