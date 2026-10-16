@@ -2,6 +2,7 @@
 // Backend-1 (Core API) — Express entry (ESM)
 
 import express from "express";
+import {makeEngine2cResearchRoute} from "./routes/engine2cResearchHistory.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
@@ -138,6 +139,9 @@ app.get("/api/health", (_req, res) => {
 app.get("/", (_req, res) => {
   res.type("text/plain").send("Frye Core API — see /api/v1/ohlc and /live");
 });
+
+// Engine2C: isolated research-only page serving; disabled until private archive and owner key exist.
+app.get("/engine2c-private-history/page",makeEngine2cResearchRoute());
 
 // --- API routes ---
 app.use("/api/v1/ohlc", ohlcRouter);
@@ -365,6 +369,13 @@ app.listen(PORT, HOST, () => {
   console.log(`[OK] core listening on :${PORT}`);
   console.log("- /api/health  (Render healthcheck)");
   console.log("- /healthz");
+  if(process.env.ENGINE2C_HISTORY_BUNDLE_URL){
+    // Background-only research page preparation: no impact on LIVE startup.
+    const child=spawn("node",["./logic/engine2c/prepareHistoryPages.mjs"],{cwd:__dirname,env:process.env,stdio:["ignore","ignore","pipe"]});
+    child.stderr.on("data",b=>console.error("[engine2c-history]",String(b).slice(0,500)));
+    child.on("close",code=>console.log("[engine2c-history] preparation exit",code));
+    child.on("error",error=>console.error("[engine2c-history] startup unavailable",error.message));
+  }
   console.log("- /api/v1/ohlc");
   console.log("- /api/sectorcards-10m");
   console.log("- /api/v1/smz-levels");
