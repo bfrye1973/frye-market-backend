@@ -42,6 +42,7 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
+import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -1950,7 +1951,7 @@ export function buildEngine22WaveStrategy(input = {}) {
         managerRestoreSequence,
     });
 
-  const currentWavelength = buildCurrentWavelength({
+  let currentWavelength = buildCurrentWavelength({
     symbol: context.symbol,
     currentPrice: context.currentPrice,
     degreeStates,
@@ -1961,6 +1962,20 @@ export function buildEngine22WaveStrategy(input = {}) {
     evaluationTimeMs: context.evaluationTimeMs,
     previousMicroSequence,
   });
+
+  // Owner-facing Fibonacci touch memory is independent from canonical wave
+  // permission, lifecycle, execution and replay. ES quote and existing 10m
+  // candles are the only observations used by this read-only display packet.
+  if (context.marketType === "FUTURES" && context.symbol === "ES") {
+    currentWavelength = applyOwnerPriceTouchesV1({
+      currentWavelength,
+      previousWavelength:context.previousOwnerWavelength ?? null,
+      currentPrice:context.currentPrice,
+      bars10m:context.barsByTf?.["10m"] ?? [],
+      evaluationTimeMs:context.evaluationTimeMs,
+      storePath:context.ownerPriceTouchStorePath ?? null,
+    });
+  }
 
   if (
     context.marketType === "FUTURES" &&
