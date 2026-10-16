@@ -62,8 +62,9 @@ export function buildEngine6ZoneRotationContext({
   const microConflict = DIR.has(direction) && DIR.has(convert(microDirection)) && !microAligned;
   const submicroConfirmed = upper(w2?.confirmationStatus) === "CONFIRMED" ||
     upper(w2?.confirmationStatus) === "LOCKED";
-  const microConfirmed = ["CONFIRMED", "LOCKED"].includes(upper(microSequence?.confirmationStatus)) ||
-    upper(microSequence?.w2Completion?.state) === "LOCKED";
+  // W2 completion is not proof that Micro W3 itself is confirmed.
+  const microConfirmed = ["CONFIRMED", "LOCKED"].includes(upper(microSequence?.confirmationStatus));
+  const microW2Completed = upper(microSequence?.w2Completion?.state) === "LOCKED";
   if (!submicro) warnings.push("ENGINE22_SUBMICRO_UNAVAILABLE");
   if (!micro) warnings.push("ENGINE22_MICRO_UNAVAILABLE");
   if (submicroConflict) warnings.push("SUBMICRO_WORKING_WAVE_OPPOSES_REACTION");
@@ -94,10 +95,16 @@ export function buildEngine6ZoneRotationContext({
     acceleration10m === "FAST_BUYING_RECOVERY_CONFIRMED";
   const easing = trend1h === "EASING";
   const rising = trend1h === "RISING";
-  const pressure = direction === "SHORT"
-    ? (sellingConfirmed && rising ? "SUPPORTIVE" : buyingConfirmed || easing ? "CAUTION" : "MIXED")
+  // Market support is trustworthy only when the specific confirming timeframes
+  // and intraday freshness are available. No stale or partial evidence may pass.
+  const available = Object.fromEntries(validity.map(v => [v.timeframe,v.available]));
+  const pressureDataUsable = intradayFresh &&
+    available["10m"] && available["30m"] && available["1h"];
+  const pressure = !pressureDataUsable ? "UNAVAILABLE" :
+    direction === "SHORT"
+    ? (buyingConfirmed || easing ? "CAUTION" : sellingConfirmed && rising ? "SUPPORTIVE" : "MIXED")
     : direction === "LONG"
-    ? (buyingConfirmed && easing ? "SUPPORTIVE" : sellingConfirmed && rising ? "CAUTION" : "MIXED")
+    ? (sellingConfirmed && rising ? "CAUTION" : buyingConfirmed && easing ? "SUPPORTIVE" : "MIXED")
     : "UNRESOLVED";
   // These are named qualitative combinations of published states, NOT scores or hard gates.
   if (pressure === "SUPPORTIVE") evidence.push("ENGINE25_TACTICAL_PRESSURE_SUPPORTS_DIRECTION");
@@ -124,6 +131,7 @@ export function buildEngine6ZoneRotationContext({
       micro: { activeWave: w3?.activeWave ?? micro?.activeWave ?? null,
         direction: microDirection, confirmationStatus: microSequence?.confirmationStatus ?? null,
         parentConflict: microConflict, structurallyConfirmed: microConfirmed,
+        w2CompletionLocked: microW2Completed,
         levels: w3?.levels ?? null },
     },
     internals: {
