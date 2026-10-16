@@ -98,6 +98,7 @@ import {
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
+import { buildEngine6ZoneRotationContext } from "../logic/engine6/buildZoneRotationContext.js";
 import {
   evaluateEngine6Strategy1Phase4Contract,
   filterEngine15ArtifactsForFastLane,
@@ -10073,6 +10074,32 @@ if (
         })
       : null;
      
+  // Engine 6 V1 read-only shadow: never feeds the permission path.
+  // Current Engine 25 canonical participation artifact; missing/invalid reads are
+  // expressed as unavailable evidence by the pure evaluator, never manufactured.
+  let engine6ZoneRotationContext = null;
+  if (isEsIntradayScalp) {
+    let engine25ParticipationArtifact = null;
+    try {
+      engine25ParticipationArtifact = JSON.parse(
+        fs.readFileSync(`${DATA_DIR}/engine25-participation.json`, "utf8")
+      );
+    } catch {
+      engine25ParticipationArtifact = null;
+    }
+    engine6ZoneRotationContext = buildEngine6ZoneRotationContext({
+      symbol,
+      strategyId: s.strategyId,
+      candidate: engine26LocationCandidate,
+      reaction: patchedConfluence?.context?.reaction?.paperScalpReaction || null,
+      participation: patchedConfluence?.context?.volume
+        ?.engine4AuthorizedReactionParticipation || null,
+      engine22WaveStrategy,
+      engine25Participation: engine25ParticipationArtifact,
+      engine25Context,
+    });
+  }
+
    return {
     strategyId: s.strategyId,
     lockedSignal, 
@@ -10087,6 +10114,7 @@ if (
     permissionPreliminary,
 
     permission: finalPermission,
+    engine6ZoneRotationContext,
      
     engine26GeneralLocation,
     engine26LocationCandidate,
