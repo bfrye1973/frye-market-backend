@@ -102,7 +102,7 @@ export function applyOwnerPriceTouchesV1({
         touchedAt:result?.time||null};
     });
     model.levels=touched;
-    node.levels=touched;
+    if(degree!=="micro") node.levels=touched;
     node.lastTouchedLevel=[...touched].reverse().find(x=>x.status==="TOUCHED")||null;
     disk[id]=Object.fromEntries(touched.filter(x=>x.status==="TOUCHED")
       .map(x=>[x.key,{key:x.key,price:x.price,status:"TOUCHED",
