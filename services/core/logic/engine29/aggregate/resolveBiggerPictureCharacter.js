@@ -124,6 +124,9 @@ export function resolveEngine29BiggerPictureCharacter({
     distributionCharacter(structuralParticipation);
 
   const currentParticipationPromotionEligible =
+    structuralParticipation?.contractValid === true &&
+    structuralParticipation?.distribution?.canonicalEngine ===
+      "engine25.distributionPressure.v2" &&
     structuralParticipation?.freshness?.state === "FRESH" &&
     structuralParticipation?.freshness?.equityScannerSession?.active === true;
 
