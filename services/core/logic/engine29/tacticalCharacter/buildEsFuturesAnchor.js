@@ -203,8 +203,14 @@ export async function buildEngine29EsFuturesAnchor({
   thirtyMinuteLimit = 3500,
   tenMinuteLimit = 5000,
   fourHourLimit = 1800,
+  dailyLimit = 400,
 } = {}) {
-  const [hourly, thirtyMinute, tenMinute, fourHour] = await Promise.all([
+  const [daily, hourly, thirtyMinute, tenMinute, fourHour] = await Promise.all([
+    fetchFuturesBars({
+      symbol,
+      timeframe: "1d",
+      limit: dailyLimit,
+    }),
     fetchFuturesBars({
       symbol,
       timeframe: "1h",
@@ -279,6 +285,7 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolvedSymbol ||
       thirtyMinute?.resolvedSymbol ||
       hourly?.resolvedSymbol ||
+      daily?.resolvedSymbol ||
       fourHour?.resolvedSymbol ||
       null,
 
@@ -288,6 +295,7 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolver ||
       thirtyMinute?.resolver ||
       hourly?.resolver ||
+      daily?.resolver ||
       fourHour?.resolver ||
       null,
 
@@ -298,6 +306,17 @@ export async function buildEngine29EsFuturesAnchor({
     tacticalAvailable: Boolean(structure?.tactical),
     fastTacticalAvailable: Boolean(structure?.fastTactical),
     liveMonitorAvailable: Boolean(entry.liveMonitor?.latest),
+
+    // Current resolved-contract daily bars for recent ES price-action context.
+    // These bars are NOT continuous/roll-normalized long-term futures history.
+    dailyPriceActionSource: {
+      timeframe: "1D",
+      sourceTimeframe: "1D",
+      historyScope: "CURRENT_RESOLVED_CONTRACT_RECENT_ONLY",
+      resolvedSymbol: daily?.resolvedSymbol || null,
+      count: Array.isArray(daily?.bars) ? daily.bars.length : 0,
+      bars: normalizeFuturesBars(daily?.bars),
+    },
 
     // Raw normalized 10m ES bars for the diagnostic live monitor.
     // This does NOT become 30m / 1H / 1W authority.
