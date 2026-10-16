@@ -8435,6 +8435,10 @@ const strategy1TenMinuteEma10 =
           "4h": marketMeter?.layers?.emaPosture?.fourHour?.bars || [],
           "1d": marketMeter?.layers?.emaPosture?.daily?.bars || [],
         },
+        previousOwnerWavelength: previousSnapshot?.strategies?.[s.strategyId]
+          ?.engine22WaveStrategy?.currentWavelength || null,
+        ownerPriceTouchStorePath: process.env.ENGINE22_OWNER_PRICE_TOUCH_PATH ||
+          "/var/data/replay/engine22-owner-price-touches.json",
         previousMicroSequence: previousSnapshot?.strategies?.[s.strategyId]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.microSequence || null,
         barsByTf: {
           "5m": engine3DiagnosticBars?.fiveMinute?.ok === true ? (engine3DiagnosticBars.fiveMinute.bars || []) : [],
