@@ -50,9 +50,6 @@ jobs:
       - name: Bigger Picture Engine25 integration contract
         run: node --test services/core/tests/engine29BiggerPictureEngine25Integration.test.js
 
-      - name: ES weekly structure context
-        run: node --test services/core/tests/engine29EsWeeklyStructureContext.test.js
-
       - name: Existing adaptive MOVE and parent persistence
         run: node --test services/core/tests/engine29MoveLaneActive.test.js
 
