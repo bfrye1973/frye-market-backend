@@ -5,6 +5,7 @@ on:
       - "services/core/logic/engine6/buildZoneRotationContext.js"
       - "services/core/tests/engine6ZoneRotationContext.test.js"
       - ".github/workflows/engine6-zone-rotation-v1.yml"
+      - "services/core/jobs/buildStrategySnapshot.js"
   workflow_dispatch:
 permissions:
   contents: read
@@ -20,5 +21,6 @@ jobs:
         run: |
           node --check services/core/logic/engine6/buildZoneRotationContext.js
           node --check services/core/tests/engine6ZoneRotationContext.test.js
+          node --check services/core/jobs/buildStrategySnapshot.js
       - name: Run isolated Engine 6 context tests
         run: node --test services/core/tests/engine6ZoneRotationContext.test.js
