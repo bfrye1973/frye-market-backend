@@ -141,6 +141,8 @@ export function buildFuturesWaveContext(input = {}) {
     barsByTf = {},
     evaluationTimeMs = null,
     previousMicroSequence = null,
+    previousOwnerWavelength = null,
+    ownerPriceTouchStorePath = null,
   } = input || {};
 
   const symbol = normalizeSymbol(rawSymbol);
@@ -196,6 +198,8 @@ export function buildFuturesWaveContext(input = {}) {
     barsByTf,
     evaluationTimeMs,
     previousMicroSequence,
+    previousOwnerWavelength,
+    ownerPriceTouchStorePath,
 
     reasonCodes: [
       "FUTURES_WAVE_CONTEXT_BUILT",
