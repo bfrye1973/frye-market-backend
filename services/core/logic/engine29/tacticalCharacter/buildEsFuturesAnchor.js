@@ -110,13 +110,11 @@ function aggregateOneHourToTwoHour(oneHourBars = []) {
 }
 
 function marketEntry({
-  daily,
   hourly,
   thirtyMinute,
   tenMinute,
   now,
 }) {
-  const dailyBars = normalizeFuturesBars(daily?.bars);
   const oneHourBars = normalizeFuturesBars(hourly?.bars);
   const thirtyMinuteBars = normalizeFuturesBars(thirtyMinute?.bars);
   const tenMinuteBars = normalizeFuturesBars(tenMinute?.bars);
@@ -137,7 +135,6 @@ function marketEntry({
       tenMinute?.resolvedSymbol ||
       thirtyMinute?.resolvedSymbol ||
       hourly?.resolvedSymbol ||
-      daily?.resolvedSymbol ||
       null,
     sourceSeriesId: null,
     isProxy: false,
@@ -145,24 +142,12 @@ function marketEntry({
     evidenceQuality: ENGINE29_EVIDENCE_QUALITY.DIRECT,
 
     available: Boolean(
-      dailyBars.length ||
       oneHourBars.length ||
       thirtyMinuteBars.length ||
       tenMinuteBars.length
     ),
 
-    structural: {
-      timeframe: "1W",
-      sourceTimeframe: "1D",
-      count: dailyBars.length,
-      latest: latest(dailyBars),
-      bars: dailyBars,
-      freshness: evaluateFreshness({
-        latestTime: latest(dailyBars)?.time,
-        timeframe: "1D",
-        now,
-      }),
-    },
+    structural: null,
 
     tactical: {
       timeframe: "1H",
@@ -218,14 +203,8 @@ export async function buildEngine29EsFuturesAnchor({
   thirtyMinuteLimit = 3500,
   tenMinuteLimit = 5000,
   fourHourLimit = 1800,
-  dailyLimit = 1100,
 } = {}) {
-  const [daily, hourly, thirtyMinute, tenMinute, fourHour] = await Promise.all([
-    fetchFuturesBars({
-      symbol,
-      timeframe: "1d",
-      limit: dailyLimit,
-    }),
+  const [hourly, thirtyMinute, tenMinute, fourHour] = await Promise.all([
     fetchFuturesBars({
       symbol,
       timeframe: "1h",
@@ -249,7 +228,6 @@ export async function buildEngine29EsFuturesAnchor({
   ]);
 
   const entry = marketEntry({
-    daily,
     hourly,
     thirtyMinute,
     tenMinute,
@@ -293,7 +271,7 @@ export async function buildEngine29EsFuturesAnchor({
   };
 
   return {
-    version: "engine29.esAnchor.v1.3.weeklyStructure",
+    version: "engine29.esAnchor.v1.2.macroLocation",
     timestamp: new Date(now).toISOString(),
     productCode: symbol,
 
@@ -301,7 +279,6 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolvedSymbol ||
       thirtyMinute?.resolvedSymbol ||
       hourly?.resolvedSymbol ||
-      daily?.resolvedSymbol ||
       fourHour?.resolvedSymbol ||
       null,
 
@@ -311,16 +288,13 @@ export async function buildEngine29EsFuturesAnchor({
       tenMinute?.resolver ||
       thirtyMinute?.resolver ||
       hourly?.resolver ||
-      daily?.resolver ||
       fourHour?.resolver ||
       null,
 
-    structuralFreshness: entry.structural?.freshness || null,
     tacticalFreshness: entry.tactical?.freshness || null,
     fastTacticalFreshness: entry.fastTactical?.freshness || null,
     liveMonitorFreshness: entry.liveMonitor?.freshness || null,
 
-    structuralAvailable: Boolean(structure?.structural),
     tacticalAvailable: Boolean(structure?.tactical),
     fastTacticalAvailable: Boolean(structure?.fastTactical),
     liveMonitorAvailable: Boolean(entry.liveMonitor?.latest),
