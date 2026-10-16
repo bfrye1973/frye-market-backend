@@ -82,6 +82,10 @@ function normalizeAccountWatermark(value = {}) {
     lastBrokerTransactionIdSeen:
       text(value?.lastBrokerTransactionIdSeen) || null,
 
+    recoveryRequired: value?.recoveryRequired === true,
+    recoveryReason: text(value?.recoveryReason) || null,
+    lastRecoveryAttemptAt: validIso(value?.lastRecoveryAttemptAt),
+    lastRecoverySuccessAt: validIso(value?.lastRecoverySuccessAt),
     updatedAt:
       validIso(value?.updatedAt),
   };
@@ -609,6 +613,33 @@ export function updateEngine8RealFillAccountWatermark(
   return next;
 }
 
+// Per-account durable catch-up obligation. Recovery is never cleared by a
+// successful OAuth response alone; only successful per-account fill delivery.
+export function markEngine8RealFillRecoveryRequired(
+  brokerAccountLabels,
+  reason = "RECOVERY_REQUIRED"
+) {
+  const labels = Array.isArray(brokerAccountLabels)
+    ? brokerAccountLabels
+    : [brokerAccountLabels];
+  const state = readEngine8RealFillObserverState();
+  const timestamp = nowIso();
+  for (const item of labels) {
+    const label = text(item);
+    if (!label) continue;
+    const current = normalizeAccountWatermark(state.accounts?.[label] || {});
+    state.accounts[label] = normalizeAccountWatermark({
+      ...current,
+      brokerAccountLabel: label,
+      recoveryRequired: true,
+      recoveryReason: reason,
+      lastRecoveryAttemptAt: timestamp,
+      updatedAt: timestamp,
+    });
+  }
+  writeState(state);
+}
+
 export function getEngine8RealFillRecord(
   dedupeKey
 ) {
@@ -694,6 +725,7 @@ export default {
   initializeEngine8RealFillBootstrap,
   getEngine8RealFillAccountWatermark,
   updateEngine8RealFillAccountWatermark,
+  markEngine8RealFillRecoveryRequired,
   getEngine8RealFillRecord,
   upsertEngine8RealFillRecord,
   listEngine8RealFillRecords,

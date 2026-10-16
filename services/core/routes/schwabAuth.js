@@ -6,6 +6,7 @@
 // No order-building or order-placement routes exist here.
 
 import express from "express";
+import { summarizeEngine8Health } from "../logic/trading/schwab/engine8AuthHealth.js";
 
 import { requireEngine8Admin } from "../logic/trading/schwab/engine8AdminAuth.js";
 
@@ -37,6 +38,12 @@ import {
 } from "../logic/trading/schwab/schwabAccountSelection.js";
 
 const router = express.Router();
+
+// Protected operational health, with no credentials or OAuth state exposed.
+router.get("/health", requireEngine8Admin, (_req, res) => {
+  try { return res.json({ ok: true, ...summarizeEngine8Health() }); }
+  catch { return res.status(503).json({ ok: false, reason: "ENGINE8_HEALTH_UNAVAILABLE" }); }
+});
 
 function nowIso() {
   return new Date().toISOString();

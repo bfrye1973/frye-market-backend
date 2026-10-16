@@ -8,6 +8,8 @@
 //
 // This file does not place orders.
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   getSchwabConfig,
   validateSchwabPhase1Config,
@@ -45,16 +47,23 @@ async function readResponseBody(response) {
   }
 }
 
+export function classifySchwabFailure(error) {
+  const status = Number(error?.status || 0);
+  const code = String(error?.brokerCode || "").toLowerCase();
+  if (code === "invalid_grant") return "SCHWAB_INVALID_GRANT";
+  if (status === 429) return "SCHWAB_RATE_LIMITED";
+  if (status === 401 || status === 403) return "SCHWAB_AUTHORIZATION_REJECTED";
+  if (status >= 500 || !status) return "SCHWAB_TEMPORARY_FAILURE";
+  return "SCHWAB_API_FAILURE";
+}
+
 function safeBrokerError({
   status,
   operation,
   body,
 }) {
   const brokerMessage =
-    body?.message ||
-    body?.error_description ||
-    body?.error ||
-    null;
+    body?.error || body?.code || null;
 
   const error = new Error(
     brokerMessage
@@ -65,10 +74,8 @@ function safeBrokerError({
   error.status = status;
   error.operation = operation;
   error.brokerCode =
-    body?.error ||
-    body?.code ||
-    null;
-
+    body?.error || body?.code || null;
+  error.reason = classifySchwabFailure(error);
   return error;
 }
 
@@ -120,6 +127,49 @@ async function tokenRequest(parameters) {
   return body;
 }
 
+// Single-host cross-process serialization: the HTTP server and fill watcher
+// both access one persistent token file. Never rely on an in-memory mutex.
+async function withTokenRefreshLock(callback) {
+  const config = getSchwabConfig();
+  const lockFile = config.tokenFile + ".refresh.lock";
+  fs.mkdirSync(path.dirname(lockFile), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + 40000;
+  let owner = null;
+  while (!owner) {
+    try {
+      const fd = fs.openSync(lockFile, "wx", 0o600);
+      owner = String(process.pid) + ":" + Date.now();
+      fs.writeFileSync(fd, owner);
+      fs.closeSync(fd);
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+      // Stale locks are cleared only when their process is definitely gone.
+      try {
+        const value = fs.readFileSync(lockFile, "utf8");
+        const pid = Number.parseInt(value.split(":")[0], 10);
+        const age = Date.now() - fs.statSync(lockFile).mtimeMs;
+        if (age > 60000 && Number.isSafeInteger(pid) && pid > 0) {
+          let alive = true;
+          try { process.kill(pid, 0); } catch (e) { if (e.code === "ESRCH") alive = false; }
+          if (!alive) fs.unlinkSync(lockFile);
+        }
+      } catch (readError) {
+        if (readError?.code !== "ENOENT") throw readError;
+      }
+      if (Date.now() >= deadline) throw new Error("SCHWAB_TOKEN_REFRESH_LOCK_TIMEOUT");
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  }
+  try { return await callback(); }
+  finally {
+    try {
+      if (fs.readFileSync(lockFile, "utf8") === owner) fs.unlinkSync(lockFile);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+}
+
 export async function exchangeSchwabAuthorizationCode(
   authorizationCode
 ) {
@@ -140,42 +190,32 @@ export async function exchangeSchwabAuthorizationCode(
     redirect_uri: config.redirectUri,
   });
 
-  return saveSchwabTokens(tokenResponse);
+  return withTokenRefreshLock(() => saveSchwabTokens(tokenResponse, { authorization: true }));
 }
 
 export async function refreshSchwabAccessToken() {
-  const currentTokens = readSchwabTokens();
-
-  if (!currentTokens?.refresh_token) {
-    throw new Error(
-      "MISSING_SCHWAB_REFRESH_TOKEN"
-    );
-  }
-
-  const tokenResponse = await tokenRequest({
-    grant_type: "refresh_token",
-    refresh_token: currentTokens.refresh_token,
+  return withTokenRefreshLock(async () => {
+    // Re-read after acquiring the cross-process lock. Another process may
+    // already have refreshed the token while this caller was waiting.
+    const currentTokens = readSchwabTokens();
+    if (!currentTokens?.refresh_token) throw new Error("MISSING_SCHWAB_REFRESH_TOKEN");
+    if (!accessTokenNeedsRefresh(currentTokens)) {
+      return { ok: true, refreshed: false, reusedNewerToken: true };
+    }
+    const tokenResponse = await tokenRequest({
+      grant_type: "refresh_token",
+      refresh_token: currentTokens.refresh_token,
+    });
+    const mergedResponse = {
+      ...tokenResponse,
+      refresh_token: tokenResponse.refresh_token || currentTokens.refresh_token,
+      refresh_token_expires_in:
+        tokenResponse.refresh_token_expires_in ??
+        currentTokens.refresh_token_expires_in ?? null,
+    };
+    saveSchwabTokens(mergedResponse, { authorization: false });
+    return { ok: true, refreshed: true };
   });
-
-  // Some OAuth providers omit a replacement refresh token.
-  // Preserve the current refresh token in that case.
-  const mergedResponse = {
-    ...tokenResponse,
-    refresh_token:
-      tokenResponse.refresh_token ||
-      currentTokens.refresh_token,
-    refresh_token_expires_in:
-      tokenResponse.refresh_token_expires_in ??
-      currentTokens.refresh_token_expires_in ??
-      null,
-  };
-
-  saveSchwabTokens(mergedResponse);
-
-  return {
-    ok: true,
-    refreshed: true,
-  };
 }
 
 function accessTokenNeedsRefresh(tokens) {
@@ -184,7 +224,7 @@ function accessTokenNeedsRefresh(tokens) {
   }
 
   if (!tokens?.expires_at) {
-    return false;
+    return true;
   }
 
   const expiresAtMs = Date.parse(tokens.expires_at);
