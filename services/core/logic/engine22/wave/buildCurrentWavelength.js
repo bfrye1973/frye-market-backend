@@ -214,24 +214,35 @@ export function buildCurrentWavelength({
   // This is a distinct owner-directed read-only wave state, not a
   // candle-confirmed V3 recount or trading authorization.
   const submicroW1Low = 7718.00;
-  const submicroW1High = 8000.00;
+  const submicroW1High = 7800.00;
   const submicroW2Ratios = [
     ["r236","0.236",0.236],["r382","0.382",0.382],
     ["r500","0.500",0.5],["r618","0.618",0.618],
     ["r786","0.786",0.786],
   ];
-  const submicroW2Levels = submicroW2Ratios.map(([key,label,ratio]) => ({
-    key,label,price:Math.round((submicroW1High -
-      (submicroW1High-submicroW1Low)*ratio)*4)/4,
-    status:"WATCH",provisional:true,touchEvidenceAvailable:false,
-    anchorSource:"OWNER_LOCKED_SUBMICRO_W1_20261015",
-  }));
+  // Owner's annotated 10m chart showed W2 low at about 7772.50.
+  // This proves a chart-observed 0.236 crossing, NOT a feed-verified touch.
+  const ownerObservedW2Low = 7772.50;
+  const submicroW2Levels = submicroW2Ratios.map(([key,label,ratio]) => {
+    const target = Math.round((submicroW1High -
+      (submicroW1High-submicroW1Low)*ratio)*4)/4;
+    const chartObserved = ownerObservedW2Low <= target;
+    return {
+      key,label,price:target,
+      status:chartObserved?"OWNER_OBSERVED_TOUCH":"WATCH",
+      touchEvidenceType:chartObserved?"OWNER_CHART_OBSERVATION":null,
+      ownerObservedW2Low:chartObserved?ownerObservedW2Low:null,
+      provisional:true,touchEvidenceAvailable:false,
+      anchorSource:"OWNER_CORRECTED_SUBMICRO_W1_20261016",
+    };
+  });
   const ownerSubmicroW2 = {
     version:"engine22.submicroW2OwnerProjection.v1",
     previousWave:"C",previousWaveEnd:7718.00,
     completedWave:"W1",activeWave:"W2",direction:"DOWN",
     lifecycle:"W1_COMPLETED_OWNER_READ_W2_WATCH",
     anchors:{w1Low:submicroW1Low,w1High:submicroW1High},
+    ownerObservedW2Low,
     levels:submicroW2Levels,
     confirmationStatus:"OWNER_COUNT_CANDLE_CONFIRMATION_PENDING",
     noExecution:true,provisional:true,
