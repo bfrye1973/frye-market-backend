@@ -14,6 +14,7 @@ import { resolveEngine29TacticalState } from "./resolveTacticalState.js";
 import { resolveEngine29FastTacticalShift } from "./resolveFastTacticalShift.js";
 import { readEngine25Participation } from "../participation/readEngine25Participation.js";
 import { buildEngine29StructuralParticipationContext } from "../participation/buildStructuralParticipationContext.js";
+import { buildEngine29EsWeeklyStructureContext } from "../structure/buildEsWeeklyStructureContext.js";
 
 function unique(values = []) {
   return [...new Set(values.filter(Boolean))];
@@ -278,6 +279,11 @@ export async function buildEngine29CrossMarketStress({
       canonicalEngine25Participation
     );
 
+  const esWeeklyStructure =
+    buildEngine29EsWeeklyStructureContext(
+      esAnchor
+    );
+
   const tactical =
     resolveEngine29TacticalState(
       groups,
@@ -367,6 +373,7 @@ export async function buildEngine29CrossMarketStress({
       structural.backdrop,
 
     structural,
+    esWeeklyStructure,
     structuralParticipation,
     tactical,
     fastTactical,
@@ -378,6 +385,7 @@ export async function buildEngine29CrossMarketStress({
     marketCharacter: {
       biggerPicture: {
         structuralState: structural.state,
+        esWeeklyStructure,
         priceBreadth: {
           owner: "ENGINE29",
           authority: "WEEKLY_PRICE_STRUCTURE",
@@ -512,6 +520,9 @@ export async function buildEngine29CrossMarketStress({
         market?.summary
           ?.liveMonitorAvailableSymbols || [],
 
+      esWeeklyStructureAvailable:
+        esWeeklyStructure?.available === true,
+
       engine25StructuralParticipationAvailable:
         structuralParticipation?.available === true,
       engine25ParticipationContractValid:
@@ -546,6 +557,8 @@ export async function buildEngine29CrossMarketStress({
           structuralSummary(
             structural.state
           ),
+
+        esWeeklyStructure,
 
         priceBreadth: {
           state:
