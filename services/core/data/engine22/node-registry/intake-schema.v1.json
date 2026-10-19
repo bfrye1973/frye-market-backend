@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "engine22.node-registry.intake.v1",
+  "title": "Engine22 seven degree source node registry (non-production, non-promoting)",
+  "type": "object",
+  "required": [
+    "schema",
+    "sourceSha256",
+    "allNodes",
+    "fibs",
+    "degreeTabs"
+  ],
+  "properties": {
+    "schema": {
+      "const": "engine22.node-registry.intake.v1"
+    },
+    "sourceSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceCellArchiveSha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "importApproval": {
+      "const": "PHASE1_SOURCE_EVIDENCE_ONLY"
+    },
+    "allNodes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "degree",
+          "node",
+          "rawDate",
+          "rawTime",
+          "rawPrice",
+          "price",
+          "datePrecision",
+          "timePrecision",
+          "timezone",
+          "priceBasis",
+          "sourceContract",
+          "sourceCountId",
+          "engine11CandleId",
+          "status",
+          "noStructuralPromotion"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^OWNER-ALL-[0-9]{3}$"
+          },
+          "degree": {
+            "enum": [
+              "SUBMICRO",
+              "MICRO",
+              "SUBMINUTE",
+              "MINUTE",
+              "MINOR",
+              "INTERMEDIATE",
+              "PRIMARY"
+            ]
+          },
+          "source": {
+            "type": "object",
+            "required": [
+              "workbookSha256",
+              "sheet",
+              "row",
+              "priceCell",
+              "dateCell",
+              "timeCell",
+              "waveCell"
+            ]
+          },
+          "rawDate": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "rawTime": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "rawPrice": {
+            "type": [
+              "string",
+              "number",
+              "null"
+            ]
+          },
+          "price": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "multipleOf": 0.25
+          },
+          "status": {
+            "const": "SOURCE_EVIDENCE_PENDING_ENGINE22_RECONCILIATION"
+          },
+          "noStructuralPromotion": {
+            "const": true
+          }
+        }
+      }
+    },
+    "fibs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "source",
+          "degree",
+          "ratioRaw",
+          "rawPrice",
+          "approval",
+          "noStructuralPromotion"
+        ],
+        "properties": {
+          "noStructuralPromotion": {
+            "const": true
+          },
+          "approval": {
+            "const": "SOURCE_EVIDENCE_PENDING_ENGINE22_RECONCILIATION"
+          }
+        }
+      }
+    },
+    "degreeTabs": {
+      "type": "object",
+      "required": [
+        "SUBMICRO",
+        "MICRO",
+        "SUBMINUTE",
+        "MINUTE",
+        "MINOR",
+        "INTERMEDIATE",
+        "PRIMARY"
+      ]
+    },
+    "rawWorksheets": {
+      "type": "object",
+      "required": [
+        "All Nodes",
+        "Start Here",
+        "Submicro",
+        "Micro",
+        "Subminute",
+        "Minute",
+        "Minor",
+        "Intermediate",
+        "Primary",
+        "Fib Levels",
+        "Source Notes"
+      ]
+    }
+  },
+  "additionalProperties": false,
+  "$comment": "Only source evidence; approval of count IDs, ESZ6 candle basis, timezone, source status and display coordinates requires separate Engine22/11/2B acceptance. Historical revisions are append-only; never overwrite source cells."
+}
