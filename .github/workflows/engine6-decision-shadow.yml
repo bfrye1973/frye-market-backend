@@ -63,8 +63,16 @@ jobs:
       - name: Existing shadow regression
         run: node --test services/core/tests/engine6ZoneRotationContext.test.js
       - name: Adjacent PAPER pipeline contract regressions
+        shell: bash
         run: |
-          node --test services/core/tests/engine7SingleSizingOwner.test.js
-          node --test services/core/tests/engine26Engine7Engine9CombinedVerification.test.js
-          node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
-          node --test services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js
+          failures=0
+          for file in \
+            services/core/tests/engine7SingleSizingOwner.test.js \
+            services/core/tests/engine26Engine7Engine9CombinedVerification.test.js \
+            services/core/tests/engine8Engine10Strategy1Provenance.test.js \
+            services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js; do
+            echo "=== $file ==="
+            node --test "$file" || failures=$((failures+1))
+          done
+          echo "ADJACENT_PIPELINE_FAILED_SUITES=$failures" >> "$GITHUB_STEP_SUMMARY"
+          exit "$failures"
