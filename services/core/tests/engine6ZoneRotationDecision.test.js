@@ -52,12 +52,23 @@ test("4h absent is backdrop warning not automatically disqualifying",()=>{
 test("completed old trip exact identity is blocked",()=>{
  assert.equal(run({completedTrip:{candidateId:"C1",midpointCompleted:true}}).decision,"BLOCK");
 });
-test("new candidate identity after old completed trip may qualify",()=>{
+test("new ID alone does not prove a fresh candidate generation",()=>{
  const r=run({completedTrip:{candidateId:"PREVIOUS",midpointCompleted:true}});
- assert.equal(r.decision,"ALLOW");assert.ok(r.warnings.includes("FRESH_CANDIDATE_AFTER_COMPLETED_TRIP"));
+ assert.equal(r.decision,"WAIT");assert.ok(r.reasons.includes("FRESH_CANDIDATE_LIFECYCLE_PROOF_PENDING"));
 });
-test("candidate already released blocks late entries",()=>{
- assert.equal(run({candidate:{...candidate,objectiveCompletedAt:"2026-10-20T15:00:00Z"}}).decision,"BLOCK");
+test("verified promoted generation may qualify with independent fresh reaction",()=>{
+ const r=run({completedTrip:{candidateId:"PREVIOUS",midpointCompleted:true},
+ candidate:{...candidate,priorCandidateId:"PREVIOUS",promotedFromTargetCompletion:true,candidateLifecycleStartTime:"2026-10-20T16:00:00Z",
+ zoneMemorySummary:{currentCandidateId:"C1",candidateLifecycleStartTime:"2026-10-20T16:00:00Z",objectiveCompletedAt:"2026-10-20T15:00:00Z",lifecycleStatus:"ACTIVE"}}});
+ assert.equal(r.decision,"ALLOW");
+ assert.ok(r.warnings.includes("FRESH_CANDIDATE_AFTER_COMPLETED_TRIP"));
+});
+test("historical objectiveCompletedAt does not itself terminate a fresh candidate",()=>{
+ const r=run({candidate:{...candidate,zoneMemorySummary:{currentCandidateId:"OLD",objectiveCompletedAt:"2026-10-20T15:00:00Z"}}});
+ assert.equal(r.decision,"ALLOW");
+});
+test("current matching memory with terminal lifecycle blocks",()=>{
+ assert.equal(run({candidate:{...candidate,zoneMemorySummary:{currentCandidateId:"C1",lifecycleStatus:"COMPLETED",objectiveCompletedAt:"2026-10-20T15:00:00Z"}}}).decision,"BLOCK");
 });
 test("promoted candidate without old provenance waits",()=>{
  assert.equal(run({candidate:{...candidate,promotedFromTargetCompletion:true}}).decision,"WAIT");
@@ -69,4 +80,23 @@ test("unconfirmed Fib levels do not become owner confirmation",()=>{
 test("existing Phase4 fails means never upgrade to GO",()=>{
  const r=run({phase4:{...phase4,allowed:false,blockers:["ENGINE4_PARTICIPATION_WAITING"]},context:{...context,internals:{...context.internals,directionalAssessment:"SUPPORTIVE"}}});
  assert.equal(r.decision,"WAIT");assert.equal(r.allowed,false);
+});
+
+test("REDUCE never activates without Engine7 receipt",()=>{
+ const adverse={...context,internals:{...context.internals,directionalAssessment:"CAUTION"}};
+ const r=run({context:adverse,reduceSizingAcknowledgment:{candidateId:"C1",zoneId:"Z1",decision:"REDUCE",enforced:false,finalContracts:3,engine7SizingOwner:true}});
+ assert.equal(r.decision,"REDUCE");assert.equal(r.reduceSizingEnforcementVerified,false);
+ assert.equal(r.reducedPermissionActivationAllowed,false);
+ assert.ok(r.warnings.includes("REDUCE_NOT_ENFORCED_BY_ENGINE7"));
+});
+test("hypothetical bounded Engine7 REDUCE receipt remains non-authoritative shadow",()=>{
+ const adverse={...context,internals:{...context.internals,directionalAssessment:"CAUTION"}};
+ const r=run({context:adverse,reduceSizingAcknowledgment:{candidateId:"C1",zoneId:"Z1",decision:"REDUCE",enforced:true,finalContracts:2,engine7SizingOwner:true}});
+ assert.equal(r.decision,"REDUCE");assert.equal(r.reduceSizingEnforcementVerified,true);
+ assert.equal(r.paperAllowed,false);assert.equal(r.reducedPermissionActivationAllowed,false);
+});
+test("REDUCE receipt for wrong candidate fails to verify",()=>{
+ const adverse={...context,internals:{...context.internals,directionalAssessment:"MIXED"}};
+ const r=run({context:adverse,reduceSizingAcknowledgment:{candidateId:"OLD",zoneId:"Z1",decision:"REDUCE",enforced:true,finalContracts:1,engine7SizingOwner:true}});
+ assert.equal(r.reduceSizingEnforcementVerified,false);
 });
