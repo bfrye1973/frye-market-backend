@@ -20,9 +20,11 @@ test("6D cannot activate PAPER permission or import execution",()=>{
  assert.equal(d.livePermissionOwner,"buildStrategySnapshot.js");
  assert.equal(Object.isFrozen(d),true);
 });
-test("existing snapshot wrapper not wired to 6A–6D, new decision remains shadow",()=>{
+test("Stage4 snapshot routes through 6C and 6D, while 6A/6B retain existing interfaces",()=>{
  const source=readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
- for(const fragment of ["6a-trade-qualification","6b-market-intelligence","6c-trade-decision"]) assert.equal(source.includes(fragment),false);
+ for(const fragment of ["6a-trade-qualification","6b-market-intelligence"]) assert.equal(source.includes(fragment),false);
+ assert.equal(source.includes("6c-trade-decision/index.js"),true);
+ assert.equal(source.includes("6d-paper-permission/buildStrategy1PermissionGate.js"),true);
  assert.equal(source.includes("6d-paper-permission/buildApprovedPaperPermissionLock.js"),true);
  assert.equal(source.includes("buildEngine6PaperPermission({"),true);
  assert.equal(source.includes("applyEngine6ApprovedPaperPermissionLock"),true);
