@@ -3,7 +3,31 @@
 export function createEngine6ApprovedPaperPermissionLock(nowIso) {
   let engine6ApprovedPaperPermissionLock = null;
   
-  const rememberEngine6ApprovedPaperPermission = (permission) => {
+  const validContext = (paper, context) => {
+    const candidate = context?.candidate;
+    if (!candidate?.candidateId || !candidate?.zoneId ||
+        candidate.candidateId !== paper?.candidateId ||
+        candidate.zoneId !== paper?.zoneId) return false;
+    if (candidate?.active !== true ||
+        context?.reactionHandoff?.evaluationAuthorized !== true ||
+        context?.reactionHandoff?.candidateId !== candidate.candidateId ||
+        context?.reactionHandoff?.zoneId !== candidate.zoneId) return false;
+    const memory = candidate.zoneMemorySummary;
+    const status = String(candidate.status || "").toUpperCase();
+    if (["COMPLETED","INVALIDATED","RETIRED","CANCELLED","EXPIRED"].includes(status) ||
+        candidate.invalidatedAt != null ||
+        candidate.invalidationFacts?.completedCloseInvalidationConfirmed === true ||
+        candidate.candidateInvalidated === true ||
+        candidate.locationInvalidated === true ||
+        (memory?.currentCandidateId === candidate.candidateId &&
+         ["COMPLETED","INVALIDATED","RETIRED","CANCELLED","EXPIRED"].includes(String(memory.lifecycleStatus||"").toUpperCase()))) return false;
+    const generation = candidate.candidateLifecycleStartTime ??
+      (memory?.currentCandidateId === candidate.candidateId ? memory.candidateLifecycleStartTime : null);
+    const saved = paper?.candidateLifecycleStartTime;
+    if (saved != null && generation != null && saved !== generation) return false;
+    return true;
+  };
+  const rememberEngine6ApprovedPaperPermission = (permission, context) => {
     const paper = permission?.paper || null;
   
     if (
@@ -12,11 +36,13 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
       paper?.paperAllowed === true &&
       ["LONG", "SHORT"].includes(String(paper?.direction || "").toUpperCase()) &&
       paper?.candidateId &&
-      paper?.zoneId
+      paper?.zoneId &&
+      validContext(paper, context)
     ) {
       engine6ApprovedPaperPermissionLock =
         JSON.parse(JSON.stringify({
           ...paper,
+          candidateLifecycleStartTime: context.candidate.candidateLifecycleStartTime ?? (context.candidate.zoneMemorySummary?.currentCandidateId === context.candidate.candidateId ? context.candidate.zoneMemorySummary?.candidateLifecycleStartTime : null) ?? null,
           locked: true,
           lockedAt: nowIso(),
           lockSource: "ENGINE6_FAST_INTRADAY_PAPER_ALLOW",
@@ -25,8 +51,8 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
     }
   };
   
-  const applyEngine6ApprovedPaperPermissionLock = (permission) => {
-    if (!engine6ApprovedPaperPermissionLock) {
+  const applyEngine6ApprovedPaperPermissionLock = (permission, context) => {
+    if (!engine6ApprovedPaperPermissionLock || !validContext(engine6ApprovedPaperPermissionLock, context)) {
       return permission;
     }
   
