@@ -8,6 +8,7 @@ on:
       - "services/core/tests/engine6ModularBoundaries.test.js"
       - "services/core/tests/engine6ApprovalLockExtraction.test.js"
       - "services/core/tests/engine6Stage4PermissionGate.test.js"
+      - "services/core/tests/engine6Stage4ScenarioAcceptance.test.js"
       - "services/core/jobs/buildStrategySnapshot.js"
       - "services/core/logic/engine6/**"
       - "services/core/logic/engine6/strategy1PermissionContract.js"
@@ -50,6 +51,8 @@ jobs:
         run: |
           node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
           node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Stage4 full decision-path scenario fixtures
+        run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
       - name: Stage4 permission and sequencing regressions
         run: node --test services/core/tests/engine6Stage4PermissionGate.test.js
       - name: Engine6D lock extraction regressions
