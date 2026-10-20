@@ -62,3 +62,9 @@ jobs:
         run: node --test services/core/tests/engine6ZoneRotationDecision.test.js
       - name: Existing shadow regression
         run: node --test services/core/tests/engine6ZoneRotationContext.test.js
+      - name: Adjacent PAPER pipeline contract regressions
+        run: |
+          node --test services/core/tests/engine7SingleSizingOwner.test.js
+          node --test services/core/tests/engine26Engine7Engine9CombinedVerification.test.js
+          node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
+          node --test services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js
