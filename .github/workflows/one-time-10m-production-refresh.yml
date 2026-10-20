@@ -1,0 +1,80 @@
+name: One-Time 10m Production Refresh
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-10min
+      PYTHONUNBUFFERED: "1"
+      FD_SCALPER_ENABLE: "true"
+      FD_SCALPER_LOOKBACK: "3"
+      FD_LOOKBACK_DAYS: "20"
+      FD_MAX_WORKERS: "10"
+      FD_RETRY_MAX: "1"
+      POLY_KEY: ${{ secrets.POLY_KEY }}
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build current intraday source
+        run: |
+          mkdir -p data
+          python -u scripts/build_outlook_source_from_polygon.py \
+            --sectors-dir data/sectors \
+            --out data/outlook_source.json
+
+      - name: Build current intraday payload
+        run: |
+          python -u scripts/make_dashboard.py \
+            --mode intraday \
+            --source data/outlook_source.json \
+            --out data/outlook_intraday.json
+
+      - name: Show fresh totals before publish
+        run: |
+          python - <<'PY'
+          import json
+          j=json.load(open("data/outlook_intraday.json"))
+          cards=j.get("sectorCards") or []
+          print("updated_at_utc",j.get("updated_at_utc"))
+          print("cards",len(cards))
+          print("up",sum(float(c.get("up") or 0) for c in cards))
+          print("down",sum(float(c.get("down") or 0) for c in cards))
+          print("advancingVolume",sum(float(c.get("advancingVolume") or 0) for c in cards))
+          print("decliningVolume",sum(float(c.get("decliningVolume") or 0) for c in cards))
+          PY
+
+      - name: Publish to canonical data-live-10min
+        run: |
+          git config user.email "bot@ci.local"
+          git config user.name "CI Bot"
+          mkdir -p /tmp/publish10m
+          cp data/outlook_source.json /tmp/publish10m/outlook_source.json
+          cp data/outlook_intraday.json /tmp/publish10m/outlook_intraday.json
+          git fetch origin "$LIVE_BRANCH" --depth=1
+          rm -f data/outlook_source.json data/outlook_intraday.json
+          git checkout -B "$LIVE_BRANCH" "origin/$LIVE_BRANCH"
+          mkdir -p data
+          cp /tmp/publish10m/outlook_source.json data/outlook_source.json
+          cp /tmp/publish10m/outlook_intraday.json data/outlook_intraday.json
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > data/heartbeat_10m.txt
+          git add data/outlook_source.json data/outlook_intraday.json data/heartbeat_10m.txt
+          git commit -m "one-time fresh 10m publish $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          git push --force-with-lease origin "$LIVE_BRANCH"
