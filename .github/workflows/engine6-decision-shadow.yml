@@ -1,0 +1,49 @@
+name: Engine6 Strategy1 Stages1-3 Baseline and Shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine6/evaluateZoneRotationDecision.js"
+      - "services/core/tests/engine6ZoneRotationDecision.test.js"
+      - ".github/workflows/engine6-decision-shadow.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  phase4-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Historical Phase4 baseline — record failures, do not rewrite tests
+        shell: bash
+        run: |
+          set +e
+          node --test services/core/tests/engine6Strategy1Phase4.test.js > phase4-baseline.log 2>&1
+          code=$?
+          cat phase4-baseline.log
+          echo "PHASE4_BASELINE_EXIT_CODE=$code" >> "$GITHUB_STEP_SUMMARY"
+          echo '### Historical Phase4 baseline' >> "$GITHUB_STEP_SUMMARY"
+          echo '\`\`\`text' >> "$GITHUB_STEP_SUMMARY"
+          tail -55 phase4-baseline.log >> "$GITHUB_STEP_SUMMARY"
+          echo '\`\`\`' >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - name: Current Phase4 focused tests
+        run: |
+          node --test services/core/tests/engine6Strategy1Qualification.phaseD3.test.js
+  isolated-decision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
+          node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Decision regressions
+        run: node --test services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Existing shadow regression
+        run: node --test services/core/tests/engine6ZoneRotationContext.test.js
