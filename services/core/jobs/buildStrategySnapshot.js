@@ -9158,6 +9158,7 @@ if (isEsIntradayScalp) {
 const {
   rememberEngine6ApprovedPaperPermission,
   applyEngine6ApprovedPaperPermissionLock,
+  rememberExistingOpenPaperApproval,
 } = createEngine6ApprovedPaperPermissionLock(nowIso);
 const engine6DCanonicalReactionHandoff = engine26ReactionHandoff;
 const engine6DLockContext = () => ({
@@ -9716,6 +9717,13 @@ if (isEsIntradayScalp) {
         finalCanonicalEngine4,
     });
 
+  // Only an already OPEN journaled PAPER trade can preserve a previous locked GO.
+  // This does not authorize a NEW entry or rerun market-context qualification.
+  rememberExistingOpenPaperApproval(
+    previousSnapshot?.strategies?.[s.strategyId]?.permission ?? null,
+    engine26OpenPaperTrades,
+    engine6DLockContext(),
+  );
   engine6ZoneRotationDecision = evaluateEngine6ZoneRotationDecision({
     symbol, strategyId: s.strategyId,
     candidate: engine26LocationCandidate,
