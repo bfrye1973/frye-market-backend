@@ -19,7 +19,7 @@ function evaluate(sceneData=scene(),opts={}){
  const {candidate,reaction,participation}=sceneData;
  const p=phase4({symbol:"ES",strategyId:id.strategyId,engine26LocationCandidate:candidate,engine3Reaction:reaction,engine4Participation:participation,direction:reaction.direction});
  const market=opts.market===undefined?internals(reaction.direction):opts.market;
- const w=opts.wave??wave;
+ const w=opts.wave??(reaction.direction==="LONG" ? {currentWavelength:{degrees:{submicro:{activeWave:"W2",direction:"UP",ownerSubmicroW2:{direction:"UP",confirmationStatus:"OWNER_COUNT_CANDLE_CONFIRMATION_PENDING"}},micro:{direction:"DOWN",ownerMicroW3:{direction:"DOWN"}}}}} : wave);
  const ctx=contextBuilder({candidate,reaction,participation,engine22WaveStrategy:w,engine25Participation:market});
  const d=decide({candidate,reaction,participation,phase4:p,context:ctx,engine25Participation:market,completedTrip:opts.completedTrip});
  const raw={paper:{decision:"FAST_INTRADAY_PAPER_ALLOW",allowed:p.allowed,paperAllowed:p.paperAllowed,planningAllowed:p.planningAllowed,direction:reaction.direction,candidateId:id.candidateId,zoneId:id.zoneId,locked:false},permission:"ALLOW"};
