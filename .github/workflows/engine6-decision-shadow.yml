@@ -4,6 +4,8 @@ on:
     paths:
       - "services/core/logic/engine6/evaluateZoneRotationDecision.js"
       - "services/core/tests/engine6ZoneRotationDecision.test.js"
+      - "services/core/tests/engine6PhaseD3FocusedCorrection.test.js"
+      - "services/core/logic/engine6/strategy1PermissionContract.js"
       - ".github/workflows/engine6-decision-shadow.yml"
   workflow_dispatch:
 permissions:
@@ -43,6 +45,8 @@ jobs:
         run: |
           node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
           node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Eight focused D3 regressions
+        run: node --test services/core/tests/engine6PhaseD3FocusedCorrection.test.js
       - name: Decision regressions
         run: node --test services/core/tests/engine6ZoneRotationDecision.test.js
       - name: Existing shadow regression
