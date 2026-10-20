@@ -122,5 +122,25 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
       schwabExecutionAllowed: false,
     };
   };
-  return { rememberEngine6ApprovedPaperPermission, applyEngine6ApprovedPaperPermissionLock };
+  // Cross-snapshot preservation uses an EXISTING OPEN PAPER journal trade and
+  // previously locked snapshot permission; no new storage or requalification.
+  const rememberExistingOpenPaperApproval = (priorPermission, openTrades, context) => {
+    const paper = priorPermission?.paper;
+    if (paper?.locked !== true ||
+        paper?.decision !== "FAST_INTRADAY_PAPER_ALLOW" ||
+        paper?.allowed !== true || paper?.paperAllowed !== true ||
+        !validContext(paper, context)) return false;
+    const trades = Array.isArray(openTrades) ? openTrades : [];
+    const match = trades.some((t) =>
+      String(t?.status || "").toUpperCase() === "OPEN" &&
+      String(t?.accountMode || "").toUpperCase() === "PAPER" &&
+      t?.candidateId === paper.candidateId &&
+      t?.zoneId === paper.zoneId &&
+      String(t?.direction || "").toUpperCase() === String(paper.direction || "").toUpperCase()
+    );
+    if (!match) return false;
+    engine6ApprovedPaperPermissionLock = JSON.parse(JSON.stringify(paper));
+    return true;
+  };
+  return { rememberEngine6ApprovedPaperPermission, applyEngine6ApprovedPaperPermissionLock, rememberExistingOpenPaperApproval };
 }
