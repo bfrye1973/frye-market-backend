@@ -1,0 +1,38 @@
+name: Redline Market Brief Live Validation
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  live-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for production briefs
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            if curl -fsS https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard -o /tmp/e25.json; then
+              if jq -e '.redlineCurrentMarketBrief != null and .redlineIntradayBrief != null' /tmp/e25.json >/dev/null; then
+                break
+              fi
+            fi
+            sleep 10
+          done
+
+          jq -e '.ok == true' /tmp/e25.json
+          jq -e '.redlineCurrentMarketBrief.readOnly == true' /tmp/e25.json
+          jq -e '.redlineCurrentMarketBrief.predictive == false' /tmp/e25.json
+          jq -e '.redlineCurrentMarketBrief.createsTradingSignal == false' /tmp/e25.json
+          jq -e '.redlineIntradayBrief.readOnly == true' /tmp/e25.json
+          jq -e '.redlineIntradayBrief.predictive == false' /tmp/e25.json
+          jq -e '.redlineIntradayBrief.createsTradingSignal == false' /tmp/e25.json
+
+          jq '{
+            currentMarketBrief: .redlineCurrentMarketBrief.paragraphs,
+            intradayBrief: .redlineIntradayBrief.paragraphs,
+            currentSections: [.redlineCurrentMarketBrief.sections[].key],
+            intradaySections: [.redlineIntradayBrief.sections[].key]
+          }' /tmp/e25.json
