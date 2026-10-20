@@ -6,6 +6,8 @@ on:
       - "services/core/tests/engine6ZoneRotationDecision.test.js"
       - "services/core/tests/engine6PhaseD3FocusedCorrection.test.js"
       - "services/core/tests/engine6ModularBoundaries.test.js"
+      - "services/core/tests/engine6ApprovalLockExtraction.test.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
       - "services/core/logic/engine6/**"
       - "services/core/logic/engine6/strategy1PermissionContract.js"
       - ".github/workflows/engine6-decision-shadow.yml"
@@ -47,6 +49,8 @@ jobs:
         run: |
           node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
           node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Engine6D lock extraction regressions
+        run: node --test services/core/tests/engine6ApprovalLockExtraction.test.js
       - name: Modular boundaries and compatibility
         run: node --test services/core/tests/engine6ModularBoundaries.test.js
       - name: Eight focused D3 regressions
