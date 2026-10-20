@@ -76,3 +76,20 @@ jobs:
           done
           echo "ADJACENT_PIPELINE_FAILED_SUITES=$failures" >> "$GITHUB_STEP_SUMMARY"
           exit "$failures"
+
+      - name: Compare adjacent failures with untouched pre-Stage4 baseline
+        if: always()
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin 55ef4b917ae37a6d2bab3a527a0b025a1e644eea
+          git worktree add --detach /tmp/engine6-stage3-baseline 55ef4b917ae37a6d2bab3a527a0b025a1e644eea
+          cd /tmp/engine6-stage3-baseline
+          set +e
+          for file in \
+            services/core/tests/engine26Engine7Engine9CombinedVerification.test.js \
+            services/core/tests/engine8Engine10Strategy1Provenance.test.js; do
+            echo "=== PRE-STAGE4 BASELINE: $file ==="
+            node --test "$file"
+            echo "BASELINE_EXIT_$file=$?"
+          done
+          exit 0
