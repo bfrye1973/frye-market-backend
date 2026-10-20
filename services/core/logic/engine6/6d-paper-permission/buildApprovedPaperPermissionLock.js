@@ -8,10 +8,7 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
     if (!candidate?.candidateId || !candidate?.zoneId ||
         candidate.candidateId !== paper?.candidateId ||
         candidate.zoneId !== paper?.zoneId) return false;
-    if (candidate?.active !== true ||
-        context?.reactionHandoff?.evaluationAuthorized !== true ||
-        context?.reactionHandoff?.candidateId !== candidate.candidateId ||
-        context?.reactionHandoff?.zoneId !== candidate.zoneId) return false;
+
     const memory = candidate.zoneMemorySummary;
     const status = String(candidate.status || "").toUpperCase();
     if (["COMPLETED","INVALIDATED","RETIRED","CANCELLED","EXPIRED"].includes(status) ||
@@ -27,6 +24,13 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
     if (saved != null && generation != null && saved !== generation) return false;
     return true;
   };
+  // Only NEW approvals require present upstream authorization.
+  // Restoration is identity/lifecycle preservation, not fresh qualification.
+  const newApprovalAuthorized = (context) =>
+    context?.candidate?.active === true &&
+    context?.reactionHandoff?.evaluationAuthorized === true &&
+    context?.reactionHandoff?.candidateId === context?.candidate?.candidateId &&
+    context?.reactionHandoff?.zoneId === context?.candidate?.zoneId;
   const rememberEngine6ApprovedPaperPermission = (permission, context) => {
     const paper = permission?.paper || null;
   
@@ -37,7 +41,8 @@ export function createEngine6ApprovedPaperPermissionLock(nowIso) {
       ["LONG", "SHORT"].includes(String(paper?.direction || "").toUpperCase()) &&
       paper?.candidateId &&
       paper?.zoneId &&
-      validContext(paper, context)
+      validContext(paper, context) &&
+      newApprovalAuthorized(context)
     ) {
       engine6ApprovedPaperPermissionLock =
         JSON.parse(JSON.stringify({
