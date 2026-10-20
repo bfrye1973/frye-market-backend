@@ -25,7 +25,7 @@ const transientCodes=new Set([
 export function evaluateEngine6ZoneRotationDecision({
  symbol="ES",strategyId="intraday_scalp@10m",candidate=null,reaction=null,
  participation=null,phase4=null,context=null,engine25Participation=null,
- completedTrip=null
+ completedTrip=null,reduceSizingAcknowledgment=null
 }={}) {
  const reasons=[],warnings=[];
  const e26=obj(candidate),e3=obj(reaction),e4=obj(participation);
@@ -56,17 +56,36 @@ export function evaluateEngine6ZoneRotationDecision({
  if(DIR.has(pDirection)&&pDirection!==direction)block("ENGINE3_ENGINE4_DIRECTION_CONFLICT");
  if(e4?.hardBlocked===true)block("ENGINE4_HARD_BLOCKED");
  if(e26?.candidateInvalidated===true||e26?.locationInvalidated===true)block("ENGINE26A_INVALIDATED");
- // Completed-trip matching: exact same candidate cannot be reauthorized.
+ // Active candidate and historical zone-memory records are different generations.
+ // Engine26A owns lifecycle; identity plus owner-published start/provenance are evidence.
  const prior=obj(completedTrip);
- if(prior?.candidateId && prior.candidateId===id &&
-    (prior.midpointCompleted===true||prior.status==="CLOSED"||prior.status==="COMPLETED"))
-   block("COMPLETED_TRIP_CANDIDATE_REUSED");
- if(e26?.objectiveCompletedAt||e26?.releaseReason||
-    e26?.zoneMemorySummary?.objectiveCompletedAt||e26?.zoneMemorySummary?.releaseReason)
-   block("CANDIDATE_ALREADY_COMPLETED");
- if(e26?.promotedFromTargetCompletion===true && !prior?.candidateId)
-   wait("FRESH_CANDIDATE_PROVENANCE_UNCONFIRMED");
- if(prior?.candidateId && prior.candidateId!==id)warnings.push("FRESH_CANDIDATE_AFTER_COMPLETED_TRIP");
+ const memory=obj(e26?.zoneMemorySummary);
+ const lifecycleStart=e26?.candidateLifecycleStartTime??memory?.candidateLifecycleStartTime??null;
+ const currentMemoryOwner=memory?.currentCandidateId===id;
+ const completionOwner=prior?.candidateId??null;
+ const oldCandidateCompleted=completionOwner===id &&
+   (prior?.midpointCompleted===true||["CLOSED","COMPLETED"].includes(upper(prior?.status)));
+ if(oldCandidateCompleted)block("COMPLETED_TRIP_CANDIDATE_REUSED");
+ const currentTerminal=["COMPLETED","INVALIDATED","CANCELLED","RETIRED"].includes(
+   upper(e26?.status??e26?.candidateState)) ||
+   (currentMemoryOwner && ["COMPLETED","INVALIDATED","CANCELLED","RETIRED"].includes(upper(memory?.lifecycleStatus)));
+ if(currentTerminal)block("CURRENT_CANDIDATE_TERMINAL_LIFECYCLE");
+ // Never treat historical objectiveCompletedAt by itself as current completion.
+ if(memory?.objectiveCompletedAt && !currentMemoryOwner)
+   warnings.push("HISTORICAL_ZONE_COMPLETION_NOT_CURRENT_CANDIDATE");
+ if(prior?.candidateId && prior.candidateId!==id){
+   const parentMatches=[e26?.priorCandidateId,e26?.parentCandidateId].includes(prior.candidateId);
+   const childCurrent= currentMemoryOwner || Boolean(lifecycleStart);
+   if(!parentMatches || !childCurrent)
+      wait("FRESH_CANDIDATE_LIFECYCLE_PROOF_PENDING");
+   else warnings.push("FRESH_CANDIDATE_AFTER_COMPLETED_TRIP");
+ }
+ if(e26?.promotedFromTargetCompletion===true){
+   const parent=e26?.priorCandidateId??e26?.parentCandidateId;
+   if(!parent || !lifecycleStart || !currentMemoryOwner ||
+      (completionOwner && parent!==completionOwner))
+      wait("PROMOTED_CANDIDATE_PROVENANCE_UNVERIFIED");
+ }
  // Preserve Phase 4 as mandatory permission authority. Never upgrade a Phase 4 denial.
  if(phase?.allowed!==true)wait("PHASE4_MANDATORY_GATES_NOT_PASSED");
  if(ctx?.eligibleForPermissionReview===false)wait("SHADOW_CONTEXT_NOT_REVIEW_READY");
@@ -104,6 +123,17 @@ export function evaluateEngine6ZoneRotationDecision({
      decision="REDUCE";
    else decision="ALLOW";
  }
+ // REDUCE cannot be promoted to a live GO without an exact bound Engine7 receipt.
+ // This field is shadow diagnostic only and cannot create permission.
+ const receipt=obj(reduceSizingAcknowledgment);
+ const reducedRiskAcknowledged=decision==="REDUCE" &&
+   receipt?.candidateId===id && receipt?.zoneId===zone &&
+   receipt?.decision==="REDUCE" && receipt?.enforced===true &&
+   Number.isInteger(receipt?.finalContracts) &&
+   receipt.finalContracts>0 && receipt.finalContracts<3 &&
+   receipt?.engine7SizingOwner===true;
+ if(decision==="REDUCE" && !reducedRiskAcknowledged)
+   warnings.push("REDUCE_NOT_ENFORCED_BY_ENGINE7");
  if(decision==="WAIT" && !reasons.length)reasons.push("CONTEXT_CONFIRMATION_PENDING");
  if(decision==="REDUCE")reasons.push("ADVERSE_CONTEXT_REDUCED_SIZE_REVIEW_ONLY");
  if(decision==="ALLOW")reasons.push("MANDATORY_GATES_PASS_CONTEXT_SUPPORTIVE");
@@ -113,6 +143,8 @@ export function evaluateEngine6ZoneRotationDecision({
    canCreatePermission:false,allowed:false,paperAllowed:false,
    realExecutionAllowed:false,brokerExecutionAllowed:false,
    reducedSizeEligibleForManagerReview:decision==="REDUCE",
+   reduceSizingEnforcementVerified:reducedRiskAcknowledged,
+   reducedPermissionActivationAllowed:false,
    sizingFormula:null,phase4MandatoryQualified:phase?.allowed===true,
    evidence:{pressure,validTactical,backdrop,
      submicroOwnerConfirmed:sub?.confirmed===true,
