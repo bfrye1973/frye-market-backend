@@ -9157,6 +9157,11 @@ const {
   rememberEngine6ApprovedPaperPermission,
   applyEngine6ApprovedPaperPermissionLock,
 } = createEngine6ApprovedPaperPermissionLock(nowIso);
+const engine6DCanonicalReactionHandoff = engine26ReactionHandoff;
+const engine6DLockContext = () => ({
+  candidate: engine26LocationCandidate,
+  reactionHandoff: engine6DCanonicalReactionHandoff,
+});
 
 let finalPermissionRaw =
   isEsIntradayScalp
@@ -9202,7 +9207,7 @@ let finalPermission =
       })
     : finalPermissionRaw;
 if (isEsIntradayScalp) {
-  rememberEngine6ApprovedPaperPermission(finalPermission);
+  rememberEngine6ApprovedPaperPermission(finalPermission, engine6DLockContext());
 }
 
 let engine26ImbalanceWatch = null;
@@ -9782,13 +9787,13 @@ if (isEsIntradayScalp) {
         finalCanonicalEngine4,
     });
 
-  rememberEngine6ApprovedPaperPermission(recalculatedPermission);
+  rememberEngine6ApprovedPaperPermission(recalculatedPermission, engine6DLockContext());
 
   finalPermissionRaw =
-    applyEngine6ApprovedPaperPermissionLock(recalculatedPermissionRaw);
+    applyEngine6ApprovedPaperPermissionLock(recalculatedPermissionRaw, engine6DLockContext());
 
   finalPermission =
-    applyEngine6ApprovedPaperPermissionLock(recalculatedPermission);
+    applyEngine6ApprovedPaperPermissionLock(recalculatedPermission, engine6DLockContext());
 
   if (finalPermission?.paper?.allowed !== true) {
     engine26PaperTradeTicket = null;
