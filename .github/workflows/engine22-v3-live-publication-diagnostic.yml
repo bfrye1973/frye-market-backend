@@ -1,0 +1,47 @@
+name: Engine22 V3 Live Publication Diagnostic
+on:
+  push:
+    branches: [engine22-v3-live-publication-diagnostic-20261012]
+  pull_request:
+    paths: [".github/workflows/engine22-v3-live-publication-diagnostic.yml"]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read production ES snapshot and report V3 fields
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --silent --show-error --max-time 40 \
+            'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES' \
+            -o "$RUNNER_TEMP/production-es.json"
+          node -e '
+          const fs=require("fs");
+          const f=process.env.RUNNER_TEMP+"/production-es.json";
+          const raw=fs.readFileSync(f,"utf8");
+          if(raw.includes("SNAPSHOT_NOT_READY") || raw.includes("SNAPSHOT_READ_FAILED") || raw.includes("SNAPSHOT_INVALID_JSON"))
+             {console.log("PRODUCTION_SNAPSHOT_RESPONSE",raw.slice(0,1300));process.exit(2);}
+          '
+          node -e '
+          const fs=require("fs");
+          const crypto=require("crypto");
+          const bytes=fs.readFileSync(process.env.RUNNER_TEMP+"/production-es.json");
+          const s=JSON.parse(bytes.toString());
+          const e=s.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy;
+          console.log(JSON.stringify({symbol:s.symbol,now:s.now,bytes:bytes.length,
+            sha256:crypto.createHash("sha256").update(bytes).digest("hex"),
+            engine22Present:!!e,engine22V3Shadow:e?.engine22V3Shadow?.available??null,
+            engine22V3ShadowReasons:e?.engine22V3Shadow?.reasonCodes??null,
+            engine22V3Projection:e?.engine22V3Projection?.available??null,
+            engine22V3ProjectionReasons:e?.engine22V3Projection?.reasonCodes??null,
+            v3CountIds:Object.fromEntries(Object.entries(e?.engine22V3Projection?.degreeStates??{}).map(([k,v])=>[k,v?.sourceCountId])),
+            legacyDegreeStatesPresent:!!e?.degreeStates,engine27Present:!!s.engine27Strategies},null,2));
+          '
+
+# Post PR96 publication verification: read-only.
+
+# Retry after production snapshot cadence.
+
+# Snapshot regeneration follow-up read.
