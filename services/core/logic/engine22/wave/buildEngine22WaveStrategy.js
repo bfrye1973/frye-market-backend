@@ -50,6 +50,7 @@ import {
 } from "../microV2/canonicalMicroStore.js";
 import { buildMicroProjectionBundle } from "../microV2/buildMicroProjectionBundle.js";
 import { buildMicroW2W3TransitionFibs } from "../microV2/buildMicroW2W3TransitionFibs.js";
+import { buildSubmicroMigrationShadow } from "../submicro/buildSubmicroMigrationShadow.js";
 import {
   mergeEngine22MicroSequenceState,
   persistEngine22MicroWaveRuntimeState,
@@ -2088,6 +2089,11 @@ export function buildEngine22WaveStrategy(input = {}) {
         }
       : null;
 
+  const submicroMigrationShadow =
+    buildSubmicroMigrationShadow({
+      microExecutionContext,
+    });
+
   const microW2W3TransitionFibs =
     microV2Migration?.available === true &&
     microV2Migration?.canonicalState
@@ -2345,6 +2351,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
     microExecutionContext,
+    submicroExecutionContext:
+      submicroMigrationShadow?.available === true
+        ? submicroMigrationShadow
+        : null,
+    submicroMigrationShadow,
     microW2W3TransitionFibs,
     microW3TouchW4Shadow,
     microV2Migration: microV2Migration

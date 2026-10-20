@@ -4,6 +4,7 @@ import { buildStrategyAccountMonitoring } from "../logic/accounts/buildStrategyA
 
 function engine22() {
   return {
+    submicroExecutionContext: { activeWave: "W3", waveDirection: "UP", lifecycle: "DEVELOPING", microTimingState: "TRANSITION_CONFIRMING", sourceCountId: "SM1", revision: 3 },
     microExecutionContext: { activeWave: "W3", waveDirection: "UP", lifecycle: "DEVELOPING", microTimingState: "TRANSITION_CONFIRMING", sourceCountId: "M1", revision: 3 },
     degreeStates: {
       subminute: { activeWave: "W3", direction: "UP", state: "ACTIVE" },
@@ -44,6 +45,8 @@ test("existing Intraday and Swing broker accounts route to Intraday and Subminut
   assert.equal(intraday.position.contracts, 5);
   assert.equal(subminute.position.contracts, 4);
   assert.equal(intraday.alignment, "ALIGNED");
+  assert.equal(intraday.structural.degree, "submicro");
+  assert.equal(intraday.structural.source, "submicroExecutionContext");
   assert.equal(subminute.alignment, "ALIGNED");
 });
 

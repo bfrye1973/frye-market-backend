@@ -4,7 +4,7 @@
 // This registry is descriptive only and carries no trading authority.
 
 export const STRATEGY_ACCOUNT_REGISTRY_VERSION =
-  "redline.strategyAccountRegistry.v1";
+  "redline.strategyAccountRegistry.v2";
 
 const LOCKED_TOTAL_CAPITAL = 46000;
 const LOCKED_RESERVE_CAPITAL = 8000;
@@ -13,15 +13,15 @@ const ACCOUNT_ROLES = Object.freeze([
   Object.freeze({
     accountRole: "INTRADAY",
     displayName: "Intraday",
-    degree: "micro",
+    degree: "submicro",
     strategyId: "intraday_scalp@10m",
     capitalTarget: 16000,
     normalMesMin: 1,
     normalMesMax: 5,
     holdingProfile: "INTRADAY",
-    structuralOwner: "MICRO",
+    structuralOwner: "SUBMICRO",
     lowerDegreeTiming: [],
-    parentContext: ["SUBMINUTE", "MINUTE"],
+    parentContext: ["MICRO", "SUBMINUTE", "MINUTE"],
     brokerBinding: Object.freeze({
       status: "BOUND_EXISTING",
       brokerAccountLabel: "SCHWAB_6380",
@@ -38,7 +38,7 @@ const ACCOUNT_ROLES = Object.freeze([
     normalMesMax: 4,
     holdingProfile: "FAST_SWING",
     structuralOwner: "SUBMINUTE",
-    lowerDegreeTiming: ["MICRO"],
+    lowerDegreeTiming: ["MICRO", "SUBMICRO"],
     parentContext: ["MINUTE", "MINOR", "INTERMEDIATE", "PRIMARY"],
     brokerBinding: Object.freeze({
       status: "BOUND_EXISTING",
@@ -56,7 +56,7 @@ const ACCOUNT_ROLES = Object.freeze([
     normalMesMax: 1,
     holdingProfile: "SWING",
     structuralOwner: "MINUTE",
-    lowerDegreeTiming: ["SUBMINUTE", "MICRO"],
+    lowerDegreeTiming: ["SUBMINUTE", "MICRO", "SUBMICRO"],
     parentContext: ["MINOR", "INTERMEDIATE", "PRIMARY"],
     brokerBinding: Object.freeze({
       status: "AWAITING_NEW_SCHWAB_ACCOUNT",
@@ -74,7 +74,7 @@ const ACCOUNT_ROLES = Object.freeze([
     normalMesMax: 1,
     holdingProfile: "SWING",
     structuralOwner: "MINOR",
-    lowerDegreeTiming: ["MINUTE", "SUBMINUTE", "MICRO"],
+    lowerDegreeTiming: ["MINUTE", "SUBMINUTE", "MICRO", "SUBMICRO"],
     parentContext: ["INTERMEDIATE", "PRIMARY"],
     brokerBinding: Object.freeze({
       status: "AWAITING_NEW_SCHWAB_ACCOUNT",
@@ -92,7 +92,7 @@ const ACCOUNT_ROLES = Object.freeze([
     normalMesMax: 1,
     holdingProfile: "POSITION_SWING",
     structuralOwner: "INTERMEDIATE",
-    lowerDegreeTiming: ["MINOR", "MINUTE", "SUBMINUTE", "MICRO"],
+    lowerDegreeTiming: ["MINOR", "MINUTE", "SUBMINUTE", "MICRO", "SUBMICRO"],
     parentContext: ["PRIMARY"],
     brokerBinding: Object.freeze({
       status: "AWAITING_NEW_SCHWAB_ACCOUNT",
@@ -110,7 +110,7 @@ const ACCOUNT_ROLES = Object.freeze([
     normalMesMax: 1,
     holdingProfile: "POSITION_SWING",
     structuralOwner: "PRIMARY",
-    lowerDegreeTiming: ["INTERMEDIATE", "MINOR", "MINUTE", "SUBMINUTE", "MICRO"],
+    lowerDegreeTiming: ["INTERMEDIATE", "MINOR", "MINUTE", "SUBMINUTE", "MICRO", "SUBMICRO"],
     parentContext: [],
     brokerBinding: Object.freeze({
       status: "AWAITING_NEW_SCHWAB_ACCOUNT",

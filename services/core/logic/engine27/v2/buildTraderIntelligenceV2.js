@@ -12,6 +12,7 @@
 // - No permission, sizing, geometry, execution, or journal authority is created.
 
 const DEGREE_ORDER = Object.freeze([
+  "submicro",
   "micro",
   "subminute",
   "minute",
@@ -21,6 +22,7 @@ const DEGREE_ORDER = Object.freeze([
 ]);
 
 const DEGREE_LABELS = Object.freeze({
+  submicro: "Submicro",
   micro: "Micro",
   subminute: "Subminute",
   minute: "Minute",
@@ -618,6 +620,36 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
     ? currentWavelength.degrees
     : {};
 
+  const submicroExecutionContext =
+    isObject(engine22?.submicroExecutionContext)
+      ? engine22.submicroExecutionContext
+      : null;
+
+  const submicroWavelength =
+    submicroExecutionContext?.available === true
+      ? {
+          activeWave: submicroExecutionContext.activeWave ?? null,
+          direction:
+            submicroExecutionContext.waveDirection ??
+            submicroExecutionContext.direction ??
+            null,
+          state:
+            submicroExecutionContext.lifecycle ??
+            submicroExecutionContext.microTimingState ??
+            null,
+          confirmationStatus:
+            submicroExecutionContext.microTimingState ??
+            submicroExecutionContext.lifecycle ??
+            "NOT_PUBLISHED",
+          invalidation:
+            submicroExecutionContext?.invalidation?.price ??
+            submicroExecutionContext?.invalidation ??
+            null,
+          levels: [],
+          nextLevel: null,
+        }
+      : null;
+
   const snapshotTime = snapshotTimestamp(snapshot);
   const degrees = {};
 
@@ -626,7 +658,10 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
       degree,
       state: degreeStates?.[degree] || null,
       display: displayDegrees?.[degree] || null,
-      wavelength: wavelengthDegrees?.[degree] || null,
+      wavelength:
+        degree === "submicro"
+          ? submicroWavelength
+          : wavelengthDegrees?.[degree] || null,
       currentWavelength,
       snapshotTime,
     });
@@ -637,7 +672,7 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
 
   return {
     active: Boolean(engine22),
-    engine: "engine27.traderIntelligenceV2.v1",
+    engine: "engine27.traderIntelligenceV2.v2",
     mode: "READ_ONLY",
     symbol: textOrNull(snapshot?.symbol),
     builtAt: new Date().toISOString(),
@@ -662,7 +697,10 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
       additiveOnly: true,
       existingEngine27ContractsUntouched: true,
       existingFiveDegreePipelinePreserved: true,
-      microAddedForPresentation: true,
+      sevenStructuralDegrees: true,
+      sixStrategyAccountsPreserved: true,
+      submicroAddedForIntradayPresentation: true,
+      microPreservedAsImmediateParentContext: true,
     },
 
     noPermissionCreated: true,
@@ -673,7 +711,9 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
     noJournalWrite: true,
 
     reasonCodes: [
-      "ENGINE27_V2_SIX_DEGREE_PRESENTATION_BUILT",
+      "ENGINE27_V2_SEVEN_DEGREE_PRESENTATION_BUILT",
+      "SUBMICRO_INTRADAY_DEGREE_ADDED",
+      "MICRO_PRESERVED_AS_PARENT_CONTEXT",
       "ENGINE22_STRUCTURAL_AUTHORITY_PRESERVED",
       "ENGINE27_V2_ADDITIVE_ONLY",
       "ENGINE27_EXISTING_A_TO_E_CONTRACTS_PRESERVED",

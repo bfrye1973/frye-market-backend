@@ -13,6 +13,16 @@ function fixture() {
     strategies: {
       "intraday_scalp@10m": {
         engine22WaveStrategy: {
+          submicroExecutionContext: {
+            available: true,
+            activeWave: "W3",
+            waveDirection: "UP",
+            lifecycle: "DEVELOPING",
+            microTimingState: "SETUP_DEVELOPING",
+            sourceCountId: "SUBMICRO-1",
+            revision: 1,
+            sourceTimestamp: "2026-10-09T01:29:00.000Z",
+          },
           degreeStates: {
             subminute: {
               activeWave: "W3",
@@ -201,12 +211,13 @@ function fixture() {
   };
 }
 
-test("V2 publishes all six degrees additively", () => {
+test("V2 publishes all seven structural degrees additively", () => {
   const result = buildEngine27TraderIntelligenceV2({
     snapshot: fixture(),
   });
 
   assert.deepEqual(result.degreeOrder, [
+    "submicro",
     "micro",
     "subminute",
     "minute",
@@ -218,6 +229,10 @@ test("V2 publishes all six degrees additively", () => {
   assert.deepEqual(Object.keys(result.degrees), result.degreeOrder);
   assert.equal(result.compatibility.additiveOnly, true);
   assert.equal(result.compatibility.existingEngine27ContractsUntouched, true);
+  assert.equal(result.compatibility.sevenStructuralDegrees, true);
+  assert.equal(result.compatibility.sixStrategyAccountsPreserved, true);
+  assert.equal(result.degrees.submicro.activeWave, "W3");
+  assert.equal(result.degrees.submicro.waveDirection, "UP");
 });
 
 test("Micro preserves Engine 22 completion state and evidence freshness", () => {
