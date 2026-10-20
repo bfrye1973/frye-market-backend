@@ -1,0 +1,17 @@
+name: Engine22 Seven Degree Reconciliation Audit
+on:
+  push:
+    branches: [engine22-seven-degree-structural-reconciliation-20261011]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check services/core/logic/engine22/migration/proposedSevenDegreeReconciliation.js
+      - run: node --test services/core/tests/engine22SevenDegreeReconciliation.audit.test.js services/core/tests/engine22MicroW4OverlapEvidence.audit.test.js services/core/tests/engine22SevenDegreeCanonicalGate.audit.test.js services/core/tests/engine22SubmicroMigrationCandidate.audit.test.js services/core/tests/engine22SevenDegreeMigrationPreflight.audit.test.js services/core/tests/engine22SevenDegreeShadowProjection.audit.test.js services/core/tests/engine22HistoricalMicroAnchorVerification.audit.test.js services/core/tests/engine22SevenDegreeChartDisplay.audit.test.js services/core/tests/engine22MicroW2W3TransitionFibsWiring.test.js services/core/tests/engine22MinuteW3DownstreamAlignment.test.js services/core/tests/engine22ProvisionalMicroSubmicroIntegration.audit.test.js services/core/tests/engine22SevenDegreeReviewDisplay.audit.test.js

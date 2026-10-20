@@ -41,6 +41,10 @@ import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
+import { buildSubmicroMigrationCandidate } from "../migration/buildSubmicroMigrationCandidate.js";
+import { buildOwnerAuthorizedProvisionalMicroCount } from "../migration/buildOwnerAuthorizedProvisionalMicroCount.js";
+import { buildSevenDegreeShadowProjection } from "../migration/buildSevenDegreeShadowProjection.js";
+import { buildSevenDegreeReviewDisplay } from "../migration/buildSevenDegreeReviewDisplay.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
@@ -2059,6 +2063,27 @@ export function buildEngine22WaveStrategy(input = {}) {
     }
   }
 
+  // Additive, non-authoritative seven-degree preview. No new parent Micro count is
+  // fabricated: without independently verified parent identity, preview is incomplete.
+  const legacyMicroForSubmicro = microV2Migration?.canonicalState ?? null;
+  // Owner accepted Micro overlap for PROVISIONAL review, not standard impulse.
+  const provisionalParentMicro = context.marketType === "FUTURES" &&
+    normalizeSymbol(context.symbol) === "ES"
+      ? buildOwnerAuthorizedProvisionalMicroCount({ownerAcceptsOverlap:true}).count
+      : null;
+  const submicroMigrationCandidate = legacyMicroForSubmicro
+    ? buildSubmicroMigrationCandidate({
+        sourceMicroState: legacyMicroForSubmicro,
+        parentMicroCountId: provisionalParentMicro?.countId ?? null,
+      })
+    : null;
+  const sevenDegreeMigrationShadow = buildSevenDegreeShadowProjection({
+    legacyDegreeStates: degreeStates,
+    microCount: provisionalParentMicro, // Distinct owner-authorized provisional parent; never locked.
+    submicroCandidate: submicroMigrationCandidate?.ok
+      ? submicroMigrationCandidate.candidate : null,
+  });
+
   const publishedDegreeStates =
     microProjectionBundle?.available === true
       ? microProjectionBundle.degreeStates
@@ -2069,10 +2094,11 @@ export function buildEngine22WaveStrategy(input = {}) {
       ? microProjectionBundle.currentWavelength
       : currentWavelength;
 
-  const publishedEngine22Display =
-    microProjectionBundle?.available === true
-      ? microProjectionBundle.engine22Display
-      : engine22Display;
+  const publishedEngine22Display = buildSevenDegreeReviewDisplay({
+    legacyDisplay: microProjectionBundle?.available === true
+      ? microProjectionBundle.engine22Display : engine22Display,
+    shadow: sevenDegreeMigrationShadow,
+  });
 
   const microExecutionContext =
     microProjectionBundle?.available === true
@@ -2345,6 +2371,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
     microExecutionContext,
+    sevenDegreeMigrationShadow,
     microW2W3TransitionFibs,
     microW3TouchW4Shadow,
     microV2Migration: microV2Migration

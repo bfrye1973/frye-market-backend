@@ -5,7 +5,7 @@
 // engine22Display is the display-only projection consumed by React.
 // Frontend must render this packet; it must not calculate wave structure.
 
-const DEGREE_ORDER = ["micro", "subminute", "minute", "minor", "intermediate", "primary"];
+const DEGREE_ORDER = ["submicro", "micro", "subminute", "minute", "minor", "intermediate", "primary"];
 
 const MICRO_MARKS = {
   w1Low: { price: 7675.0, time: "2026-10-01 07:00" },
@@ -329,7 +329,7 @@ function flagsFor(degreeStates) {
   };
 }
 
-export function buildEngine22Display({ degreeStates = null, currentWavelength = null } = {}) {
+export function buildEngine22Display({ degreeStates = null, currentWavelength = null, submicroCanonicalState = null } = {}) {
   if (!degreeStates || typeof degreeStates !== "object") return null;
 
   return {
@@ -337,6 +337,17 @@ export function buildEngine22Display({ degreeStates = null, currentWavelength = 
     headline: currentWavelength?.degrees?.micro?.microSequence?.state || "Micro structural timing inside Subminute W3.",
     degreeOrder: [...DEGREE_ORDER],
     degrees: {
+      submicro: submicroCanonicalState?.degree === "SUBMICRO" &&
+        submicroCanonicalState?.publicationEligible === true &&
+        submicroCanonicalState?.parentContext?.degree === "MICRO" &&
+        submicroCanonicalState?.countId && submicroCanonicalState?.sequenceId
+        ? baseDegree("submicro", submicroCanonicalState)
+        : {
+            degree: "submicro", label: "Intraday Submicro", active: false,
+            badge: "UNAVAILABLE", headline: "Awaiting Engine 22 canonical Submicro publication",
+            rows: [], levels: [], rules: ["No count, anchors, or prices inferred from Micro."],
+            noExecution: true, noPermissionCreated: true, watchOnly: true,
+          },
       micro: microDisplay(currentWavelength),
       subminute: subminuteDisplay(degreeStates.subminute),
       minute: minuteDisplay(degreeStates.minute),
