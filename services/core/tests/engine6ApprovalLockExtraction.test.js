@@ -42,10 +42,10 @@ test("a later qualifying GO replaces the existing same-invocation lock",()=>{
  assert.equal(out.paper.direction,"LONG");assert.equal(out.paper.candidateId,"C2");
  assert.equal(out.paper.paperLongAllowed,true);assert.equal(out.paper.paperShortAllowed,false);
 });
-test("snapshot now delegates exactly two existing calls to the factory",()=>{
+test("snapshot delegates one final approval call after Stage4 classification",()=>{
  const source=readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
  assert.match(source,/createEngine6ApprovedPaperPermissionLock\(nowIso\)/);
- assert.equal((source.match(/rememberEngine6ApprovedPaperPermission\(/g)||[]).length,2);
+ assert.equal((source.match(/rememberEngine6ApprovedPaperPermission\(/g)||[]).length,1);
  assert.equal((source.match(/applyEngine6ApprovedPaperPermissionLock\(/g)||[]).length,2);
  assert.equal(source.includes("let engine6ApprovedPaperPermissionLock = null;"),false);
 });
