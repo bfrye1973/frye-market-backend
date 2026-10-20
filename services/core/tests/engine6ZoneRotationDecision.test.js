@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { evaluateEngine6ZoneRotationDecision as decide } from "../logic/engine6/evaluateZoneRotationDecision.js";
+import { buildEngine7ProposedSizingPreview } from "../logic/engine7/v2/buildProposedSizingPreview.js";
 const candidate={candidateId:"C1",zoneId:"Z1"};
 const reaction={direction:"SHORT",candidateId:"C1",zoneId:"Z1"};
 const participation={direction:"SHORT",candidateId:"C1",zoneId:"Z1"};
@@ -99,4 +100,44 @@ test("REDUCE receipt for wrong candidate fails to verify",()=>{
  const adverse={...context,internals:{...context.internals,directionalAssessment:"MIXED"}};
  const r=run({context:adverse,reduceSizingAcknowledgment:{candidateId:"OLD",zoneId:"Z1",decision:"REDUCE",enforced:true,finalContracts:1,engine7SizingOwner:true}});
  assert.equal(r.reduceSizingEnforcementVerified,false);
+});
+
+test("actual Engine7 paper-test path ignores REDUCE multiplier and can size three",()=>{
+ const previous=process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+ process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION="1";
+ try {
+  const out=buildEngine7ProposedSizingPreview({
+   engine26ProposedGeometry:{
+    strategyId:"intraday_scalp@10m",symbol:"ES",direction:"SHORT",
+    candidateId:"C1",zoneId:"Z1",
+    proposedEntryPrice:7600,proposedStopPrice:7605,
+    proposedStopDistancePoints:5,proposedTargets:[]
+   },
+   engine6PaperPermission:{decision:"REDUCE",allowed:true,planningAllowed:true,sizeMultiplier:0.5},
+   riskConfig:{
+    instrument:"ES",riskBudgetDollars:1000,dollarsPerPoint:50,
+    minimumContracts:1,maximumContracts:5,roundingRule:"FLOOR",
+    estimatedSlippagePointsPerSide:0.25,
+    commissionDollarsPerContractRoundTrip:5,paperOnly:true
+   }
+  });
+  assert.equal(out.finalContracts,3);
+  assert.equal(out.finalSizingMode,"PAPER_TESTING_DATA_COLLECTION");
+  const adverse={...context,internals:{...context.internals,directionalAssessment:"CAUTION"}};
+  const shadow=run({context:adverse,reduceSizingAcknowledgment:{
+    candidateId:"C1",zoneId:"Z1",decision:"REDUCE",
+    enforced:false,finalContracts:out.finalContracts,engine7SizingOwner:true
+  }});
+  assert.equal(shadow.reduceSizingEnforcementVerified,false);
+  assert.equal(shadow.reducedPermissionActivationAllowed,false);
+ } finally {
+  if(previous===undefined)delete process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION;
+  else process.env.ENGINE_STRATEGY1_PAPER_DATA_COLLECTION=previous;
+ }
+});
+test("an independent fresh candidate with no completedTrip input is not blocked by unrelated historical memory",()=>{
+ const r=run({candidate:{...candidate,
+  zoneMemorySummary:{currentCandidateId:"OLD",objectiveCompletedAt:"2026-10-20T15:00:00Z",lifecycleStatus:"COMPLETED"}}});
+ assert.equal(r.decision,"ALLOW");
+ assert.ok(r.warnings.includes("HISTORICAL_ZONE_COMPLETION_NOT_CURRENT_CANDIDATE"));
 });
