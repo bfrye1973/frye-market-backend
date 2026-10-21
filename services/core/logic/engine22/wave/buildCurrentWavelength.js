@@ -308,6 +308,32 @@ export function buildCurrentWavelength({
           E:"ANTICIPATED_NOT_STARTED",
           completionConfirmed:false,
         },
+        // Lower degrees are preserved, not reset or relabeled. Their prior
+        // owner projections are observational swings during the Minute W2
+        // hypothesis, not evidence that Minute W3 has been confirmed.
+        childDegreeContext:{
+          subminute:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMINUTE_W3_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          micro:{
+            historicalCountPreserved:true,
+            priorProjection:"MICRO_W3_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          submicro:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMICRO_W2_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+        },
         preserveHistoricalAnchors:true,
         shadowOnly:true,noExecution:true,noPermissionCreated:true,
       },
