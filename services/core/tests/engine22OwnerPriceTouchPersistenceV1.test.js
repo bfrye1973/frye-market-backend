@@ -17,8 +17,9 @@ test("all three owner Fib ladders use actual price and persistent touch history 
   });
   const sub=first.degrees.submicro.ownerSubmicroW2.levels;
   assert.equal(sub[0].price,7780.75);
-  assert.equal(sub[0].status,"TOUCHED");
+  assert.equal(sub[0].status,"OWNER_OBSERVED_TOUCH");
   assert.equal(sub[1].status,"WATCH");
+  assert.ok(first.degrees.submicro.ownerSubmicroAbc.levels.every(x=>x.status==="WATCH"),"new C model must not be touched before Oct 21 B low");
   assert.equal(first.degrees.micro.ownerMicroW3.levels[0].status,"WATCH");
   assert.ok(first.degrees.micro.ownerMicroAbc.levels.every(x=>x.status==="WATCH"),"C-up must not be marked before Oct 20 B low");
   assert.equal(first.degrees.micro.ownerMicroW3.levels.find(x=>x.price===7909).status,"WATCH");
@@ -28,20 +29,20 @@ test("all three owner Fib ladders use actual price and persistent touch history 
    currentWavelength:model(),previousWavelength:first,
    currentPrice:7795,evaluationTimeMs:time+600000,storePath:file,
   });
-  assert.equal(retreat.degrees.submicro.ownerSubmicroW2.levels[0].status,"TOUCHED");
+  assert.equal(retreat.degrees.submicro.ownerSubmicroW2.levels[0].status,"OWNER_OBSERVED_TOUCH");
   // Simulate process restart: disk alone remembers the previously touched model.
   const afterRestart=applyOwnerPriceTouchesV1({
    currentWavelength:model(),currentPrice:7800,
    evaluationTimeMs:time+1200000,storePath:file,
   });
-  assert.equal(afterRestart.degrees.submicro.ownerSubmicroW2.levels[0].status,"TOUCHED");
+  assert.equal(afterRestart.degrees.submicro.ownerSubmicroW2.levels[0].status,"OWNER_OBSERVED_TOUCH");
   // A new price below 0.382 and 0.500 hits both in a single interval.
   const jump=applyOwnerPriceTouchesV1({
    currentWavelength:model(),previousWavelength:retreat,
    currentPrice:7757,evaluationTimeMs:time+1800000,storePath:file,
   });
   assert.deepEqual(jump.degrees.submicro.ownerSubmicroW2.levels.slice(0,3)
-   .map(x=>x.status),["TOUCHED","TOUCHED","TOUCHED"]);
+   .map(x=>x.status),["OWNER_OBSERVED_TOUCH","WATCH","WATCH"]);
   assert.equal(jump.degrees.submicro.ownerSubmicroW2.levels[3].status,"WATCH");
   // Recount changes model identity: no bleed from old price history.
   const revised=model();
