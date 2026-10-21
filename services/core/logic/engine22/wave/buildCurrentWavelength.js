@@ -286,6 +286,57 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     minute: {
+      // Owner's current Oct 21 working hypothesis is Minute W2 developing,
+      // with an INTERNAL contracting triangle candidate. It is NOT a
+      // completed triangle, a formally confirmed recount, or trade authority.
+      // The historical W3 projection beneath this packet remains for audit.
+      ownerMinuteW2Hypothesis: {
+        version:"engine22.minuteW2ComplexCorrectionWatch.v1",
+        degree:"minute",activeWave:"W2",direction:"CORRECTIVE",
+        stage:"COMPLEX_CORRECTION_CANDIDATE",
+        confirmationStatus:"OWNER_HYPOTHESIS_UNCONFIRMED",
+        minuteW3Started:false,
+        minuteW3Confirmation:"NOT_CONFIRMED",
+        rangeReferences:{upperApprox:7910,lowerApprox:7557},
+        internalPattern:{
+          type:"CONTRACTING_TRIANGLE_CANDIDATE",
+          placement:"INTERNAL_B_OR_X_COMPONENT_UNRESOLVED",
+          A:"COMPLETION_CANDIDATE",
+          B:"COMPLETION_CANDIDATE",
+          C:"COMPLETION_CANDIDATE",
+          D:"DEVELOPING_WATCH",
+          E:"ANTICIPATED_NOT_STARTED",
+          completionConfirmed:false,
+        },
+        // Lower degrees are preserved, not reset or relabeled. Their prior
+        // owner projections are observational swings during the Minute W2
+        // hypothesis, not evidence that Minute W3 has been confirmed.
+        childDegreeContext:{
+          subminute:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMINUTE_W3_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          micro:{
+            historicalCountPreserved:true,
+            priorProjection:"MICRO_W3_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          submicro:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMICRO_W2_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+        },
+        preserveHistoricalAnchors:true,
+        shadowOnly:true,noExecution:true,noPermissionCreated:true,
+      },
       degree: "minute", activeWave: "W3", direction: "UP",
       state: "MINUTE_W3_STARTED_CONFIRMATION_PENDING",
       origin: 7576.00, originArea: [7575.00, 7576.00],
