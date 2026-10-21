@@ -72,6 +72,26 @@ jobs:
             print("REPLAY_SAMPLE_HEAD",json.dumps(d,default=str)[:1600])
           except Exception as e: print("REPLAY_SAMPLE_ERROR",repr(e))
           PY
+      - name: Read-only Oct21 Replay Engine6 evidence window
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json
+          for t in ("0640","0643","0647","0649","0652","0655","0658","0702","0704","0707","0710"):
+            try:
+              u=f"https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time={t}"
+              with urllib.request.urlopen(u,timeout=18) as r:d=json.load(r)
+              s=d.get("strategies",{}).get("intraday_scalp@10m",{})
+              p=s.get("permission",{}) or {}
+              paper=p.get("paper",{}) or {}
+              e26=s.get("engine26LocationCandidate",{}) or {}
+              e3=((s.get("confluence",{}) or {}).get("context",{}) or {}).get("reaction",{}).get("paperScalpReaction",{}) or {}
+              e4=((s.get("confluence",{}) or {}).get("context",{}) or {}).get("volume",{}).get("engine4AuthorizedReactionParticipation",{}) or {}
+              out=dict(time=t,price=d.get("currentPrice"),candidate=e26.get("candidateId"),zone=e26.get("zoneId"),candidateStatus=e26.get("status"),candidateDirection=e26.get("direction"),generation=e26.get("candidateLifecycleStartTime"),e3direction=e3.get("direction"),e3qualified=e3.get("engine3Strategy1QualifiedForEngine6"),e3reaction=e3.get("reactionState"),e4direction=e4.get("direction"),e4confirmed=e4.get("participationConfirmed"),e4allowed=e4.get("allowed"),permission=paper.get("decision"),allowed=paper.get("allowed"),locked=paper.get("locked"),blockers=paper.get("blockers"),e26b=(s.get("engine26ProposedGeometry") or {}).get("status"),e7=(s.get("engine7SizingPreview") or {}).get("finalContracts"),e8=(s.get("engine8PaperOrder") or {}).get("status"),stratKeys=list(s.keys())[:90] if t=="0652" else None)
+              print("ES_REPLAY_POINT",json.dumps(out,default=str)[:2900])
+            except Exception as e:print("ES_REPLAY_ERROR",t,repr(e))
+          PY
       - name: Stage4 full decision-path scenario fixtures
         run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
       - name: Stage4 permission and sequencing regressions
