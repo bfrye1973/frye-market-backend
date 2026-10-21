@@ -56,6 +56,22 @@ jobs:
         shell: bash
         run: |
           curl --max-time 20 -sS -w '\nHTTP_STATUS:%{http_code}\n' "https://frye-market-backend-1.onrender.com/api/v1/replay/es/times?date=2026-10-21" | head -c 12000
+      - name: Read-only Oct21 Replay sample keys
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request
+          u="https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time=0652"
+          try:
+            with urllib.request.urlopen(u,timeout=20) as r:
+              d=json.load(r)
+            print("REPLAY_SAMPLE_ROOT_KEYS",list(d.keys()))
+            for k,v in d.items():
+              if isinstance(v,dict): print("REPLAY_SAMPLE_CHILD",k,list(v.keys())[:60])
+            print("REPLAY_SAMPLE_HEAD",json.dumps(d,default=str)[:1600])
+          except Exception as e: print("REPLAY_SAMPLE_ERROR",repr(e))
+          PY
       - name: Stage4 full decision-path scenario fixtures
         run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
       - name: Stage4 permission and sequencing regressions
