@@ -273,11 +273,36 @@ export function buildCurrentWavelength({
     confirmationStatus:"OWNER_COUNT_CANDLE_CONFIRMATION_PENDING",
     noExecution:true,provisional:true,
   };
+  // Owner-confirmed Oct 21 Submicro A/B points; C remains an active
+  // developing working hypothesis, not a structurally confirmed completion.
+  const ownerSubmicroAbc = {
+    version:"engine22.submicroAbcMicroC.v1",
+    parentDegree:"micro",parentWave:"C",
+    activeWave:"C",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+    waveA:{
+      startPrice:7708.00,startLocalTime:"2026-10-20 05:00",
+      high:7793.25,highLocalTime:"2026-10-20 16:00",
+      status:"OWNER_COMPLETED",
+    },
+    waveB:{
+      low:7750.75,lowLocalTime:"2026-10-21 07:00",
+      status:"OWNER_COMPLETED",
+    },
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+      label:ratio.toFixed(3),
+      price:Math.round((7750.75+(7793.25-7708.00)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+    })),
+    confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
   const degrees = {
     submicro:{
       degree:"submicro",activeWave:"W2",direction:"DOWN",
       state:"SUBMICRO_W2_DOWN_WATCH_OWNER_READ",
-      ownerSubmicroW2,
+      ownerSubmicroW2, // archived owner model; touch memory must remain separate
+      ownerSubmicroAbc,
       levels:submicroW2Levels,
       nextLevel:null,lastTouchedLevel:null,
       noExecution:true,
