@@ -24,7 +24,7 @@ if(removed.length!==2)throw Error("EXPECTED_TWO_AFFECTED_LONG_CAMPAIGNS_FOUND_"+
 const retained=source.filter(t=>!affected(t));
 const inputs=rows.filter(r=>r.fill?.futuresContractCode==="MESZ26"&&r.fill?.direction==="LONG")
  .map(r=>r.fill).sort((a,b)=>Date.parse(a.fillTime)-Date.parse(b.fillTime));
-if(inputs.length!==24)throw Error("LONG_FILL_COUNT_CHANGED_"+inputs.length);
+if(inputs.length!==25)throw Error("LONG_FILL_COUNT_CHANGED_"+inputs.length);
 fs.mkdirSync(sandbox,{recursive:true,mode:0o700});
 const target=path.join(sandbox,"trade-journal.json");
 if(fs.existsSync(target))throw Error("SANDBOX_ALREADY_EXISTS");
