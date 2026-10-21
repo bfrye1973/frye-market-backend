@@ -198,6 +198,32 @@ export function buildCurrentWavelength({
     start:microW3Anchors.w2Low,currentPrice:null,
     anchorSource:microW3Anchors.source,
   }).map(level=>({...level,status:"WATCH",provisional:true,touchEvidenceAvailable:false}));
+  // Oct 21 owner working count: Micro ABC UP builds Minute internal D.
+  // A starts at Minute C's confirmed owner price (Oct 16 11:00 Phoenix).
+  // This is a read-only candidate and does not replace microSequence.
+  const ownerMicroAbc = {
+    version:"engine22.microAbcMinuteD.v1",
+    parentDegree:"minute",parentLeg:"D",
+    activeWave:"C",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+    waveA:{
+      startPrice:7676.50,
+      startLocalTime:"2026-10-16 11:00",
+      high:7773.25,highLocalTime:"2026-10-19 08:00",
+      status:"OWNER_COMPLETED",
+    },
+    waveB:{
+      low:7708.00,lowLocalTime:"2026-10-20 05:00",
+      status:"OWNER_COMPLETED",
+    },
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+      label:ratio.toFixed(3),
+      price:Math.round((7708+(7773.25-7676.50)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+    })),
+    confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
   const subminuteLevels = waveProjectionLevels({
     w1Low:7616.25,w1High:7847.00,start:7673.25,currentPrice:null,
     anchorSource:"OWNER_CONFIRMED_ALL_NODES_SUBMINUTE_20261015",
@@ -260,6 +286,7 @@ export function buildCurrentWavelength({
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
       anchorProvenance: microSequence.anchorProvenance,
       microSequence,
+      ownerMicroAbc,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
         activeWave:"W3",direction:"UP",anchors:microW3Anchors,
