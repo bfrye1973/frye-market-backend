@@ -1,0 +1,23 @@
+name: Engine2C V2 secure research serving preparation
+on:
+  push:
+    branches: [engine2c-v2-secure-serving-preparation-20261015]
+  pull_request:
+    branches: [main]
+jobs:
+  deny-by-default:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test isolated research gateway
+        run: node --test services/core/tests/engine2c/researchHistoricalServingV2.test.mjs
+      - name: Ensure no modifications to production mounts, trading or live market routes
+        run: |
+          git diff --exit-code d3aa6d135ead3c3a757d2d03aad8c843183ca410 -- services/core/server.js services/core/routes/futuresOhlc.js services/core/routes/trading.js
