@@ -51,6 +51,11 @@ jobs:
         run: |
           node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
           node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Read-only Engine12 Oct21 Replay times availability
+        if: always()
+        shell: bash
+        run: |
+          curl --max-time 20 -sS -w '\nHTTP_STATUS:%{http_code}\n' "https://frye-market-backend-1.onrender.com/api/v1/replay/es/times?date=2026-10-21" | head -c 12000
       - name: Stage4 full decision-path scenario fixtures
         run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
       - name: Stage4 permission and sequencing regressions
