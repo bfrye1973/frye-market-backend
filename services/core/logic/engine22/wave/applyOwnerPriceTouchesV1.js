@@ -33,7 +33,9 @@ function observations({degree,modelVersion,price,previousPrice,bars=[],evaluatio
   const items=[];
   const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
   const current=finite(price),old=finite(previousPrice);
-  if (current!==null) {
+  const minMicroCOrigin=Date.parse("2026-10-20T12:00:00Z");
+  const eligibleQuote=degree!=="micro" || modelVersion!=="engine22.microAbcMinuteD.v1" || now>=minMicroCOrigin;
+  if (current!==null && eligibleQuote) {
     items.push({low:old===null?current:Math.min(old,current),
       high:old===null?current:Math.max(old,current),
       time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
