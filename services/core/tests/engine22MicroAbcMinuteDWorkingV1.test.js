@@ -1,0 +1,21 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
+test("Micro A 7773.25 and B 7708 owner pivots project C up without altering lifecycle",()=>{
+ const result=buildCurrentWavelength({symbol:"ES",currentPrice:7790,microBars5m:[]});
+ const model=result.degrees.micro.ownerMicroAbc;
+ assert.equal(model.version,"engine22.microAbcMinuteD.v1");
+ assert.equal(model.parentLeg,"D");
+ assert.equal(model.activeWave,"C");
+ assert.equal(model.stage,"DEVELOPING_CANDIDATE");
+ assert.equal(model.waveA.startPrice,7676.5);
+ assert.equal(model.waveA.high,7773.25);
+ assert.equal(model.waveA.highLocalTime,"2026-10-19 08:00");
+ assert.equal(model.waveB.low,7708);
+ assert.equal(model.waveB.lowLocalTime,"2026-10-20 05:00");
+ assert.deepEqual(model.levels.map(x=>x.price),[7745,7756.5,7767.75,7804.75,7831,7865.5,7901.5]);
+ assert.ok(model.levels.every(x=>x.status==="WATCH"&&x.provisional));
+ assert.equal(model.noExecution,true);
+ assert.equal(result.degrees.minute.ownerMinuteW2Hypothesis.activeInternalLeg,"D");
+ assert.deepEqual(result.degrees.micro.ownerMicroW3.anchors,{w1Low:7706.25,w1High:7897.25,w2Low:7718,w2LowLocalTime:"2026-10-15 06:30",source:"OWNER_LOCKED_MICRO_W3_20261015"});
+});
