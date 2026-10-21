@@ -19,7 +19,8 @@ test("all three owner Fib ladders use actual price and persistent touch history 
   assert.equal(sub[0].price,7780.75);
   assert.equal(sub[0].status,"TOUCHED");
   assert.equal(sub[1].status,"WATCH");
-  assert.equal(first.degrees.micro.ownerMicroW3.levels[0].status,"TOUCHED");
+  assert.equal(first.degrees.micro.ownerMicroW3.levels[0].status,"WATCH");
+  assert.ok(first.degrees.micro.ownerMicroAbc.levels.every(x=>x.status==="WATCH"),"C-up must not be marked before Oct 20 B low");
   assert.equal(first.degrees.micro.ownerMicroW3.levels.find(x=>x.price===7909).status,"WATCH");
   // The original, independent Micro lifecycle levels remain unchanged.
   assert.deepEqual(first.degrees.micro.levels,model().degrees.micro.levels);
@@ -58,6 +59,7 @@ test("completed 10m highs and lows can register a touched extension between quot
   bars10m:[{time:start,low:7770,high:7911}],
   evaluationTimeMs:Date.parse("2026-10-16T13:20:00Z"),
  });
- assert.equal(output.degrees.micro.ownerMicroW3.levels.find(x=>x.price===7909).status,"TOUCHED");
+ assert.equal(output.degrees.micro.ownerMicroW3.levels.find(x=>x.price===7909).status,"WATCH");
+ assert.equal(output.degrees.micro.ownerMicroAbc.levels.find(x=>x.price===7901.5).status,"WATCH");
  assert.equal(output.degrees.subminute.levels.find(x=>x.price===7904).status,"TOUCHED");
 });
