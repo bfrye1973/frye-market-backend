@@ -15,6 +15,13 @@ test("Minute W2 triangle hypothesis does not rewrite canonical or historical wav
  assert.equal(view.internalPattern.E,"ANTICIPATED_NOT_STARTED");
  assert.equal(view.internalPattern.completionConfirmed,false);
  assert.equal(view.minuteW3Started,false);
+ assert.deepEqual(Object.keys(view.childDegreeContext).sort(),["micro","submicro","subminute"]);
+ for(const degree of ["micro","subminute","submicro"]){
+  assert.equal(view.childDegreeContext[degree].relationship,"INSIDE_MINUTE_W2_CANDIDATE");
+  assert.equal(view.childDegreeContext[degree].historicalCountPreserved,true);
+  assert.equal(view.childDegreeContext[degree].noReset,true);
+  assert.equal(view.childDegreeContext[degree].waveRecount,"PENDING");
+ }
  assert.equal(view.noExecution,true);
  assert.equal(view.noPermissionCreated,true);
  assert.equal(minute.activeWave,"W3"); // legacy model preserved; not promoted
