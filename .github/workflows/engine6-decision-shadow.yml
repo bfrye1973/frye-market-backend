@@ -92,6 +92,24 @@ jobs:
               print("ES_REPLAY_POINT",json.dumps(out,default=str)[:2900])
             except Exception as e:print("ES_REPLAY_ERROR",t,repr(e))
           PY
+      - name: Replay audit Engine3 versus Engine22 timing October21
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json
+          for t in ("0640","0643","0647","0649","0652","0655","0658","0702","0704","0707","0710"):
+            try:
+              with urllib.request.urlopen(f"https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time={t}",timeout=15) as r:d=json.load(r)
+              s=d.get("strategies",{}).get("intraday_scalp@10m",{})
+              rx=((s.get("confluence") or {}).get("context") or {}).get("reaction") or {}
+              e3=rx.get("paperScalpReaction") or {}
+              wave=s.get("engine22WaveStrategy") or {}
+              w=(wave.get("currentWavelength") or {}).get("degrees") or {}
+              o={"time":t,"price":d.get("currentPrice"),"e3":{k:e3.get(k) for k in ("direction","quality","reactionState","authorizedReactionState","engine3Strategy1QualifiedForEngine6","reactionConfirmed","evaluationAuthorized","allowed","blockers","reasonCodes","oneMinute","fiveMinute","fastTenMinute","canonical","diagnostics")},"reactionKeys":list(rx.keys()),"e3Keys":list(e3.keys()),"waveDegrees":list(w.keys()),"submicro":{k:(w.get("submicro") or {}).get(k) for k in ("activeWave","direction","state","stage")},"micro":{k:(w.get("micro") or {}).get(k) for k in ("activeWave","direction","state","stage")}}
+              print("AUDIT_E3",json.dumps(o,default=str)[:6000])
+            except Exception as e:print("AUDIT_E3_ERROR",t,repr(e))
+          PY
       - name: Stage4 full decision-path scenario fixtures
         run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
       - name: Stage4 permission and sequencing regressions
