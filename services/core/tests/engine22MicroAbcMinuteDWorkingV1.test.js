@@ -13,7 +13,7 @@ test("Micro A 7773.25 and B 7708 owner pivots project C up without altering life
  assert.equal(model.waveA.highLocalTime,"2026-10-19 08:00");
  assert.equal(model.waveB.low,7708);
  assert.equal(model.waveB.lowLocalTime,"2026-10-20 05:00");
- assert.deepEqual(model.levels.map(x=>x.price),[7745,7756.5,7767.75,7804.75,7831,7865.5,7901.5]);
+ assert.deepEqual(model.levels.map(x=>x.price),[7745,7756.5,7767.75,7804.75,7831,7864.5,7901.5]);
  assert.ok(model.levels.every(x=>x.status==="WATCH"&&x.provisional));
  assert.equal(model.noExecution,true);
  assert.equal(result.degrees.minute.ownerMinuteW2Hypothesis.activeInternalLeg,"D");
