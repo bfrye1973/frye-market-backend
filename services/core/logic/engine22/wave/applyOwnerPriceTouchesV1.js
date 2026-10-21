@@ -15,25 +15,27 @@ const originMs = {
 };
 function modelFor(degree, packet) {
   if (degree === "submicro") return packet?.ownerSubmicroW2;
-  if (degree === "micro") return packet?.ownerMicroW3;
+  if (degree === "micro") return packet?.ownerMicroAbc?.version === "engine22.microAbcMinuteD.v1" ? packet.ownerMicroAbc : packet?.ownerMicroW3;
   return packet;
 }
 function modelId(degree, model) {
   if (degree === "submicro" && model?.version !== "engine22.submicroW2OwnerProjection.v1") return null;
-  if (degree === "micro" && model?.version !== "engine22.microW3OwnerProjection.v1") return null;
+  if (degree === "micro" && !["engine22.microW3OwnerProjection.v1","engine22.microAbcMinuteD.v1"].includes(model?.version)) return null;
   if (degree === "subminute" && !Array.isArray(model?.levels)) return null;
-  const anchors = model?.anchors || (degree === "subminute" ?
+  const anchors = model?.anchors || (degree === "micro" && model?.version === "engine22.microAbcMinuteD.v1" ? {waveA:model.waveA,waveB:model.waveB} : null) || (degree === "subminute" ?
     {w1Low:7616.25,w1High:7847,w2Low:7673.25} : {});
   const levels = model?.levels;
   if (!Array.isArray(levels) || !levels.length ||
       !levels.every(l=>validKey(l.key)&&finite(l.price))) return null;
   return JSON.stringify([degree,anchors,levels.map(l=>[l.key,l.price])]);
 }
-function observations({degree,price,previousPrice,bars=[],evaluationTimeMs}) {
+function observations({degree,modelVersion,price,previousPrice,bars=[],evaluationTimeMs}) {
   const items=[];
   const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
   const current=finite(price),old=finite(previousPrice);
-  if (current!==null) {
+  const minMicroCOrigin=Date.parse("2026-10-20T12:00:00Z");
+  const eligibleQuote=degree!=="micro" || modelVersion!=="engine22.microAbcMinuteD.v1" || now>=minMicroCOrigin;
+  if (current!==null && eligibleQuote) {
     items.push({low:old===null?current:Math.min(old,current),
       high:old===null?current:Math.max(old,current),
       time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
@@ -42,7 +44,8 @@ function observations({degree,price,previousPrice,bars=[],evaluationTimeMs}) {
     const t=Number(b?.time),high=finite(b?.high),low=finite(b?.low);
     if(!Number.isSafeInteger(t)||t<=0||high===null||low===null||low>high)continue;
     const barStart=t*1000;
-    if(barStart<originMs[degree]||barStart+600000>now)continue;
+    const modelOrigin=degree==="micro" && modelVersion==="engine22.microAbcMinuteD.v1" ? Date.parse("2026-10-20T12:00:00Z") : originMs[degree];
+    if(barStart<modelOrigin||barStart+600000>now)continue;
     items.push({low,high,time:new Date(barStart).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
   }
   return items;
@@ -79,7 +82,7 @@ export function applyOwnerPriceTouchesV1({
     const oldId=modelId(degree,oldModel);
     const previousLevels=oldId===id?oldModel.levels:[];
     const past=disk[id]&&typeof disk[id]==="object"?disk[id]:{};
-    const source=observations({degree,price:currentPrice,
+    const source=observations({degree,modelVersion:model.version,price:currentPrice,
       previousPrice:oldId===id?previousWavelength?.currentPrice:null,
       bars:bars10m,evaluationTimeMs});
     const touched=model.levels.map(level=>{
