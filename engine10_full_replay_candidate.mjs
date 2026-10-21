@@ -50,7 +50,7 @@ if(fs.existsSync(journalFile))throw Error("SANDBOX_OUTPUT_ALREADY_EXISTS");
 const paper=original.filter(t=>String(t.accountMode).toUpperCase()!=="REAL");
 fs.writeFileSync(journalFile,JSON.stringify(paper,null,2),{flag:"wx",mode:0o600});
 process.env.TRADE_JOURNAL_DIR=sandbox;
-const {ingestRealBrokerFill}=await import("./services/core/logic/journal/tradeJournalStore.js");
+const {ingestRealBrokerFill}=await import("file:///opt/render/project/src/services/core/logic/journal/tradeJournalStore.js");
 let applied=0,failures=[];
 for(const f of fills){
  const r=await ingestRealBrokerFill(f);
