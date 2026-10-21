@@ -11,7 +11,7 @@ test("Minute W2 triangle hypothesis does not rewrite canonical or historical wav
  assert.equal(view.confirmationStatus,"OWNER_HYPOTHESIS_UNCONFIRMED");
  assert.equal(view.internalPattern.type,"CONTRACTING_TRIANGLE_CANDIDATE");
  assert.equal(view.internalPattern.placement,"INTERNAL_B_OR_X_COMPONENT_UNRESOLVED");
- assert.equal(view.internalPattern.D,"DEVELOPING_WATCH");
+ assert.equal(view.internalPattern.D,"DEVELOPING_CANDIDATE");
  assert.equal(view.internalPattern.E,"ANTICIPATED_NOT_STARTED");
  assert.equal(view.internalPattern.completionConfirmed,false);
  assert.equal(view.activeInternalLeg,"D");
