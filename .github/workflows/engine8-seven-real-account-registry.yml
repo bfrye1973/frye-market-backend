@@ -8,6 +8,7 @@ on:
       - "services/core/logic/trading/schwab/planSevenRealAccountWatermarks.js"
       - "services/core/tests/engine8SevenRealWatermarkPlan.test.js"
       - "services/core/tests/engine8SevenRealFillNormalization.test.js"
+      - "services/core/scripts/exportEngine8Oct22SevenRealEvidence.js"
       - "services/core/logic/trading/schwab/engine8RealFillNormalizer.js"
       - "services/core/logic/trading/schwab/selectApprovedSchwabRealAccounts.js"
       - "services/core/tests/engine8SevenRealAccountRegistry.test.js"
@@ -22,4 +23,6 @@ jobs:
         with:
           node-version: "20"
       - run: node --test services/core/tests/engine8SevenRealAccountRegistry.test.js services/core/tests/engine8SevenRealWatermarkPlan.test.js services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js services/core/tests/engine8SevenRealFillNormalization.test.js services/core/tests/engine8RealSchwabObserver.test.js
-      - run: node --check services/core/logic/trading/schwab/engine8RealAccountRegistry.js
+      - run: |
+          node --check services/core/logic/trading/schwab/engine8RealAccountRegistry.js
+          node --check services/core/scripts/exportEngine8Oct22SevenRealEvidence.js
