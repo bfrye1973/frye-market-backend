@@ -1,0 +1,20 @@
+name: Engine 10 Journal Maintenance Guard
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/journal/journalMaintenanceGuard.js"
+      - "services/core/logic/journal/tradeJournalStore.js"
+      - "services/core/tests/engine10JournalMaintenanceGuard.test.js"
+      - ".github/workflows/engine10-journal-maintenance.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --check services/core/logic/journal/tradeJournalStore.js
+      - run: node --test services/core/tests/engine10JournalMaintenanceGuard.test.js
+      - run: node --test services/core/tests/engine10RealContractIdentity.test.js
