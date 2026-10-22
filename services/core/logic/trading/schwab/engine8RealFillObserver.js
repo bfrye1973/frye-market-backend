@@ -25,6 +25,7 @@ import {
 } from "./schwabClient.js";
 import { getSchwabConfig } from "./schwabConfig.js";
 import { selectApprovedSchwabRealAccounts } from "./selectApprovedSchwabRealAccounts.js";
+import { journalMaintenanceStatus } from "../../journal/journalMaintenanceGuard.js";
 import {
   normalizeSchwabRealFutureTransaction,
   normalizeSchwabRealFutureTransactionLegs,
@@ -375,6 +376,19 @@ export async function observeSchwabRealFills({
           false
         )
       : deliver === true;
+
+  // Never observe, deliver or advance durable watermarks while the Journal
+  // is under a controlled cutover lock. Preserve pending Schwab fills.
+  if (journalMaintenanceStatus(process.env.TRADE_JOURNAL_DIR || "/var/data/replay/journal").locked) {
+    return {
+      ok: false,
+      status: "ENGINE10_JOURNAL_MAINTENANCE_LOCKED",
+      delivered: 0,
+      watermarkAdvanced: 0,
+      pending: 0,
+      errors: ["ENGINE10_JOURNAL_MAINTENANCE_LOCKED"],
+    };
+  }
 
   const endDate = now.toISOString();
   const bootstrapStartedAt =
