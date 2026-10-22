@@ -225,6 +225,7 @@ function normalizeTransactionCandidates({
   transaction,
   maskedAccountNumber,
   observedAt,
+  accountScope = "LEGACY_TWO",
 }) {
   // Preserve the legacy path exactly for the overwhelming majority of
   // historical/single-FUTURE transactions. This prevents a rollout from
@@ -233,6 +234,7 @@ function normalizeTransactionCandidates({
     transaction,
     maskedAccountNumber,
     observedAt,
+    accountScope,
   });
 
   if (legacy.ok) {
@@ -255,6 +257,7 @@ function normalizeTransactionCandidates({
     transaction,
     maskedAccountNumber,
     observedAt,
+    accountScope,
   });
 
   if (!legAware.ok) {
@@ -479,7 +482,9 @@ export async function observeSchwabRealFills({
     };
   }
 
-  const selected = selectApprovedSchwabRealAccounts(accountsResult.accounts || []);
+  const accountScope = process.env.ENGINE8_REAL_ACCOUNT_SCOPE === "SEVEN_STRATEGIES"
+    ? "SEVEN_STRATEGIES" : "LEGACY_TWO";
+  const selected = selectApprovedSchwabRealAccounts(accountsResult.accounts || [], {accountScope});
   result.unrelatedAccountsSkipped = selected.skippedCount;
   result.approvedAccountsDiscovered = selected.approved.length;
 
@@ -598,6 +603,7 @@ export async function observeSchwabRealFills({
             account.maskedAccountNumber,
           observedAt:
             nowIso(),
+          accountScope,
         });
 
       if (!normalized.ok) {
