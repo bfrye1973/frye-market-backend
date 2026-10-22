@@ -20,17 +20,23 @@ export function planOctober22Classification(trades=[],verifiedOpenings=[]){
    if(up(t.accountMode)!=="REAL")return false;
    const label=up(t.brokerAccountLabel||t.realBroker?.brokerAccountLabel);
    if(label!==account)return false;
-   const e=t.events?.find(e=>e.eventType==="REAL_ENTRY_FILL");
-   return str(e?.brokerTransactionId||t.entry?.brokerTransactionId)===id;
+   const first=str(t.entry?.brokerTransactionId||t.events?.find(e=>e.eventType==="REAL_ENTRY_FILL")?.brokerTransactionId);
+   const events=(t.events||[]).filter(e=>["REAL_ENTRY_FILL","REAL_SCALE_IN_FILL"].includes(e.eventType));
+   return first===id||events.some(e=>str(e.brokerTransactionId)===id);
   });
   if(matches.length!==1){unmatched.push({identity,count:matches.length});continue;}
   const t=matches[0],entryTime=str(t.entry?.time);
-  if(Date.parse(entryTime)!==Date.parse(time)){errors.push({type:"ENTRY_TIME_MISMATCH",tradeId:t.tradeId});continue;}
-  if(Date.parse(time)<Date.parse(REAL_STRATEGY_CUTOVER_UTC)){errors.push({type:"PRE_CUTOVER_OPENING",tradeId:t.tradeId});continue;}
+  if(Date.parse(entryTime)>Date.parse(time)){errors.push({type:"FILL_BEFORE_CAMPAIGN_ENTRY",tradeId:t.tradeId});continue;}
+  if(Date.parse(entryTime)<Date.parse(REAL_STRATEGY_CUTOVER_UTC)){errors.push({type:"PRE_CUTOVER_CAMPAIGN",tradeId:t.tradeId});continue;}
   const previous=up(t.performanceGroup||t.journalAccount);
   if(t.performanceGroup&&previous!==classification.classification){errors.push({type:"CLASSIFICATION_CONFLICT",tradeId:t.tradeId});continue;}
   if(previous===classification.classification)continue;
   if(!["SWING","INTRADAY"].includes(previous)){errors.push({type:"UNEXPECTED_LEGACY_CLASSIFICATION",tradeId:t.tradeId});continue;}
+  if(changes.some(c=>c.tradeId===t.tradeId)){
+    const existing=changes.find(c=>c.tradeId===t.tradeId);
+    if(existing.performanceGroup!==classification.classification)errors.push({type:"CAMPAIGN_CLASSIFICATION_CONFLICT",tradeId:t.tradeId});
+    continue;
+  }
   changes.push({tradeId:t.tradeId,brokerAccountLabel:account,brokerTransactionId:id,previousPerformanceGroup:previous,performanceGroup:classification.classification,performanceClassificationSource:"VERIFIED_OCT22_CUTOVER",performanceClassificationVersion:classification.registryVersion});
  }
  return {schema:"engine10.oct22ClassificationPlan.v1",ok:errors.length===0&&unmatched.length===0,changes,errors,unmatched,readOnly:true};
