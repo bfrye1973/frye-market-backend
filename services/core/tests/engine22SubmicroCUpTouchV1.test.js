@@ -6,7 +6,7 @@ import path from "node:path";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
 import {applyOwnerPriceTouchesV1} from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 
-const make=()=>buildCurrentWavelength({symbol:"ES",currentPrice:7807,microBars5m:[]});
+const make=()=>{ const v=buildCurrentWavelength({symbol:"ES",currentPrice:7807,microBars5m:[]}); delete v.degrees.micro.ownerMicroBDown; delete v.degrees.submicro.ownerSubmicroADown; return v; };
 const levels=[7783.25,7793.5,7803.5,7836,7859.25,7888.75,7921.25];
 
 test("Submicro A/B owner pivots and C upward Fibonacci targets remain isolated from historical W2",()=>{
