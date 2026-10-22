@@ -1813,6 +1813,15 @@ function normalizeRealBrokerFill(fill = {}) {
       SCHWAB_7727:"SUBMINUTE",SCHWAB_3914:"MINUTE",
       SCHWAB_5671:"MINOR",SCHWAB_2888:"INTERMEDIATE",SCHWAB_0144:"PRIMARY",
     })[physicalAccount] : reportedAccount;
+  // A verified broker label is mandatory for new strategy accounts.
+  // A conflicting supplied Journal label must not silently remap ownership.
+  const expectedReported=physicalAccount==="SCHWAB_0747" ? ["SWING","SUBMICRO"] :
+    physicalAccount==="SCHWAB_6380" ? ["INTRADAY","MICRO"] :
+    physicalAccount ? [journalAccount] : [];
+  const accountIdentityConflict=!!physicalAccount&&!!reportedAccount&&!expectedReported.includes(reportedAccount);
+  const accountIdentityUnknown=!physicalAccount&&!!brokerAccountLabel;
+  const accountIdentityMissing=!physicalAccount&&!brokerAccountLabel&&
+    !["SWING","INTRADAY"].includes(reportedAccount);
 
   const brokerTransactionId = normalizeId(
     firstDefined(
@@ -1937,6 +1946,9 @@ function normalizeRealBrokerFill(fill = {}) {
 
     brokerAccountLabel:
       normalizeId(fill?.brokerAccountLabel),
+    accountIdentityConflict,
+    accountIdentityUnknown,
+    accountIdentityMissing,
 
     brokerTransactionId,
     brokerOrderId,
@@ -2010,6 +2022,9 @@ function validateRealBrokerFill(fill) {
   if (!fill.journalAccount) {
     errors.push("INVALID_REAL_JOURNAL_ACCOUNT");
   }
+  if(fill.accountIdentityConflict)errors.push("REAL_BROKER_ACCOUNT_CLASSIFICATION_CONFLICT");
+  if(fill.accountIdentityUnknown)errors.push("UNAPPROVED_REAL_BROKER_ACCOUNT");
+  if(fill.accountIdentityMissing)errors.push("MISSING_REAL_BROKER_ACCOUNT_IDENTITY");
 
   if (!fill.brokerTransactionId) {
     errors.push("MISSING_BROKER_TRANSACTION_ID");
