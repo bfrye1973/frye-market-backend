@@ -1,0 +1,44 @@
+name: Engine 8C OAuth Reliability Checks
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/trading/schwab/**'
+      - 'services/core/jobs/watchEngine8RealSchwabFills.js'
+      - 'services/core/routes/schwabAuth.js'
+      - 'services/core/tests/engine8cSchwabOAuthReliability.test.js'
+      - '.github/workflows/engine8c-oauth-reliability-check.yml'
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --ignore-scripts
+      # These legacy Engine 10 test files use shared default fixture paths.
+      # Run separately to avoid parallel Journal fixture collisions.
+      - name: Run Engine 8C and Engine 8/10 regressions in isolation
+        shell: bash
+        run: |
+          set -e
+          for testfile in \
+            services/core/tests/engine8cSchwabOAuthReliability.test.js \
+            services/core/tests/engine8RealSchwabObserver.test.js \
+            services/core/tests/engine10RealSchwabJournal.test.js \
+            services/core/tests/engine10RealBrokerFillLegIdentity.test.js \
+            services/core/tests/engine10RealMultiCampaignFifo.test.js \
+            services/core/tests/engine10RealFuturesExpirationIdentity.test.js
+          do
+            node --test "$testfile"
+          done
+      - name: Diagnostic baseline of existing Engine 10 test on main (non-gating)
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout --detach origin/main
+          node --test services/core/tests/engine10RealSchwabJournal.test.js
