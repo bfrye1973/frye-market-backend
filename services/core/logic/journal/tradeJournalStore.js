@@ -3,6 +3,7 @@ import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { classifyRealCampaignAtEntry, brokerIdentityPartition } from "./realAccountClassification.js";
+import { assertJournalWritable } from "./journalMaintenanceGuard.js";
 import {
   buildStructuralContextAtEntry,
 } from "../accounts/buildStructuralEntryContext.js";
@@ -51,6 +52,7 @@ function readJson(file, fallback) {
 }
 
 function writeJson(file, data) {
+  if(path.resolve(file)===JOURNAL_FILE)assertJournalWritable(JOURNAL_DIR);
   ensureDataDir();
 
   const tempFile = `${file}.tmp`;
