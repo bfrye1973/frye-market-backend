@@ -4,6 +4,7 @@ on:
     paths:
       - "services/core/logic/journal/**"
       - "services/core/tests/engine10*.test.js"
+      - "services/core/engine10_oct22_offline_acceptance.mjs"
       - ".github/workflows/engine10-seven-real-accounts.yml"
   workflow_dispatch:
 jobs:
@@ -20,6 +21,13 @@ jobs:
           node --check services/core/logic/journal/realAccountClassification.js
           node --check services/core/logic/journal/oct22ClassificationMigration.js
           node --check services/core/logic/journal/realPerformanceSections.js
+          node --check services/core/engine10_oct22_offline_acceptance.mjs
+      - name: Offline runner imports and guarded dry-run smoke test
+        run: |
+          node services/core/engine10_oct22_offline_acceptance.mjs > /tmp/engine10-acceptance-smoke.log 2>&1 && exit 1 || code=$?
+          test "$code" -ne 0
+          grep -q ENGINE8_OCT22_OPENINGS_FILE_REQUIRED /tmp/engine10-acceptance-smoke.log
+          ! grep -q ERR_MODULE_NOT_FOUND /tmp/engine10-acceptance-smoke.log
       - name: Seven account contract tests
         run: |
           node --test services/core/tests/engine10SevenRealAccountClassification.test.js
