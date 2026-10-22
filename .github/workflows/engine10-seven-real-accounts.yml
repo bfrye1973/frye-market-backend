@@ -1,0 +1,33 @@
+name: Engine 10 Seven REAL Account Contract
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/journal/**"
+      - "services/core/tests/engine10*.test.js"
+      - ".github/workflows/engine10-seven-real-accounts.yml"
+  workflow_dispatch:
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/journal/tradeJournalStore.js
+          node --check services/core/logic/journal/realAccountClassification.js
+          node --check services/core/logic/journal/oct22ClassificationMigration.js
+          node --check services/core/logic/journal/realPerformanceSections.js
+      - name: Seven account contract tests
+        run: |
+          node --test services/core/tests/engine10SevenRealAccountClassification.test.js
+          node --test services/core/tests/engine10Oct22ClassificationMigration.test.js
+          node --test services/core/tests/engine10RealPerformanceSections.test.js
+      - name: Existing REAL accounting regression
+        run: |
+          node --test services/core/tests/engine10RealContractIdentity.test.js
+          node --test services/core/tests/engine10RealMultiCampaignFifo.test.js
+          node --test services/core/tests/engine10RealBrokerFillLegIdentity.test.js
+          node --test services/core/tests/engine10RealFuturesExpirationIdentity.test.js
