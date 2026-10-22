@@ -25,6 +25,7 @@ jobs:
           node --test services/core/tests/engine10SevenRealAccountClassification.test.js
           node --test services/core/tests/engine10Oct22ClassificationMigration.test.js
           node --test services/core/tests/engine10RealPerformanceSections.test.js
+          node --test services/core/tests/engine10MinorOpeningPreflight.test.js
       - name: Existing REAL accounting regression
         run: |
           node --test services/core/tests/engine10RealContractIdentity.test.js
