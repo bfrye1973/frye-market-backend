@@ -1807,7 +1807,12 @@ function normalizeRealBrokerFill(fill = {}) {
   const reportedAccount=normalizeRealJournalAccount(fill?.journalAccount);
   const brokerAccountLabel=normalizeId(fill?.brokerAccountLabel);
   const physicalAccount=brokerIdentityPartition(brokerAccountLabel);
-  const journalAccount=physicalAccount || reportedAccount;
+  const journalAccount=physicalAccount==="SCHWAB_0747" ? "SWING" :
+    physicalAccount==="SCHWAB_6380" ? "INTRADAY" :
+    physicalAccount ? ({
+      SCHWAB_7727:"SUBMINUTE",SCHWAB_3914:"MINUTE",
+      SCHWAB_5671:"MINOR",SCHWAB_2888:"INTERMEDIATE",SCHWAB_0144:"PRIMARY",
+    })[physicalAccount] : reportedAccount;
 
   const brokerTransactionId = normalizeId(
     firstDefined(
