@@ -15,3 +15,13 @@ test("MINOR mismatched account, quantity or price fails closed",()=>{
   assert.equal(preflightMinorOpening([],{...fill,...delta}).action,"BLOCK");
  }
 });
+
+test("equivalent ISO timestamp formatting is accepted",()=>{
+ const r=preflightMinorOpening([],{...fill,fillTime:"2026-10-22T13:42:18.000Z"});
+ assert.equal(r.ok,true);assert.equal(r.action,"ELIGIBLE_FOR_CANONICAL_INGESTION");
+});
+test("different instant and invalid timestamps are blocked",()=>{
+ for(const time of ["2026-10-22T13:42:19.000Z","not-a-date"]){
+  assert.equal(preflightMinorOpening([],{...fill,fillTime:time}).action,"BLOCK");
+ }
+});
