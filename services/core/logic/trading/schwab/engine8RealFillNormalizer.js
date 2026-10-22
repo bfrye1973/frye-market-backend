@@ -16,6 +16,8 @@
 //
 // This file never places, modifies, cancels, or replaces broker orders.
 
+import { findSchwabRealAccountByMaskedNumber } from "./engine8RealAccountRegistry.js";
+
 const ACCOUNT_MAP = Object.freeze({
   "6380": Object.freeze({
     brokerAccountLabel: "SCHWAB_6380",
@@ -73,9 +75,17 @@ function accountLast4(maskedAccountNumber) {
   return digits.slice(-4);
 }
 
-export function resolveSchwabJournalAccount(maskedAccountNumber) {
+export function resolveSchwabJournalAccount(maskedAccountNumber, { accountScope = "LEGACY_TWO" } = {}) {
   const last4 = accountLast4(maskedAccountNumber);
-  const mapped = ACCOUNT_MAP[last4] || null;
+  const registered = accountScope === "SEVEN_STRATEGIES"
+    ? findSchwabRealAccountByMaskedNumber(maskedAccountNumber) : null;
+  const mapped = registered ? {
+    brokerAccountLabel: registered.brokerAccountLabel,
+    // Transport alias only; performanceGroup is exclusively Engine 10's.
+    journalAccount: registered.historicalJournalAccount || registered.strategy,
+    strategy: registered.strategy,
+    accountRegistryVersion: "engine8.schwabRealAccounts.v1",
+  } : accountScope === "LEGACY_TWO" ? ACCOUNT_MAP[last4] || null : null;
 
   if (!mapped) {
     return {
@@ -313,8 +323,9 @@ function canonicalLegSort(left, right) {
 function validateTransactionEnvelope({
   transaction,
   maskedAccountNumber,
+  accountScope = "LEGACY_TWO",
 }) {
-  const account = resolveSchwabJournalAccount(maskedAccountNumber);
+  const account = resolveSchwabJournalAccount(maskedAccountNumber, { accountScope });
 
   if (!account.ok) {
     return {
@@ -415,11 +426,13 @@ function validateTransactionEnvelope({
 export function normalizeSchwabRealFutureTransactionLegs({
   transaction,
   maskedAccountNumber,
+  accountScope = "LEGACY_TWO",
   observedAt = new Date().toISOString(),
 } = {}) {
   const envelope = validateTransactionEnvelope({
     transaction,
     maskedAccountNumber,
+    accountScope,
   });
 
   if (!envelope.ok) {
@@ -728,11 +741,13 @@ export function normalizeSchwabRealFutureTransactionLegs({
 export function normalizeSchwabRealFutureTransaction({
   transaction,
   maskedAccountNumber,
+  accountScope = "LEGACY_TWO",
   observedAt = new Date().toISOString(),
 } = {}) {
   const envelope = validateTransactionEnvelope({
     transaction,
     maskedAccountNumber,
+    accountScope,
   });
 
   if (!envelope.ok) {
