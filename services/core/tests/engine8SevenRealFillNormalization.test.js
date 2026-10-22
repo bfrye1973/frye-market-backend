@@ -31,7 +31,12 @@ test("legacy account normalization and identity remain bitwise compatible",()=>{
   const scoped=normalize({...input,accountScope:"SEVEN_STRATEGIES"});
   assert.equal(baseline.ok,true);
   assert.equal(scoped.ok,true);
-  assert.deepEqual(scoped.fill,baseline.fill);
+  // observedAt is the wall-clock observation timestamp and may differ by milliseconds.
+  const {observedAt: baselineObservedAt,...baselineStable}=baseline.fill;
+  const {observedAt: scopedObservedAt,...scopedStable}=scoped.fill;
+  assert.ok(Number.isFinite(Date.parse(baselineObservedAt)));
+  assert.ok(Number.isFinite(Date.parse(scopedObservedAt)));
+  assert.deepEqual(scopedStable,baselineStable);
   assert.equal(scoped.fill.journalAccount,"INTRADAY");
 });
 test("unknown broker identities cannot be coerced into account scope",()=>{
