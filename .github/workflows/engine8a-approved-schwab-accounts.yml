@@ -1,0 +1,27 @@
+name: Engine 8A Schwab approved account discovery
+on:
+  push:
+    branches: [engine8a-schwab-approved-account-filter-v1]
+  pull_request:
+    paths:
+      - "services/core/logic/trading/schwab/engine8RealFillObserver.js"
+      - "services/core/logic/trading/schwab/selectApprovedSchwabRealAccounts.js"
+      - "services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Test approved account filtering
+        run: node --test services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js
+      - name: Syntax check watcher and observer
+        run: |
+          node --check services/core/logic/trading/schwab/engine8RealFillObserver.js
+          node --check services/core/logic/trading/schwab/selectApprovedSchwabRealAccounts.js
+          node --check services/core/jobs/watchEngine8RealSchwabFills.js
