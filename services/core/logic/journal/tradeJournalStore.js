@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { assertJournalWritable } from "./journalMaintenanceGuard.js";
 import {
   buildStructuralContextAtEntry,
 } from "../accounts/buildStructuralEntryContext.js";
@@ -50,11 +51,19 @@ function readJson(file, fallback) {
 }
 
 function writeJson(file, data) {
+  if (path.resolve(file) === JOURNAL_FILE) assertJournalWritable(JOURNAL_DIR);
   ensureDataDir();
 
   const tempFile = `${file}.tmp`;
 
   fs.writeFileSync(tempFile, JSON.stringify(data, null, 2));
+  if (path.resolve(file) === JOURNAL_FILE) {
+    try { assertJournalWritable(JOURNAL_DIR); }
+    catch (error) {
+      try { fs.unlinkSync(tempFile); } catch {}
+      throw error;
+    }
+  }
   fs.renameSync(tempFile, file);
 }
 
