@@ -1807,11 +1807,7 @@ function normalizeRealBrokerFill(fill = {}) {
   const reportedAccount=normalizeRealJournalAccount(fill?.journalAccount);
   const brokerAccountLabel=normalizeId(fill?.brokerAccountLabel);
   const physicalAccount=brokerIdentityPartition(brokerAccountLabel);
-  const journalAccount=physicalAccount ? (
-    physicalAccount==="SCHWAB_0747" ? "SWING" :
-    physicalAccount==="SCHWAB_6380" ? "INTRADAY" :
-    physicalAccount
-  ) : reportedAccount;
+  const journalAccount=physicalAccount || reportedAccount;
 
   const brokerTransactionId = normalizeId(
     firstDefined(
@@ -2121,10 +2117,17 @@ function realCampaignMatches(trade, fill) {
   return (
     toUpper(trade?.accountMode) === "REAL" &&
     toUpper(trade?.source) === "SCHWAB_BROKER_FILL" &&
-    toUpper(
-      trade?.journalAccount ||
-      trade?.brokerImport?.accountAlias
-    ) === fill.journalAccount &&
+    (
+      (
+        toUpper(trade?.brokerAccountLabel || trade?.realBroker?.brokerAccountLabel) &&
+        toUpper(fill.brokerAccountLabel) &&
+        toUpper(trade?.brokerAccountLabel || trade?.realBroker?.brokerAccountLabel) === toUpper(fill.brokerAccountLabel)
+      ) ||
+      (
+        !trade?.brokerAccountLabel &&
+        toUpper(trade?.journalAccount || trade?.brokerImport?.accountAlias) === toUpper(fill.journalAccount)
+      )
+    ) &&
     toUpper(
       trade?.normalizedInstrumentRoot ||
       trade?.instrumentRoot ||
