@@ -5,6 +5,8 @@ import {
   ingestRealBrokerFill
 } from "../logic/journal/tradeJournalStore.js";
 
+import { buildRealPerformanceSections } from "../logic/journal/realPerformanceSections.js";
+
 const router = express.Router();
 
 function requireEngine8Admin(req, res, next) {
@@ -58,6 +60,20 @@ router.get("/trade-journal", async (req, res) => {
       detail: String(err?.message || err)
     });
   }
+});
+
+/**
+ * GET /api/v1/trade-journal/real-performance
+ * Read-only nine-section reporting. No Journal or Schwab writes.
+ */
+router.get("/trade-journal/real-performance", async (_req,res)=>{
+ try{
+  const out=await listTrades({accountMode:"REAL"});
+  if(!out?.ok||!Array.isArray(out.trades))return res.status(503).json({ok:false,error:"REAL_JOURNAL_UNAVAILABLE"});
+  return res.json({ok:true,...buildRealPerformanceSections(out.trades)});
+ }catch(err){
+  return res.status(500).json({ok:false,error:"REAL_PERFORMANCE_REPORT_FAILED",detail:String(err?.message||err)});
+ }
 });
 
 /**

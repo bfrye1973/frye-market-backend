@@ -25,6 +25,7 @@ import {
 } from "./schwabClient.js";
 import { getSchwabConfig } from "./schwabConfig.js";
 import { selectApprovedSchwabRealAccounts } from "./selectApprovedSchwabRealAccounts.js";
+import { journalMaintenanceStatus } from "../../journal/journalMaintenanceGuard.js";
 import {
   normalizeSchwabRealFutureTransaction,
   normalizeSchwabRealFutureTransactionLegs,
@@ -225,6 +226,7 @@ function normalizeTransactionCandidates({
   transaction,
   maskedAccountNumber,
   observedAt,
+  accountScope = "LEGACY_TWO",
 }) {
   // Preserve the legacy path exactly for the overwhelming majority of
   // historical/single-FUTURE transactions. This prevents a rollout from
@@ -233,6 +235,7 @@ function normalizeTransactionCandidates({
     transaction,
     maskedAccountNumber,
     observedAt,
+    accountScope,
   });
 
   if (legacy.ok) {
@@ -255,6 +258,7 @@ function normalizeTransactionCandidates({
     transaction,
     maskedAccountNumber,
     observedAt,
+    accountScope,
   });
 
   if (!legAware.ok) {
@@ -373,6 +377,19 @@ export async function observeSchwabRealFills({
         )
       : deliver === true;
 
+  // Never observe, deliver or advance durable watermarks while the Journal
+  // is under a controlled cutover lock. Preserve pending Schwab fills.
+  if (journalMaintenanceStatus(process.env.TRADE_JOURNAL_DIR || "/var/data/replay/journal").locked) {
+    return {
+      ok: false,
+      status: "ENGINE10_JOURNAL_MAINTENANCE_LOCKED",
+      delivered: 0,
+      watermarkAdvanced: 0,
+      pending: 0,
+      errors: ["ENGINE10_JOURNAL_MAINTENANCE_LOCKED"],
+    };
+  }
+
   const endDate = now.toISOString();
   const bootstrapStartedAt =
     getEngine8RealFillBootstrapStartedAt();
@@ -479,7 +496,9 @@ export async function observeSchwabRealFills({
     };
   }
 
-  const selected = selectApprovedSchwabRealAccounts(accountsResult.accounts || []);
+  const accountScope = process.env.ENGINE8_REAL_ACCOUNT_SCOPE === "SEVEN_STRATEGIES"
+    ? "SEVEN_STRATEGIES" : "LEGACY_TWO";
+  const selected = selectApprovedSchwabRealAccounts(accountsResult.accounts || [], {accountScope});
   result.unrelatedAccountsSkipped = selected.skippedCount;
   result.approvedAccountsDiscovered = selected.approved.length;
 
@@ -598,6 +617,7 @@ export async function observeSchwabRealFills({
             account.maskedAccountNumber,
           observedAt:
             nowIso(),
+          accountScope,
         });
 
       if (!normalized.ok) {
