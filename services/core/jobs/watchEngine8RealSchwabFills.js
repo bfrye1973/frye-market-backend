@@ -115,6 +115,9 @@ while (true) {
         recoveryMode: out.recoveryMode,
         bootstrapStartedAt: out.bootstrapStartedAt,
         accountsRead: out.accountsRead,
+        approvedAccountsDiscovered: out.approvedAccountsDiscovered,
+        unrelatedAccountsSkipped: out.unrelatedAccountsSkipped,
+        accountErrors: out.accountErrors,
         transactionsRead: out.transactionsRead,
         futuresFillsNormalized:
           out.futuresFillsNormalized,
