@@ -58,6 +58,15 @@ function writeJson(file, data) {
   const tempFile = `${file}.tmp`;
 
   fs.writeFileSync(tempFile, JSON.stringify(data, null, 2));
+  // Recheck immediately before the rename so a maintenance lock appearing
+  // during serialization cannot be bypassed by an already-started write.
+  if(path.resolve(file)===JOURNAL_FILE){
+    try { assertJournalWritable(JOURNAL_DIR); }
+    catch(error) {
+      try { fs.unlinkSync(tempFile); } catch {}
+      throw error;
+    }
+  }
   fs.renameSync(tempFile, file);
 }
 
