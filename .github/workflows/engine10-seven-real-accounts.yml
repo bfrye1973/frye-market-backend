@@ -7,6 +7,7 @@ on:
       - "services/core/engine10_oct22_offline_acceptance.mjs"
       - "services/core/engine10_seven_real_cutover_preflight.mjs"
       - "services/core/engine10_prepare_seven_real_cutover.mjs"
+      - "services/core/engine10_apply_seven_real_cutover.mjs"
       - "services/core/routes/tradeJournal.js"
       - ".github/workflows/engine10-seven-real-accounts.yml"
   workflow_dispatch:
@@ -27,6 +28,7 @@ jobs:
           node --check services/core/engine10_oct22_offline_acceptance.mjs
           node --check services/core/engine10_seven_real_cutover_preflight.mjs
           node --check services/core/engine10_prepare_seven_real_cutover.mjs
+          node --check services/core/engine10_apply_seven_real_cutover.mjs
           node --check services/core/routes/tradeJournal.js
       - name: Offline runner imports and guarded dry-run smoke test
         run: |
