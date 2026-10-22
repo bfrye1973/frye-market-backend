@@ -1,0 +1,28 @@
+name: Engine 8 seven REAL account registry
+on:
+  push:
+    branches: [engine8a-seven-real-account-registry-v1]
+  pull_request:
+    paths:
+      - "services/core/logic/trading/schwab/engine8RealAccountRegistry.js"
+      - "services/core/logic/trading/schwab/planSevenRealAccountWatermarks.js"
+      - "services/core/tests/engine8SevenRealWatermarkPlan.test.js"
+      - "services/core/tests/engine8SevenRealFillNormalization.test.js"
+      - "services/core/scripts/exportEngine8Oct22SevenRealEvidence.js"
+      - "services/core/logic/trading/schwab/engine8RealFillNormalizer.js"
+      - "services/core/logic/trading/schwab/selectApprovedSchwabRealAccounts.js"
+      - "services/core/tests/engine8SevenRealAccountRegistry.test.js"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --test services/core/tests/engine8SevenRealAccountRegistry.test.js services/core/tests/engine8SevenRealWatermarkPlan.test.js services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js services/core/tests/engine8SevenRealFillNormalization.test.js services/core/tests/engine8RealSchwabObserver.test.js
+      - run: |
+          node --check services/core/logic/trading/schwab/engine8RealAccountRegistry.js
+          node --check services/core/scripts/exportEngine8Oct22SevenRealEvidence.js
