@@ -6,7 +6,7 @@ import path from "node:path";
 import { buildCurrentWavelength } from "../logic/engine22/wave/buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 
-const model=()=>buildCurrentWavelength({symbol:"ES",currentPrice:7800,microBars5m:[]});
+const model=()=>{ const v=buildCurrentWavelength({symbol:"ES",currentPrice:7800,microBars5m:[]}); delete v.degrees.micro.ownerMicroBDown; delete v.degrees.submicro.ownerSubmicroADown; return v; };
 test("all three owner Fib ladders use actual price and persistent touch history without cross-degree changes",()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"e22-price-touch-"));
  const file=path.join(dir,"touches.json");
