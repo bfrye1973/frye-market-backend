@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import crypto from "crypto";
 import { fileURLToPath } from "url";
+import { classifyRealCampaignAtEntry, brokerIdentityPartition } from "./realAccountClassification.js";
 import {
   buildStructuralContextAtEntry,
 } from "../accounts/buildStructuralEntryContext.js";
@@ -1745,11 +1746,7 @@ function updateSummary(trade) {
 
 function normalizeRealJournalAccount(value) {
   const account = toUpper(value);
-
-  if (account === "INTRADAY" || account === "SWING") {
-    return account;
-  }
-
+  if (["INTRADAY","SWING","SUBMICRO","MICRO","SUBMINUTE","MINUTE","MINOR","INTERMEDIATE","PRIMARY"].includes(account))return account;
   return null;
 }
 
@@ -1807,7 +1804,24 @@ function normalizeRealBrokerFill(fill = {}) {
   const broker = toUpper(fill?.broker || "SCHWAB");
   const source = toUpper(fill?.source || "SCHWAB_BROKER_FILL");
   const accountMode = toUpper(fill?.accountMode || "REAL");
-  const journalAccount = normalizeRealJournalAccount(fill?.journalAccount);
+  const reportedAccount=normalizeRealJournalAccount(fill?.journalAccount);
+  const brokerAccountLabel=normalizeId(fill?.brokerAccountLabel);
+  const physicalAccount=brokerIdentityPartition(brokerAccountLabel);
+  const journalAccount=physicalAccount==="SCHWAB_0747" ? "SWING" :
+    physicalAccount==="SCHWAB_6380" ? "INTRADAY" :
+    physicalAccount ? ({
+      SCHWAB_7727:"SUBMINUTE",SCHWAB_3914:"MINUTE",
+      SCHWAB_5671:"MINOR",SCHWAB_2888:"INTERMEDIATE",SCHWAB_0144:"PRIMARY",
+    })[physicalAccount] : reportedAccount;
+  // A verified broker label is mandatory for new strategy accounts.
+  // A conflicting supplied Journal label must not silently remap ownership.
+  const expectedReported=physicalAccount==="SCHWAB_0747" ? ["SWING","SUBMICRO"] :
+    physicalAccount==="SCHWAB_6380" ? ["INTRADAY","MICRO"] :
+    physicalAccount ? [journalAccount] : [];
+  const accountIdentityConflict=!!physicalAccount&&!!reportedAccount&&!expectedReported.includes(reportedAccount);
+  const accountIdentityUnknown=!physicalAccount&&!!brokerAccountLabel;
+  const accountIdentityMissing=!physicalAccount&&!brokerAccountLabel&&
+    !["SWING","INTRADAY"].includes(reportedAccount);
 
   const brokerTransactionId = normalizeId(
     firstDefined(
@@ -1932,6 +1946,9 @@ function normalizeRealBrokerFill(fill = {}) {
 
     brokerAccountLabel:
       normalizeId(fill?.brokerAccountLabel),
+    accountIdentityConflict,
+    accountIdentityUnknown,
+    accountIdentityMissing,
 
     brokerTransactionId,
     brokerOrderId,
@@ -2005,6 +2022,9 @@ function validateRealBrokerFill(fill) {
   if (!fill.journalAccount) {
     errors.push("INVALID_REAL_JOURNAL_ACCOUNT");
   }
+  if(fill.accountIdentityConflict)errors.push("REAL_BROKER_ACCOUNT_CLASSIFICATION_CONFLICT");
+  if(fill.accountIdentityUnknown)errors.push("UNAPPROVED_REAL_BROKER_ACCOUNT");
+  if(fill.accountIdentityMissing)errors.push("MISSING_REAL_BROKER_ACCOUNT_IDENTITY");
 
   if (!fill.brokerTransactionId) {
     errors.push("MISSING_BROKER_TRANSACTION_ID");
@@ -2117,10 +2137,17 @@ function realCampaignMatches(trade, fill) {
   return (
     toUpper(trade?.accountMode) === "REAL" &&
     toUpper(trade?.source) === "SCHWAB_BROKER_FILL" &&
-    toUpper(
-      trade?.journalAccount ||
-      trade?.brokerImport?.accountAlias
-    ) === fill.journalAccount &&
+    (
+      (
+        toUpper(trade?.brokerAccountLabel || trade?.realBroker?.brokerAccountLabel) &&
+        toUpper(fill.brokerAccountLabel) &&
+        toUpper(trade?.brokerAccountLabel || trade?.realBroker?.brokerAccountLabel) === toUpper(fill.brokerAccountLabel)
+      ) ||
+      (
+        !trade?.brokerAccountLabel &&
+        toUpper(trade?.journalAccount || trade?.brokerImport?.accountAlias) === toUpper(fill.journalAccount)
+      )
+    ) &&
     toUpper(
       trade?.normalizedInstrumentRoot ||
       trade?.instrumentRoot ||
@@ -2179,18 +2206,14 @@ function findRealFillDuplicate(trades, fill) {
         : [];
 
     for (const row of events) {
-      const sameParent =
-        toUpper(
-          row?.broker
-        ) === fill.broker &&
-        toUpper(
-          row?.journalAccount
-        ) ===
-          fill.journalAccount &&
-        sameNonEmpty(
-          row?.brokerTransactionId,
-          fill.brokerTransactionId
-        );
+      const eventBrokerLabel=toUpper(trade?.brokerAccountLabel||trade?.realBroker?.brokerAccountLabel||row?.brokerAccountLabel);
+      const fillBrokerLabel=toUpper(fill?.brokerAccountLabel);
+      const sameBrokerIdentity=fillBrokerLabel && eventBrokerLabel
+        ? eventBrokerLabel===fillBrokerLabel
+        : toUpper(row?.journalAccount)===fill.journalAccount;
+      const sameParent=toUpper(row?.broker)===fill.broker &&
+        sameBrokerIdentity &&
+        sameNonEmpty(row?.brokerTransactionId,fill.brokerTransactionId);
 
       if (!sameParent) {
         continue;
@@ -3333,8 +3356,15 @@ function createRealCampaign({
       })
     );
 
+  const classification=classifyRealCampaignAtEntry({
+    brokerAccountLabel:fill.brokerAccountLabel,
+    entryTime:fill.fillTime,
+  });
   const trade = {
     tradeId,
+    performanceGroup:classification.ok ? classification.classification : fill.journalAccount,
+    performanceClassificationSource:classification.ok ? classification.source : "LEGACY_COMPATIBILITY",
+    performanceClassificationVersion:classification.registryVersion||null,
 
     identity: {
       tradeId,
