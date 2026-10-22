@@ -5,8 +5,10 @@ const norm=x=>String(x??"").trim();
 export function preflightMinorOpening(trades=[],fill={}){
  const expected={brokerAccountLabel:"SCHWAB_5671",brokerTransactionId:"134209487262",fillTime:"2026-10-22T13:42:18Z",futuresContractCode:"MESZ26",positionEffect:"OPENING",direction:"LONG",side:"BUY",quantity:1,fillPrice:7730.25};
  for(const [key,value] of Object.entries(expected)){
-  const actual=key==="fillPrice"||key==="quantity"?Number(fill[key]):norm(fill[key]);
-  if(actual!==value)return {ok:false,action:"BLOCK",reason:"VERIFIED_FILL_MISMATCH",field:key};
+  const actual=key==="fillTime"?Date.parse(norm(fill[key])):key==="fillPrice"||key==="quantity"?Number(fill[key]):norm(fill[key]);
+  const wanted=key==="fillTime"?Date.parse(value):value;
+  if(!Number.isFinite(actual)&&key==="fillTime")return {ok:false,action:"BLOCK",reason:"INVALID_FILL_TIMESTAMP",field:key};
+  if(actual!==wanted)return {ok:false,action:"BLOCK",reason:"VERIFIED_FILL_MISMATCH",field:key};
  }
  const classification=classifyRealCampaignAtEntry({brokerAccountLabel:fill.brokerAccountLabel,entryTime:fill.fillTime});
  if(!classification.ok||classification.classification!=="MINOR")return {ok:false,action:"BLOCK",reason:"INVALID_MINOR_CLASSIFICATION"};
