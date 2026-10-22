@@ -22,6 +22,7 @@ jobs:
       - name: Syntax checks
         run: |
           node --check services/core/logic/journal/tradeJournalStore.js
+          node --check services/core/logic/journal/journalMaintenanceGuard.js
           node --check services/core/logic/journal/realAccountClassification.js
           node --check services/core/logic/journal/oct22ClassificationMigration.js
           node --check services/core/logic/journal/realPerformanceSections.js
@@ -43,6 +44,7 @@ jobs:
           node --test services/core/tests/engine10RealPerformanceSections.test.js
           node --test services/core/tests/engine10MinorOpeningPreflight.test.js
           node --test services/core/tests/engine10OfflineAcceptanceFixture.test.js
+          node --test services/core/tests/engine10JournalMaintenanceGuard.test.js
       - name: Existing REAL accounting regression
         run: |
           node --test services/core/tests/engine10RealContractIdentity.test.js
