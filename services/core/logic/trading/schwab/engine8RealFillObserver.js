@@ -24,6 +24,7 @@ import {
   schwabApiRequest,
 } from "./schwabClient.js";
 import { getSchwabConfig } from "./schwabConfig.js";
+import { selectApprovedSchwabRealAccounts } from "./selectApprovedSchwabRealAccounts.js";
 import {
   normalizeSchwabRealFutureTransaction,
   normalizeSchwabRealFutureTransactionLegs,
@@ -399,6 +400,8 @@ export async function observeSchwabRealFills({
     bootstrapStartedAt,
     endDate,
     accountsRead: 0,
+    unrelatedAccountsSkipped: 0,
+    approvedAccountsDiscovered: 0,
     transactionsRead: 0,
     futuresFillsNormalized: 0,
     multiFutureTransactionsNormalized: 0,
@@ -476,37 +479,24 @@ export async function observeSchwabRealFills({
     };
   }
 
+  const selected = selectApprovedSchwabRealAccounts(accountsResult.accounts || []);
+  result.unrelatedAccountsSkipped = selected.skippedCount;
+  result.approvedAccountsDiscovered = selected.approved.length;
+
+  if (!selected.ok) {
+    return {
+      ...result,
+      ok: false,
+      status: "SCHWAB_APPROVED_ACCOUNT_DISCOVERY_FAILED",
+      accountErrors: selected.errors.length,
+      errors: selected.errors,
+    };
+  }
+
   const candidates = [];
   const accountRuns = new Map();
 
-  for (
-    const account of
-    accountsResult.accounts || []
-  ) {
-    if (
-      !account?.accountHash ||
-      !account?.maskedAccountNumber
-    ) {
-      result.skipped += 1;
-      continue;
-    }
-
-    const accountIdentity =
-      resolveSchwabJournalAccount(
-        account.maskedAccountNumber
-      );
-
-    if (!accountIdentity.ok) {
-      result.accountErrors += 1;
-      result.errors.push({
-        account:
-          account.maskedAccountNumber,
-        error:
-          accountIdentity.reason,
-      });
-      continue;
-    }
-
+  for (const { account, identity: accountIdentity } of selected.approved) {
     const brokerAccountLabel =
       accountIdentity.brokerAccountLabel;
 
