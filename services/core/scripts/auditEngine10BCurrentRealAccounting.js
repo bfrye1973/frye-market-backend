@@ -33,7 +33,8 @@ for(const t of real){
    if(Number.isFinite(price))slot.remainingEntries.push(price);
   }else if(c.status==="CLOSED"){
    slot.closed++;closed++;
-   if(!Number.isFinite(Number(c.netRealizedPnL))&&!Number.isFinite(Number(c.netPnL)))
+   if((c.netRealizedPnL===null||c.netRealizedPnL===undefined||!Number.isFinite(Number(c.netRealizedPnL))) &&
+      (c.netPnL===null||c.netPnL===undefined||!Number.isFinite(Number(c.netPnL))))
      noClosedNet.push({tradeId:t.tradeId,contractId:c.contractId});
   }
  }
