@@ -8,6 +8,7 @@ on:
       - "services/core/logic/trading/schwab/reconcileDurablePendingRealFills.js"
       - "services/core/jobs/watchEngine8RealSchwabFills.js"
       - "services/core/tests/engine8DurableRealAckRecovery.test.js"
+      - "services/core/scripts/auditEngine8ThreeRealAcknowledgments.js"
 permissions:
   contents: read
 jobs:
@@ -20,5 +21,6 @@ jobs:
           node-version: "20"
       - run: node --test services/core/tests/engine8DurableRealAckRecovery.test.js services/core/tests/engine8RealSchwabObserver.test.js services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js
       - run: |
+          node --check services/core/scripts/auditEngine8ThreeRealAcknowledgments.js
           node --check services/core/jobs/watchEngine8RealSchwabFills.js
           node --check services/core/logic/trading/schwab/reconcileDurablePendingRealFills.js
