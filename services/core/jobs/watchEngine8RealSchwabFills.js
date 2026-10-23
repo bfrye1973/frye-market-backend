@@ -12,6 +12,7 @@
 import {
   observeSchwabRealFills,
 } from "../logic/trading/schwab/engine8RealFillObserver.js";
+import {reconcileDurablePendingRealFills} from "../logic/trading/schwab/reconcileDurablePendingRealFills.js";
 
 function positiveInt(value, fallback) {
   const parsed = Number.parseInt(
@@ -102,6 +103,14 @@ while (true) {
   const startedAt = new Date();
 
   try {
+    // Repair existing durable pending records independently of the short
+    // polling window; never mutate Engine 8 account watermarks here.
+    if(process.env.ENGINE8_REAL_FILL_DELIVERY_ENABLED === "1"){
+      const pending = await reconcileDurablePendingRealFills();
+      if(pending.acknowledged || pending.pending || pending.errors.length){
+        console.log(JSON.stringify({engine:"engine8.durableRealFillReconciliation.v1",...pending}));
+      }
+    }
     const out = await observeSchwabRealFills({
       now: startedAt,
       recoveryMode: firstIteration,
