@@ -44,7 +44,7 @@ export async function reconcileDurablePendingRealFills({
  const config=deliver?null:getSchwabConfig();
  const base=(process.env.ENGINE8_REAL_JOURNAL_BASE_URL||process.env.CORE_BASE||
   "http://127.0.0.1:10000").replace(/\/+$/,"");
- const handler=deliver||async fill=>{
+ const handler=deliver||(async fill=>{
   if(!config.adminSecret)throw Error("ADMIN_SECRET_MISSING");
   const r=await fetch(base+"/api/v1/trade-journal/real-fill",{
    method:"POST",headers:{"Content-Type":"application/json",
@@ -52,7 +52,7 @@ export async function reconcileDurablePendingRealFills({
    body:JSON.stringify(fill),signal:AbortSignal.timeout(20000)
   });
   return {httpOk:r.ok,body:await r.json()};
- };
+ });
  for(const candidate of candidates){
   const fill=candidate.normalizedFill;
   const key=string(candidate.dedupeKey);
