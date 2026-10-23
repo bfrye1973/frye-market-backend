@@ -1,0 +1,38 @@
+name: Engine 2B Historical ES Coverage
+on:
+  push:
+    branches: [engine2b-chart-overlays-v1]
+    paths:
+      - 'services/core/tests/engine2HistoricalProviderCoverage.mjs'
+      - 'services/core/tests/engine2RolloverPriceParity.mjs'
+      - 'services/core/tests/engine2HistoricalAnchorContractSanity.mjs'
+      - '.github/workflows/engine2b-historical-coverage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Probe historical contracts without writing data
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: node services/core/tests/engine2HistoricalProviderCoverage.mjs
+
+      - name: Compare unadjusted ESU6 and ESZ6 overlap prices
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: node services/core/tests/engine2RolloverPriceParity.mjs
+
+      - name: Compare approved anchor prices to historical contract bars
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: node services/core/tests/engine2HistoricalAnchorContractSanity.mjs
