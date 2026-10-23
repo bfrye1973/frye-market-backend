@@ -98,6 +98,10 @@ import {
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
+import { buildEngine6ZoneRotationContext } from "../logic/engine6/buildZoneRotationContext.js";
+import { createEngine6ApprovedPaperPermissionLock } from "../logic/engine6/6d-paper-permission/buildApprovedPaperPermissionLock.js";
+import { gateNewStrategy1PaperPermission } from "../logic/engine6/6d-paper-permission/buildStrategy1PermissionGate.js";
+import { evaluateEngine6ZoneRotationDecision } from "../logic/engine6/6c-trade-decision/index.js";
 import {
   evaluateEngine6Strategy1Phase4Contract,
   filterEngine15ArtifactsForFastLane,
@@ -9151,98 +9155,17 @@ if (isEsIntradayScalp) {
   }
 }
 
-let engine6ApprovedPaperPermissionLock = null;
+const {
+  rememberEngine6ApprovedPaperPermission,
+  applyEngine6ApprovedPaperPermissionLock,
+  rememberExistingOpenPaperApproval,
+} = createEngine6ApprovedPaperPermissionLock(nowIso);
+const engine6DCanonicalReactionHandoff = engine26ReactionHandoff;
+const engine6DLockContext = () => ({
+  candidate: engine26LocationCandidate,
+  reactionHandoff: engine6DCanonicalReactionHandoff,
+});
 
-const rememberEngine6ApprovedPaperPermission = (permission) => {
-  const paper = permission?.paper || null;
-
-  if (
-    paper?.decision === "FAST_INTRADAY_PAPER_ALLOW" &&
-    paper?.allowed === true &&
-    paper?.paperAllowed === true &&
-    ["LONG", "SHORT"].includes(String(paper?.direction || "").toUpperCase()) &&
-    paper?.candidateId &&
-    paper?.zoneId
-  ) {
-    engine6ApprovedPaperPermissionLock =
-      JSON.parse(JSON.stringify({
-        ...paper,
-        locked: true,
-        lockedAt: nowIso(),
-        lockSource: "ENGINE6_FAST_INTRADAY_PAPER_ALLOW",
-        lockReason: "ENGINE6_GO_CANNOT_BE_DOWNGRADED_DOWNSTREAM",
-      }));
-  }
-};
-
-const applyEngine6ApprovedPaperPermissionLock = (permission) => {
-  if (!engine6ApprovedPaperPermissionLock) {
-    return permission;
-  }
-
-  return {
-    ...(permission || {}),
-    permission:
-      permission?.permission === "STAND_DOWN"
-        ? "REDUCE"
-        : permission?.permission || "REDUCE",
-
-    direction:
-      engine6ApprovedPaperPermissionLock.direction,
-
-    watchOnly: false,
-    setupEligible: true,
-
-    paper: {
-      ...(permission?.paper || {}),
-      ...engine6ApprovedPaperPermissionLock,
-
-      decision: "FAST_INTRADAY_PAPER_ALLOW",
-      allowed: true,
-      paperAllowed: true,
-
-      paperShortAllowed:
-        engine6ApprovedPaperPermissionLock.direction === "SHORT",
-
-      paperLongAllowed:
-        engine6ApprovedPaperPermissionLock.direction === "LONG",
-
-      fastIntradayPaperAllow: true,
-
-      blockers: [],
-      warnings: [
-        ...new Set([
-          ...(Array.isArray(permission?.paper?.warnings)
-            ? permission.paper.warnings
-            : []),
-          "ENGINE6_APPROVED_PERMISSION_LOCK_ACTIVE",
-        ]),
-      ],
-
-      reasonCodes: [
-        ...new Set([
-          ...(Array.isArray(engine6ApprovedPaperPermissionLock.reasonCodes)
-            ? engine6ApprovedPaperPermissionLock.reasonCodes
-            : []),
-          "ENGINE6_APPROVED_PERMISSION_LOCK_ACTIVE",
-          "DOWNSTREAM_PERMISSION_DOWNGRADE_BLOCKED",
-        ]),
-      ],
-
-      realExecutionAllowed: false,
-      executable: false,
-      brokerExecutionAllowed: false,
-      schwabExecutionAllowed: false,
-    },
-
-    realExecutionAllowed: false,
-    executable: false,
-    brokerExecutionAllowed: false,
-    schwabExecutionAllowed: false,
-  };
-};
-
- 
 let finalPermissionRaw =
   isEsIntradayScalp
     ? buildFinalPermissionFromEngine15({
@@ -9286,9 +9209,7 @@ let finalPermission =
             ?.engine4AuthorizedReactionParticipation || null,
       })
     : finalPermissionRaw;
-if (isEsIntradayScalp) {
-  rememberEngine6ApprovedPaperPermission(finalPermission);
-}
+// Initial permission is preliminary, never remembered as an unchecked GO.
 
 let engine26ImbalanceWatch = null;
 let engine26PaperTradePlan = null;
@@ -9300,108 +9221,6 @@ let engine26ReplayMarker = null;
 let engine26ProposedGeometry = null; 
 let engine7SizingPreview = null;
 let engine7PositionSizing = null; 
-
-if (isEsIntradayScalp) {
-  try {
-    const openPaperTrades = engine26OpenPaperTrades;
-const engine26 = buildEngine26PaperTradePlan({
-  symbol,
-  strategyId: s.strategyId,
-  tf: s.tf,
-  permission: finalPermission,
-  engine22WaveStrategy,
-  engine25Context,
-  confluence: patchedConfluence,
-  engine15Decision,
-
-  engine26GeneralLocation,
-  engine26LocationCandidate,
-  engine26GeometryHandoff,
-
-  openPaperTrades,
-  dailyBars:
-    marketMeter?.layers?.emaPosture?.daily?.bars || [],
-});
-
-    engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
-    engine26StructuralContext = engine26.engine26StructuralContext || null;
-    engine26ReactionHandoff =
-      engine26?.engine26ReactionHandoff ||
-      engine26StructuralContext?.engine26ReactionHandoff ||
-      engine26StructuralContext?.reactionHandoff ||
-      engine26ReactionHandoff ||
-      null;
-    engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
-    engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
-    engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
-    engine26GeometryPreviews =
-      engine26.engine26GeometryPreviews || null;
-    engine26ProposedGeometry =
-      engine26.engine26ProposedGeometry || null;
-    engine7SizingPreview =
-      buildEngine7ProposedSizingPreview({
-        engine26ProposedGeometry,
-
-    engine6PaperPermission:
-      finalPermission?.paper || null,
-
-    engine27MinuteReadiness: null,
-
-    riskConfig:
-      ES_PAPER_RISK_CONFIG,
-
-    snapshotTime:
-      engine26ProposedGeometry?.snapshotTime ||
-      nowIso(),
-  });
-    // V1 planner-only. Do not call Engine 8 from snapshot builder.
-    engine26PaperTradeExecution = null;
-    engine26ReplayMarker = buildEngine26ReplayMarker({
-      symbol,
-      strategyId: s.strategyId,
-      engine26ImbalanceWatch,
-      engine26StructuralContext,
-      engine26PaperTradeTicket,
-      engine26PaperTradeExecution,
-      permission: finalPermission,
-      confluence: patchedConfluence,
-      engine15Decision,
-    });
-  } catch (err) {
-    console.error("[E26 PAPER TRADE PLANNER ERROR]", err);
-
-    engine26PaperTradePlan = {
-      active: false,
-      engine: "engine26.paperTradePlanner.v1",
-      mode: "PAPER_ONLY",
-      researchOnly: true,
-      symbol,
-      strategyId: s.strategyId,
-      tf: s.tf,
-      allowed: false,
-      status: "NO_PAPER_TRADE",
-      blockers: ["ENGINE26_PLANNER_FAILED"],
-      reasonCodes: [
-        "ENGINE26_PLANNER_FAILED",
-        "NO_REAL_EXECUTION",
-        "NO_ENGINE8_CALL_IN_SNAPSHOT_BUILD",
-      ],
-      debug: {
-        error: String(err?.message || err),
-        stack: String(err?.stack || ""),
-      },
-      noRealExecution: true,
-      realExecutionAllowed: false,
-      brokerExecutionAllowed: false,
-      schwabExecutionAllowed: false,
-      createdAt: new Date().toISOString(),
-    };
-    
-    engine26StructuralContext = null;
-    engine26PaperTradeTicket = null;
-    engine26PaperTradeExecution = null;
-  }
-}
 
  const lockedSignal = updateSignalLock({
   symbol,
@@ -9808,6 +9627,37 @@ if (
   }
 }
 
+  // Engine 6B owner context prepared before new PAPER GO.
+  // Current Engine 25 canonical participation artifact; missing/invalid reads are
+  // expressed as unavailable evidence by the pure evaluator, never manufactured.
+  let engine6ZoneRotationContext = null;
+  let engine6ZoneRotationEngine25Participation = null;
+  if (isEsIntradayScalp) {
+    let engine25ParticipationArtifact = null;
+    try {
+      engine25ParticipationArtifact = JSON.parse(
+        fs.readFileSync(`${DATA_DIR}/engine25-participation.json`, "utf8")
+      );
+    } catch {
+      engine25ParticipationArtifact = null;
+    }
+    engine6ZoneRotationEngine25Participation = engine25ParticipationArtifact;
+    engine6ZoneRotationContext = buildEngine6ZoneRotationContext({
+      symbol,
+      strategyId: s.strategyId,
+      candidate: engine26LocationCandidate,
+      reaction: patchedConfluence?.context?.reaction?.paperScalpReaction || null,
+      participation: patchedConfluence?.context?.volume
+        ?.engine4AuthorizedReactionParticipation || null,
+      engine22WaveStrategy,
+      engine25Participation: engine25ParticipationArtifact,
+      engine25Context,
+    });
+  }
+
+
+let engine6ZoneRotationDecision = null;
+
 /*
  * Engine 6 final canonical participation recalculation.
  *
@@ -9867,13 +9717,28 @@ if (isEsIntradayScalp) {
         finalCanonicalEngine4,
     });
 
-  rememberEngine6ApprovedPaperPermission(recalculatedPermission);
+  // Only an already OPEN journaled PAPER trade can preserve a previous locked GO.
+  // This does not authorize a NEW entry or rerun market-context qualification.
+  rememberExistingOpenPaperApproval(
+    previousSnapshot?.strategies?.[s.strategyId]?.permission ?? null,
+    engine26OpenPaperTrades,
+    engine6DLockContext(),
+  );
+  engine6ZoneRotationDecision = evaluateEngine6ZoneRotationDecision({
+    symbol, strategyId: s.strategyId,
+    candidate: engine26LocationCandidate,
+    reaction: finalCanonicalEngine3,
+    participation: finalCanonicalEngine4,
+    phase4: recalculatedPermission?.paper?.strategy1Phase4Contract ?? null,
+    context: engine6ZoneRotationContext,
+    engine25Participation: engine6ZoneRotationEngine25Participation,
+  });
+  const gatedPermission = gateNewStrategy1PaperPermission(recalculatedPermission, engine6ZoneRotationDecision);
+  const gatedRaw = gateNewStrategy1PaperPermission(recalculatedPermissionRaw, engine6ZoneRotationDecision);
+  rememberEngine6ApprovedPaperPermission(gatedPermission, engine6DLockContext());
 
-  finalPermissionRaw =
-    applyEngine6ApprovedPaperPermissionLock(recalculatedPermissionRaw);
-
-  finalPermission =
-    applyEngine6ApprovedPaperPermissionLock(recalculatedPermission);
+  finalPermissionRaw = applyEngine6ApprovedPaperPermissionLock(gatedRaw, engine6DLockContext());
+  finalPermission = applyEngine6ApprovedPaperPermissionLock(gatedPermission, engine6DLockContext());
 
   if (finalPermission?.paper?.allowed !== true) {
     engine26PaperTradeTicket = null;
@@ -9904,6 +9769,109 @@ if (isEsIntradayScalp) {
       };
     }
   }
+if (isEsIntradayScalp) {
+  try {
+    const openPaperTrades = engine26OpenPaperTrades;
+const engine26 = buildEngine26PaperTradePlan({
+  symbol,
+  strategyId: s.strategyId,
+  tf: s.tf,
+  permission: finalPermission,
+  engine22WaveStrategy,
+  engine25Context,
+  confluence: patchedConfluence,
+  engine15Decision,
+
+  engine26GeneralLocation,
+  engine26LocationCandidate,
+  engine26GeometryHandoff,
+
+  openPaperTrades,
+  dailyBars:
+    marketMeter?.layers?.emaPosture?.daily?.bars || [],
+});
+
+    engine26ImbalanceWatch = engine26.engine26ImbalanceWatch || null;
+    engine26StructuralContext = engine26.engine26StructuralContext || null;
+    engine26ReactionHandoff =
+      engine26?.engine26ReactionHandoff ||
+      engine26StructuralContext?.engine26ReactionHandoff ||
+      engine26StructuralContext?.reactionHandoff ||
+      engine26ReactionHandoff ||
+      null;
+    engine26PaperTradePlan = engine26.engine26PaperTradePlan || null;
+    engine26PaperTradeTicket = engine26.engine26PaperTradeTicket || null;
+    engine26TradePlanPreview = engine26.engine26TradePlanPreview || null;
+    engine26GeometryPreviews =
+      engine26.engine26GeometryPreviews || null;
+    engine26ProposedGeometry =
+      engine26.engine26ProposedGeometry || null;
+    engine7SizingPreview =
+      buildEngine7ProposedSizingPreview({
+        engine26ProposedGeometry,
+
+    engine6PaperPermission:
+      finalPermission?.paper || null,
+
+    engine27MinuteReadiness: null,
+
+    riskConfig:
+      ES_PAPER_RISK_CONFIG,
+
+    snapshotTime:
+      engine26ProposedGeometry?.snapshotTime ||
+      nowIso(),
+  });
+    // V1 planner-only. Do not call Engine 8 from snapshot builder.
+    engine26PaperTradeExecution = null;
+    engine26ReplayMarker = buildEngine26ReplayMarker({
+      symbol,
+      strategyId: s.strategyId,
+      engine26ImbalanceWatch,
+      engine26StructuralContext,
+      engine26PaperTradeTicket,
+      engine26PaperTradeExecution,
+      permission: finalPermission,
+      confluence: patchedConfluence,
+      engine15Decision,
+    });
+  } catch (err) {
+    console.error("[E26 PAPER TRADE PLANNER ERROR]", err);
+
+    engine26PaperTradePlan = {
+      active: false,
+      engine: "engine26.paperTradePlanner.v1",
+      mode: "PAPER_ONLY",
+      researchOnly: true,
+      symbol,
+      strategyId: s.strategyId,
+      tf: s.tf,
+      allowed: false,
+      status: "NO_PAPER_TRADE",
+      blockers: ["ENGINE26_PLANNER_FAILED"],
+      reasonCodes: [
+        "ENGINE26_PLANNER_FAILED",
+        "NO_REAL_EXECUTION",
+        "NO_ENGINE8_CALL_IN_SNAPSHOT_BUILD",
+      ],
+      debug: {
+        error: String(err?.message || err),
+        stack: String(err?.stack || ""),
+      },
+      noRealExecution: true,
+      realExecutionAllowed: false,
+      brokerExecutionAllowed: false,
+      schwabExecutionAllowed: false,
+      createdAt: new Date().toISOString(),
+    };
+    
+    engine26StructuralContext = null;
+    engine26PaperTradeTicket = null;
+    engine26PaperTradeExecution = null;
+  }
+}
+
+
  /*
    * Engine 26B dedicated Strategy 1 pipeline.
    *
@@ -10087,6 +10055,8 @@ if (
     permissionPreliminary,
 
     permission: finalPermission,
+    engine6ZoneRotationContext,
+    engine6ZoneRotationDecision,
      
     engine26GeneralLocation,
     engine26LocationCandidate,

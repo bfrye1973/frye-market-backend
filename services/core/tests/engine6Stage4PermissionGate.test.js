@@ -1,0 +1,20 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { gateNewStrategy1PaperPermission as gate } from "../logic/engine6/6d-paper-permission/buildStrategy1PermissionGate.js";
+const approved=(direction="SHORT")=>({permission:"ALLOW",paper:{decision:"FAST_INTRADAY_PAPER_ALLOW",allowed:true,paperAllowed:true,planningAllowed:true,candidateId:"C",zoneId:"Z",direction,locked:true,blockers:[]}});
+for(const direction of ["SHORT","LONG"])test("qualified "+direction+" ALLOW retains normal PAPER GO",()=>{const p=approved(direction);assert.equal(gate(p,{decision:"ALLOW",phase4MandatoryQualified:true}),p);});
+for(const state of ["REDUCE","WAIT","BLOCK"])test(state+" cannot create PAPER GO",()=>{const p=gate(approved(),{decision:state,phase4MandatoryQualified:true});assert.equal(p.paper.allowed,false);assert.equal(p.paper.paperAllowed,false);assert.equal(p.paper.planningAllowed,false);assert.equal(p.paper.decision,"PAPER_STAND_DOWN");assert.equal(p.paper.classification,state);assert.equal(p.realExecutionAllowed,false);assert.equal(p.brokerExecutionAllowed,false);});
+test("missing Phase4 qualified evidence fails closed",()=>{const p=gate(approved(),{decision:"ALLOW",phase4MandatoryQualified:false});assert.equal(p.paper.allowed,false);});
+test("non-allow source cannot be promoted",()=>{const p={paper:{decision:"PAPER_STAND_DOWN",allowed:false}};assert.equal(gate(p,{decision:"ALLOW",phase4MandatoryQualified:true}),p);});
+test("new PAPER planning occurs only after final Engine6C/6D gate",()=>{
+ const s=readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
+ const gateAt=s.indexOf("engine6ZoneRotationDecision = evaluateEngine6ZoneRotationDecision(");
+ const lockAt=s.indexOf("rememberEngine6ApprovedPaperPermission(gatedPermission");
+ const planAt=s.indexOf("const engine26 = buildEngine26PaperTradePlan({");
+ const e7At=s.indexOf("engine7SizingPreview =\n      buildEngine7ProposedSizingPreview({");
+ assert.ok(gateAt>0 && lockAt>gateAt && planAt>lockAt && e7At>planAt);
+ assert.equal((s.match(/rememberEngine6ApprovedPaperPermission\(/g)||[]).length,1);
+ assert.equal((s.match(/buildEngine26PaperTradePlan\(/g)||[]).length,1);
+ assert.ok(s.indexOf("engine6ZoneRotationContext = buildEngine6ZoneRotationContext(")<gateAt);
+});
