@@ -1,0 +1,18 @@
+name: Engine 8A October 23 Broker Audit
+on:
+  push:
+    branches: [engine8a-oct23-seven-account-readonly-reconciliation]
+permissions:
+  contents: read
+jobs:
+  script-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Syntax check read-only audit
+        run: node --check services/core/scripts/auditEngine8Oct23SevenRealBroker.js
+      - name: Seven-account selector regression
+        run: node --test services/core/tests/engine8SevenRealAccountRegistry.test.js services/core/tests/engine8ApprovedSchwabAccountDiscovery.test.js
