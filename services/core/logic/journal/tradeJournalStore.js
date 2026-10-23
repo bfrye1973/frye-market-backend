@@ -3370,6 +3370,7 @@ function createRealCampaign({
   const classification=classifyRealCampaignAtEntry({
     brokerAccountLabel:fill.brokerAccountLabel,
     entryTime:fill.fillTime,
+    brokerTransactionId:fill.brokerTransactionId,
   });
   const trade = {
     tradeId,
@@ -4992,6 +4993,25 @@ export async function ingestRealBrokerFill(
             fill.fillTime,
           priorCloseTime:
             latestCloseTime,
+        };
+      }
+
+      // Refuse unapproved pre-cutover campaigns before writing Journal state.
+      // The two verified exceptions are keyed to exact account, transaction and timestamp.
+      const openingClassification = classifyRealCampaignAtEntry({
+        brokerAccountLabel: fill.brokerAccountLabel,
+        brokerTransactionId: fill.brokerTransactionId,
+        entryTime: fill.fillTime,
+      });
+      if (!openingClassification.ok) {
+        return {
+          ok: false,
+          created: false,
+          updated: false,
+          duplicate: false,
+          journalCompleted: false,
+          error: openingClassification.error,
+          brokerTransactionId: fill.brokerTransactionId,
         };
       }
 
