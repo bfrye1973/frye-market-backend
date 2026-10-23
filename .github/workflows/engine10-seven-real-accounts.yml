@@ -25,6 +25,8 @@ jobs:
           node --check services/core/logic/journal/journalMaintenanceGuard.js
           node --check services/core/logic/journal/realAccountClassification.js
           node --check services/core/logic/journal/verifiedPrecutoverProvenance.js
+          node --check services/core/scripts/preflightEngine10BPrecutoverProvenance.js
+          node --check services/core/scripts/applyEngine10BPrecutoverProvenance.js
           node --check services/core/logic/journal/oct22ClassificationMigration.js
           node --check services/core/logic/journal/realPerformanceSections.js
           node --check services/core/engine10_oct22_offline_acceptance.mjs
