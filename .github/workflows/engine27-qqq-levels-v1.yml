@@ -11,6 +11,9 @@ on:
       - "services/core/jobs/readEngine27CrossMarketLevelsV1.js"
       - "services/core/tests/engine27CrossMarketPersistV1.test.js"
       - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/jobs/runEngine27CrossMarketRefreshV1.js"
+      - "services/core/logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js"
+      - "services/core/tests/engine27CrossMarketAssessmentV1.test.js"
       - "services/core/jobs/auditEngine27CrossMarketLiveSourcesV1.js"
       - "services/core/logic/engine27/buildEngine27Strategies.js"
       - ".github/workflows/engine27-qqq-levels-v1.yml"
@@ -24,7 +27,7 @@ jobs:
         with:
           node-version: "22"
       - name: Key level unit and immutable source tests
-        run: node --test services/core/tests/engine27QqqKeyLevelsV1.test.js services/core/tests/engine27VixKeyLevelsV1.test.js services/core/tests/engine27CrossMarketSourceV1.test.js services/core/tests/engine27CrossMarketPersistV1.test.js
+        run: node --test services/core/tests/engine27QqqKeyLevelsV1.test.js services/core/tests/engine27VixKeyLevelsV1.test.js services/core/tests/engine27CrossMarketSourceV1.test.js services/core/tests/engine27CrossMarketPersistV1.test.js services/core/tests/engine27CrossMarketAssessmentV1.test.js
       - name: Engine 27 existing V2 regression
         run: node --test services/core/tests/engine27TraderIntelligenceV2.test.js
       - name: Syntax tests
@@ -36,4 +39,6 @@ jobs:
           node --check services/core/jobs/readEngine27CrossMarketLevelsV1.js
           node --check services/core/jobs/buildStrategySnapshot.js
           node --check services/core/jobs/auditEngine27CrossMarketLiveSourcesV1.js
+          node --check services/core/jobs/runEngine27CrossMarketRefreshV1.js
+          node --check services/core/logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js
           node --check services/core/logic/engine27/buildEngine27Strategies.js
