@@ -1,6 +1,6 @@
 // Canonical, strictly completed Polygon OHLC adapter for the existing Engine27 reaction classifier.
 // No order, permission, Engine22, or Engine10 mutations. No UVXY proxy for direct VIX.
-import {fetchPolygonAggregatesPaginated} from "../../providers/polygonAggsProvider.js";
+import {fetchPolygonAggregatesPaginated} from "../providers/polygonAggsProvider.js";
 import {detectEngine27ZoneReactionsV1} from "../logic/engine27/crossMarket/detectZoneReactionsV1.js";
 const PERIOD_MS={"10m":600000,"1h":3600000};
 export async function buildEngine27QualifiedReactionsV1({
