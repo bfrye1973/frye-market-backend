@@ -32,6 +32,8 @@ import {
   buildTraderDecision,
 } from "./decision/buildTraderDecision.js";
 
+import { buildQqqKeyLevelsV1 } from "./crossMarket/buildQqqKeyLevelsV1.js";
+
 import {
   buildEngine27TraderIntelligenceV2,
 } from "./v2/buildTraderIntelligenceV2.js";
@@ -340,6 +342,14 @@ export function buildEngine27Strategies({
     engine27TraderIntelligenceV2,
     // Additive current owner working interpretation; historical V2 is unchanged.
     engine27WorkingSevenDegrees: buildEngine27WorkingSevenDegrees({snapshot}),
+    // Read-only source-qualified optional QQQ daily bars; unavailable until a canonical feed supplies them.
+    engine27QqqKeyLevels: buildQqqKeyLevelsV1({
+      candles: snapshot?.crossMarketLevelSources?.QQQ?.dailyCandles,
+      source: snapshot?.crossMarketLevelSources?.QQQ?.source,
+      asOf: snapshot?.crossMarketLevelSources?.QQQ?.asOf,
+      symbol: snapshot?.crossMarketLevelSources?.QQQ?.symbol ?? "QQQ",
+      timeframe: snapshot?.crossMarketLevelSources?.QQQ?.timeframe ?? "1d",
+    }),
 
     laneCount:
       lanes.length,
