@@ -1,3 +1,4 @@
+import { buildEngine27SevenInvalidationsV1 } from "./buildSevenInvalidationsV1.js";
 // Engine 27 additive seven-degree OWNER WORKING COUNT interpretation.
 // Read-only. Engine 22 alone owns wave identity, level geometry, touch status and confirmations.
 // These selectors are explicitly approved in Engine 22C's October 24 handoff.
@@ -33,6 +34,7 @@ function summarize(degree, model) {
 }
 export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
   const e22 = snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy;
+  const invalidations = buildEngine27SevenInvalidationsV1({snapshot});
   const degrees = {};
   for (const degree of ENGINE27_WORKING_DEGREES) {
     const {model,expected,source} = sourceFor(e22,degree);
@@ -44,7 +46,7 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
         confirmationNeeded:{status:"NOT_PUBLISHED",evidence:[]},
         potentialCompletion:{levels:[],nextLevel:null,summary:"Current Engine 22 owner model not published."},
         parentContext:{parentDegree:null,parentWave:null,displayText:null},
-        invalidation:{price:null},traderRead:{headline:"Current working model unavailable",summary:"No fallback to superseded wave counts.",rules:[]},
+        invalidation:{price:null,status:"OWNER_MODEL_UNAVAILABLE",rule:null,source:null},traderRead:{headline:"Current working model unavailable",summary:"No fallback to superseded wave counts.",rules:[]},
         provenance:{workingSource:source,workingModelVersion:expected,confirmationStatus:"NOT_PUBLISHED",countId:null},
         noExecution:true};
       continue;
@@ -64,7 +66,12 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
       currentCondition:degree === "subminute" ? published(model.currentWorkingStructure,"ABC_UP_INSIDE_MINUTE_D") : degree === "minute" ? published(model.activeInternalLegStage, "DEVELOPING_CANDIDATE") : published(model.stage ?? model.lifecycle),
       confirmationNeeded:{status:confirmation,evidence:[],rule:null,note:"Owner working interpretation is not confirmed solely by owner pivot approval."},
       potentialCompletion:{levels:currentLevels,nextLevel:null,summary:currentLevels.length?"Engine 22 owner-model projection; not completion confirmation.":"Current applicable Fibonacci ladder not published."},
-      invalidation:{price:null,displayText:null},
+      invalidation:{price:invalidations.degrees[degree]?.price ?? null,
+        rule:invalidations.degrees[degree]?.rule ?? null,
+        status:invalidations.degrees[degree]?.status ?? "NOT_PUBLISHED",
+        breached:invalidations.degrees[degree]?.breached ?? null,
+        source:invalidations.degrees[degree]?.provenance ?? null,
+        displayText:invalidations.degrees[degree]?.rule ?? "Not published"},
       parentContext:{parentDegree,parentWave,displayText:degree === "minute"?"Internal D UP inside Minute W2":degree === "micro"?"Micro B within Subminute/Minute correction; direct parent count identity unresolved":null},
       traderRead:{headline:story,summary:story,rules:[]},
       provenance:{workingSource:source,workingModelVersion:model.version ?? null,confirmationStatus:confirmation,countId:model.sourceCountId ?? null,workingCount:true,confirmed:false},
