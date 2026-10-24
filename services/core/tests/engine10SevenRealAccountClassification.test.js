@@ -37,3 +37,30 @@ test("unknown account and missing timestamps fail closed",()=>{
   assert.equal(classifyRealCampaignAtEntry({brokerAccountLabel:"SCHWAB_UNKNOWN",entryTime:"2026-10-22T13:42:18Z"}).ok,false);
   assert.equal(classifyRealCampaignAtEntry({brokerAccountLabel:"SCHWAB_5671",entryTime:null}).ok,false);
 });
+
+test("only the two owner-approved pre-cutover account and transaction pairs qualify",()=>{
+  const approved=[
+    ["SCHWAB_7727","134185163978","2026-10-22T05:30:35Z","SUBMINUTE"],
+    ["SCHWAB_3914","134186181985","2026-10-22T06:29:15Z","MINUTE"],
+  ];
+  for(const [brokerAccountLabel,brokerTransactionId,entryTime,classification] of approved){
+    const r=classifyRealCampaignAtEntry({brokerAccountLabel,brokerTransactionId,entryTime});
+    assert.equal(r.ok,true);
+    assert.equal(r.classification,classification);
+    assert.equal(r.source,"VERIFIED_PRECUTOVER_ACCOUNT_EXCEPTION");
+    for(const bad of [
+      {brokerAccountLabel:"SCHWAB_5671"},
+      {brokerTransactionId:"999999999999"},
+      {entryTime:"2026-10-22T05:30:36Z"},
+      {brokerTransactionId:null},
+    ]){
+      assert.equal(classifyRealCampaignAtEntry({
+        brokerAccountLabel,brokerTransactionId,entryTime,...bad,
+      }).ok,false);
+    }
+  }
+  assert.equal(classifyRealCampaignAtEntry({
+    brokerAccountLabel:"SCHWAB_7727",brokerTransactionId:"134185163978",
+    entryTime:"2026-10-22T07:00:00Z",
+  }).source,"STRATEGY_CUTOVER");
+});

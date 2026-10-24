@@ -15,6 +15,22 @@ export const REAL_ACCOUNT_REGISTRY = Object.freeze([
   {brokerAccountLabel:"SCHWAB_0144",strategy:"PRIMARY",historical:null},
 ].map(v=>Object.freeze(v)));
 
+// Owner-approved, transaction-specific exceptions. No other pre-cutover openings qualify.
+export const VERIFIED_PRECUTOVER_ACCOUNT_EXCEPTIONS = Object.freeze([
+  Object.freeze({
+    brokerAccountLabel: "SCHWAB_7727",
+    brokerTransactionId: "134185163978",
+    openingTimeUtc: "2026-10-22T05:30:35.000Z",
+    performanceGroup: "SUBMINUTE",
+  }),
+  Object.freeze({
+    brokerAccountLabel: "SCHWAB_3914",
+    brokerTransactionId: "134186181985",
+    openingTimeUtc: "2026-10-22T06:29:15.000Z",
+    performanceGroup: "MINUTE",
+  }),
+]);
+
 const validGroups = new Set([
   "SWING","INTRADAY","SUBMICRO","MICRO","SUBMINUTE","MINUTE",
   "MINOR","INTERMEDIATE","PRIMARY",
@@ -22,7 +38,7 @@ const validGroups = new Set([
 const normalized=v=>String(v??"").trim().toUpperCase();
 const mapping=label=>REAL_ACCOUNT_REGISTRY.find(v=>v.brokerAccountLabel===normalized(label))||null;
 
-export function classifyRealCampaignAtEntry({brokerAccountLabel,entryTime,existingCampaign=null}={}){
+export function classifyRealCampaignAtEntry({brokerAccountLabel,entryTime,brokerTransactionId=null,existingCampaign=null}={}){
   if(existingCampaign){
     const stored=normalized(existingCampaign?.performanceGroup||existingCampaign?.journalAccount);
     if(validGroups.has(stored))return {
@@ -37,7 +53,22 @@ export function classifyRealCampaignAtEntry({brokerAccountLabel,entryTime,existi
   const ms=Date.parse(String(entryTime??""));
   if(!Number.isFinite(ms))return {ok:false,error:"INVALID_ENTRY_TIME"};
   const after=ms>=Date.parse(REAL_STRATEGY_CUTOVER_UTC);
-  if(!after&&!account.historical)return {ok:false,error:"NO_APPROVED_PRECUTOVER_CLASSIFICATION"};
+  if(!after&&!account.historical){
+    const exception=VERIFIED_PRECUTOVER_ACCOUNT_EXCEPTIONS.find(e=>
+      e.brokerAccountLabel===account.brokerAccountLabel &&
+      e.brokerTransactionId===normalized(brokerTransactionId) &&
+      Date.parse(e.openingTimeUtc)===ms
+    );
+    if(!exception)return {ok:false,error:"NO_APPROVED_PRECUTOVER_CLASSIFICATION"};
+    return {
+      ok:true,classification:exception.performanceGroup,
+      source:"VERIFIED_PRECUTOVER_ACCOUNT_EXCEPTION",
+      brokerAccountLabel:account.brokerAccountLabel,
+      brokerTransactionId:exception.brokerTransactionId,
+      registryVersion:REAL_ACCOUNT_CONTRACT_VERSION,
+      cutoverUtc:REAL_STRATEGY_CUTOVER_UTC,
+    };
+  }
   return {
     ok:true,
     classification:after?account.strategy:account.historical,
