@@ -5,7 +5,7 @@ const now=new Date("2026-10-23T20:40:00Z");
 const rows=[
  {time:Date.parse("2026-10-23T20:00:00Z"),open:698,high:700,low:697,close:698},
  {time:Date.parse("2026-10-23T20:10:00Z"),open:699,high:702,low:698,close:699},
- {time:Date.parse("2026-10-23T20:20:00Z"),open:700,high:705,low:699,close:704},
+ {time:Date.parse("2026-10-23T20:20:00Z"),open:700,high:705,low:699,close:699},
  {time:Date.parse("2026-10-23T20:30:00Z"),open:704,high:709,low:703,close:708}
 ];
 test("a completed QQQ candle confirms reclaim, forming last bar excluded",async()=>{
