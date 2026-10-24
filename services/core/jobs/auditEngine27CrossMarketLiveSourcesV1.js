@@ -12,6 +12,7 @@ const summary=Object.fromEntries(Object.entries(result.instruments??{}).map(([ke
  bars:v.sourceBars??0,
  zones:Array.isArray(v.levels)?v.levels.length:0,
  reasonCodes:v.reasonCodes??[],
+ errorClass:v.errorClass??null,
 }]));
 console.log(JSON.stringify({schema:result.schema,asOf:result.asOf,reasonCodes:result.reasonCodes??[],instruments:summary},null,2));
 if(Object.values(summary).some(x=>x.available!==true)||Object.keys(summary).length!==2)process.exitCode=1;
