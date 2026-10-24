@@ -51,6 +51,7 @@ import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wav
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
 import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevelsV1.js";
+import { maybeRefreshEngine27CrossMarketLevelsV1 } from "./maybeRefreshEngine27CrossMarketLevelsV1.js";
 import { buildEngine27CrossMarketAssessmentV1 } from "../logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js";
 import {
   getManualLevelRowsFor,
@@ -10917,6 +10918,13 @@ result.strategies[s.strategyId] = {
 });
   // Optional, read-only cross-market level publication. This is POST Engine 6:
   // it cannot change reaction, permission, execution or Engine 10 accounting.
+  // Optional, lock-guarded update on the SAME instance that owns the Render disk.
+  // Best-effort only, after Engine6 is settled; no permission or journal mutation.
+  result.engine27Strategies.engine27CrossMarketRefresh =
+    await maybeRefreshEngine27CrossMarketLevelsV1({
+      filePath: process.env.ENGINE27_CROSS_MARKET_LEVELS_PATH ?? null,
+      apiKey: process.env.POLYGON_API_KEY ?? process.env.MASSIVE_API_KEY ?? null,
+    });
   result.engine27Strategies.engine27CrossMarketLevels =
     readEngine27CrossMarketLevelsV1({
       filePath: process.env.ENGINE27_CROSS_MARKET_LEVELS_PATH ?? null,
