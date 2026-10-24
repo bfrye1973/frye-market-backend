@@ -14,7 +14,7 @@ export function buildEngine27CrossMarketAssessmentV1({publication=null}={}){
  const qqq=assessMarket(publication?.instruments?.QQQ,"QQQ");
  const vix=assessMarket(publication?.instruments?.VIX,"VIX");
  return {schema:"engine27.crossMarketAssessment.v1",mode:"READ_ONLY",
-   qqq,vix,state:qqq.state==="UNAVAILABLE"||vix.state==="UNAVAILABLE"?"UNAVAILABLE":"MIXED",
+   qqq,vix,state:qqq.state==="UNAVAILABLE"||vix.state==="UNAVAILABLE"?"UNAVAILABLE":"UNCONFIRMED",
    interpretation:"QQQ and VIX zones are observations only until qualified breaks, reclaims or rejections are independently verified.",
    noPermissionCreated:true,noExecution:true};
 }
