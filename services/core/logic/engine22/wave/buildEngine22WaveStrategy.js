@@ -43,6 +43,7 @@ import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
+import { buildSevenDegreeInvalidationsV1 } from "./buildSevenDegreeInvalidationsV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -2341,6 +2342,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     degreeStates: publishedDegreeStates,
     engine22Display: publishedEngine22Display,
     currentWavelength: publishedCurrentWavelength,
+    sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
+      currentWavelength:publishedCurrentWavelength,
+      degreeStates:publishedDegreeStates,
+      evaluationTimeMs:context.evaluationTimeMs,
+    }),
 
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
