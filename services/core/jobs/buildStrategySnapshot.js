@@ -51,6 +51,7 @@ import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wav
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
 import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevelsV1.js";
+import { buildEngine27CrossMarketAssessmentV1 } from "../logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js";
 import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
@@ -10920,6 +10921,8 @@ result.strategies[s.strategyId] = {
     readEngine27CrossMarketLevelsV1({
       filePath: process.env.ENGINE27_CROSS_MARKET_LEVELS_PATH ?? null,
     });
+  result.engine27Strategies.engine27CrossMarketAssessment =
+    buildEngine27CrossMarketAssessmentV1({publication:result.engine27Strategies.engine27CrossMarketLevels});
 
 
 /*
