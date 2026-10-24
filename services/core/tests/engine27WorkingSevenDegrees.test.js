@@ -28,3 +28,16 @@ test("version mismatch never falls back to superseded Micro lifecycle",()=>{
  assert.equal(out.degrees.micro.available,false);
  assert.equal(out.degrees.micro.activeWave,"NOT_PUBLISHED");
 });
+
+test("dynamic seven degree market alignment is derived from Engine22 and reports missing evidence",()=>{
+ const sample=make();const out=buildEngine27WorkingSevenDegrees({snapshot:sample});
+ assert.equal(out.workingAlignment.alignmentState,"MIXED_INTERNAL_CORRECTION");
+ assert.deepEqual(out.workingAlignment.downDegrees,["submicro","micro"]);
+ assert.ok(out.workingAlignment.warnings.includes("SUBMINUTE_ACTIVE_ABC_FIB_NOT_PUBLISHED"));
+ assert.match(out.workingAlignment.marketStory,/Micro B DOWN/);
+ delete sample.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroBDown;
+ const changed=buildEngine27WorkingSevenDegrees({snapshot:sample});
+ assert.equal(changed.degrees.micro.available,false);
+ assert.equal(changed.workingAlignment.alignmentState,"PARTIAL_EVIDENCE");
+ assert.ok(changed.workingAlignment.warnings.includes("STRUCTURAL_DEGREES_UNAVAILABLE"));
+});
