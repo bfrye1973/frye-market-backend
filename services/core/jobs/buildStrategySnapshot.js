@@ -10931,6 +10931,22 @@ result.strategies[s.strategyId] = {
     });
   result.engine27Strategies.engine27CrossMarketAssessment =
     buildEngine27CrossMarketAssessmentV1({publication:result.engine27Strategies.engine27CrossMarketLevels});
+  // Operational proof — source status only; no prices, credentials or private positions.
+  console.log("[ENGINE27_CROSS_MARKET_STATUS]", JSON.stringify({
+    refreshState: result.engine27Strategies.engine27CrossMarketRefresh?.state ?? "UNKNOWN",
+    publicationAvailable: result.engine27Strategies.engine27CrossMarketLevels?.available === true,
+    QQQ: {
+      available: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.QQQ?.available === true,
+      asOf: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.QQQ?.lastCandleTime ?? null,
+      zones: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.QQQ?.levels?.length ?? 0,
+    },
+    VIX: {
+      available: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.VIX?.available === true,
+      asOf: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.VIX?.lastCandleTime ?? null,
+      zones: result.engine27Strategies.engine27CrossMarketLevels?.instruments?.VIX?.levels?.length ?? 0,
+    },
+  }));
+
 
 
 /*
