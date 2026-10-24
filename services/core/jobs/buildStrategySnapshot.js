@@ -50,6 +50,7 @@ import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3St
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
 import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategies.js";
+import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevelsV1.js";
 import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
@@ -10913,6 +10914,13 @@ result.strategies[s.strategyId] = {
   result.engine27Strategies = buildEngine27Strategies({
   snapshot: result,
 });
+  // Optional, read-only cross-market level publication. This is POST Engine 6:
+  // it cannot change reaction, permission, execution or Engine 10 accounting.
+  result.engine27Strategies.engine27CrossMarketLevels =
+    readEngine27CrossMarketLevelsV1({
+      filePath: process.env.ENGINE27_CROSS_MARKET_LEVELS_PATH ?? null,
+    });
+
 
 /*
  * Engine 8 — Subminute canonical execution state.
