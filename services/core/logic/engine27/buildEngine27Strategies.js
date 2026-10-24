@@ -35,6 +35,7 @@ import {
 import {
   buildEngine27TraderIntelligenceV2,
 } from "./v2/buildTraderIntelligenceV2.js";
+import { buildEngine27WorkingSevenDegrees } from "./v2/buildWorkingSevenDegrees.js";
 
 function barsForTimeframe(
   snapshot,
@@ -337,6 +338,8 @@ export function buildEngine27Strategies({
 
     // Additive V2 presentation contract. Existing A–E fields remain frozen.
     engine27TraderIntelligenceV2,
+    // Additive current owner working interpretation; historical V2 is unchanged.
+    engine27WorkingSevenDegrees: buildEngine27WorkingSevenDegrees({snapshot}),
 
     laneCount:
       lanes.length,
