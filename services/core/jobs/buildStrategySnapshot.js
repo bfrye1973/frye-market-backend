@@ -53,6 +53,7 @@ import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategi
 import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevelsV1.js";
 import { maybeRefreshEngine27CrossMarketLevelsV1 } from "./maybeRefreshEngine27CrossMarketLevelsV1.js";
 import { buildEngine27CrossMarketAssessmentV1 } from "../logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js";
+import { readEngine27EsInstitutionalContextV1 } from "../logic/engine27/crossMarket/readEsInstitutionalContextV1.js";
 import {
   getManualLevelRowsFor,
   attachManualLevelsToEngine2Block,
@@ -10931,6 +10932,13 @@ result.strategies[s.strategyId] = {
     });
   result.engine27Strategies.engine27CrossMarketAssessment =
     buildEngine27CrossMarketAssessmentV1({publication:result.engine27Strategies.engine27CrossMarketLevels});
+  // Canonical Engine1 ES chart zones, read-only: never infer from chart pixels.
+  result.engine27Strategies.engine27EsInstitutionalContext =
+    String(symbol).toUpperCase()==="ES"
+      ? readEngine27EsInstitutionalContextV1()
+      : {schema:"engine27.esInstitutionalContext.v1",symbol:"ES",available:false,
+         reasonCodes:["ES_ONLY_SOURCE"],institutionalParents:[],negotiatedZones:[]};
+
   // Operational proof — source status only; no prices, credentials or private positions.
   console.log("[ENGINE27_CROSS_MARKET_STATUS]", JSON.stringify({
     refreshState: result.engine27Strategies.engine27CrossMarketRefresh?.state ?? "UNKNOWN",
