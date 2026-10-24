@@ -11,6 +11,8 @@ const summary=Object.fromEntries(Object.entries(result.instruments??{}).map(([ke
  lastCandleTime:v.lastCandleTime??null,
  bars:v.sourceBars??0,
  zones:Array.isArray(v.levels)?v.levels.length:0,
+ close:v.close??null,
+ nearestZones:Array.isArray(v.levels)&&Number.isFinite(v.close)?v.levels.slice().sort((a,b)=>Math.abs(a.center-v.close)-Math.abs(b.center-v.close)).slice(0,5).map(l=>({low:l.low,high:l.high,type:l.type,observations:l.observationCount})):[],
  reasonCodes:v.reasonCodes??[],
  errorClass:v.errorClass??null,
 }]));
