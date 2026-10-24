@@ -54,14 +54,14 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
     const leg = degree === "minute" ? published(model.activeInternalLeg,"D") : null;
     const direction = degree === "minute" ? published(model.activeInternalLegDirection) : published(model.direction ?? model.sequenceDirection);
     const wave = degree === "subminute" ? "ABC" : published(model.activeWave ?? model.currentWave);
-    const confirmation = published(model.confirmationStatus ?? model.stage,"NOT_PUBLISHED");
-    const parentDegree = degree === "submicro" ? "micro" : degree === "micro" ? "subminute" : degree === "subminute" ? "minute" : degree === "minute" ? "minor" : model.parentDegree ?? null;
+    const confirmation = degree === "subminute" ? published(model.waveRecount,"PENDING") : published(model.confirmationStatus ?? model.stage,"NOT_PUBLISHED");
+    const parentDegree = degree === "submicro" ? "micro" : degree === "micro" ? null : degree === "subminute" ? "minute" : degree === "minute" ? "minor" : model.parentDegree ?? null;
     const parentWave = degree === "submicro" ? "B" : degree === "micro" ? null : degree === "subminute" ? "D" : degree === "minute" ? null : model.parentWave ?? null;
     const story = summarize(degree,model);
     degrees[degree] = {degree,label:degree.toUpperCase(),available:true,
       activeWave:degree === "minute" ? "W2 / D UP" : wave,
       waveDirection:direction,
-      currentCondition:degree === "subminute" ? published(model.currentWorkingStructure,"ABC_UP_INSIDE_MINUTE_D") : published(model.stage ?? model.activeInternalLegStage ?? model.lifecycle),
+      currentCondition:degree === "subminute" ? published(model.currentWorkingStructure,"ABC_UP_INSIDE_MINUTE_D") : degree === "minute" ? published(model.activeInternalLegStage, "DEVELOPING_CANDIDATE") : published(model.stage ?? model.lifecycle),
       confirmationNeeded:{status:confirmation,evidence:[],rule:null,note:"Owner working interpretation is not confirmed solely by owner pivot approval."},
       potentialCompletion:{levels:currentLevels,nextLevel:null,summary:currentLevels.length?"Engine 22 owner-model projection; not completion confirmation.":"Current applicable Fibonacci ladder not published."},
       invalidation:{price:null,displayText:null},
