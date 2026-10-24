@@ -1,6 +1,6 @@
 // Engine 27 QQQ / direct-VIX daily source adapter.
 // Fetches only existing provider candles; never infers missing prices or a proxy.
-import {fetchPolygonDailyBars} from "../engine25DataSources.js";
+import {fetchPolygonDailyBars} from "./engine25DataSources.js";
 import {buildQqqKeyLevelsV1} from "../logic/engine27/crossMarket/buildQqqKeyLevelsV1.js";
 import {buildVixKeyLevelsV1} from "../logic/engine27/crossMarket/buildVixKeyLevelsV1.js";
 const DAY=86400000;
