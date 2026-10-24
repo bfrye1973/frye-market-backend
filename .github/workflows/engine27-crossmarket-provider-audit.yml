@@ -1,0 +1,33 @@
+name: Engine27 QQQ VIX Real Provider Read-only Audit
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/engine27-crossmarket-provider-audit.yml"
+      - "services/core/jobs/auditEngine27CrossMarketLiveSourcesV1.js"
+      - "services/core/jobs/buildEngine27CrossMarketSourceV1.js"
+  workflow_dispatch:
+jobs:
+  provider-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check availability of existing provider secret
+        id: credential
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          if [ -n "$POLYGON_API_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Polygon provider credential unavailable in this workflow; real market acceptance NOT VERIFIED."
+          fi
+      - name: QQQ and direct VIX real-source audit
+        if: steps.credential.outputs.available == 'true'
+        working-directory: services/core
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: node jobs/auditEngine27CrossMarketLiveSourcesV1.js
