@@ -4,7 +4,7 @@
 const finite=v=>typeof v==="number"&&Number.isFinite(v);
 const rounded=v=>Math.round(v*100)/100;
 export function buildVixKeyLevelsV1({candles=[],asOf=null,source=null,symbol="I:VIX",timeframe="1d"}={}){
- const base={schema:"engine27.qqqKeyLevels.v1",mode:"READ_ONLY",symbol:"I:VIX",timeframe,
+ const base={schema:"engine27.vixKeyLevels.v1",mode:"READ_ONLY",symbol:"I:VIX",timeframe,
   source:source||null,asOf:asOf||null,available:false,levels:[],reasonCodes:[],
   noPermissionCreated:true,noExecution:true};
  if(symbol!=="I:VIX"||timeframe!=="1d")return {...base,reasonCodes:["SYMBOL_OR_TIMEFRAME_NOT_APPROVED"]};
