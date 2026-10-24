@@ -39,6 +39,7 @@ import {
   buildEngine27TraderIntelligenceV2,
 } from "./v2/buildTraderIntelligenceV2.js";
 import { buildEngine27WorkingSevenDegrees } from "./v2/buildWorkingSevenDegrees.js";
+import { buildEngine27SevenInvalidationsV1 } from "./v2/buildSevenInvalidationsV1.js";
 
 function barsForTimeframe(
   snapshot,
@@ -343,6 +344,7 @@ export function buildEngine27Strategies({
     engine27TraderIntelligenceV2,
     // Additive current owner working interpretation; historical V2 is unchanged.
     engine27WorkingSevenDegrees: buildEngine27WorkingSevenDegrees({snapshot}),
+    engine27SevenInvalidations: buildEngine27SevenInvalidationsV1({snapshot}),
     // Read-only source-qualified optional QQQ daily bars; unavailable until a canonical feed supplies them.
     engine27VixKeyLevels: buildVixKeyLevelsV1({
       candles: snapshot?.crossMarketLevelSources?.VIX?.dailyCandles,
