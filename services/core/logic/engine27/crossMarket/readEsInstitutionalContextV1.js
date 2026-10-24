@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 const __dirname=path.dirname(fileURLToPath(import.meta.url));
-export const ES_SMZ_FILE=path.resolve(__dirname,"../../data/es-smz-manual-structures.json");
+export const ES_SMZ_FILE=path.resolve(__dirname,"../../../data/es-smz-manual-structures.json");
 const finite=n=>typeof n==="number"&&Number.isFinite(n);
 export function readEngine27EsInstitutionalContextV1({filePath=ES_SMZ_FILE}={}){
  const base={schema:"engine27.esInstitutionalContext.v1",symbol:"ES",mode:"READ_ONLY",
