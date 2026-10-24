@@ -1,0 +1,25 @@
+name: Engine27 QQQ Levels V1 Validation
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/crossMarket/**"
+      - "services/core/tests/engine27QqqKeyLevelsV1.test.js"
+      - "services/core/logic/engine27/buildEngine27Strategies.js"
+      - ".github/workflows/engine27-qqq-levels-v1.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Key level unit and immutable source tests
+        run: node --test services/core/tests/engine27QqqKeyLevelsV1.test.js
+      - name: Engine 27 existing V2 regression
+        run: node --test services/core/tests/engine27TraderIntelligenceV2.test.js
+      - name: Syntax tests
+        run: |
+          node --check services/core/logic/engine27/crossMarket/buildQqqKeyLevelsV1.js
+          node --check services/core/logic/engine27/buildEngine27Strategies.js
