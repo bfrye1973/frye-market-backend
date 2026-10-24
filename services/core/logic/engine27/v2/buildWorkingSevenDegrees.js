@@ -71,7 +71,26 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
       internalLeg:leg,largerCorrection:degree === "minute"?"W2":null,
       noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
   }
+  const available = ENGINE27_WORKING_DEGREES.filter(d => degrees[d]?.available);
+  const up = available.filter(d => degrees[d]?.waveDirection === "UP");
+  const down = available.filter(d => degrees[d]?.waveDirection === "DOWN");
+  const corrective = available.filter(d => degrees[d]?.largerCorrection);
+  const mixed = up.length > 0 && down.length > 0;
+  const alignmentState = available.length !== 7 ? "PARTIAL_EVIDENCE" : mixed ? "MIXED_INTERNAL_CORRECTION" : down.length ? "BEARISH_WORKING_ALIGNMENT" : up.length ? "BULLISH_WORKING_ALIGNMENT" : "UNRESOLVED";
+  const warnings = [
+    ...(mixed ? ["LOWER_AND_HIGHER_DEGREE_DIRECTIONS_DIFFER"] : []),
+    ...(corrective.length ? ["MINUTE_CORRECTION_UNCONFIRMED"] : []),
+    ...(degrees.subminute?.potentialCompletion?.levels?.length ? [] : ["SUBMINUTE_ACTIVE_ABC_FIB_NOT_PUBLISHED"]),
+    ...(available.length !== 7 ? ["STRUCTURAL_DEGREES_UNAVAILABLE"] : []),
+  ];
+  const story = [
+    `Minute: ${degrees.minute?.traderRead?.summary ?? "not published"}`,
+    `Subminute: ${degrees.subminute?.traderRead?.summary ?? "not published"}`,
+    `Micro: ${degrees.micro?.traderRead?.summary ?? "not published"}`,
+    `Submicro: ${degrees.submicro?.traderRead?.summary ?? "not published"}`,
+  ].join(" ");
   return {engine:"engine27.workingSevenDegrees.v1",mode:"READ_ONLY",active:Boolean(e22),
+    workingAlignment:{alignmentState,confidence:"NOT_CALIBRATED",upDegrees:up,downDegrees:down,unavailableDegrees:ENGINE27_WORKING_DEGREES.filter(d => !degrees[d]?.available),warnings,marketStory:story},
     degreeOrder:[...ENGINE27_WORKING_DEGREES],degrees,
     strategyCardCount:7,brokerMappingChanged:false,
     noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
