@@ -8,7 +8,7 @@ const event={type:"trade",source:"POLYGON_DIRECT_ES_TRADE",symbol:"ES",resolvedS
 const base={owner,event,observedAt:at,expectedContract:"ESZ6"};
 test("accepts source-qualified ES trade with no bars",()=>{const x=run(base);assert.equal(x.currentPrice,7762);assert.equal(x.state,"LIVE_TRADE_OBSERVED");assert.equal(x.confirmedFibObjective,null)});
 test("requires actual trade event, rejects aggregated 10m bar",()=>assert.equal(run({...base,event:{...event,type:"bar",bar:{time:1792969200}}}).state,"UNAVAILABLE"));
-test("real-stream price near Fib does not pretend touch",()=>{const x=run({...base,event:{...event,price:7685.75}});assert.equal(x.provisionalTouches.length,0);assert.equal(x.nextProvisionalReference.key,"e382")});
+test("real-stream price near Fib does not pretend touch",()=>{const x=run({...base,event:{...event,price:7740}});assert.equal(x.provisionalTouches.length,0);assert.equal(x.nextProvisionalReference.key,"e382")});
 test("trade exactly at owner level is provisional touch",()=>{const x=run({...base,event:{...event,price:7761.25}});assert.equal(x.provisionalTouches[0].evidenceClass,"TRADE_AT_LEVEL");assert.equal(x.confirmedWaveCompletion,false)});
 test("two consecutive trades crossing owner level record price observation",()=>{let prev=run(base);let next=run({...base,previous:prev,event:{...event,price:7760,tradeTime:"2026-10-25T23:00:56.100Z"}});assert.equal(next.provisionalTouches[0].evidenceClass,"BETWEEN_CONSECUTIVE_TRADES")});
 test("no wave confirmation or execution from trade price",()=>{const x=run(base);assert.equal(x.noExecution,true);assert.equal(x.confirmedWaveCompletion,false)});
