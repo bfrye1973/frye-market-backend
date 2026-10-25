@@ -5,6 +5,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { persistEngineRuntimeFiles } from "../logic/durableEngineRuntimeState.js";
 import {
   buildEngine29CrossMarketStress,
   buildEngine29TrapCampaign,
@@ -183,6 +184,14 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   }
 
   writeJsonAtomic(OUTPUT_FILE, output);
+
+  const persistence = persistEngineRuntimeFiles({
+    fileNames: ["engine29-cross-market-stress.json"],
+  });
+  console.log(
+    `[engine29] DURABLE SAVE ok=${persistence.ok} saved=${persistence.saved.join(",") || "none"}`
+  );
+
   writeEngine29SqueezeV2Campaign(squeezeCampaign);
   writeEngine29TrapCampaign(trapCampaign);
 
