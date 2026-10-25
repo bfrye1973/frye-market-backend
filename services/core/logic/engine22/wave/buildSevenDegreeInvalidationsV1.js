@@ -153,8 +153,27 @@ export function buildSevenDegreeInvalidationsV1({
   const minorPivot=dynamicZone("minor","W4");
   const minorZone=minorPivot || (minorOrigin!==null
     ?{low:minorOrigin,high:minorOrigin,kind:"HISTORICAL_ORIGIN_REFERENCE_SINGLE_PRICE",source:"engine22WaveStrategy.currentWavelength.degrees.minor.origin",qualifiedMark:false}:null);
+  // Every degree publishes the best available *review* reference. An owner-completed
+  // B high is a recount checkpoint for a C-down working model, NOT proof that the
+  // entire Elliott count fails when price trades above it.
+  const ownerBZone=(price,source)=>price===null?null:{
+    low:price,high:price,kind:"OWNER_COMPLETED_B_HIGH_RECOUNT_REFERENCE",
+    source,qualifiedMark:false,
+  };
+  // Subminute borrows the current larger C-down owner's B high only as a
+  // SCENARIO reference: the ABC-vs-ABCDE and degree placement are unresolved.
+  const largerC=cw.minute?.ownerLargerCDownScenario;
+  const largerB=largerC?.version==="engine22.largerCorrectionCDownWatch.v1"
+    ? positive(largerC?.anchors?.bHigh):null;
+  const subminuteZone=largerB===null?null:{
+    low:largerB,high:largerB,kind:"PROVISIONAL_PARENT_C_DOWN_B_HIGH_RECOUNT_REFERENCE",
+    source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario.anchors.bHigh",
+    qualifiedMark:false,degreePlacementConfirmed:false,
+  };
   const candidateZones={
-    submicro:null,micro:null,subminute:null,
+    submicro:ownerBZone(submicroReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown.waveB.high"),
+    micro:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
+    subminute:subminuteZone,
     minute:minuteZone,minor:minorZone,
     intermediate:dynamicZone("intermediate","W2"),
     primary:dynamicZone("primary","W4"),
@@ -185,7 +204,7 @@ export function buildSevenDegreeInvalidationsV1({
     },
     subminute:{
       candidateReference:null,referenceType:"NONE_APPROVED",
-      observation:"RECONCILE_SUBMINUTE_C_DEGREE_ASSIGNMENT_WITH_MINUTE_W2_BEFORE_RULE",
+      observation:"PROVISIONAL_PARENT_B_HIGH_RECOUNT_REFERENCE_ONLY_RECONCILE_SUBMINUTE_C_DEGREE_ASSIGNMENT_WITH_MINUTE_W2_BEFORE_RULE",
       reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
       parentRecountOnReview:false,
     },
@@ -228,6 +247,8 @@ export function buildSevenDegreeInvalidationsV1({
       candidateZone:zone,
       zoneAuthority:"REVIEW_ONLY_NOT_STRUCTURAL_INVALIDATION",
       zoneAvailability:zone?"SOURCE_REFERENCE_AVAILABLE":"QUALIFIED_PIVOT_REQUIRED",
+      zonePriceStatus:zone?.qualifiedMark===true?"CONFIRMED_NON_SUPERSEDED_PIVOT":zone?"PROVISIONAL_REVIEW_REFERENCE":"UNAVAILABLE",
+      isStructuralInvalidation:false,
       prerequisites:prerequisite,
       approvedRules:0,
     };
