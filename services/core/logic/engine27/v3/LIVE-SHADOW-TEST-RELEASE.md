@@ -1,0 +1,52 @@
+# Engine 27 V3 Micro — LIVE SHADOW TEST RELEASE
+
+**Deployment status:** Separate Render preview service created; code startup confirmed LIVE on Render. **Trade-price acceptance: BLOCKED until Polygon futures API credential is set in staging and a real raw T-event trace verified.** No production Backend1/Backend2/frontend changes.
+
+## Owner-authorized scope
+Micro first. Read-only, no orders, no broker control. Existing Engine27 A–E/V2 untouched. No 10-minute bars in active V3 price logic.
+
+## Actual isolated preview service
+- Name: `engine27-v3-micro-shadow-preview`
+- ID: `srv-dbf98oq9lscs7398u5jg`
+- Render dashboard: https://dashboard.render.com/web/srv-dbf98oq9lscs7398u5jg
+- Protected view URL: https://engine27-v3-micro-shadow-preview.onrender.com/
+- Health: https://engine27-v3-micro-shadow-preview.onrender.com/healthz
+- Git branch: `engine27-v3-micro-intelligence`, autoDeploy **NO**, Free tier, single instance.
+- Start command: `node services/streamer/shadow/microShadowServer.js`
+- Render initial deploy `dep-dbf98p29lscs7398u7fg` marked `live`, with application log `Listening, shadow=true; no trading authority` at 2026-10-25T23:45:05Z.
+- Follow-up config deploy `dep-dbf98r6gej5s73aceeug` requested after configuring same-instance HTTPS trade URL; verify its final status separately.
+
+## Configured
+- `ENGINE27_V3_SHADOW_ENABLED=true`
+- Strong Basic Auth username/password provisioned in Render environment (never posted to GitHub; owner retrieves credentials privately).
+- Dedicated SSE read token provisioned in Render environment (never posted to GitHub).
+- `ENGINE27_V3_SNAPSHOT_URL=https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES`
+- `ENGINE27_V3_TRADE_URL=https://engine27-v3-micro-shadow-preview.onrender.com/stream/futures/trades-v3?symbol=ES`
+
+## Blocking credential
+Staging `POLYGON_API_KEY` is **not configured by this programmer**, because connected tools do not expose existing secret values and credentials must not be copied in chat. Owner must add a valid Polygon/Massive futures-WebSocket key directly to this preview service under Render **Environment**. Do not expose the key in chat, frontend, logs, or source control. Until set, the view must show `UNAVAILABLE`, not a fake ES trade price.
+
+## Shadow page
+- Separate dark Micro-only panel, labeled `ENGINE 27 V3 — MICRO INTELLIGENCE | SHADOW / NOT TRADING`.
+- Last source-qualified individual ES trade, resolved contract and feed state.
+- Current Engine22 Micro wave, unconfirmed owner state, next provisional Fibonacci reference and live price touch classification.
+- Neighboring Submicro/Subminute reads, E25/E29/QQQ/VIX source status, real contract / thesis availability, uncalibrated replay, explicit missing information.
+- Basic-Auth HTML and same-origin state JSON; separate protected X-Engine27-V3-Read-Token SSE. No broker/account numbers published beyond masked Micro account identity.
+- No production cards overridden.
+
+## Acceptance limitations and safety
+- Provider `T` event time is milliseconds; `q` is the unique per-contract sequence, source doc: https://massive.com/docs/websocket/futures/trades. Actual raw q,t sample not yet captured from preview.
+- Dedicated staging stream supports one Polygon connection per instance, maximum eight protected internal SSE consumers, and bounded backpressure behavior. Do not expose this endpoint to paying subscriber browsers.
+- Consumer maintains bounded dedup ID history, live price continuity resets on reconnect and rollover, and stale source becomes unavailable.
+- The screenshot's older Micro card remains unchanged and is separate from new shadow view.
+- Engine10 account 6380 REAL open contracts and original immutable `structuralContextAtEntry` not yet verified in staging; Engine9 plan joins and replay calibration still pending. UI must fail closed.
+- Render Free preview tier may suspend/idle; prolonged continuous feed acceptance may require owner-approved paid environment.
+- Rollback: set `ENGINE27_V3_SHADOW_ENABLED=false`, suspend or delete `srv-dbf98oq9lscs7398u5jg`; no existing production service requires rollback. Feature PR #200 remains draft.
+
+## Test results
+- [V3 isolated validation including UI and shadow server syntax PASS](https://github.com/bfrye1973/frye-market-backend/actions/runs/40246072666)
+- [Legacy V2 validation PASS on preceding tested commit](https://github.com/bfrye1973/frye-market-backend/actions/runs/40246061934)
+- Actual staging service started, independently verified by Render deployment metadata and application log.
+- Actual live ES trade source -> protected SSE -> Micro Manager -> UI evidence: **NOT YET VERIFIED**.
+
+**PRODUCTION STATUS: BLOCKED.** Shadow preview itself is isolated and started, but live trade source and private journal evidence incomplete.
