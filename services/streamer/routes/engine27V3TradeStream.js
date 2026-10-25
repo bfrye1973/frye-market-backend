@@ -12,8 +12,17 @@ const blocked=new Set();
 const MAX_WRITABLE_BYTES=65536;
 const MAX_SUBSCRIBERS=8;
 let socket=null,contract=null,starting=false,retry=null,retryAttempt=0,authenticated=false;
-const send=(res,x)=>{if(res.destroyed||res.writableEnded)return false;return res.write("data: "+JSON.stringify(x)+"\n\n")};
-function fanout(data){for(const res of subscribers){if(!send(res,data)){subscribers.delete(res);try{res.end()}catch{}}}}
+const send=(res,x)=>{
+ if(res.destroyed||res.writableEnded)return false;
+ if(blocked.has(res))return true; // drop incoming ticks while backpressured, no unbounded queue
+ if(res.writableLength>MAX_WRITABLE_BYTES)return false;
+ const canContinue=res.write("data: "+JSON.stringify(x)+"\\n\\n");
+ if(!canContinue)blocked.add(res); // res.write(false) is backpressure, not a dead client
+ return true;
+};
+function fanout(data){for(const res of subscribers){
+ if(!send(res,data)){subscribers.delete(res);blocked.delete(res);try{res.end()}catch{}}
+}}
 function teardown(){
  if(retry){clearTimeout(retry);retry=null}
  if(socket){try{socket.close()}catch{}socket=null}
