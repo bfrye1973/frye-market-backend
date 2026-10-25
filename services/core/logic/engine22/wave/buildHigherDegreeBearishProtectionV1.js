@@ -25,7 +25,7 @@ function assess({degree,timeframe,periodMs,bars,evaluationMs,structuralReference
   const latest = closed.at(-1) ?? null;
   const previous = closed.at(-2) ?? null;
   // Never infer healthy conditions from a missing or stale source.
-  const maxAge = periodMs * (timeframe === "1d" ? 5 : 3); // weekends permitted for daily, not indefinite staleness
+  const maxAge = timeframe === "1d" ? 5 * 86400000 : 3 * 86400000; // ES weekend/holiday carry; never indefinite
   const fresh = Boolean(latest && evaluationMs - latest.time <= maxAge);
   const hasTwo = Boolean(previous && latest);
   let status = "UNCONFIRMED";
