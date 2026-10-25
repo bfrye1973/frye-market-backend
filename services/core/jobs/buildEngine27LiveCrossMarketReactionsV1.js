@@ -12,6 +12,25 @@ export async function buildEngine27LiveCrossMarketReactionsV1({levels,apiKey,now
   results[key]=await buildEngine27QualifiedReactionsV1({symbol,zones,timeframe:"1h",apiKey,now,
    ...(fetchAggregates?{fetchAggregates}:{})});
  }
- return {schema:"engine27.liveCrossMarketReactions.v1",mode:"READ_ONLY",instruments:results,
+ const read=(key)=>{
+  const data=results[key];
+  if(data?.state==="UNAVAILABLE")return "UNAVAILABLE";
+  const event=data?.events?.at(-1)?.event;
+  if(!event)return "UNCONFIRMED";
+  const bullish=event==="RECLAIM_CONFIRMED"||event==="DEFENSE_CANDIDATE";
+  const bearish=event==="BREAKDOWN_CONFIRMED"||event==="REJECTION_CANDIDATE";
+  if(!bullish&&!bearish)return "UNCONFIRMED";
+  const esSupport=key==="QQQ"?bullish:bearish;
+  return esSupport?"SUPPORTIVE":"ADVERSE";
+ };
+ const qqqSignal=read("QQQ"),vixSignal=read("VIX");
+ const signal=qqqSignal==="UNAVAILABLE"||vixSignal==="UNAVAILABLE"?"UNAVAILABLE":
+  qqqSignal==="UNCONFIRMED"&&vixSignal==="UNCONFIRMED"?"UNCONFIRMED":
+  qqqSignal==="SUPPORTIVE"&&vixSignal==="SUPPORTIVE"?"SUPPORTIVE":
+  qqqSignal==="ADVERSE"&&vixSignal==="ADVERSE"?"ADVERSE":"MIXED";
+ return {schema:"engine27.liveCrossMarketReactions.v1",mode:"READ_ONLY",
+   interpretation:{state:signal,qqq:qqqSignal,vix:vixSignal,
+     note:"Completed hourly zone reactions are contextual evidence, not a confirmed ES reversal or trade permission."},
+   instruments:results,
   noPermissionCreated:true,noExecution:true,noJournalWrite:true};
 }
