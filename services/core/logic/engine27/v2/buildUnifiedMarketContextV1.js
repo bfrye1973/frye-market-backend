@@ -55,7 +55,7 @@ export function buildEngine27UnifiedMarketContextV1({snapshot,levels=null,assess
  const strategyReads=Object.fromEntries(DEGREES.map(degree=>[degree,{
   degree,structuralRisk:degree==="intermediate"||degree==="primary"?warnings[degree]:{status:"NOT_SET"},
   engine25Status:!participation.available?"UNAVAILABLE":participation.fresh?"CURRENT":"STALE",
-  engine29Status:!tactical.available?"UNAVAILABLE":tactical.fresh?"CURRENT":"STALE",
+  engine29Status:["micro","submicro"].includes(degree)?(!tactical.available?"UNAVAILABLE":tactical.fresh?"CURRENT":"STALE"):"NOT_APPLICABLE_INTRADAY_ONLY",
   crossMarketStatus:crossMarket.QQQ.status==="UNAVAILABLE"||crossMarket.VIX.status==="UNAVAILABLE"?"PARTIAL_OR_UNAVAILABLE":"OBSERVATION_ONLY",
   interpretation:"Cross-market zones do not override Elliott structure; no confirmed invalidation inferred."
  }]));
