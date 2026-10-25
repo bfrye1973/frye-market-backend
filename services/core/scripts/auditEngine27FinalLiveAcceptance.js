@@ -12,6 +12,8 @@ const result={schema:i.schema??null,marketContextSchema:m.schema??null,
 degreeCount:Object.keys(degrees).length,
 degrees,qqq:m.crossMarket?.QQQ??null,vix:m.crossMarket?.VIX??null,
 intermediateWarning:m.warnings?.intermediate?.status??null,
-primaryWarning:m.warnings?.primary?.status??null};
+primaryWarning:m.warnings?.primary?.status??null,
+ engine25:m.participation?{available:m.participation.available,fresh:m.participation.fresh,state:m.participation.state,updatedAt:m.participation.updatedAt}:null,
+ engine29:m.tactical?{available:m.tactical.available,fresh:m.tactical.fresh,overallState:m.tactical.overallState,oneHour:m.tactical.oneHour,thirtyMinute:m.tactical.thirtyMinute,timestamp:m.tactical.timestamp}:null};
 console.log("ENGINE27_FINAL_ACCEPTANCE "+JSON.stringify(result));
 if(i.schema!=="engine27.sevenInvalidations.v2"||m.schema!=="engine27.unifiedMarketContext.v1")process.exitCode=1;
