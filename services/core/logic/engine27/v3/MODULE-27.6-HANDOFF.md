@@ -1,0 +1,6 @@
+# Engine 27 V3 — Module 27.6 historical-validation handoff
+Status: isolated replay validator; production historical calibration NOT accepted.
+Files: contracts/historicalValidation.v1.js; historicalValidation/evaluateReplay.js; tests/historicalValidation.test.js.
+Schema: engine27.v3.historicalValidation.v1. Inputs: immutable Engine12 replay snapshot rows (ES, snapshotTime), original prediction observations (id, predictedAt, evidenceAsOf, direction, referencePrice), cutoff timestamp, optional future outcome labels (predictionId, observedAt, observedPrice). Enforce strictly increasing unique replay timestamps, no snapshot/prediction/evidence after cutoff and no duplicate predicted identities. Future outcomes can only annotate, never alter prediction. Confidence stays NOT_CALIBRATED. No production engine influence.
+12 negative/positive tests. Added to combined isolated V3 CI; verify status before claiming full pass.
+Gaps: No live immutable prediction issuance/capture mechanism wired; no Engine12 Replay archive read implemented in V3; Engine28A micro replay learning identified, but its calibration authority and historical outcomes must be separately proven. No retroactive confidence or rewriting. No production deployment.
