@@ -419,7 +419,11 @@ async function fetchFuturesAggs({
   url.searchParams.set("window_start.gte", startDate);
   url.searchParams.set("window_start.lte", endDate);
   url.searchParams.set("sort", "asc");
-  url.searchParams.set("limit", "50000");
+  // Keep upstream results bounded without truncating the beginning of the
+  // requested ascending time window before its newest candles arrive.
+  // The existing lookback windows yield under 5,000 native observations for
+  // supported chart timeframes; do not request the former 50,000-row payload.
+  url.searchParams.set("limit", "5000");
   url.searchParams.set("apiKey", POLY_KEY);
 
   const r = await fetch(url.toString(), {
