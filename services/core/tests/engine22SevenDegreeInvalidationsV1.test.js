@@ -18,16 +18,16 @@ test("seven independent active degree records, no invented invalidations",()=>{
  assert.equal(output.warningEligible,false);
  assert.deepEqual(Object.keys(output.degrees),degreeNames);
  assert.equal(output.evaluationTime,"2026-10-24T22:00:00.000Z");
- assert.equal(output.degrees.submicro.activeModel,"engine22.submicroADownOwnerWatch.v1");
- assert.equal(output.degrees.micro.activeModel,"engine22.microBDownOwnerWatch.v1");
+ assert.equal(output.degrees.submicro.activeModel,"engine22.submicroCDownOwnerWatch.v1");
+ assert.equal(output.degrees.micro.activeModel,"engine22.microCDownOwnerWatch.v1");
  assert.equal(output.degrees.minute.activeModel,"engine22.minuteW2ComplexCorrectionWatch.v1");
- assert.equal(output.degrees.subminute.activeModel,null);
- assert.equal(output.degrees.subminute.waveIdentity,"SUBMINUTE_ABC_UP");
+ assert.equal(output.degrees.subminute.activeModel,"engine22.subminuteCurrentCDownReference.v1");
+ assert.equal(output.degrees.subminute.waveIdentity,"SUBMINUTE_C_DOWN");
  assert.equal(output.degrees.minute.largerCorrectionDirection,"CORRECTIVE");
- assert.equal(output.degrees.minute.direction,"UP");
- assert.equal(output.degrees.micro.waveIdentity,"MICRO_B_DOWN");
- assert.equal(output.degrees.submicro.waveIdentity,"SUBMICRO_A_DOWN");
- assert.deepEqual(output.degrees.minute.rules.map(x=>x.scope),["INTERNAL_D_UP","MINUTE_W2_DEGREE_COUNT","PARENT_STRUCTURE"]);
+ assert.equal(output.degrees.minute.direction,"DOWN");
+ assert.equal(output.degrees.micro.waveIdentity,"MICRO_C_DOWN");
+ assert.equal(output.degrees.submicro.waveIdentity,"SUBMICRO_C_DOWN");
+ assert.deepEqual(output.degrees.minute.rules.map(x=>x.scope),["INTERNAL_C_DOWN","MINUTE_W2_DEGREE_COUNT","PARENT_STRUCTURE"]);
  for(const degree of degreeNames){
   const item=output.degrees[degree];
   assert.equal(item.sourceCountId,null);
@@ -47,8 +47,8 @@ test("seven independent active degree records, no invented invalidations",()=>{
 });
 test("legacy or superseded owner models never supply invalidation",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7760,microBars5m:[]});
- delete cw.degrees.micro.ownerMicroBDown;
- delete cw.degrees.submicro.ownerSubmicroADown;
+ delete cw.degrees.micro.ownerMicroCDown;
+ delete cw.degrees.submicro.ownerSubmicroCDown;
  delete cw.degrees.minute.ownerMinuteW2Hypothesis;
  const out=buildSevenDegreeInvalidationsV1({
    currentWavelength:cw,degreeStates:{
@@ -67,8 +67,8 @@ test("legacy or superseded owner models never supply invalidation",()=>{
 });
 test("no price touch, incomplete candle, normal recount or model change can imply confirmation",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7700,microBars5m:[]});
- cw.degrees.micro.ownerMicroBDown.levels[0].status="TOUCHED";
- cw.degrees.submicro.ownerSubmicroADown.levels[0].status="TOUCHED";
+ cw.degrees.micro.ownerMicroCDown.levels[0].status="TOUCHED";
+ cw.degrees.submicro.ownerSubmicroCDown.levels[0].status="TOUCHED";
  cw.degrees.micro.microSequence.invalidation=7782.75;
  const output=buildSevenDegreeInvalidationsV1({currentWavelength:cw});
  for(const item of Object.values(output.degrees)){
