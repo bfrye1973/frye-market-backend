@@ -6,7 +6,7 @@ const wave=()=>buildCurrentWavelength({symbol:"ES",currentPrice:7665,microBars5m
 const mark=(price,confirmed=true)=>({price,confirmed,superseded:false});
 test("Minute and Minor review references are published but never hard invalidations",()=>{
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:wave()});
- assert.deepEqual([r.degrees.minute.invalidationReadiness.candidateZone.low,r.degrees.minute.invalidationReadiness.candidateZone.high],[7557,7575]);
+ assert.deepEqual([r.degrees.minute.invalidationReadiness.candidateZone.low,r.degrees.minute.invalidationReadiness.candidateZone.high],[7419.5,7419.5]);
  assert.deepEqual([r.degrees.minor.invalidationReadiness.candidateZone.low,r.degrees.minor.invalidationReadiness.candidateZone.high],[7398,7398]);
  for(const d of ["minute","minor","intermediate","primary"]){
   const entry=r.degrees[d].invalidationReadiness;

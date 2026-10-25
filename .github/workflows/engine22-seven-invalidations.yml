@@ -8,6 +8,7 @@ on:
       - "services/core/tests/engine22SevenDegreeInvalidationsV1.test.js"
       - "services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js"
       - "services/core/tests/engine22HigherDegreeReviewZones.test.js"
+      - "services/core/tests/engine22MinuteMinorOwnerAnchors.test.js"
       - "services/core/tests/engine22HigherDegreeBearishProtection.test.js"
       - ".github/workflows/engine22-seven-invalidations.yml"
 permissions:
@@ -23,4 +24,4 @@ jobs:
       - run: node --check services/core/logic/engine22/wave/buildSevenDegreeInvalidationsV1.js
       - run: node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
       - run: node --check services/core/logic/engine22/wave/buildHigherDegreeBearishProtectionV1.js
-      - run: node --test services/core/tests/engine22SevenDegreeInvalidationsV1.test.js services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js services/core/tests/engine22HigherDegreeReviewZones.test.js services/core/tests/engine22HigherDegreeBearishProtection.test.js
+      - run: node --test services/core/tests/engine22SevenDegreeInvalidationsV1.test.js services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js services/core/tests/engine22HigherDegreeReviewZones.test.js services/core/tests/engine22HigherDegreeBearishProtection.test.js services/core/tests/engine22MinuteMinorOwnerAnchors.test.js

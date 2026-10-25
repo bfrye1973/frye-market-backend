@@ -146,6 +146,22 @@ export function buildSevenDegreeInvalidationsV1({
   const minuteLower=positive(minuteRefs?.lowerApprox);
   const minuteWick= cw.minute?.ownerLargerCDownScenario?.version==="engine22.largerCorrectionCDownWatch.v1"
     ? positive(cw.minute.ownerLargerCDownScenario.warningReferences?.[1]):null;
+  const approvedMinute=cw.minute?.ownerMinuteW2Retracement;
+  const ownerMinuteBoundary=approvedMinute?.version==="engine22.minuteW2RetracementOwner.v1"
+    && approvedMinute?.activeWave==="W2" && approvedMinute?.anchors?.w1Low===7419.50
+    && approvedMinute?.anchors?.w1High===7908.75
+    ? {low:7419.50,high:7419.50,kind:"OWNER_CONFIRMED_MINUTE_W1_ORIGIN",
+       source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerMinuteW2Retracement.anchors.w1Low",
+       qualifiedMark:false,ownerApprovedReference:true,
+       distinction:"W2_STRUCTURAL_BOUNDARY_NOT_OLD_CORRECTION_SUPPORT"}
+    :null;
+  const ownerMinor=cw.minor?.ownerW5StructuralReference;
+  const ownerMinorBoundary=ownerMinor?.version==="engine22.minorW5StructuralReference.v1"
+    && cw.minor?.state==="MINOR_W5_ACTIVE_CANDIDATE" && ownerMinor?.price===7398
+    ? {low:7398,high:7398,kind:"OWNER_CONFIRMED_MINOR_W4_REFERENCE",
+       source:"engine22WaveStrategy.currentWavelength.degrees.minor.ownerW5StructuralReference.price",
+       qualifiedMark:false,ownerApprovedReference:true}
+    :null;
   const minuteZone=minuteLower!==null && minuteWick!==null && minuteLower<=minuteWick
     ?{low:minuteLower,high:minuteWick,kind:"APPROX_RANGE_LOW_AND_HISTORIC_WICK",source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerMinuteW2Hypothesis.rangeReferences.lowerApprox + ownerLargerCDownScenario.warningReferences[1]",qualifiedMark:false}
     :null;
@@ -174,7 +190,7 @@ export function buildSevenDegreeInvalidationsV1({
     submicro:ownerBZone(submicroReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown.waveB.high"),
     micro:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
     subminute:subminuteZone,
-    minute:minuteZone,minor:minorZone,
+    minute:ownerMinuteBoundary || minuteZone,minor:minorPivot || ownerMinorBoundary || minorZone,
     intermediate:dynamicZone("intermediate","W2"),
     primary:dynamicZone("primary","W4"),
   };
