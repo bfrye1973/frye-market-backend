@@ -1,20 +1,19 @@
-// Source-qualified individual ES futures trade conversion. No aggregation and no trading authority.
-export const SOURCE = "POLYGON_DIRECT_ES_TRADE";
-const finite=n=>typeof n==="number"&&Number.isFinite(n);
+// Source-specific Massive/Polygon Futures WebSocket T contract.
+// https://massive.com/docs/websocket/futures/trades — t is Unix milliseconds; q is
+// ticker-unique, increasing trade sequence (gaps are valid). Unlike Futures REST,
+// do NOT normalize nanoseconds or infer units by magnitude.
+export const SOURCE="POLYGON_DIRECT_ES_TRADE";
+const validNumber=n=>typeof n==="number"&&Number.isFinite(n);
 export function normalizeEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={}){
  if(!/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(resolvedSymbol??""))return null;
- if((message?.ev??message?.event)!=="T"||message?.sym!==resolvedSymbol)return null;
- const price=message?.p, size=message?.s;
- if(!finite(price)||price<=0||!finite(size)||size<=0)return null;
- // Polygon futures trade timestamps can use seconds / milliseconds / microseconds / nanoseconds.
- // Unit must be unambiguous by magnitude; no wall-clock fallback.
- const raw=message?.t;
- if(!finite(raw)||raw<=0)return null;
- const unit=raw>=1e17?"ns":raw>=1e14?"us":raw>=1e12?"ms":raw>=1e9?"s":null;
- if(!unit)return null;
- const ms=unit==="ns"?Math.floor(raw/1e6):unit==="us"?Math.floor(raw/1e3):unit==="ms"?raw:raw*1000;
+ if(message?.ev!=="T"||message?.sym!==resolvedSymbol)return null;
+ if(!validNumber(message.p)||message.p<=0||!Number.isSafeInteger(message.s)||message.s<=0)return null;
+ const raw=message.t;
+ if(!Number.isSafeInteger(raw)||raw<1e12||raw>=1e13)return null; // strict Unix MS
+ if(!Number.isSafeInteger(message.q)||message.q<0)return null;
  const observed=Date.parse(observedAt??"");
- if(!Number.isFinite(observed)||!Number.isFinite(ms)||ms>observed+2000||observed-ms>30000)return null;
- return {type:"trade",source:SOURCE,symbol:"ES",resolvedSymbol,
-   price,size,tradeTime:new Date(ms).toISOString(),observedAt,readOnly:true};
+ if(!Number.isFinite(observed)||raw>observed+2000||observed-raw>30000)return null;
+ return {ok:true,type:"trade",source:SOURCE,symbol:"ES",resolvedSymbol,
+  price:message.p,size:message.s,tradeTime:new Date(raw).toISOString(),
+  eventId:String(message.q),observedAt,readOnly:true};
 }
