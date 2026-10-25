@@ -1,51 +1,38 @@
-// Seven-degree read-only structural invalidation registry.
-// Engine22 exclusively owns current count and invalidation evidence.
-// No invented thresholds, no fallback to superseded counts, no broker stop substitution.
+// Engine27 view of Engine22's CURRENT authoritative review and invalidation packet.
+// Never promotes review boundaries to approved invalidation. No inferred lifecycle.
 const DEGREES=["submicro","micro","subminute","minute","minor","intermediate","primary"];
-const num=v=>typeof v==="number"&&Number.isFinite(v)?v:null;
-const str=v=>typeof v==="string"&&v.trim()?v:null;
-const own=(e22,d)=>{
- const cw=e22?.currentWavelength?.degrees;
- const minute=cw?.minute?.ownerMinuteW2Hypothesis;
- switch(d){
- case "submicro":return {model:cw?.submicro?.ownerSubmicroCDown,path:"currentWavelength.degrees.submicro.ownerSubmicroCDown",expected:"engine22.submicroCDownOwnerWatch.v1"};
- case "micro":return {model:cw?.micro?.ownerMicroCDown,path:"currentWavelength.degrees.micro.ownerMicroCDown",expected:"engine22.microCDownOwnerWatch.v1"};
- case "subminute":return {model:cw?.subminute?.ownerCurrentCDown,path:"currentWavelength.degrees.subminute.ownerCurrentCDown",expected:"engine22.subminuteCurrentCDownReference.v1"};
- case "minute":return {model:minute,path:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis",expected:"engine22.minuteW2ComplexCorrectionWatch.v1"};
- default:return {model:e22?.degreeStates?.[d],path:"degreeStates."+d};
- }
-};
+const owner=e22=>e22?.sevenDegreeInvalidations;
 export function buildEngine27SevenInvalidationsV1({snapshot}={}){
  const e22=snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy;
+ const packet=owner(e22),schemaOk=packet?.schema==="engine22.sevenDegreeInvalidations.v1";
  const entries={};
  for(const degree of DEGREES){
-  const {model,path,expected}=own(e22,degree);
-  const compatible=model&&typeof model==="object"&&(!expected||model.version===expected);
-  const candidates=compatible?[
-   ["invalidationLevel",model.invalidationLevel],
-   ["invalidationPrice",model.invalidationPrice],
-   ["invalidation.price",model.invalidation?.price],
-   ["structuralInvalidation.price",model.structuralInvalidation?.price],
-  ]:[];
-  const found=candidates.find(([,v])=>num(v)!==null);
-  const price=found?num(found[1]):null;
-  const rule=compatible?(str(model.invalidationRule)||str(model.invalidation?.rule)||str(model.structuralInvalidation?.rule)):null;
-  const breached=compatible&&typeof model.invalidationBreached==="boolean"?model.invalidationBreached:null;
-  const status=!compatible?"OWNER_MODEL_UNAVAILABLE":price!==null||rule?"PUBLISHED":"NOT_PUBLISHED";
+  const record=schemaOk?packet?.degrees?.[degree]:null;
+  const readiness=record?.invalidationReadiness;
+  const z=readiness?.candidateZone;
+  const reviewZone=z&&typeof z.low==="number"&&Number.isFinite(z.low)&&typeof z.high==="number"&&Number.isFinite(z.high)&&z.high>=z.low
+    ?{low:z.low,high:z.high,kind:z.kind??null,source:z.source??null,qualifiedMark:z.qualifiedMark===true}:null;
+  const approved=Array.isArray(record?.rules)?record.rules.filter(r=>r?.status==="PUBLISHED"&&typeof r.price==="number"&&Number.isFinite(r.price)&&r.trigger&&r.timeframe&&r.ruleVersion):[];
   entries[degree]={
-   degree,status,price,rule,breached,
-   breachConfirmation:breached===true?"SOURCE_REPORTED": "NOT_VERIFIED",
-   // No proximity warnings from price alone until current-price evidence is validated.
-   warningState:status==="PUBLISHED"?"WATCH":"UNAVAILABLE",
-   provenance:{engine:"ENGINE22",path,field:found?.[0]??(rule?"invalidationRule":null),
-      modelVersion:compatible?(model.version??null):null,
-      countId:compatible?(model.sourceCountId??model.countId??null):null,
-      ownerCompatible:Boolean(compatible)},
+   degree,status:approved.length?"PUBLISHED":record?"NOT_PUBLISHED":"OWNER_MODEL_UNAVAILABLE",
+   price:approved.length?approved[0].price:null,rule:approved.length?approved[0].trigger:null,
+   officialRules:approved,breached:null,warningState:"UNAVAILABLE",
+   review:{status:reviewZone?"REVIEW_ONLY":"NOT_PUBLISHED",zone:reviewZone,
+     availability:readiness?.zoneAvailability??null,
+     authority:readiness?.zoneAuthority??"NOT_STRUCTURAL_INVALIDATION",
+     proposedReview:readiness?.proposedReview??null,
+     countIdentityStatus:record?.countIdentityStatus??"NOT_PUBLISHED"},
+   provenance:{engine:"ENGINE22",path:record?.modelSource??null,
+     modelVersion:record?.activeModel??null,
+     expectedModelVersion:record?.expectedModelVersion??null,
+     countId:record?.sourceCountId??null,ownerCompatible:Boolean(record?.activeModel),
+     sourceSchema:schemaOk?packet.schema:null},
    noExecution:true,noPermissionCreated:true,noJournalWrite:true
   };
  }
- return {schema:"engine27.sevenInvalidations.v1",mode:"READ_ONLY",degrees:entries,
-  degreeOrder:DEGREES,publishedCount:DEGREES.filter(d=>entries[d].status==="PUBLISHED").length,
-  allPublished:DEGREES.every(d=>entries[d].status==="PUBLISHED"),
+ return {schema:"engine27.sevenInvalidations.v2",mode:"READ_ONLY",degrees:entries,degreeOrder:DEGREES,
+  publishedCount:DEGREES.filter(d=>entries[d].status==="PUBLISHED").length,
+  reviewCount:DEGREES.filter(d=>entries[d].review.status==="REVIEW_ONLY").length,
+  sourceStatus:schemaOk?packet.status:"ENGINE22_AUTHORITY_UNAVAILABLE",
   noExecution:true,noPermissionCreated:true,noJournalWrite:true};
 }
