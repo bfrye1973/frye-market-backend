@@ -356,6 +356,20 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // Owner-selected presentation of larger corrective C inside Minute W2.
+      // The source scenario stays independently stored under Minute, and the
+      // legacy Subminute W3 remains for historical audit.
+      ownerCurrentCDown:{
+        version:"engine22.subminuteCurrentCDownReference.v1",
+        activeWave:"C",direction:"DOWN",
+        parentDegree:"minute",parentWave:"W2",
+        stage:"DEVELOPING_CANDIDATE",
+        scenarioSource:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario",
+        modelStatus:"DEGREE_PLACEMENT_PROVISIONAL",
+        levels:[], // resolved from canonical scenario at presentation time
+        confirmationStatus:"NOT_STRUCTURALLY_CONFIRMED",
+        noExecution:true,noPermissionCreated:true,
+      },
       degree: "subminute", activeWave: "W3", direction: "UP",
       state: "SUBMINUTE_W3_ACTIVE_CANDIDATE", origin: 7673.25,
       invalidation: 7673.25,
