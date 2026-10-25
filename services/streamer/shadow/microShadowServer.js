@@ -5,7 +5,6 @@
 import express from "express";
 import crypto from "node:crypto";
 import {microShadowHtml} from "./microShadowView.js";
-import futuresRouter from "../routes/futuresStream.js";
 import tradeRouter from "../routes/engine27V3TradeStream.js";
 import {createTradeIngestionRunner} from "../../core/logic/engine27/v3/livePriceObserver/createTradeIngestionRunner.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
@@ -55,7 +54,6 @@ app.get("/shadow/state",auth,(_req,res)=>{
   noExecution:true});
 });
 app.use("/stream/futures/trades-v3",tradeRouter);
-app.use("/stream/futures",futuresRouter);
 async function refreshSnapshot(){
  if(!SNAP_URL)return;
  try{
