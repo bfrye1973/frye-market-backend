@@ -154,6 +154,59 @@ export function applyOwnerPriceTouchesV1({
       .map(x=>[x.key,{key:x.key,price:x.price,status:x.status,
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt}]));
   }
+  // Minute owner W2: record downward retracement touches separately from
+  // historical Minute W3 and the larger C-down scenario.
+  const minute=root.degrees?.minute?.ownerMinuteW2Retracement;
+  if(minute?.version==="engine22.minuteW2RetracementOwner.v1" &&
+     minute.activeWave==="W2" && Array.isArray(minute.levels)) {
+    const id=JSON.stringify(["minute","ownerMinuteW2Retracement",minute.version,
+      minute.anchors?.w1Low,minute.anchors?.w1High,
+      minute.levels.map(level=>[level.key,level.price])]);
+    const previous=previousWavelength?.degrees?.minute?.ownerMinuteW2Retracement;
+    const same=previous?.version===minute.version &&
+      previous.anchors?.w1Low===minute.anchors?.w1Low &&
+      previous.anchors?.w1High===minute.anchors?.w1High;
+    const past=disk[id]||{};
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const start=Date.parse("2026-08-13T16:00:00Z"); // owner's 09:00 Arizona W1 high
+    const quote=finite(currentPrice);
+    const oldQuote=same?finite(previousWavelength?.currentPrice):null;
+    const observed=[];
+    if(now>=start && quote!==null)observed.push({
+      low:oldQuote===null?quote:Math.min(oldQuote,quote),
+      time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]) {
+      const seconds=Number(bar?.time),low=finite(bar?.low);
+      if(!Number.isSafeInteger(seconds)||seconds<=0||low===null)continue;
+      const timestamp=seconds*1000;
+      if(timestamp<start||timestamp+600000>now)continue;
+      observed.push({low,time:new Date(timestamp).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC"});
+    }
+    minute.levels=minute.levels.map(level=>{
+      const prior=past[level.key]||(same?previous?.levels?.find(x=>
+        x.key===level.key&&x.price===level.price):null);
+      const retained=prior?.status==="TOUCHED"&&prior?.price===level.price;
+      const hit=retained?null:observed.find(x=>x.low<=level.price);
+      return {...level,status:retained||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(retained||hit),
+        touchEvidenceType:retained
+          ?prior.touchEvidenceType||"PREVIOUS_SNAPSHOT":hit?.source||null,
+        touchedAt:retained?prior.touchedAt||null:hit?.time||null,
+        touchEvidence:retained||hit?{
+          verified:hit?.source==="ES_10M_COMPLETED_OHLC" ||
+            prior?.touchEvidence?.verified===true,
+          evidenceClass:hit?.source==="ES_10M_COMPLETED_OHLC"
+            ?"COMPLETED_CANDLE":retained?"RETAINED_OBSERVATION":"SNAPSHOT_PRICE",
+          historicBarTouchUnverified:hit?.source!=="ES_10M_COMPLETED_OHLC"
+            && prior?.touchEvidence?.verified!==true,
+        }:null};
+    });
+    disk[id]=Object.fromEntries(minute.levels.filter(x=>x.status==="TOUCHED")
+      .map(x=>[x.key,{key:x.key,price:x.price,status:x.status,
+        touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
+        touchEvidence:x.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
