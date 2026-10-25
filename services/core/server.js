@@ -7,6 +7,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { startEngine25FinlightStream } from "./logic/engine25FinlightStream.js";
+import { restoreEngineRuntimeFiles } from "./logic/durableEngineRuntimeState.js";
 
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";
@@ -70,6 +71,18 @@ const app = express();
 // --- Paths ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+try {
+  const restored = restoreEngineRuntimeFiles();
+  console.log(
+    `[startup] Engine runtime restore ok=${restored.ok} restored=${restored.restored.join(",") || "none"} preserved=${restored.preserved.join(",") || "none"}`
+  );
+} catch (error) {
+  console.error(
+    "[startup] Engine runtime restore failed:",
+    error?.stack || error?.message || String(error)
+  );
+}
 
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (_req, res) => {
