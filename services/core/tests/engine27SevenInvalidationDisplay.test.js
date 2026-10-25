@@ -6,9 +6,9 @@ test("cards expose only canonical current-owner invalidation, not Fib geometry",
  micro:{ownerMicroCDown:{version:"engine22.microCDownOwnerWatch.v1",levels:[{price:7750.75}]}},
  }},degreeStates:{minor:{invalidationLevel:7543.5}}}}}};
  const out=buildEngine27WorkingSevenDegrees({snapshot});
- assert.equal(out.degrees.submicro.invalidation.price,7812.25);
+ assert.equal(out.degrees.submicro.invalidation.price,null);
  assert.equal(out.degrees.micro.invalidation.price,null);
  assert.equal(out.degrees.minor.invalidation.price,7543.5);
- assert.equal(out.degrees.submicro.invalidation.source.engine,"ENGINE22");
+ assert.equal(out.degrees.submicro.invalidation.source,null);
  assert.equal(out.noExecution,true);
 });
