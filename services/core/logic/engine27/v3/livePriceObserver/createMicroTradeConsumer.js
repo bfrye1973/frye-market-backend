@@ -18,13 +18,14 @@ export function createMicroTradeConsumer({readInputs,onObservation=()=>{}}={}){
    if(!source?.snapshot||typeof receivedAt!=="string")return {accepted:false,reasonCodes:["CANONICAL_INPUTS_MISSING"]};
    const owner=source.snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown;
    // Reject/observe first; do not run Manager for duplicate, stale or invalid input.
+   const previousObservation=state.previousObservation;
    const result=reduceTradeIngestion(state,{type:"TRADE",event,receivedAt,owner});
    const accepted=result.accepted>state.accepted;
    state=result;
    if(!accepted)return {accepted:false,reasonCodes:state.reasonCodes};
    const intelligence=buildMicroIntelligenceV3({...source,evaluatedAt:receivedAt,
      livePriceEvent:event,liveObservedAt:receivedAt,expectedEsContract:state.contract,
-     previousLiveObservation:result.accepted===1?null:source.previousLiveObservation??null});
+     previousLiveObservation:previousObservation});
    // Persist only bounded telemetry, not the huge six-module snapshots or private Journal.
    // The caller gets the result synchronously and may choose an approved storage policy.
    onObservation(intelligence);
