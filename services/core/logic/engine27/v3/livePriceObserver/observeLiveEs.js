@@ -1,7 +1,7 @@
 import {LIVE_OBSERVER_SCHEMA,LIVE_EVENT_SCHEMA,LIVE_OBSERVER_SOURCE} from "../contracts/livePriceObserver.v1.js";
 const positive=x=>typeof x==="number"&&Number.isFinite(x)&&x>0;
 const time=s=>typeof s==="string"&&Number.isFinite(Date.parse(s))?Date.parse(s):NaN;
-const contract=s=>typeof s==="string"&&/^ES[FGHJKMNQUVXZ]\\d{1,2}$/.test(s);
+const contract=s=>typeof s==="string"&&/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(s);
 const fail=reason=>({schema:LIVE_OBSERVER_SCHEMA,mode:"READ_ONLY_SHADOW",available:false,state:"UNAVAILABLE",
  currentPrice:null,lastTradeAt:null,provisionalTouches:[],nextProvisionalReference:null,
  confirmedFibObjective:null,confirmedWaveCompletion:false,reasonCodes:[reason],
