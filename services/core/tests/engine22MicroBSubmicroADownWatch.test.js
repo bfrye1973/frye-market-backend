@@ -4,6 +4,7 @@ import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelen
 import {applyOwnerPriceTouchesV1} from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 test("new downside models are isolated and correctly priced",()=>{
  const wave=buildCurrentWavelength({symbol:"ES",currentPrice:7763.5,microBars5m:[]});
+ delete wave.degrees.submicro.ownerSubmicroCDown;
  delete wave.degrees.micro.ownerMicroCDown; // replay the superseded Micro B count without changing the active owner model
  const m=wave.degrees.micro.ownerMicroBDown;
  const s=wave.degrees.submicro.ownerSubmicroADown;
