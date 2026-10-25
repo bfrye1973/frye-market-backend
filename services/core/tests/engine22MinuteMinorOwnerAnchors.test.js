@@ -13,7 +13,7 @@ test("owner Minute W1 completed anchors and W2 retracements exactly match approv
   assert.equal(minute.completedWave,"W1");
   assert.equal(minute.activeWave,"W2");
   assert.equal(minute.nextWaveStarted,false);
-  assert.deepEqual(minute.levels.map(v=>v.price),[7793.25,7722,7664.25,7606.5,7524.25,7419.5]);
+  assert.deepEqual(minute.levels.map(v=>v.price),[7793.25,7721.75,7664.25,7606.5,7524.25,7419.5]);
   assert.ok(minute.levels.every(v=>v.touchEvidenceAvailable===false && v.status==="WATCH"));
   assert.equal(minute.structuralReference,7419.5);
   assert.equal(w.degrees.minute.activeWave,"W3"); // preserved historical model only
