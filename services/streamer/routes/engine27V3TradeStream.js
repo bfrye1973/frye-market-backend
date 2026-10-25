@@ -16,7 +16,7 @@ const send=(res,x)=>{
  if(res.destroyed||res.writableEnded)return false;
  if(blocked.has(res))return true; // drop incoming ticks while backpressured, no unbounded queue
  if(res.writableLength>MAX_WRITABLE_BYTES)return false;
- const canContinue=res.write("data: "+JSON.stringify(x)+"\\n\\n");
+ const canContinue=res.write("data: "+JSON.stringify(x)+String.fromCharCode(10,10));
  if(!canContinue)blocked.add(res); // res.write(false) is backpressure, not a dead client
  return true;
 };
