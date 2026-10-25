@@ -1,0 +1,256 @@
+{
+  "schema": "engine22.node-registry.reconciliation-evidence.v1",
+  "sourceSha256": "6fb824cc5e8469bc66db004b903fbf3caf537d624ad18fcbc24a20815f9f40a8",
+  "manualSource": "services/core/data/waves/active/active-wave-state-es.json",
+  "manualSourceBlobSha": "4dbcdead83ae7a27659f8cc69f562692364f1ce8",
+  "v3OwnerSource": "services/core/logic/engine22/v3/buildOwnerBootstrap.js",
+  "v3OwnerSourceBlobSha": "1c6d5c0f7c4ee32c82a73ad6d607c9f5fcc496f9",
+  "authoritativeDecision": "NO_COUNT_OR_FIB_CHANGES_PHASE_1",
+  "sourceCountIds": "LEGACY_MANUAL_COUNT_IDS_ABSENT;V3_BASELINE_SHADOW_IDS_NOT_APPROVED_PLOT_AUTHORITIES",
+  "chartCompatibility": "BLOCKED_PRICE_BASIS_AND_ENGINE11_CANDLE_LINEAGE",
+  "ownerVsManualConflicts": [
+    {
+      "degree": "MINUTE",
+      "node": "W1 starting low",
+      "sourceId": "WB-ALL-018",
+      "ownerPrice": 7419,
+      "legacyPrice": 7591,
+      "legacyTimestamp": "2026-09-16 12:30",
+      "ownerRawDate": "7/29/206",
+      "ownerRawTime": "1",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINUTE",
+      "node": "W1 ending high",
+      "sourceId": "WB-ALL-019",
+      "ownerPrice": 7905,
+      "legacyPrice": 7848.5,
+      "legacyTimestamp": "2026-09-23",
+      "ownerRawDate": "46247",
+      "ownerRawTime": "0.2916666666666667",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINOR",
+      "node": "W1 starting low",
+      "sourceId": "WB-ALL-024",
+      "ownerPrice": 6496,
+      "legacyPrice": 6417,
+      "legacyTimestamp": "2026-03-30 17:00",
+      "ownerRawDate": "46111",
+      "ownerRawTime": "0.6666666666666666",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINOR",
+      "node": "W1 ending high",
+      "sourceId": "WB-ALL-025",
+      "ownerPrice": 6973,
+      "legacyPrice": 6948.75,
+      "legacyTimestamp": "2026-04-10 08:00",
+      "ownerRawDate": "46119",
+      "ownerRawTime": "0.9583333333333334",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINOR",
+      "node": "W2",
+      "sourceId": "WB-ALL-026",
+      "ownerPrice": 6884,
+      "legacyPrice": 6829,
+      "legacyTimestamp": "2026-04-12 15:00",
+      "ownerRawDate": "46124",
+      "ownerRawTime": "0.6666666666666666",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINOR",
+      "node": "W3",
+      "sourceId": "WB-ALL-027",
+      "ownerPrice": 7758,
+      "legacyPrice": 7694.25,
+      "legacyTimestamp": "2026-06-02 19:00",
+      "ownerRawDate": "46175",
+      "ownerRawTime": "0.4583333333333333",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "MINOR",
+      "node": "W4",
+      "sourceId": "WB-ALL-028",
+      "ownerPrice": 7395.75,
+      "legacyPrice": 7398,
+      "legacyTimestamp": "2026-07-29 13:30",
+      "ownerRawDate": "46232",
+      "ownerRawTime": "0.6666666666666666",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "INTERMEDIATE",
+      "node": "W1 ending high",
+      "sourceId": "WB-ALL-031",
+      "ownerPrice": 7205,
+      "legacyPrice": 7151,
+      "legacyTimestamp": "2026-01-28",
+      "ownerRawDate": "46050",
+      "ownerRawTime": "0.375",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "INTERMEDIATE",
+      "node": "W2",
+      "sourceId": "WB-ALL-032",
+      "ownerPrice": 6511,
+      "legacyPrice": 6407,
+      "legacyTimestamp": "2026-03-30",
+      "ownerRawDate": "46111",
+      "ownerRawTime": "0.6666666666666666",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "PRIMARY",
+      "node": "W1 starting low",
+      "sourceId": "WB-ALL-036",
+      "ownerPrice": 3096,
+      "legacyPrice": 3200,
+      "legacyTimestamp": "2020-04-02",
+      "ownerRawDate": "43914",
+      "ownerRawTime": "0.375",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "PRIMARY",
+      "node": "W1 ending high",
+      "sourceId": "WB-ALL-037",
+      "ownerPrice": 5692,
+      "legacyPrice": 5620,
+      "legacyTimestamp": "2022-01-05",
+      "ownerRawDate": "44564",
+      "ownerRawTime": "0.2916666666666667",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "PRIMARY",
+      "node": "W2",
+      "sourceId": "WB-ALL-038",
+      "ownerPrice": 4462,
+      "legacyPrice": 4306,
+      "legacyTimestamp": "2022-10-12",
+      "ownerRawDate": "44846",
+      "ownerRawTime": "0.2916666666666667",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "PRIMARY",
+      "node": "W3",
+      "sourceId": "WB-ALL-039",
+      "ownerPrice": 6548,
+      "legacyPrice": 6487,
+      "legacyTimestamp": "2025-02-20",
+      "ownerRawDate": "45708",
+      "ownerRawTime": "0.20833333333333334",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    },
+    {
+      "degree": "PRIMARY",
+      "node": "W4",
+      "sourceId": "WB-ALL-040",
+      "ownerPrice": 5254,
+      "legacyPrice": 5182,
+      "legacyTimestamp": "2025-04-09",
+      "ownerRawDate": "45756",
+      "ownerRawTime": "0.125",
+      "recordStatus": "REQUIRES_ENGINE22_RECONCILIATION",
+      "decision": "PRESERVE_BOTH;NO_AUTOMATIC_PROMOTION"
+    }
+  ],
+  "knownAdditionalConflicts": [
+    {
+      "degree": "MINUTE",
+      "type": "COUNT_AUTHORITY",
+      "manual": "W2_ABC_C_DOWN_ACTIVE_20260928",
+      "currentOwnerV3": "W3_UP_STARTED_CONFIRMATION_PENDING",
+      "decision": "UNRESOLVED_STRUCTURAL_RECONCILIATION_REQUIRED"
+    },
+    {
+      "degree": "SUBMINUTE",
+      "type": "W3_FIB_ANCHOR_SET",
+      "legacyOperational": [
+        7575,
+        7859.25,
+        7671.5
+      ],
+      "newerOwnerExcel": [
+        7616.25,
+        7847,
+        7673.25
+      ],
+      "decision": "OWNER_OBSERVATIONS_NOT_AUTOMATICALLY_PROMOTED"
+    },
+    {
+      "degree": "MICRO",
+      "type": "W1_ORIGIN",
+      "v3": [
+        7677.25,
+        7897.5
+      ],
+      "ownerExcel": [
+        7706.25,
+        7897.25
+      ],
+      "decision": "UNRESOLVED;NO_ROLLOVER_OFFSET_ASSUMED"
+    },
+    {
+      "degree": "SUBMICRO",
+      "type": "ABC_ENDPOINT",
+      "v3A": [
+        7787.5,
+        "2026-10-08 10:30"
+      ],
+      "excelA": [
+        7782,
+        "2026-10-08 07:00"
+      ],
+      "v3B": [
+        7886.5,
+        "2026-10-11 21:00"
+      ],
+      "excelB": [
+        7886.25,
+        "2026-10-11 19:00"
+      ],
+      "decision": "KEEP_SOURCE_RECORDS_SEPARATE"
+    },
+    {
+      "degree": "MINOR",
+      "type": "DATE_CORRECTION",
+      "excelOwnerW1Low": {
+        "price": 6496,
+        "dateSerial": 46111,
+        "timeFraction": 0.6666666666666666
+      },
+      "legacyW1Low": {
+        "price": 6417,
+        "date": "2026-03-30",
+        "time": "17:00"
+      },
+      "decision": "OWNER_CORRECTION_RECOVERED_BUT_PRICE_MISMATCH_REQUIRES_REVIEW"
+    }
+  ],
+  "noExecution": true,
+  "noPermissionCreated": true
+}
