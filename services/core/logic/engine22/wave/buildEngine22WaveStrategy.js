@@ -44,6 +44,7 @@ import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildSevenDegreeInvalidationsV1 } from "./buildSevenDegreeInvalidationsV1.js";
+import { buildHigherDegreeBearishProtectionV1 } from "./buildHigherDegreeBearishProtectionV1.js";
 import { buildCanonicalMicroMigrationShadow } from "../microV2/buildCanonicalMicroMigrationShadow.js";
 import {
   readActiveCanonicalMicroCount,
@@ -2342,6 +2343,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     degreeStates: publishedDegreeStates,
     engine22Display: publishedEngine22Display,
     currentWavelength: publishedCurrentWavelength,
+    higherDegreeBearishProtection: buildHigherDegreeBearishProtectionV1({
+      symbol:context.symbol,
+      barsByTf:context.barsByTf,
+      evaluationTimeMs:context.evaluationTimeMs,
+    }),
     sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
       currentWavelength:publishedCurrentWavelength,
       degreeStates:publishedDegreeStates,
