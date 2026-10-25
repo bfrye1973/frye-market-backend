@@ -38,3 +38,26 @@ The command outputs NO broker records or credentials, and performs only an fs.re
 ## Test / gate
 GitHub draft PR #200: integrated 13 fixtures plus 6 modules; recent GitHub V3 and V2 workflows succeeded before this audit-only addition. Run links: https://github.com/bfrye1973/frye-market-backend/actions . No real-record replay acceptance pass.
 **Recommendation: BLOCKED for production.** Continue isolated feature-branch source qualification only; no merge, deployment, frontend change or expansion to other strategies.
+
+
+## Actual production ES evidence received — October 25, 2026
+Owner supplied sanitized **read-only** Render Shell output from production service `frye-market-backend-1`. Snapshot timestamp `2026-10-25T22:31:25.615Z`; symbol ES; recorded bar count 120. No broker records were included.
+
+**Verified live snapshot fields:**
+- Owner `currentWavelength.degrees.micro.ownerMicroCDown`: `engine22.microCDownOwnerWatch.v1`, direction DOWN, stage DEVELOPING_CANDIDATE, confirmation C_DOWN_WORKING_COUNT_NOT_CONFIRMED.
+- A high 7898, low 7678; B high 7813.25. All nine owner Fib records have `key`, `price`, `status`, `provisional`, `touchEvidenceAvailable`.
+- Touched provisional references: e236 7761.25, e382 7729.25, e500 7703.25, e618 7677.25. Untouched provisional references: e786 7640.25, e1000 7593.25, e1272 7533.50, e1618 7457.25, e2000 7373.25. None is a confirmed trade objective.
+- Neighbor owner versions: `engine22.submicroCDownOwnerWatch.v1`, `engine22.subminuteCurrentCDownReference.v1`.
+- ES 10m bar records contain keys `time,open,high,low,close,volume`. `time` is a number. No `completed` or `isComplete` flags. Sample OHLC fields numerical.
+- First sampled bar time `1792719600` = `2026-10-23T01:40:00Z` (assumed Unix seconds). Last `1792967400` = `2026-10-25T22:30:00Z`. These values are consistent with Unix seconds at bar START, as expected by Engine22's touch processor.
+- Last bar at 22:30Z would complete 22:40Z, after snapshot 22:31:25Z; therefore it was **in progress**, not admissible to the completed-bar evaluator. This is a verified producer-shape/consumer mismatch. The previous bar's presence and last completed time have NOT been independently observed.
+- The 120 bars span Friday–Sunday with normal nontrading intervals possible; snapshot row availability does not establish continuous freshness. Weekend/session handling remains unverified.
+
+**Acceptance impact:**
+Source owner contract, owner levels, neighbor model versions, bar field names and numeric timestamp representation are now **live-snapshot verified**. Strict UNIX_SECONDS_BAR_START interpretation is strongly supported by matching date/clock alignment, but authoritative upstream producer code must still be checked. V3 input assembler currently passes raw `esBars10m` to a strict adapter which rejects any unfinished candle; feeding the full live snapshot array would fail because it contains the in-progress 22:30 bar. This is a genuine V3-specific source adapter contract issue, not an Engine22 defect.
+
+**Proposed fix for Manager review (NOT IMPLEMENTED):**
+Introduce a V3-only source-qualified 10m completion selector *before* `adaptEngine22Micro`. Require numeric integer Unix seconds bar-start, explicit ES/10m identity, chronological/nonduplicate OHLC, time+600000 <= observation time. Exclude trailing unfinished candle(s) as IN_PROGRESS with reason code and count; never silently adjust unknown units or reorder malformed candles. Preserve previous completed candles across Globex maintenance/weekends and classify market-closed age separately from stale/incomplete live data, following actual session schedule. Validate at least two adjacent genuine completed bars when hold/failure confirmation eventually becomes authorized. Keep Engine22 Fib owner levels provisional and `confirmedObjective=null`.
+Do not change V2, Engine22, Engine10, trading permissions or production code. Manager approval requested for this V3 adapter contract reconciliation prior to implementation.
+
+**Still blocked:** actual live Engine10 SCHWAB_6380 contracts / entry provenance, linked Engine9 plans, E25/29/QQQ/VIX reaction records and historical Replay/Engine28. **Overall production verdict remains BLOCKED.**
