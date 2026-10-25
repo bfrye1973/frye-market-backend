@@ -3,6 +3,7 @@ import express from "express";
 import streamRouter from "./routes/stream.js";
 import scalpRouter from "./routes/scalp.js";
 import futuresRouter from "./routes/futuresStream.js";
+import engine27V3TradeRouter from "./routes/engine27V3TradeStream.js";
 import { startEngine5B } from "./engine5b/runner.js";
 
 
@@ -68,6 +69,7 @@ app.use("/stream", streamRouter);
 /* -------------------------------------------------
    Futures routes
 -------------------------------------------------- */
+app.use("/stream/futures/trades-v3", engine27V3TradeRouter);
 app.use("/stream/futures", futuresRouter);
 
 /* -------------------------------------------------
