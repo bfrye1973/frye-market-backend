@@ -101,7 +101,7 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
     const parentWave = degree === "submicro" ? "C" : degree === "micro" ? "C" : degree === "subminute" ? "W2" : degree === "minute" ? null : model.parentWave ?? null;
     const story = summarize(degree,model);
     degrees[degree] = {degree,label:degree.toUpperCase(),available:true,
-      activeWave:degree === "minute" ? "W2 / C DOWN" : wave,
+      activeWave:degree === "minute" ? "W2" : wave,
       waveDirection:direction,
       currentCondition:degree === "subminute" ? published(model.stage,"DEVELOPING_CANDIDATE") : degree === "minute" ? published(minuteC?.status, "DEVELOPING_CANDIDATE") : published(model.stage ?? model.lifecycle),
       confirmationNeeded:{status:confirmation,evidence:[],rule:null,note:"Owner working interpretation is not confirmed solely by owner pivot approval."},
