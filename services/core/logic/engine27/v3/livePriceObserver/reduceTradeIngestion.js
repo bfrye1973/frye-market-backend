@@ -38,7 +38,7 @@ export function reduceTradeIngestion(state=initialTradeIngestion(),action={}){
  if(identity&&prev.recentEventIds.includes(identity))
    return {...prev,rejected:prev.rejected+1,reasonCodes:["DUPLICATE_PROVIDER_TRADE_ID"]};
  if((prev.lastTradeAt&&Date.parse(event.tradeTime)<Date.parse(prev.lastTradeAt))||
-    (prev.priorTradeWatermark&&Date.parse(event.tradeTime)<Date.parse(prev.priorTradeWatermark))
+    (prev.priorTradeWatermark&&Date.parse(event.tradeTime)<Date.parse(prev.priorTradeWatermark)))
    return {...prev,rejected:prev.rejected+1,reasonCodes:["OUT_OF_ORDER_TRADE"]};
  if(prev.lastReceivedAt&&Date.parse(at)-Date.parse(prev.lastReceivedAt)>30000){
   return {...prev,status:"STALE",gapCount:prev.gapCount+1,previousObservation:null,lastManagerOutput:null,
