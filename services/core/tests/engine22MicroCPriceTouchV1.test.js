@@ -6,7 +6,7 @@ import path from "node:path";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
 import {applyOwnerPriceTouchesV1} from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 
-const base=()=>{ const v=buildCurrentWavelength({symbol:"ES",currentPrice:7802.25,microBars5m:[]}); delete v.degrees.micro.ownerMicroBDown; delete v.degrees.submicro.ownerSubmicroADown; return v; };
+const base=()=>{ const v=buildCurrentWavelength({symbol:"ES",currentPrice:7802.25,microBars5m:[]}); delete v.degrees.micro.ownerMicroCDown; delete v.degrees.micro.ownerMicroBDown; delete v.degrees.submicro.ownerSubmicroADown; return v; };
 const targets=[7745,7756.5,7767.75,7804.75,7831,7864.5,7901.5];
 test("Micro C UP uses live ES quote, survives retreat/restart, isolates old Micro W3",()=>{
  const folder=fs.mkdtempSync(path.join(os.tmpdir(),"e22-micro-c-touch-"));
