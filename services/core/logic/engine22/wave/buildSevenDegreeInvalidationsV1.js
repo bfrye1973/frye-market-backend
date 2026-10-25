@@ -74,47 +74,49 @@ export function buildSevenDegreeInvalidationsV1({
 }={}){
   const cw=currentWavelength?.degrees||{};
   const parent=cw.minute?.ownerMinuteW2Hypothesis;
-  const subminute=parent?.childDegreeContext?.subminute;
   const records={
     submicro:ownerRecord({
-      degree:"submicro",model:cw.submicro?.ownerSubmicroADown,
-      expectedVersion:"engine22.submicroADownOwnerWatch.v1",
-      waveIdentity:"SUBMICRO_A_DOWN",parentDegree:"micro",parentWave:"B",
-      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroADown",
+      degree:"submicro",model:cw.submicro?.ownerSubmicroCDown,
+      expectedVersion:"engine22.submicroCDownOwnerWatch.v1",
+      waveIdentity:"SUBMICRO_C_DOWN",parentDegree:"micro",parentWave:"C",
+      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown",
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     micro:ownerRecord({
-      degree:"micro",model:cw.micro?.ownerMicroBDown,
-      expectedVersion:"engine22.microBDownOwnerWatch.v1",
-      waveIdentity:"MICRO_B_DOWN",parentDegree:"subminute",parentWave:"ABC_UP_INSIDE_MINUTE_D",
-      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroBDown",
+      degree:"micro",model:cw.micro?.ownerMicroCDown,
+      expectedVersion:"engine22.microCDownOwnerWatch.v1",
+      waveIdentity:"MICRO_C_DOWN",parentDegree:"subminute",parentWave:"C",
+      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown",
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     subminute:{
-      degree:"subminute",activeModel:null,
-      expectedModelVersion:null,
-      modelSource:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerMinuteW2Hypothesis.childDegreeContext.subminute",
-      modelStatus:subminute?.currentWorkingStructure==="ABC_UP_INSIDE_MINUTE_D"?"OWNER_WORKING_CONTEXT_ONLY":"NOT_PUBLISHED",
-      waveIdentity:subminute?.currentWorkingStructure==="ABC_UP_INSIDE_MINUTE_D"?"SUBMINUTE_ABC_UP":null,
-      direction:subminute?.currentWorkingStructure==="ABC_UP_INSIDE_MINUTE_D"?"UP":null,
-      stage:subminute?.waveRecount||null,
-      parentDegree:"minute",parentWave:"D",
+      degree:"subminute",
+      activeModel:cw.subminute?.ownerCurrentCDown?.version === "engine22.subminuteCurrentCDownReference.v1"
+        ? "engine22.subminuteCurrentCDownReference.v1":null,
+      expectedModelVersion:"engine22.subminuteCurrentCDownReference.v1",
+      modelSource:"engine22WaveStrategy.currentWavelength.degrees.subminute.ownerCurrentCDown",
+      modelStatus:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"
+        ?"OWNER_WORKING_DEGREE_PLACEMENT_PROVISIONAL":"NOT_PUBLISHED",
+      waveIdentity:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"SUBMINUTE_C_DOWN":null,
+      direction:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"DOWN":null,
+      stage:cw.subminute?.ownerCurrentCDown?.stage||null,
+      parentDegree:"minute",parentWave:"W2",
       sourceCountId:null,countIdentityStatus:"NOT_PUBLISHED",modelRevision:null,sourceTimestamp:null,
       rules:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"].map(scope=>unpublished(scope)),
     },
     minute:ownerRecord({
       degree:"minute",model:parent,
       expectedVersion:"engine22.minuteW2ComplexCorrectionWatch.v1",
-      waveIdentity:"MINUTE_W2_INTERNAL_D_UP",parentDegree:"minor",parentWave:null,
+      waveIdentity:"MINUTE_W2_INTERNAL_C_DOWN_CANDIDATE",parentDegree:"minor",parentWave:null,
       sourcePath:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerMinuteW2Hypothesis",
-      scopes:["INTERNAL_D_UP","MINUTE_W2_DEGREE_COUNT","PARENT_STRUCTURE"],
+      scopes:["INTERNAL_C_DOWN","MINUTE_W2_DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     minor:higherRecord("minor",degreeStates),
     intermediate:higherRecord("intermediate",degreeStates),
     primary:higherRecord("primary",degreeStates),
   };
   if(records.minute.modelStatus==="OWNER_WORKING_UNCONFIRMED"){
-    records.minute.direction=parent.activeInternalLegDirection==="UP"?"UP":null;
+    records.minute.direction=cw.minute?.ownerLargerCDownScenario?.version==="engine22.largerCorrectionCDownWatch.v1"?"DOWN":null;
     records.minute.largerCorrectionDirection="CORRECTIVE";
   }
   const degrees=Object.fromEntries(DEGREES.map(d=>[d,records[d]]));
