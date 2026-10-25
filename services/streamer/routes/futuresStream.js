@@ -918,3 +918,6 @@ router.get("/agg", async (req, res) => {
     } catch {}
   });
 });
+
+// Additive V3 read-only reuse of the existing canonical ES contract resolver.
+export { resolveFuturesContract };
