@@ -12,7 +12,7 @@ export function reduceTradeIngestion(state=initialTradeIngestion(),action={}){
  const prev=state;
  if(action.type==="DISCONNECTED"||action.type==="RECONNECTING"||action.type==="STALE"){
   return {...prev,status:action.type,lastReceivedAt:null,previousObservation:null,
-   lastManagerOutput:null,gapCount:prev.gapCount+1,reasonCodes:[action.reasonCode??"SOURCE_GAP"],
+   lastManagerOutput:null,gapCount:prev.gapCount+1,reasonCodes:[action.reasonCode??(action.type==="STALE"?"SOURCE_STALE":"SOURCE_GAP")],
    // Deliberately DO NOT retain a current price across feed gaps.
    lastTradeAt:null};
  }
