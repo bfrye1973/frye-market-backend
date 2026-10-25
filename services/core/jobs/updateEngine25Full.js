@@ -4,6 +4,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { execFileSync } from "child_process";
+import { persistEngineRuntimeFiles } from "../logic/durableEngineRuntimeState.js";
 import { buildEngine25SectorHealth } from "../logic/engine25SectorHealth.js";
 import { buildEngine25EsTechnicalContext } from "../logic/engine25EsTechnicalContext.js";
 import {
@@ -582,6 +583,23 @@ async function main() {
 
   console.log("\n[Engine25Full] Building canonical Engine 25 context...");
   runNodeJob("jobs/buildEngine25Context.js");
+  const persistence = persistEngineRuntimeFiles({
+    fileNames: [
+      "engine25-market-health.json",
+      "engine25-participation.json",
+      "engine25-context.json",
+      "engine25-es-overlay.json",
+      "engine25-sector-card-breadth-snapshots.json",
+      "engine25-zone-classification.json",
+      "engine25-es-zone-aware-read.json",
+      "engine25-es-technical-context.json",
+    ],
+  });
+
+  console.log(
+    `[Engine25Full] Durable save ok=${persistence.ok} saved=${persistence.saved.join(",") || "none"}`
+  );
+
   console.log("\n========================================");
   console.log("Engine 25 Full Update Complete");
   console.log("Wrote:");

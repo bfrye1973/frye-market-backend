@@ -2,11 +2,13 @@
 // Backend-1 (Core API) — Express entry (ESM)
 
 import express from "express";
+import fs from "fs";
 import {makeEngine2cResearchRoute} from "./routes/engine2cResearchHistory.js";
 import path from "path";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { startEngine25FinlightStream } from "./logic/engine25FinlightStream.js";
+import { restoreEngineRuntimeFiles } from "./logic/durableEngineRuntimeState.js";
 
 import { ohlcRouter } from "./routes/ohlc.js";
 import liveRouter from "./routes/live.js";
@@ -70,6 +72,18 @@ const app = express();
 // --- Paths ---
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+try {
+  const restored = restoreEngineRuntimeFiles();
+  console.log(
+    `[startup] Engine runtime restore ok=${restored.ok} restored=${restored.restored.join(",") || "none"} preserved=${restored.preserved.join(",") || "none"}`
+  );
+} catch (error) {
+  console.error(
+    "[startup] Engine runtime restore failed:",
+    error?.stack || error?.message || String(error)
+  );
+}
 
 // WHO AM I TEST ROUTE
 app.get("/__whoami", (_req, res) => {
@@ -278,6 +292,74 @@ function runStartupSnapshotBuild() {
   });
 }
 
+// --- Engine 25/29 canonical runtime bootstrap ---
+let ENGINE_RUNTIME_BOOTSTRAP_RUNNING = false;
+
+function runEngineRuntimeBootstrapIfMissing() {
+  const required = [
+    path.join(__dirname, "data", "engine29-cross-market-stress.json"),
+    path.join(__dirname, "data", "engine25-context.json"),
+  ];
+
+  const missing = required.filter((filePath) => !fs.existsSync(filePath));
+  if (!missing.length) {
+    console.log("[engine-runtime-bootstrap] skipped: canonical runtime state present");
+    return;
+  }
+
+  if (ENGINE_RUNTIME_BOOTSTRAP_RUNNING) {
+    console.log("[engine-runtime-bootstrap] skipped: already running");
+    return;
+  }
+
+  ENGINE_RUNTIME_BOOTSTRAP_RUNNING = true;
+  console.log(
+    `[engine-runtime-bootstrap] START missing=${missing.map((p) => path.basename(p)).join(",")}`
+  );
+
+  const child = spawn("node", ["./jobs/updateEngine29Then25.js"], {
+    cwd: __dirname,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  child.stdout.on("data", (d) => {
+    stdout += d.toString();
+  });
+
+  child.stderr.on("data", (d) => {
+    stderr += d.toString();
+  });
+
+  child.on("close", (code) => {
+    ENGINE_RUNTIME_BOOTSTRAP_RUNNING = false;
+
+    if (code === 0) {
+      console.log(
+        `[engine-runtime-bootstrap] SUCCESS @ ${new Date().toISOString()}`
+      );
+      if (stdout.trim()) console.log(stdout.trim().slice(-6000));
+    } else {
+      console.error(
+        `[engine-runtime-bootstrap] FAIL code=${code} @ ${new Date().toISOString()}`
+      );
+      if (stdout.trim()) console.log(stdout.trim().slice(-6000));
+      if (stderr.trim()) console.error(stderr.trim().slice(-6000));
+    }
+  });
+
+  child.on("error", (error) => {
+    ENGINE_RUNTIME_BOOTSTRAP_RUNNING = false;
+    console.error(
+      "[engine-runtime-bootstrap] SPAWN ERROR:",
+      error?.stack || error?.message || String(error)
+    );
+  });
+}
+
 // --- Engine 25 startup news recovery ---
 // WebSocket delivery begins only after the connection is admitted.
 // Restore recent Reuters history first so a restart does not erase the
@@ -395,6 +477,12 @@ app.listen(PORT, HOST, () => {
   setTimeout(() => {
     runStartupSnapshotBuild();
   }, 1500);
+
+  // If a fresh deploy has no runtime copies and no durable copies exist yet,
+  // rebuild Engine 29 -> Engine 25 once even when the market is closed.
+  setTimeout(() => {
+    runEngineRuntimeBootstrapIfMissing();
+  }, 3500);
 
   // Engine 25 news startup contract:
   // REST recovery/backfill first -> persistent WebSocket second.
