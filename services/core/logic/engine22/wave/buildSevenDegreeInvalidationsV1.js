@@ -127,6 +127,38 @@ export function buildSevenDegreeInvalidationsV1({
   const ownerB = (model,version)=>model?.version===version ? positive(model?.waveB?.high) : null;
   const submicroReviewHigh=ownerB(cw.submicro?.ownerSubmicroCDown,"engine22.submicroCDownOwnerWatch.v1");
   const microReviewHigh=ownerB(cw.micro?.ownerMicroCDown,"engine22.microCDownOwnerWatch.v1");
+  // Explicitly informational zone candidates; never adopted as hard failure rules.
+  // Confirmed degree marks are preferable to legacy invalidation fields.
+  const markPrice=(state,key)=>{
+    const m=state?.marks?.[key];
+    return m?.confirmed===true && m?.superseded!==true ? positive(m?.price) : null;
+  };
+  const dynamicZone=(degree,wave)=>{
+    const state=degreeStates?.[degree];
+    const expected=degree==="intermediate"?"W3":"W5";
+    if(state?.active!==true || state.activeWave!==expected) return null;
+    const p=markPrice(state,wave);
+    return p===null ? null : {low:p,high:p,kind:"STRUCTURAL_PIVOT_SINGLE_PRICE",source:"engine22WaveStrategy.degreeStates."+degree+".marks."+wave+".price",pivotWave:wave,qualifiedMark:true};
+  };
+  const minuteHypothesis=cw.minute?.ownerMinuteW2Hypothesis;
+  const minuteRefs=minuteHypothesis?.version==="engine22.minuteW2ComplexCorrectionWatch.v1"
+    ? minuteHypothesis?.rangeReferences:null;
+  const minuteLower=positive(minuteRefs?.lowerApprox);
+  const minuteWick= cw.minute?.ownerLargerCDownScenario?.version==="engine22.largerCorrectionCDownWatch.v1"
+    ? positive(cw.minute.ownerLargerCDownScenario.warningReferences?.[1]):null;
+  const minuteZone=minuteLower!==null && minuteWick!==null && minuteLower<=minuteWick
+    ?{low:minuteLower,high:minuteWick,kind:"APPROX_RANGE_LOW_AND_HISTORIC_WICK",source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerMinuteW2Hypothesis.rangeReferences.lowerApprox + ownerLargerCDownScenario.warningReferences[1]",qualifiedMark:false}
+    :null;
+  const minorOrigin=cw.minor?.state==="MINOR_W5_ACTIVE_CANDIDATE" ? positive(cw.minor?.origin):null;
+  const minorPivot=dynamicZone("minor","W4");
+  const minorZone=minorPivot || (minorOrigin!==null
+    ?{low:minorOrigin,high:minorOrigin,kind:"HISTORICAL_ORIGIN_REFERENCE_SINGLE_PRICE",source:"engine22WaveStrategy.currentWavelength.degrees.minor.origin",qualifiedMark:false}:null);
+  const candidateZones={
+    submicro:null,micro:null,subminute:null,
+    minute:minuteZone,minor:minorZone,
+    intermediate:dynamicZone("intermediate","W2"),
+    primary:dynamicZone("primary","W4"),
+  };
   const prerequisite=[
     "OWNER_APPROVED_COUNT_ID_AND_REVISION",
     "OWNER_APPROVED_PATTERN_SPECIFIC_INVALIDATION_RULE",
@@ -184,6 +216,7 @@ export function buildSevenDegreeInvalidationsV1({
   };
   for(const degree of DEGREES){
     const proposal=reviewPlan[degree];
+    const zone=candidateZones[degree]||null;
     records[degree].invalidationReadiness={
       schema:"engine22.invalidationReadiness.v1",
       status:"OWNER_RULE_APPROVAL_REQUIRED",
@@ -192,6 +225,9 @@ export function buildSevenDegreeInvalidationsV1({
       alertEligible:false,
       officialInvalidationPrice:null,
       proposedReview:proposal,
+      candidateZone:zone,
+      zoneAuthority:"REVIEW_ONLY_NOT_STRUCTURAL_INVALIDATION",
+      zoneAvailability:zone?"SOURCE_REFERENCE_AVAILABLE":"QUALIFIED_PIVOT_REQUIRED",
       prerequisites:prerequisite,
       approvedRules:0,
     };
