@@ -1,0 +1,12 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {evaluatePriceActionFib as run} from "../priceActionFib/evaluatePriceActionFib.js";
+const owner={identity:"micro-owner-1",degree:"micro",direction:"DOWN"};
+const levels=[{id:"fib-1",price:7700}];
+const candles=[{complete:true,high:7705,low:7695,close:7698,endTime:"2026-10-25T10:00:00Z"}];
+test("missing owner fails closed",()=>assert.equal(run({levels,candles,observedAt:"2026-10-25T10:01:00Z"}).state,"UNAVAILABLE"));
+test("missing levels fails closed",()=>assert.equal(run({owner,candles,observedAt:"2026-10-25T10:01:00Z"}).state,"UNAVAILABLE"));
+test("incomplete candle rejected",()=>assert.equal(run({owner,levels,candles:[{...candles[0],complete:false}],observedAt:"2026-10-25T10:01:00Z"}).state,"UNAVAILABLE"));
+test("future candle rejected",()=>assert.equal(run({owner,levels,candles,observedAt:"2026-10-25T09:59:00Z"}).state,"UNAVAILABLE"));
+test("touch is not confirmation",()=>assert.equal(run({owner,levels,candles,observedAt:"2026-10-25T10:01:00Z"}).state,"UNCONFIRMED_TOUCH"));
+test("no touch is not confirmation",()=>assert.equal(run({owner,levels:[{id:"other",price:7800}],candles,observedAt:"2026-10-25T10:01:00Z"}).state,"AWAITING_REACTION"));
