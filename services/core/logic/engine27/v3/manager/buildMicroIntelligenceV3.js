@@ -6,9 +6,11 @@ import {evaluateMarketConfirmation} from "../marketConfirmation/evaluateMarketCo
 import {evaluatePositionIntelligence} from "../positionIntelligence/evaluatePositionIntelligence.js";
 import {evaluateOriginalThesis} from "../entryThesisMemory/evaluateOriginalThesis.js";
 import {evaluateHistoricalReplay} from "../historicalValidation/evaluateReplay.js";
+import {observeLiveEs} from "../livePriceObserver/observeLiveEs.js";
 
 export function buildMicroIntelligenceV3(input={}){
  const {contract,sources}=assembleMicroInputs(input);
+ const livePriceObservation=input.livePriceEvent?observeLiveEs({event:input.livePriceEvent,previous:input.previousLiveObservation??null,owner:sources.snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown??null,observedAt:input.liveObservedAt??sources.evaluatedAt,expectedContract:input.expectedEsContract??null}):null;
  // Refuse unqualified ES bars; do not silently repair timestamps, sources or identities.
  const priceActionFib=evaluatePriceActionFib({snapshot:sources.snapshot,
  esBars10m:contract.qualified?sources.esBars10m:null,
@@ -44,7 +46,7 @@ export function buildMicroIntelligenceV3(input={}){
  holdExitRecommendation:null,reasonCodes:positionIntelligence.reasonCodes};
  return {schema:MICRO_MANAGER_SCHEMA,mode:"READ_ONLY_SHADOW",symbol:"ES",degree:"micro",account:MICRO_ACCOUNT,
  evaluatedAt:sources.evaluatedAt,acceptance:"NOT_PRODUCTION_ACCEPTED",sourceAssembly:contract,
- modules:{priceActionFib,neighboringAlignment,marketConfirmation,positionIntelligence,
+ livePriceObservation,modules:{priceActionFib,neighboringAlignment,marketConfirmation,positionIntelligence,
  entryThesisMemory,historicalValidation},strategyAssessment,positionAssessment,
  noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true,
  noOrderModification:true};
