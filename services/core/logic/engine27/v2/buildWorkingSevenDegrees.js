@@ -118,6 +118,11 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
       internalLeg:leg,largerCorrection:degree === "minute"?"W2":null,
       noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
   }
+  // Engine 22 is the sole owner of higher-degree protection; Engine 27 displays it.
+  const higherProtection=e22?.higherDegreeBearishProtection?.degrees ?? {};
+  for(const degree of ["intermediate","primary"]) {
+    degrees[degree].bearishProtection = higherProtection?.[degree] ?? null;
+  }
   const structuralReadiness=e22?.sevenDegreeInvalidations?.degrees || {};
   for(const degree of ENGINE27_WORKING_DEGREES){
     degrees[degree].directionAssessment=directionAssessment(snapshot,degree,degrees[degree].waveDirection,
