@@ -5,6 +5,7 @@ on:
       - "services/core/logic/engine22/wave/buildSevenDegreeInvalidationsV1.js"
       - "services/core/logic/engine22/wave/buildEngine22WaveStrategy.js"
       - "services/core/tests/engine22SevenDegreeInvalidationsV1.test.js"
+      - "services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js"
       - ".github/workflows/engine22-seven-invalidations.yml"
 permissions:
   contents: read
@@ -18,4 +19,4 @@ jobs:
           node-version: "24"
       - run: node --check services/core/logic/engine22/wave/buildSevenDegreeInvalidationsV1.js
       - run: node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
-      - run: node --test services/core/tests/engine22SevenDegreeInvalidationsV1.test.js
+      - run: node --test services/core/tests/engine22SevenDegreeInvalidationsV1.test.js services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js
