@@ -21,3 +21,24 @@ test("reject stale event",()=>assert.equal(run({...base,observedAt:"2026-10-25T2
 test("rollover resets observer rather than mixing contracts",()=>{const p=run(base);const r=run({...base,previous:p,expectedContract:"ESH27",event:{...event,resolvedSymbol:"ESH27"}});assert.equal(r.reasonCodes[0],"CONTRACT_ROLLOVER_REQUIRES_RESET")});
 test("owner model missing fails closed",()=>assert.equal(run({...base,owner:{...owner,version:"old"}}).state,"UNAVAILABLE"));
 test("readonly and input immutable",()=>{const snapshot=structuredClone(event);run(base);assert.deepEqual(event,snapshot);assert.equal(run(base).noPermissionCreated,true)});
+
+test("observed Oct 25 production ESZ6 stream bar conforms without wave confirmation",()=>{
+ const productionEvent={ok:true,type:"bar",symbol:"ES",resolvedSymbol:"ESZ6",tf:"10m",mode:"eth",
+  bar:{time:1792969200,open:7686.25,high:7686.25,low:7685.75,close:7685.75,volume:81}};
+ const productionOwner={...owner,levels:[
+  {key:"e236",price:7761.25,provisional:true},
+  {key:"e382",price:7729.25,provisional:true},
+  {key:"e500",price:7703.25,provisional:true},
+  {key:"e618",price:7677.25,provisional:true},
+  {key:"e786",price:7640.25,provisional:true}
+ ]};
+ const r=run({event:productionEvent,owner:productionOwner,expectedContract:"ESZ6",observedAt:"2026-10-25T23:00:56.050Z"});
+ assert.equal(r.available,true);
+ assert.equal(r.currentPrice,7685.75);
+ assert.equal(r.expectedContract,"ESZ6");
+ assert.equal(r.lastCompletedCandle,null);
+ assert.equal(r.provisionalTouches.length,0);
+ assert.equal(r.confirmedFibObjective,null);
+ assert.equal(r.confirmedWaveCompletion,false);
+ assert.equal(r.noExecution,true);
+});
