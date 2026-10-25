@@ -226,6 +226,21 @@ export function buildCurrentWavelength({
   };
   // Owner working recount October 22: Micro A completed, B DOWN developing.
   // Keep prior C-UP owner model as historical, without promoting wave confirmation.
+  // Current owner working count: A DOWN complete, B UP complete, C DOWN developing.
+  const ownerMicroCDown = {
+    version:"engine22.microCDownOwnerWatch.v1",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"C",
+    waveA:{high:7898,low:7678,lowLocalTime:"2026-10-16 09:00",status:"OWNER_COMPLETED"},
+    waveB:{high:7813.25,highLocalTime:"2026-10-21 09:00",status:"OWNER_COMPLETED"},
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7813.25-(7898-7678)*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"C_DOWN_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
   const ownerMicroBDown = {
     version:"engine22.microBDownOwnerWatch.v1",activeWave:"B",direction:"DOWN",
     stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentLeg:"ABC_UP_INSIDE_MINUTE_D",
@@ -342,6 +357,7 @@ export function buildCurrentWavelength({
       microSequence,
       ownerMicroAbc,
       ownerMicroBDown,
+      ownerMicroCDown,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
         activeWave:"W3",direction:"UP",anchors:microW3Anchors,
