@@ -1,0 +1,17 @@
+import test from "node:test";import assert from "node:assert/strict";
+import {evaluateHistoricalReplay as run} from "../historicalValidation/evaluateReplay.js";
+const snapshots=[{symbol:"ES",snapshotTime:"2026-10-23T15:00:00Z"},{symbol:"ES",snapshotTime:"2026-10-23T15:10:00Z"}];
+const prediction={id:"P1",predictedAt:"2026-10-23T15:10:00Z",evidenceAsOf:"2026-10-23T15:00:00Z",direction:"DOWN",referencePrice:7700};
+const args={cutoff:"2026-10-23T15:10:00Z",snapshots,predictions:[prediction],outcomes:[]};
+test("historical prediction is immutable and confidence is not invented",()=>{let x=run(args);assert.equal(x.state,"OUTCOME_PENDING");assert.equal(x.statisticalConfidence,"NOT_CALIBRATED");assert.equal(x.observations[0].immutable,true)});
+test("future market snapshot is rejected as lookahead",()=>assert.equal(run({...args,snapshots:[...snapshots,{symbol:"ES",snapshotTime:"2026-10-23T16:00:00Z"}]}).state,"UNAVAILABLE"));
+test("future evidence before prediction is rejected",()=>assert.equal(run({...args,predictions:[{...prediction,evidenceAsOf:"2026-10-23T15:20:00Z"}]}).state,"UNAVAILABLE"));
+test("prediction itself cannot postdate cutoff",()=>assert.equal(run({...args,predictions:[{...prediction,predictedAt:"2026-10-23T16:00:00Z"}]}).state,"UNAVAILABLE"));
+test("duplicate replay snapshots fail rather than doubling samples",()=>assert.equal(run({...args,snapshots:[...snapshots,snapshots[1]]}).state,"UNAVAILABLE"));
+test("duplicate predictions fail rather than double counting",()=>assert.equal(run({...args,predictions:[prediction,prediction]}).state,"UNAVAILABLE"));
+test("outcome must match predicted identity",()=>assert.equal(run({...args,outcomes:[{predictionId:"WRONG",observedAt:"2026-10-23T15:20:00Z",observedPrice:7690}]}).state,"UNAVAILABLE"));
+test("outcome must follow prediction time",()=>assert.equal(run({...args,outcomes:[{predictionId:"P1",observedAt:"2026-10-23T15:00:00Z",observedPrice:7690}]}).state,"UNAVAILABLE"));
+test("future outcome is label only with no forecast rewrite",()=>{let x=run({...args,outcomes:[{predictionId:"P1",observedAt:"2026-10-23T15:30:00Z",observedPrice:7680}]});assert.equal(x.state,"OUTCOME_OBSERVED");assert.equal(x.outcomes[0].postCutoff,true);assert.equal(x.observations[0].referencePrice,7700)});
+test("missing replay fails closed",()=>assert.equal(run({...args,snapshots:[]}).state,"UNAVAILABLE"));
+test("wrong market identity fails closed",()=>assert.equal(run({...args,snapshots:[{...snapshots[0],symbol:"SPY"}]}).state,"UNAVAILABLE"));
+test("no trade authority",()=>{let x=run(args);assert.equal(x.noExecution,true);assert.equal(x.noJournalWrite,true)});
