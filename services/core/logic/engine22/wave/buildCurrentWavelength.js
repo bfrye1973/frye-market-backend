@@ -255,6 +255,23 @@ export function buildCurrentWavelength({
   // Submicro A down is only a developing leg. These are reference
   // retracements from the last owner Submicro low to the Micro A high,
   // not an independently confirmed Submicro A projection.
+  // Current owner working Submicro ABC DOWN inside Micro C DOWN.
+  // B time corrected to Oct 22 18:50 Arizona, after A low at 14:30.
+  const ownerSubmicroCDown = {
+    version:"engine22.submicroCDownOwnerWatch.v1",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"C",
+    waveA:{high:7812,highLocalTime:"2026-10-21 11:30",
+      low:7712,lowLocalTime:"2026-10-22 14:30",status:"OWNER_COMPLETED"},
+    waveB:{high:7743,highLocalTime:"2026-10-22 18:50",status:"OWNER_COMPLETED"},
+    levels:[0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7743-100*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"C_DOWN_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
   const ownerSubmicroADown = {
     version:"engine22.submicroADownOwnerWatch.v1",activeWave:"A",direction:"DOWN",
     stage:"DEVELOPING_CANDIDATE",parentDegree:"micro",parentWave:"B",
@@ -347,6 +364,7 @@ export function buildCurrentWavelength({
       ownerSubmicroW2, // archived owner model; touch memory must remain separate
       ownerSubmicroAbc,
       ownerSubmicroADown,
+      ownerSubmicroCDown,
       levels:submicroW2Levels,
       nextLevel:null,lastTouchedLevel:null,
       noExecution:true,
