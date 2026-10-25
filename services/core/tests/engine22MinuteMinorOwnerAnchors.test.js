@@ -41,3 +41,25 @@ test("missing current Minute owner model does not invent owner boundary",()=>{
   const r=buildSevenDegreeInvalidationsV1({currentWavelength:w});
   assert.equal(r.degrees.minute.invalidationReadiness.candidateZone?.ownerApprovedReference ?? false,false);
 });
+
+test("Minor W5 Fib prices reached by ES snapshot expose provenance for green UI",()=>{
+ const current=buildCurrentWavelength({symbol:"ES",currentPrice:7672.5,microBars5m:[]});
+ const fibs=current.degrees.minor.levels;
+ const reached=fibs.filter(x=>x.status==="TOUCHED");
+ const waiting=fibs.filter(x=>x.status==="WATCH");
+ assert.ok(reached.length>=2);
+ assert.ok(waiting.length>=1);
+ for(const level of reached){
+  assert.equal(level.touchEvidenceAvailable,true);
+  assert.equal(level.touchEvidenceType,"ES_CURRENT_SNAPSHOT_AT_OR_ABOVE_LEVEL");
+  assert.equal(level.touchEvidence?.verified,false);
+  assert.equal(level.touchEvidence?.observedPrice,7672.5);
+  assert.equal(level.touchEvidence?.historicTouchUnverified,true);
+ }
+ for(const level of waiting){
+  assert.equal(level.touchEvidenceAvailable,false);
+  assert.equal(level.touchEvidenceType,null);
+ }
+ const lower=buildCurrentWavelength({symbol:"ES",currentPrice:7400,microBars5m:[]});
+ assert.ok(lower.degrees.minor.levels.every(x=>x.status==="WATCH"&&x.touchEvidenceAvailable===false));
+});

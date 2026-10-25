@@ -292,10 +292,21 @@ export function buildCurrentWavelength({
     w1Low: 7591.00, w1High: 7848.50, start: 7576.00, currentPrice: price,
     anchorSource: "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
   });
+  // Minor W5 only: a live ES snapshot at/above a Fib level proves that
+  // price has REACHED that level. It does not prove a historic candle touch,
+  // a completed candle, a W5 confirmation, or trade permission.
   const minorLevels = waveProjectionLevels({
     w1Low: 6417.00, w1High: 6948.75, start: 7398.00, currentPrice: price,
     anchorSource: "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
-  });
+  }).map(item => ({
+    ...item,
+    touchEvidenceAvailable:item.status==="TOUCHED",
+    touchEvidenceType:item.status==="TOUCHED"?"ES_CURRENT_SNAPSHOT_AT_OR_ABOVE_LEVEL":null,
+    touchEvidence:item.status==="TOUCHED" ? {
+      verified:false, observation:"ES_CURRENT_SNAPSHOT_THRESHOLD",
+      observedPrice:price, direction:"UP", historicTouchUnverified:true,
+    }:null,
+  }));
   // Owner-locked Submicro W1 after the ABC C low at 7718.00.
   // This is a distinct owner-directed read-only wave state, not a
   // candle-confirmed V3 recount or trading authorization.
