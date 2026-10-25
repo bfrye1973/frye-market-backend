@@ -91,7 +91,7 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
         noExecution:true};
       continue;
     }
-    const minuteC = degree === "minute" ? e22?.currentWavelength?.degrees?.minute?.ownerLargerCDownScenario : null;
+    const minuteC = (degree === "minute" || degree === "subminute") ? e22?.currentWavelength?.degrees?.minute?.ownerLargerCDownScenario : null;
     const currentLevels = degree === "subminute" ? levels(minuteC?.levels) : levels(minuteC?.levels ?? model.levels ?? model.activeFibModel?.displayLevels);
     const leg = degree === "minute" ? (minuteC?.version === "engine22.largerCorrectionCDownWatch.v1" ? "C" : null) : null;
     const direction = degree === "minute" ? (leg === "C" ? "DOWN" : "NOT_PUBLISHED") : published(model.direction ?? model.sequenceDirection);
