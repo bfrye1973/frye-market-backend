@@ -33,3 +33,22 @@ test("consumer duplicate does not create another manager output",()=>{
  c.connect("ESZ6");c.ingest(trade("1"),at);const r=c.ingest(trade("1"),at);
  assert.equal(r.accepted,false);assert.equal(observations.length,1);
 });
+
+test("same-contract reconnect rejects duplicate replay but forgets crossed-price continuity",()=>{
+ const a=accept(connected(),trade("18"));
+ const d=reduce(a,{type:"DISCONNECTED"});
+ const again=reduce(d,{type:"CONNECTED",contract:"ESZ6"});
+ assert.equal(again.previousObservation,null);
+ const duplicate=accept(again,trade("18"));
+ assert.equal(duplicate.accepted,1);
+ assert.equal(duplicate.reasonCodes[0],"DUPLICATE_PROVIDER_TRADE_ID");
+ const b=accept(duplicate,trade("19",7760,"2026-10-25T23:00:56.080Z"),"2026-10-25T23:00:56.100Z");
+ assert.equal(b.accepted,2);
+ assert.equal(b.previousObservation.provisionalTouches.length,0);
+});
+test("rollover cannot reuse previous contract sequence memory",()=>{
+ const a=accept(connected(),trade("18"));
+ const next=reduce(reduce(a,{type:"DISCONNECTED"}),{type:"CONNECTED",contract:"ESH7"});
+ assert.deepEqual(next.recentEventIds,[]);
+ assert.equal(next.priorTradeWatermark,null);
+});
