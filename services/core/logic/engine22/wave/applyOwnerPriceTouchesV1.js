@@ -115,6 +115,43 @@ export function applyOwnerPriceTouchesV1({
       .map(x=>[x.key,{key:x.key,price:x.price,status:"TOUCHED",
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt}]));
   }
+  // Separate price-only touch history for the larger corrective C scenario.
+  // Never copy these levels into the canonical Minute W3 or D-UP models.
+  const cModel=root.degrees?.minute?.ownerLargerCDownScenario;
+  if(cModel?.version==="engine22.largerCorrectionCDownWatch.v1" && Array.isArray(cModel.levels)){
+    const id=JSON.stringify(["minute","largerCorrectionCDown",cModel.version,cModel.anchors,
+      cModel.levels.map(x=>[x.key,x.price])]);
+    const past=disk[id]||{};
+    const previous=previousWavelength?.degrees?.minute?.ownerLargerCDownScenario;
+    const same=previous?.version===cModel.version &&
+      JSON.stringify(previous.anchors)===JSON.stringify(cModel.anchors);
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const quote=finite(currentPrice);
+    const oldQuote=same?finite(previousWavelength?.currentPrice):null;
+    const observations=[];
+    if(quote!==null)observations.push({
+      low:oldQuote===null?quote:Math.min(quote,oldQuote),
+      time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",
+    });
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const time=Number(b?.time),low=finite(b?.low);
+      if(!Number.isSafeInteger(time)||time<=0||low===null)continue;
+      if(time*1000<Date.parse("2026-10-06T00:00:00Z")||time*1000+600000>now)continue;
+      observations.push({low,time:new Date(time*1000).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
+    }
+    cModel.levels=cModel.levels.map(level=>{
+      const historical=past[level.key]||(same?previous?.levels?.find(x=>x.key===level.key&&x.price===level.price):null);
+      const hit=observations.find(x=>x.low<=level.price);
+      const prior=historical?.status==="TOUCHED"&&historical?.price===level.price;
+      return {...level,status:prior||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(prior||hit),
+        touchEvidenceType:prior?(historical.touchEvidenceType||"PREVIOUS_SNAPSHOT"):(hit?.source||null),
+        touchedAt:prior?(historical.touchedAt||null):(hit?.time||null)};
+    });
+    disk[id]=Object.fromEntries(cModel.levels.filter(x=>x.status==="TOUCHED")
+      .map(x=>[x.key,{key:x.key,price:x.price,status:x.status,
+        touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }

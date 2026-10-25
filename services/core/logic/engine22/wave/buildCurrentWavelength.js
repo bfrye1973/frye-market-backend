@@ -372,6 +372,27 @@ export function buildCurrentWavelength({
       // with an INTERNAL contracting triangle candidate. It is NOT a
       // completed triangle, a formally confirmed recount, or trade authority.
       // The historical W3 projection beneath this packet remains for audit.
+      // Larger August-October correction: owner-directed C DOWN projection.
+      // Degree placement between competing ABC and ABCDE paths is unconfirmed.
+      // Independent from historical Minute W3 and older D-UP watch.
+      ownerLargerCDownScenario:{
+        version:"engine22.largerCorrectionCDownWatch.v1",
+        status:"PROVISIONAL_WORKING_SCENARIO",activeLeg:"C",direction:"DOWN",
+        structureCandidates:["ABC","ABCDE_TRIANGLE"],
+        degreeAssignment:"PENDING_RECONCILIATION",
+        anchors:{aHigh:7905,aHighLocalTime:"2026-08-13 07:00",
+          aLow:7575,aLowLocalTime:"2026-09-16 12:00",
+          bHigh:7897.50},
+        formula:"B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        levels:[0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+          key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+          price:Math.round((7897.50-330*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+        })),
+        warningReferences:[7618,7575],
+        confirmationStatus:"STRUCTURAL_C_COMPLETION_NOT_CONFIRMED",
+        countIdentityStatus:"NOT_PUBLISHED",noExecution:true,noPermissionCreated:true,
+      },
       ownerMinuteW2Hypothesis: {
         version:"engine22.minuteW2ComplexCorrectionWatch.v1",
         degree:"minute",activeWave:"W2",direction:"CORRECTIVE",
