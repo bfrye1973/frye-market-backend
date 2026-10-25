@@ -24,3 +24,23 @@ test("unmatched Engine9 plan never attaches to real position",()=>{const trade={
 test("replay rejects future snapshot without influencing strategy",()=>{const r=build({...base,replay:{snapshots:[{symbol:"ES",snapshotTime:"2026-10-23T18:00:00Z"}],predictions:[],outcomes:[],cutoff:at}});assert.equal(r.modules.historicalValidation.state,"UNAVAILABLE");assert.equal(r.strategyAssessment.state,"OBSERVATION_ONLY")});
 test("seven distinct account mappings and E29 gate",()=>{assert.equal(new Set(STRATEGY_CONFIGURATIONS.map(x=>x.account)).size,7);assert.deepEqual(STRATEGY_CONFIGURATIONS.filter(x=>x.engine29).map(x=>x.degree),["submicro","micro"])});
 test("snapshot and evidence are not mutated",()=>{const s=structuredClone(snapshot),b=structuredClone(bars);build(base);assert.deepEqual(snapshot,s);assert.deepEqual(bars,b)});
+
+test("optional live ES price observation stays advisory and separate from six modules",()=>{
+ const s=Math.floor(Date.parse("2026-10-23T17:30:00Z")/1000);
+ const evt={ok:true,type:"bar",symbol:"ES",resolvedSymbol:"ESZ26",tf:"10m",mode:"eth",
+ bar:{time:s,open:7765,high:7770,low:7759,close:7760}};
+ const r=build({...base,livePriceEvent:evt,expectedEsContract:"ESZ26",liveObservedAt:"2026-10-23T17:31:00Z"});
+ assert.equal(r.livePriceObservation.state,"LIVE_PRICE_OBSERVED");
+ assert.equal(r.livePriceObservation.confirmedWaveCompletion,false);
+ assert.equal(r.strategyAssessment.confirmedObjective,null);
+ assert.equal(r.positionAssessment.holdExitRecommendation,null);
+ assert.equal(Object.keys(r.modules).length,6);
+});
+test("live wrong-contract event is unavailable, no guessed ES price",()=>{
+ const s=Math.floor(Date.parse("2026-10-23T17:30:00Z")/1000);
+ const evt={ok:true,type:"bar",symbol:"ES",resolvedSymbol:"ESH27",tf:"10m",mode:"eth",
+ bar:{time:s,open:7765,high:7770,low:7759,close:7760}};
+ const r=build({...base,livePriceEvent:evt,expectedEsContract:"ESZ26",liveObservedAt:"2026-10-23T17:31:00Z"});
+ assert.equal(r.livePriceObservation.state,"UNAVAILABLE");
+ assert.equal(r.strategyAssessment.entryAuthorized,false);
+});
