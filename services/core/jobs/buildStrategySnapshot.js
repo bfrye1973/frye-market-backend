@@ -53,6 +53,7 @@ import { buildEngine27Strategies } from "../logic/engine27/buildEngine27Strategi
 import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevelsV1.js";
 import { maybeRefreshEngine27CrossMarketLevelsV1 } from "./maybeRefreshEngine27CrossMarketLevelsV1.js";
 import { buildEngine27CrossMarketAssessmentV1 } from "../logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js";
+import { buildEngine27UnifiedMarketContextV1 } from "../logic/engine27/v2/buildUnifiedMarketContextV1.js";
 import { readEngine27EsInstitutionalContextV1 } from "../logic/engine27/crossMarket/readEsInstitutionalContextV1.js";
 import {
   getManualLevelRowsFor,
@@ -10938,6 +10939,14 @@ result.strategies[s.strategyId] = {
       ? readEngine27EsInstitutionalContextV1()
       : {schema:"engine27.esInstitutionalContext.v1",symbol:"ES",available:false,
          reasonCodes:["ES_ONLY_SOURCE"],institutionalParents:[],negotiatedZones:[]};
+  result.engine27Strategies.engine27UnifiedMarketContext =
+    buildEngine27UnifiedMarketContextV1({
+      snapshot: result,
+      levels: result.engine27Strategies.engine27CrossMarketLevels,
+      assessment: result.engine27Strategies.engine27CrossMarketAssessment,
+      esZones: result.engine27Strategies.engine27EsInstitutionalContext,
+    });
+
 
   // Operational proof — source status only; no prices, credentials or private positions.
   console.log("[ENGINE27_CROSS_MARKET_STATUS]", JSON.stringify({
