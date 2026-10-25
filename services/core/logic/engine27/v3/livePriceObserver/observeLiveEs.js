@@ -36,14 +36,15 @@ export function observeLiveEs({previous=null,event=null,owner=null,observedAt=nu
   return absent("OUT_OF_ORDER_STREAM_BAR",previous);
  const nowPrice=b.close;
  const currentTouches=touches(b,owner.levels);
- let lastCompleted=previous?.lastCompletedCandle??null;
+ let lastCompleted=null;
+ let elapsedBucket=previous?.elapsedBucket??null;
  if(previous?.lastBarStartMs!=null&&start>previous.lastBarStartMs&&previous?.activeBar){
    const prior=previous.activeBar;
    // New bucket alone is insufficient: prior bar must have ended on time axis.
-   if(prior.endMs<=now)lastCompleted={
+   if(prior.endMs<=now)elapsedBucket={
       startTime:new Date(prior.startMs).toISOString(),endTime:new Date(prior.endMs).toISOString(),
       open:prior.open,high:prior.high,low:prior.low,close:prior.close,
-      touchedLevels:prior.touchedLevels,confirmation:"PRICE_TOUCH_NOT_WAVE_COMPLETION"
+      touchedLevels:prior.touchedLevels,confirmation:"BUCKET_ELAPSED_FINAL_OHLC_UNVERIFIED"
    };
  }
  // The SSE emits interim OHLC updates, not a reliable finalized-candle flag.
@@ -54,11 +55,11 @@ export function observeLiveEs({previous=null,event=null,owner=null,observedAt=nu
  mode:"READ_ONLY_SHADOW",available:true,state:"LIVE_PRICE_OBSERVED",
  symbol:"ES",expectedContract,timeframe:"10m",asOf:observedAt,
  currentPrice:nowPrice,priceAsOf:observedAt,lastBarStartMs:start,
- activeBar,provisionalTouches:currentTouches,lastCompletedCandle:lastCompleted,
+ activeBar,provisionalTouches:currentTouches,lastCompletedCandle:null,elapsedBucket,
  priceActionStatus:currentTouches.length?"PROVISIONAL_LEVEL_TOUCHED":"PRICE_OBSERVED_NO_LEVEL_TOUCH",
  nextProvisionalReference:owner.levels.find(l=>l.price<nowPrice)?(({key,price})=>({key,price,provisional:true}))(owner.levels.find(l=>l.price<nowPrice)):null,
  confirmedFibObjective:null,confirmedWaveCompletion:false,
- reasonCodes:lastCompleted?[]:["NO_STREAM_COMPLETED_CANDLE_YET"],
+ reasonCodes:elapsedBucket?["STREAM_BUCKET_ELAPSED_NOT_CANONICAL_COMPLETION"]:["NO_STREAM_COMPLETED_CANDLE_YET"],
  noPermissionCreated:true,noExecution:true,noJournalWrite:true,noOrderModification:true
  };
 }
