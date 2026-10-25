@@ -119,6 +119,83 @@ export function buildSevenDegreeInvalidationsV1({
     records.minute.direction=cw.minute?.ownerLargerCDownScenario?.version==="engine22.largerCorrectionCDownWatch.v1"?"DOWN":null;
     records.minute.largerCorrectionDirection="CORRECTIVE";
   }
+  // RESEARCH ONLY: Review references are not approved structural invalidations.
+  // Crucially, a corrective C-wave exceeding its B high can require a recount
+  // without invalidating the entire higher-degree structure.
+  // No fields in this block may be used as trade permission or a live alert.
+  const positive = x=>typeof x==="number" && Number.isFinite(x) && x>0 ? x : null;
+  const ownerB = (model,version)=>model?.version===version ? positive(model?.waveB?.high) : null;
+  const submicroReviewHigh=ownerB(cw.submicro?.ownerSubmicroCDown,"engine22.submicroCDownOwnerWatch.v1");
+  const microReviewHigh=ownerB(cw.micro?.ownerMicroCDown,"engine22.microCDownOwnerWatch.v1");
+  const prerequisite=[
+    "OWNER_APPROVED_COUNT_ID_AND_REVISION",
+    "OWNER_APPROVED_PATTERN_SPECIFIC_INVALIDATION_RULE",
+    "EXACT_ES_PRICE_AND_DIRECTION",
+    "CONFIRMATION_CANDLE_TIMEFRAME_AND_CLOSE_OR_WICK_POLICY",
+    "SOURCE_TIMESTAMPS_AND_COMPLETED_BAR_EVIDENCE",
+    "PARENT_CHILD_SCOPE_AND_RECOUNT_POLICY",
+    "REPLAY_TEST_AND_OWNER_SIGNOFF",
+  ];
+  const reviewPlan={
+    submicro:{
+      candidateReference:submicroReviewHigh,referenceType:"COMPLETED_B_HIGH",
+      observation:"PRICE_ABOVE_REFERENCE_SUGGESTS_C_DOWN_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
+      reviewTimeframe:"10m",reviewTrigger:"COMPLETED_10M_CLOSE_ABOVE_REFERENCE",
+      timeframeStatus:"RESEARCH_PROPOSAL_NOT_APPROVED",
+      parentRecountOnReview:false,
+    },
+    micro:{
+      candidateReference:microReviewHigh,referenceType:"COMPLETED_B_HIGH",
+      observation:"PRICE_ABOVE_REFERENCE_SUGGESTS_C_DOWN_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
+      reviewTimeframe:"1h",reviewTrigger:"COMPLETED_1H_CLOSE_ABOVE_REFERENCE",
+      timeframeStatus:"RESEARCH_PROPOSAL_NOT_APPROVED",
+      parentRecountOnReview:false,
+    },
+    subminute:{
+      candidateReference:null,referenceType:"NONE_APPROVED",
+      observation:"RECONCILE_SUBMINUTE_C_DEGREE_ASSIGNMENT_WITH_MINUTE_W2_BEFORE_RULE",
+      reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
+      parentRecountOnReview:false,
+    },
+    minute:{
+      candidateReference:null,referenceType:"NONE_APPROVED",
+      observation:"RESOLVE_MINUTE_W2_ABC_VS_ABCDE_AND_C_DEGREE_PLACEMENT_BEFORE_RULE",
+      reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
+      parentRecountOnReview:false,
+    },
+    minor:{
+      candidateReference:null,referenceType:"NONE_APPROVED",
+      observation:"QUALIFY_CURRENT_MINOR_COUNT_AND_PARENT_WAVE_START_WITH_OWNER_EVIDENCE",
+      reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
+      parentRecountOnReview:false,
+    },
+    intermediate:{
+      candidateReference:null,referenceType:"NONE_APPROVED",
+      observation:"QUALIFY_CURRENT_INTERMEDIATE_COUNT_AND_STRUCTURAL_FAILURE_PATTERN",
+      reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
+      parentRecountOnReview:false,
+    },
+    primary:{
+      candidateReference:null,referenceType:"NONE_APPROVED",
+      observation:"QUALIFY_CURRENT_PRIMARY_COUNT_AND_STRUCTURAL_FAILURE_PATTERN",
+      reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",
+      parentRecountOnReview:false,
+    },
+  };
+  for(const degree of DEGREES){
+    const proposal=reviewPlan[degree];
+    records[degree].invalidationReadiness={
+      schema:"engine22.invalidationReadiness.v1",
+      status:"OWNER_RULE_APPROVAL_REQUIRED",
+      confirmedInvalidation:false,
+      tradePermissionEligible:false,
+      alertEligible:false,
+      officialInvalidationPrice:null,
+      proposedReview:proposal,
+      prerequisites:prerequisite,
+      approvedRules:0,
+    };
+  }
   const degrees=Object.fromEntries(DEGREES.map(d=>[d,records[d]]));
   return {
     schema:SCHEMA,
