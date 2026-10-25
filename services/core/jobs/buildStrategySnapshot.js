@@ -54,6 +54,7 @@ import { readEngine27CrossMarketLevelsV1 } from "./readEngine27CrossMarketLevels
 import { maybeRefreshEngine27CrossMarketLevelsV1 } from "./maybeRefreshEngine27CrossMarketLevelsV1.js";
 import { buildEngine27CrossMarketAssessmentV1 } from "../logic/engine27/crossMarket/buildCrossMarketAssessmentV1.js";
 import { buildEngine27UnifiedMarketContextV1 } from "../logic/engine27/v2/buildUnifiedMarketContextV1.js";
+import { buildEngine27MicroIntelligenceV1 } from "../logic/engine27/v2/buildMicroIntelligenceV1.js";
 import { buildEngine27LiveCrossMarketReactionsV1 } from "./buildEngine27LiveCrossMarketReactionsV1.js";
 import { readEngine27EsInstitutionalContextV1 } from "../logic/engine27/crossMarket/readEsInstitutionalContextV1.js";
 import {
@@ -10951,6 +10952,13 @@ result.strategies[s.strategyId] = {
       engine25: engine25Context,
       engine29: loadJsonFileSafe(`${DATA_DIR}/engine29-cross-market-stress.json`),
     });
+  result.engine27Strategies.engine27MicroIntelligence = buildEngine27MicroIntelligenceV1({
+    working: result.engine27Strategies.engine27WorkingSevenDegrees,
+    context: result.engine27Strategies.engine27UnifiedMarketContext,
+    reactions: result.engine27Strategies.engine27LiveCrossMarketReactions,
+    price: Number.isFinite(result?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.currentPrice)
+      ? result.strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.currentPrice : null,
+  });
 
 
   // Operational proof — source status only; no prices, credentials or private positions.
