@@ -1,6 +1,6 @@
 import {MICRO_MANAGER_SCHEMA,MICRO_ACCOUNT} from "../contracts/manager.v1.js";
 import {assembleMicroInputs} from "./assembleMicroInputs.js";
-import {evaluatePriceActionFib} from "../priceActionFib/evaluatePriceActionFib.js";
+import {evaluateTradePriceFib} from "../priceActionFib/evaluateTradePriceFib.js";
 import {evaluateNeighboringAlignment} from "../neighboringAlignment/evaluateNeighboringAlignment.js";
 import {evaluateMarketConfirmation} from "../marketConfirmation/evaluateMarketConfirmation.js";
 import {evaluatePositionIntelligence} from "../positionIntelligence/evaluatePositionIntelligence.js";
@@ -10,11 +10,10 @@ import {observeLiveEs} from "../livePriceObserver/observeLiveEs.js";
 
 export function buildMicroIntelligenceV3(input={}){
  const {contract,sources}=assembleMicroInputs(input);
- const livePriceObservation=input.livePriceEvent?observeLiveEs({event:input.livePriceEvent,previous:input.previousLiveObservation??null,owner:sources.snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown??null,observedAt:input.liveObservedAt??sources.evaluatedAt,expectedContract:input.expectedEsContract??null}):null;
- // Refuse unqualified ES bars; do not silently repair timestamps, sources or identities.
- const priceActionFib=evaluatePriceActionFib({snapshot:sources.snapshot,
- esBars10m:contract.qualified?sources.esBars10m:null,
- sourceSymbol:"ES",evaluatedAt:sources.evaluatedAt});
+ const owner=sources.snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown??null;
+ const livePriceObservation=input.livePriceEvent?observeLiveEs({event:input.livePriceEvent,previous:input.previousLiveObservation??null,owner,observedAt:input.liveObservedAt??sources.evaluatedAt,expectedContract:input.expectedEsContract??null}):null;
+ // Trade observation is the sole live price input. No 10-minute bars in V3 Manager.
+ const priceActionFib=evaluateTradePriceFib({liveObservation:livePriceObservation,owner});
  const neighboringAlignment=evaluateNeighboringAlignment({snapshot:sources.snapshot});
  const marketConfirmation=evaluateMarketConfirmation({degree:"micro",symbol:"ES",evaluatedAt:sources.evaluatedAt,
  engine25:sources.engine25,engine29:sources.engine29,crossMarketLevels:sources.crossMarketLevels,
