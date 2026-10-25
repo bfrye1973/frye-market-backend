@@ -32,7 +32,7 @@ export function evaluatePositionIntelligence({journal=null,officialPlans=[],micr
    const plan=officialPlans.map(p=>attachPlan(t,p)).find(Boolean)??null;
    positions.push({tradeId:t.tradeId,contractId:c.contractId,brokerAccountLabel:MICRO_ACCOUNT,direction:t.direction,symbol:t.symbol,entryPrice:c.entryPrice,
      contracts:1,unrealizedPnL:null,unrealizedPnLStatus:"VERIFIED_MARK_TO_MARKET_UNAVAILABLE",officialManagement:plan,
-     entryThesisAvailable:!!(t.structuralContextAtEntry&&t.structuralContextAtEntry.reason!=="ENGINE22_STRUCTURE_UNAVAILABLE_AT_ENTRY"&&t.structuralContextAtEntry.historicalBackfill!==true),
+     entryThesisStatus:"NOT_YET_VALIDATED_BY_MODULE_27_5",
      source:"ENGINE10_REAL_BROKER_CONTRACT"});
   }
  }
