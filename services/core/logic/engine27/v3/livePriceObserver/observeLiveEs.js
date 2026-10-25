@@ -28,12 +28,12 @@ export function observeLiveEs({previous=null,event=null,owner=null,observedAt=nu
  const b=event.bar;
  if(!Number.isSafeInteger(b?.time)||b.time<1e9||!validCandle(b))return absent("UNVERIFIED_STREAM_CANDLE_FORMAT",previous);
  const start=b.time*1000,end=start+LIVE_OBSERVER_PERIOD_MS;
+ if(previous?.lastBarStartMs!=null&&start<previous.lastBarStartMs)
+  return absent("OUT_OF_ORDER_STREAM_BAR",previous);
  if(start>now||!goodNumber(maxStreamAgeMs)||maxStreamAgeMs<=0||
  (now-start)>LIVE_OBSERVER_PERIOD_MS+maxStreamAgeMs)return absent("STREAM_EVENT_OUTSIDE_OBSERVATION_WINDOW",previous);
  if(previous?.expectedContract&&previous.expectedContract!==expectedContract)
   return absent("CONTRACT_ROLLOVER_REQUIRES_RESET",previous);
- if(previous?.lastBarStartMs!=null&&start<previous.lastBarStartMs)
-  return absent("OUT_OF_ORDER_STREAM_BAR",previous);
  const nowPrice=b.close;
  const currentTouches=touches(b,owner.levels);
  let lastCompleted=null;
