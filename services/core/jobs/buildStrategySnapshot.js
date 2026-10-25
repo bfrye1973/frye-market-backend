@@ -10945,6 +10945,8 @@ result.strategies[s.strategyId] = {
       levels: result.engine27Strategies.engine27CrossMarketLevels,
       assessment: result.engine27Strategies.engine27CrossMarketAssessment,
       esZones: result.engine27Strategies.engine27EsInstitutionalContext,
+      engine25: engine25Context,
+      engine29: loadJsonFileSafe(`${DATA_DIR}/engine29-cross-market-stress.json`),
     });
 
 
