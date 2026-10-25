@@ -14,6 +14,7 @@ const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
 const PASS=process.env.ENGINE27_V3_SHADOW_PASSWORD||"";
 const READ_TOKEN=process.env.ENGINE27_V3_TRADE_READ_TOKEN||"";
 const SNAP_URL=process.env.ENGINE27_V3_SNAPSHOT_URL||"";
+const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
@@ -73,15 +74,14 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
 if(enabled){
  await refreshSnapshot();
  setInterval(()=>{void refreshSnapshot()},15000).unref();
- if(READ_TOKEN&&SNAP_URL){
+ if(READ_TOKEN&&SNAP_URL&&TRADE_URL){
   retryRunner=createTradeIngestionRunner({
-   url:"https://127.0.0.1:"+PORT+"/stream/futures/trades-v3?symbol=ES",
+   url:TRADE_URL,
    token:READ_TOKEN,
    readInputs:()=>({snapshot}),
    onObservation:m=>{latest=m}
   });
-  // Do not start by default here until local HTTPS transport is explicit.
-  // See configured trade runner start in separate follow-on integration.
+  void retryRunner.run();
  }
 }
 export {app,server};
