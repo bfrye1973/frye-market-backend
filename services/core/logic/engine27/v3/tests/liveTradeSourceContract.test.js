@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {normalizeEngine27V3EsTrade as normalize} from "../../../../../streamer/routes/engine27V3TradeContract.js";
 const at="2026-10-25T23:00:56.050Z";
-const base={ev:"T",sym:"ESZ6",p:7686.25,s:2,t:Date.parse(at)*1000000};
+const base={ev:"T",sym:"ESZ6",p:7686.25,s:2,t:Date.parse(at),q:32599300};
 test("normalize actual polygon futures T event into trade-only contract",()=>{
  const r=normalize(base,{resolvedSymbol:"ESZ6",observedAt:at});
  assert.equal(r.type,"trade");assert.equal(r.source,"POLYGON_DIRECT_ES_TRADE");assert.equal(r.price,7686.25);
@@ -14,3 +14,7 @@ test("rejects unqualified timestamp",()=>assert.equal(normalize({...base,t:null}
 test("rejects stale provider trades",()=>assert.equal(normalize({...base,t:Date.parse(at)-40000},{resolvedSymbol:"ESZ6",observedAt:at}),null));
 test("rejects zero size",()=>assert.equal(normalize({...base,s:0},{resolvedSymbol:"ESZ6",observedAt:at}),null));
 test("rejects future events",()=>assert.equal(normalize({...base,t:Date.parse(at)+120000},{resolvedSymbol:"ESZ6",observedAt:at}),null));
+
+test("futures websocket nanoseconds cannot pass as milliseconds",()=>assert.equal(normalize({...base,t:Date.parse(at)*1000000},{resolvedSymbol:"ESZ6",observedAt:at}),null));
+test("missing provider q sequence rejected",()=>assert.equal(normalize({...base,q:undefined},{resolvedSymbol:"ESZ6",observedAt:at}),null));
+test("sequence passed without exposing credentials",()=>{const r=normalize(base,{resolvedSymbol:"ESZ6",observedAt:at});assert.equal(r.eventId,"32599300");assert.equal(Object.hasOwn(r,"apiKey"),false)});
