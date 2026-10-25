@@ -9,6 +9,6 @@ test("cards expose only canonical current-owner invalidation, not Fib geometry",
  assert.equal(out.degrees.submicro.invalidation.price,null);
  assert.equal(out.degrees.micro.invalidation.price,null);
  assert.equal(out.degrees.minor.invalidation.price,7543.5);
- assert.equal(out.degrees.submicro.invalidation.source,null);
+ assert.equal(out.degrees.submicro.invalidation.source.ownerCompatible,false);
  assert.equal(out.noExecution,true);
 });
