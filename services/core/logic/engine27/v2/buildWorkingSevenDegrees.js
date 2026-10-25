@@ -16,12 +16,12 @@ const levels = v => Array.isArray(v) ? v.filter(l => l && typeof l.price === "nu
 const published = (v, fallback = "NOT_PUBLISHED") => string(v) || fallback;
 function sourceFor(e22, degree) {
   const cw = e22?.currentWavelength;
-  const w2 = cw?.degrees?.minute?.ownerMinuteW2Hypothesis;
+  const w2 = cw?.degrees?.minute?.ownerMinuteW2Retracement;
   switch (degree) {
     case "submicro": return {model:cw?.degrees?.submicro?.ownerSubmicroCDown, expected:"engine22.submicroCDownOwnerWatch.v1", source:"currentWavelength.degrees.submicro.ownerSubmicroCDown"};
     case "micro": return {model:cw?.degrees?.micro?.ownerMicroCDown, expected:"engine22.microCDownOwnerWatch.v1", source:"currentWavelength.degrees.micro.ownerMicroCDown"};
     case "subminute": return {model:cw?.degrees?.subminute?.ownerCurrentCDown, expected:"engine22.subminuteCurrentCDownReference.v1", source:"currentWavelength.degrees.subminute.ownerCurrentCDown"};
-    case "minute": return {model:w2, expected:"engine22.minuteW2ComplexCorrectionWatch.v1", source:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis"};
+    case "minute": return {model:w2, expected:"engine22.minuteW2RetracementOwner.v1", source:"currentWavelength.degrees.minute.ownerMinuteW2Retracement"};
     default: return {model:e22?.degreeStates?.[degree], expected:null, source:"degreeStates."+degree};
   }
 }
@@ -29,7 +29,7 @@ function summarize(degree, model) {
   if (degree === "submicro") return "Submicro C DOWN developing inside Micro C. Completion unconfirmed.";
   if (degree === "micro") return "Micro C DOWN developing inside Subminute C. Completion unconfirmed.";
   if (degree === "subminute") return "Subminute C DOWN owner working reference inside Minute W2; degree placement provisional.";
-  if (degree === "minute") return "Minute W2 complex correction; internal C DOWN scenario. ABC versus ABCDE unconfirmed.";
+  if (degree === "minute") return "Minute W1 complete; W2 DOWN developing. W3 not started. Internal ABC/ABCDE remains unconfirmed.";
   return published(model?.headline, degree.toUpperCase()+" current structural state");
 }
 // Observational price direction only; never a wave invalidation, entry, or permission.
@@ -92,9 +92,9 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
       continue;
     }
     const minuteC = (degree === "minute" || degree === "subminute") ? e22?.currentWavelength?.degrees?.minute?.ownerLargerCDownScenario : null;
-    const currentLevels = degree === "subminute" ? levels(minuteC?.levels) : levels(minuteC?.levels ?? model.levels ?? model.activeFibModel?.displayLevels);
+    const currentLevels = degree === "subminute" ? [] : degree === "minute" ? levels(model.levels) : levels(model.levels ?? model.activeFibModel?.displayLevels);
     const leg = degree === "minute" ? (minuteC?.version === "engine22.largerCorrectionCDownWatch.v1" ? "C" : null) : null;
-    const direction = degree === "minute" ? (leg === "C" ? "DOWN" : "NOT_PUBLISHED") : published(model.direction ?? model.sequenceDirection);
+    const direction = degree === "minute" ? "DOWN" : published(model.direction ?? model.sequenceDirection);
     const wave = published(model.activeWave ?? model.currentWave);
     const confirmation = degree === "subminute" ? published(model.confirmationStatus,"PENDING") : published(model.confirmationStatus ?? model.stage,"NOT_PUBLISHED");
     const parentDegree = degree === "submicro" ? "micro" : degree === "micro" ? "subminute" : degree === "subminute" ? "minute" : degree === "minute" ? "minor" : model.parentDegree ?? null;
@@ -111,6 +111,7 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
         status:invalidations.degrees[degree]?.status ?? "NOT_PUBLISHED",
         breached:invalidations.degrees[degree]?.breached ?? null,
         source:invalidations.degrees[degree]?.provenance ?? null,
+        review:invalidations.degrees[degree]?.review ?? null,
         displayText:invalidations.degrees[degree]?.rule ?? "Not published"},
       parentContext:{parentDegree,parentWave,displayText:degree === "minute"?"Internal C DOWN candidate inside Minute W2":degree === "micro"?"Micro C DOWN inside Subminute C DOWN":null},
       traderRead:{headline:story,summary:story,rules:[]},
