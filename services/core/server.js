@@ -231,7 +231,7 @@ function runStartupSnapshotBuild() {
   const startedAt = new Date().toISOString();
   console.log(`[startup-snapshot] START @ ${startedAt}`);
 
-  const child = spawn("node", ["./jobs/buildStrategySnapshot.js"], {
+  const child = spawn("node", ["./jobs/buildAllStrategySnapshots.js"], {
     cwd: __dirname,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -250,7 +250,7 @@ function runStartupSnapshotBuild() {
 
   child.on("close", (code) => {
     if (code === 0) {
-      console.log(`[startup-snapshot] SUCCESS @ ${new Date().toISOString()}`);
+      console.log(`[startup-snapshot] SUCCESS SPY+ES @ ${new Date().toISOString()}`);
       if (stdout.trim()) {
         console.log(stdout.trim());
       }
