@@ -7,7 +7,8 @@ test("Engine25/29 remain read-only and stale sources cannot provide fresh confir
  assert.equal(result.participation.available,true);assert.equal(result.participation.fresh,false);
  assert.equal(result.tactical.fresh,false);assert.equal(result.tactical.oneHour,"CAUTION");
  assert.equal(result.strategyReads.minute.engine25Status,"STALE");
- assert.equal(result.strategyReads.minute.engine29Status,"STALE");
+ assert.equal(result.strategyReads.minute.engine29Status,"NOT_APPLICABLE_INTRADAY_ONLY");
+ assert.equal(result.strategyReads.micro.engine29Status,"STALE");
  assert.equal(result.noPermissionCreated,true);assert.equal(result.noExecution,true);
 });
 test("fresh source timestamps are recognized but do not confirm Elliott invalidation",()=>{
@@ -18,5 +19,6 @@ test("fresh source timestamps are recognized but do not confirm Elliott invalida
 });
 test("missing sources fail to unavailable",()=>{
  const result=build({now});assert.equal(result.participation.available,false);
- assert.equal(result.tactical.available,false);assert.equal(result.strategyReads.primary.engine29Status,"UNAVAILABLE");
+ assert.equal(result.tactical.available,false);assert.equal(result.strategyReads.primary.engine29Status,"NOT_APPLICABLE_INTRADAY_ONLY");
+ assert.equal(result.strategyReads.micro.engine29Status,"UNAVAILABLE");
 });
