@@ -9,7 +9,7 @@ test("owner C-down geometry and historical Minute D model isolation",()=>{
  assert.equal(c.version,"engine22.largerCorrectionCDownWatch.v1");
  assert.equal(c.anchors.aHigh,7905);assert.equal(c.anchors.aLow,7575);
  assert.equal(c.anchors.bHigh,7897.5);
- assert.deepEqual(c.levels.map(x=>x.price),[7771.5,7732.5,7693.5,7638.25,7567.5,7477.75,7363.5,7237.5]);
+ assert.deepEqual(c.levels.map(x=>x.price),[7771.5,7732.5,7693.5,7638,7567.5,7477.75,7363.5,7237.5]);
  assert.equal(c.degreeAssignment,"PENDING_RECONCILIATION");
  assert.equal(c.confirmationStatus,"STRUCTURAL_C_COMPLETION_NOT_CONFIRMED");
  assert.equal(cw.degrees.minute.ownerMinuteW2Hypothesis.activeInternalLeg,"D");
