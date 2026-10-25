@@ -38,6 +38,9 @@ jobs:
       - name: Syntax check Engine 27 root builder
         run: node --check services/core/logic/engine27/buildEngine27Strategies.js
 
+      - name: Seven working card directional regression
+        run: node --test services/core/tests/engine27WorkingSevenDegrees.test.js services/core/tests/engine27SevenInvalidationDisplay.test.js services/core/tests/engine27SevenCardDirectionalAssessment.test.js
+
       - name: V2 contract tests
         run: node --test services/core/tests/engine27TraderIntelligenceV2.test.js
 
