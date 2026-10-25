@@ -1,22 +1,22 @@
-# Engine 27 V3 — Micro-first read-only intelligence
+# Engine 27 V3 — Micro-first, trade-native price observation
 
-Development-only on branch `engine27-v3-micro-intelligence` (draft PR #200). No production wiring, front-end changes, trade permission, order management, journal mutation, deployment, or merge.
+Development-only, draft PR #200. No production wiring, orders, sizing, journal writes, frontend changes, merge, or deployment.
 
-## Implemented source-isolated modules
-1. `priceActionFib/`: Engine22 owner C-down, provisional Fib ladder, completed ES 10m evidence; no fabricated confirmed objective.
-2. `neighboringAlignment/`: Submicro ↔ Micro ↔ Subminute owner linkage; contrary direction ≠ structural invalidation.
-3. `marketConfirmation/`: Engine25, Engine29 (Micro/Submicro only), QQQ, direct I:VIX and Engine1 ES zones; freshness and evidence qualification.
-4. `positionIntelligence/`: Engine10 real account SCHWAB_6380 contract read; Engine9 plan only on durable identity join; no invented P&L.
-5. `entryThesisMemory/`: immutable entry-time thesis or ENTRY_STRUCTURE_UNAVAILABLE.
-6. `historicalValidation/`: Engine12/Engine28A replay input validation, no lookahead or invented confidence.
+## Approved price-evidence direction
+**Engine 27 V3's active Micro manager and live observer no longer consume or construct 10-minute bars.** They require a source-qualified individual ES trade-price event (contract, price, size, trade timestamp) and use Engine22's owner Fib ladder without recalculating it.
 
-## Integrated manager
-`manager/assembleMicroInputs.js` is the single source-qualification entrypoint; it requires explicit completed ES bar provenance and refuses guessed timestamp units.
-`manager/buildMicroIntelligenceV3.js` produces `engine27.v3.microUnifiedIntelligence.v1`, with all six module outputs, separate strategy and position assessments, explicit unavailable states, and no trading authority.
-`manager/strategyConfigurations.js` lists all seven account/degrees; only Micro is evaluated by the integrated manager at this stage.
+- `livePriceObserver/observeLiveEs.js`: trade-only observation; rejects aggregate/bar events, stale/future trades, wrong contracts and reordered events.
+- `priceActionFib/evaluateTradePriceFib.js`: trade observation vs provisional owner price ladder; touch is never wave completion or trading permission.
+- `manager/buildMicroIntelligenceV3.js`: single read-only orchestrator using trade-native price intelligence and five other independent modules.
+- `manager/assembleMicroInputs.js`: requires ES/Engine22 snapshot identity; no 10m bar inputs.
+- Existing `priceActionFib/evaluatePriceActionFib.js` and `adaptEngine22Micro.js` remain isolated, unreferenced legacy V3 experiment code for test compatibility. They are not imported into the active V3 manager. Do not connect them to live Micro intelligence.
 
-## Test commands
-`node --test services/core/logic/engine27/v3/tests/*.test.js` from repo root. CI: `.github/workflows/engine27-v3-micro-isolated.yml` also runs selected V2 regressions.
+## Live feed limitation
+The existing Backend 2 `/stream/futures/agg` SSE publishes aggregated `bar` events, not individual `trade` events. It does internally receive Polygon `T.ESZ6` trades. An approved, strictly read-only, source-qualified **trade event feed** is required for fully automatic continuous observation. The V3 manager currently does not have a deployed live subscription and correctly reports live price unavailable without a qualified trade event.
 
-## Still required for acceptance
-Capture and verify sanitized actual production ES 10m candle source/units, Engine22 Micro owner and provisional flags, Engine10 Micro open contract field names and entry-time provenance; connect immutable replay sources; test complete live-data integration. V3 remains shadow-only and NOT_PRODUCTION_ACCEPTED until Manager review and owner approval. CI fixtures alone do not prove live data.
+## Separate modules preserved
+27.2 neighboring alignment, 27.3 market context, 27.4 positions, 27.5 entry-thesis memory, and 27.6 historical validation remain isolated. All remain advisory. The Engine29 gate remains Micro/Submicro only.
+
+## Validation
+`node --test services/core/logic/engine27/v3/tests/*.test.js` from repo root. Workflow `.github/workflows/engine27-v3-micro-isolated.yml` also tests V2.
+No production acceptance until live trade feed and Engine10 identity/provenance verified.
