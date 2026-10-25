@@ -1,0 +1,21 @@
+name: Engine 27 V3 Micro isolated acceptance
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine27/v3/**'
+      - '.github/workflows/engine27-v3-micro-isolated.yml'
+  workflow_dispatch:
+jobs:
+  micro-price-fib:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify isolated Module 27.1
+        run: node --test services/core/logic/engine27/v3/tests/priceActionFib.test.js
+      - name: Verify legacy Engine 27 compatibility
+        run: |
+          cd services/core
+          node --test tests/engine27TraderIntelligenceV2.test.js tests/engine27WorkingSevenDegrees.test.js tests/engine27MicroIntelligenceV1.test.js tests/engine27Engine25Engine29Context20261025.test.js tests/engine27FinalE22OwnerSync20261025.test.js
