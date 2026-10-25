@@ -15,6 +15,7 @@ const originMs = {
 };
 function modelFor(degree, packet) {
   if (degree === "submicro" && packet?.ownerSubmicroADown?.version === "engine22.submicroADownOwnerWatch.v1") return packet.ownerSubmicroADown;
+  if (degree === "micro" && packet?.ownerMicroCDown?.version === "engine22.microCDownOwnerWatch.v1") return packet.ownerMicroCDown;
   if (degree === "micro" && packet?.ownerMicroBDown?.version === "engine22.microBDownOwnerWatch.v1") return packet.ownerMicroBDown;
   if (degree === "submicro") return packet?.ownerSubmicroAbc?.version === "engine22.submicroAbcMicroC.v1" ? packet.ownerSubmicroAbc : packet?.ownerSubmicroW2;
   if (degree === "micro") return packet?.ownerMicroAbc?.version === "engine22.microAbcMinuteD.v1" ? packet.ownerMicroAbc : packet?.ownerMicroW3;
@@ -22,9 +23,9 @@ function modelFor(degree, packet) {
 }
 function modelId(degree, model) {
   if (degree === "submicro" && !["engine22.submicroW2OwnerProjection.v1","engine22.submicroAbcMicroC.v1","engine22.submicroADownOwnerWatch.v1"].includes(model?.version)) return null;
-  if (degree === "micro" && !["engine22.microW3OwnerProjection.v1","engine22.microAbcMinuteD.v1","engine22.microBDownOwnerWatch.v1"].includes(model?.version)) return null;
+  if (degree === "micro" && !["engine22.microW3OwnerProjection.v1","engine22.microAbcMinuteD.v1","engine22.microBDownOwnerWatch.v1","engine22.microCDownOwnerWatch.v1"].includes(model?.version)) return null;
   if (degree === "subminute" && !Array.isArray(model?.levels)) return null;
-  const anchors = model?.anchors || (model?.version === "engine22.microBDownOwnerWatch.v1" ? model.waveA : null) || (model?.version === "engine22.submicroADownOwnerWatch.v1" ? {referenceLow:model.referenceLow,originHigh:model.originHigh} : null) || (degree === "submicro" && model?.version === "engine22.submicroAbcMicroC.v1" ? {waveA:model.waveA,waveB:model.waveB} : null) || (degree === "micro" && model?.version === "engine22.microAbcMinuteD.v1" ? {waveA:model.waveA,waveB:model.waveB} : null) || (degree === "subminute" ?
+  const anchors = model?.anchors || (model?.version==="engine22.microCDownOwnerWatch.v1"?{waveA:model.waveA,waveB:model.waveB}:null) || (model?.version === "engine22.microBDownOwnerWatch.v1" ? model.waveA : null) || (model?.version === "engine22.submicroADownOwnerWatch.v1" ? {referenceLow:model.referenceLow,originHigh:model.originHigh} : null) || (degree === "submicro" && model?.version === "engine22.submicroAbcMicroC.v1" ? {waveA:model.waveA,waveB:model.waveB} : null) || (degree === "micro" && model?.version === "engine22.microAbcMinuteD.v1" ? {waveA:model.waveA,waveB:model.waveB} : null) || (degree === "subminute" ?
     {w1Low:7616.25,w1High:7847,w2Low:7673.25} : {});
   const levels = model?.levels;
   if (!Array.isArray(levels) || !levels.length ||
@@ -37,7 +38,7 @@ function observations({degree,modelVersion,price,previousPrice,bars=[],evaluatio
   const current=finite(price),old=finite(previousPrice);
   const minMicroCOrigin=Date.parse("2026-10-20T12:00:00Z");
   const minSubmicroCOrigin=Date.parse("2026-10-21T14:00:00Z");
-  const eligibleQuote=(degree!=="micro" || modelVersion!=="engine22.microBDownOwnerWatch.v1" || now>=Date.parse("2026-10-21T18:00:00Z")) && (degree!=="submicro" || modelVersion!=="engine22.submicroADownOwnerWatch.v1" || now>=Date.parse("2026-10-21T18:00:00Z")) && (degree!=="micro" || modelVersion!=="engine22.microAbcMinuteD.v1" || now>=minMicroCOrigin) &&
+  const eligibleQuote=(degree!=="micro"||modelVersion!=="engine22.microCDownOwnerWatch.v1"||now>=Date.parse("2026-10-21T16:00:00Z")) && (degree!=="micro" || modelVersion!=="engine22.microBDownOwnerWatch.v1" || now>=Date.parse("2026-10-21T18:00:00Z")) && (degree!=="submicro" || modelVersion!=="engine22.submicroADownOwnerWatch.v1" || now>=Date.parse("2026-10-21T18:00:00Z")) && (degree!=="micro" || modelVersion!=="engine22.microAbcMinuteD.v1" || now>=minMicroCOrigin) &&
     (degree!=="submicro" || modelVersion!=="engine22.submicroAbcMicroC.v1" || now>=minSubmicroCOrigin);
   if (current!==null && eligibleQuote) {
     items.push({low:old===null?current:Math.min(old,current),
@@ -48,7 +49,7 @@ function observations({degree,modelVersion,price,previousPrice,bars=[],evaluatio
     const t=Number(b?.time),high=finite(b?.high),low=finite(b?.low);
     if(!Number.isSafeInteger(t)||t<=0||high===null||low===null||low>high)continue;
     const barStart=t*1000;
-    const modelOrigin=["engine22.microBDownOwnerWatch.v1","engine22.submicroADownOwnerWatch.v1"].includes(modelVersion) ? Date.parse("2026-10-21T18:00:00Z") : degree==="submicro" && modelVersion==="engine22.submicroAbcMicroC.v1" ? Date.parse("2026-10-21T14:00:00Z") : (degree==="micro" && modelVersion==="engine22.microAbcMinuteD.v1" ? Date.parse("2026-10-20T12:00:00Z") : originMs[degree]);
+    const modelOrigin=modelVersion==="engine22.microCDownOwnerWatch.v1"?Date.parse("2026-10-21T16:00:00Z"):["engine22.microBDownOwnerWatch.v1","engine22.submicroADownOwnerWatch.v1"].includes(modelVersion) ? Date.parse("2026-10-21T18:00:00Z") : degree==="submicro" && modelVersion==="engine22.submicroAbcMicroC.v1" ? Date.parse("2026-10-21T14:00:00Z") : (degree==="micro" && modelVersion==="engine22.microAbcMinuteD.v1" ? Date.parse("2026-10-20T12:00:00Z") : originMs[degree]);
     if(barStart<modelOrigin||barStart+600000>now)continue;
     items.push({low,high,time:new Date(barStart).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
   }
@@ -97,7 +98,7 @@ export function applyOwnerPriceTouchesV1({
         level.touchEvidenceType==="OWNER_CHART_OBSERVATION")
         result={source:"OWNER_CHART_OBSERVATION",time:null};
       if(!result) for(const bar of source){
-        const isDown=["engine22.microBDownOwnerWatch.v1","engine22.submicroADownOwnerWatch.v1","engine22.submicroW2OwnerProjection.v1"].includes(model.version);
+        const isDown=["engine22.microBDownOwnerWatch.v1","engine22.submicroADownOwnerWatch.v1","engine22.submicroW2OwnerProjection.v1","engine22.microCDownOwnerWatch.v1"].includes(model.version);
         const hit=isDown ? bar.low<=level.price : bar.high>=level.price;
         if(hit){result={source:bar.source,time:bar.time};break;}
       }
