@@ -441,6 +441,33 @@ export function buildCurrentWavelength({
         confirmationStatus:"STRUCTURAL_C_COMPLETION_NOT_CONFIRMED",
         countIdentityStatus:"NOT_PUBLISHED",noExecution:true,noPermissionCreated:true,
       },
+      // Oct 25 owner-confirmed Minute W1: July 30 12:00 AZ -> Aug 13 09:00 AZ.
+      // W2 is still DOWN/DEVELOPING. This owner model supersedes the
+      // historical Minute W3 projection for the CURRENT Minute card ONLY.
+      ownerMinuteW2Retracement:{
+        version:"engine22.minuteW2RetracementOwner.v1",
+        degree:"minute",completedWave:"W1",completedWaveConfirmedByOwner:true,
+        activeWave:"W2",direction:"DOWN",stage:"DEVELOPING",
+        nextWave:"W3",nextWaveStarted:false,
+        anchors:{
+          w1Low:7419.50,w1LowLocalTime:"2026-07-30 12:00",
+          w1High:7908.75,w1HighLocalTime:"2026-08-13 09:00",
+          wave1Length:489.25,
+          provenance:"OWNER_CHART_APPROVED_20261025",
+        },
+        levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),
+          price:Math.round((7908.75-489.25*ratio)*4)/4,
+          status:"WATCH",provisional:false,touchEvidenceAvailable:false,
+          levelType:ratio===1?"W1_ORIGIN_STRUCTURAL_BOUNDARY":"W2_RETRACEMENT",
+        })),
+        structuralReference:7419.50,
+        invalidationRule:"MINUTE_W2_CANNOT_TRADE_BELOW_START_OF_MINUTE_W1",
+        invalidationTrigger:"INTRABAR_PRICE_BELOW_7419_50",
+        status:"OWNER_APPROVED_REFERENCE_NOT_LIVE_HARD_INVALIDATION",
+        noExecution:true,noPermissionCreated:true,
+      },
       ownerMinuteW2Hypothesis: {
         version:"engine22.minuteW2ComplexCorrectionWatch.v1",
         degree:"minute",activeWave:"W2",direction:"CORRECTIVE",
@@ -521,6 +548,15 @@ export function buildCurrentWavelength({
       lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
     },
     minor: {
+      // Owner-confirmed current W5 reference; strictly separate from order stops.
+      ownerW5StructuralReference:{
+        version:"engine22.minorW5StructuralReference.v1",
+        pivotWave:"W4",price:7398.00,source:"OWNER_CHART_APPROVED_20261025",
+        rule:"MINOR_W5_ACTIVE_COUNT_REQUIRES_W4_ORIGIN_REVIEW_IF_BREACHED",
+        trigger:"INTRABAR_PRICE_BELOW_7398_00",
+        status:"OWNER_APPROVED_REFERENCE_NOT_LIVE_HARD_INVALIDATION",
+        noExecution:true,noPermissionCreated:true,
+      },
       degree: "minor", activeWave: "W5", direction: "UP", state: "MINOR_W5_ACTIVE_CANDIDATE",
       origin: 7398.00, invalidation: 7398.00,
       confirmationStatus: "ACTIVE_CANDIDATE", levels: minorLevels,
