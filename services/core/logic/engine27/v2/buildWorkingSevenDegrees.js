@@ -18,18 +18,18 @@ function sourceFor(e22, degree) {
   const cw = e22?.currentWavelength;
   const w2 = cw?.degrees?.minute?.ownerMinuteW2Hypothesis;
   switch (degree) {
-    case "submicro": return {model:cw?.degrees?.submicro?.ownerSubmicroADown, expected:"engine22.submicroADownOwnerWatch.v1", source:"currentWavelength.degrees.submicro.ownerSubmicroADown"};
-    case "micro": return {model:cw?.degrees?.micro?.ownerMicroBDown, expected:"engine22.microBDownOwnerWatch.v1", source:"currentWavelength.degrees.micro.ownerMicroBDown"};
-    case "subminute": return {model:w2?.childDegreeContext?.subminute, expected:null, source:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis.childDegreeContext.subminute"};
+    case "submicro": return {model:cw?.degrees?.submicro?.ownerSubmicroCDown, expected:"engine22.submicroCDownOwnerWatch.v1", source:"currentWavelength.degrees.submicro.ownerSubmicroCDown"};
+    case "micro": return {model:cw?.degrees?.micro?.ownerMicroCDown, expected:"engine22.microCDownOwnerWatch.v1", source:"currentWavelength.degrees.micro.ownerMicroCDown"};
+    case "subminute": return {model:cw?.degrees?.subminute?.ownerCurrentCDown, expected:"engine22.subminuteCurrentCDownReference.v1", source:"currentWavelength.degrees.subminute.ownerCurrentCDown"};
     case "minute": return {model:w2, expected:"engine22.minuteW2ComplexCorrectionWatch.v1", source:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis"};
     default: return {model:e22?.degreeStates?.[degree], expected:null, source:"degreeStates."+degree};
   }
 }
 function summarize(degree, model) {
-  if (degree === "submicro") return "Submicro A DOWN developing inside Micro B. Owner working count; structurally unconfirmed.";
-  if (degree === "micro") return "Micro B DOWN developing after A. Owner working count; structurally unconfirmed.";
-  if (degree === "subminute") return "Subminute ABC UP working inside Minute D. Recount pending; independent ABC Fibonacci model not published.";
-  if (degree === "minute") return "Minute W2 complex correction; internal D UP developing. Triangle hypothesis unconfirmed.";
+  if (degree === "submicro") return "Submicro C DOWN developing inside Micro C. Completion unconfirmed.";
+  if (degree === "micro") return "Micro C DOWN developing inside Subminute C. Completion unconfirmed.";
+  if (degree === "subminute") return "Subminute C DOWN owner working reference inside Minute W2; degree placement provisional.";
+  if (degree === "minute") return "Minute W2 complex correction; internal C DOWN scenario. ABC versus ABCDE unconfirmed.";
   return published(model?.headline, degree.toUpperCase()+" current structural state");
 }
 export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
@@ -51,19 +51,19 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
         noExecution:true};
       continue;
     }
-    const minuteD = degree === "minute" ? model.internalDProjection : null;
-    const currentLevels = degree === "subminute" ? [] : levels(minuteD?.levels ?? model.levels ?? model.activeFibModel?.displayLevels);
-    const leg = degree === "minute" ? published(model.activeInternalLeg,"D") : null;
-    const direction = degree === "minute" ? published(model.activeInternalLegDirection) : published(model.direction ?? model.sequenceDirection);
-    const wave = degree === "subminute" ? "ABC" : published(model.activeWave ?? model.currentWave);
-    const confirmation = degree === "subminute" ? published(model.waveRecount,"PENDING") : published(model.confirmationStatus ?? model.stage,"NOT_PUBLISHED");
-    const parentDegree = degree === "submicro" ? "micro" : degree === "micro" ? null : degree === "subminute" ? "minute" : degree === "minute" ? "minor" : model.parentDegree ?? null;
-    const parentWave = degree === "submicro" ? "B" : degree === "micro" ? null : degree === "subminute" ? "D" : degree === "minute" ? null : model.parentWave ?? null;
+    const minuteC = degree === "minute" ? e22?.currentWavelength?.degrees?.minute?.ownerLargerCDownScenario : null;
+    const currentLevels = degree === "subminute" ? levels(minuteC?.levels) : levels(minuteC?.levels ?? model.levels ?? model.activeFibModel?.displayLevels);
+    const leg = degree === "minute" ? (minuteC?.version === "engine22.largerCorrectionCDownWatch.v1" ? "C" : null) : null;
+    const direction = degree === "minute" ? (leg === "C" ? "DOWN" : "NOT_PUBLISHED") : published(model.direction ?? model.sequenceDirection);
+    const wave = published(model.activeWave ?? model.currentWave);
+    const confirmation = degree === "subminute" ? published(model.confirmationStatus,"PENDING") : published(model.confirmationStatus ?? model.stage,"NOT_PUBLISHED");
+    const parentDegree = degree === "submicro" ? "micro" : degree === "micro" ? "subminute" : degree === "subminute" ? "minute" : degree === "minute" ? "minor" : model.parentDegree ?? null;
+    const parentWave = degree === "submicro" ? "C" : degree === "micro" ? "C" : degree === "subminute" ? "W2" : degree === "minute" ? null : model.parentWave ?? null;
     const story = summarize(degree,model);
     degrees[degree] = {degree,label:degree.toUpperCase(),available:true,
-      activeWave:degree === "minute" ? "W2 / D UP" : wave,
+      activeWave:degree === "minute" ? "W2 / C DOWN" : wave,
       waveDirection:direction,
-      currentCondition:degree === "subminute" ? published(model.currentWorkingStructure,"ABC_UP_INSIDE_MINUTE_D") : degree === "minute" ? published(model.activeInternalLegStage, "DEVELOPING_CANDIDATE") : published(model.stage ?? model.lifecycle),
+      currentCondition:degree === "subminute" ? published(model.stage,"DEVELOPING_CANDIDATE") : degree === "minute" ? published(minuteC?.status, "DEVELOPING_CANDIDATE") : published(model.stage ?? model.lifecycle),
       confirmationNeeded:{status:confirmation,evidence:[],rule:null,note:"Owner working interpretation is not confirmed solely by owner pivot approval."},
       potentialCompletion:{levels:currentLevels,nextLevel:null,summary:currentLevels.length?"Engine 22 owner-model projection; not completion confirmation.":"Current applicable Fibonacci ladder not published."},
       invalidation:{price:invalidations.degrees[degree]?.price ?? null,
@@ -72,7 +72,7 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
         breached:invalidations.degrees[degree]?.breached ?? null,
         source:invalidations.degrees[degree]?.provenance ?? null,
         displayText:invalidations.degrees[degree]?.rule ?? "Not published"},
-      parentContext:{parentDegree,parentWave,displayText:degree === "minute"?"Internal D UP inside Minute W2":degree === "micro"?"Micro B within Subminute/Minute correction; direct parent count identity unresolved":null},
+      parentContext:{parentDegree,parentWave,displayText:degree === "minute"?"Internal C DOWN candidate inside Minute W2":degree === "micro"?"Micro C DOWN inside Subminute C DOWN":null},
       traderRead:{headline:story,summary:story,rules:[]},
       provenance:{workingSource:source,workingModelVersion:model.version ?? null,confirmationStatus:confirmation,countId:model.sourceCountId ?? null,workingCount:true,confirmed:false},
       internalLeg:leg,largerCorrection:degree === "minute"?"W2":null,
