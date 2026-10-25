@@ -1,0 +1,25 @@
+name: engine25-29-durable-runtime-state-tests
+
+on:
+  push:
+    branches:
+      - engine25-29-durable-runtime-state
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/durableEngineRuntimeState.js
+          node --check services/core/jobs/updateEngine29CrossMarketStress.js
+          node --check services/core/jobs/updateEngine25Full.js
+          node --check services/core/server.js
+      - name: Runtime persistence tests
+        run: node --test services/core/tests/durableEngineRuntimeState.test.js
