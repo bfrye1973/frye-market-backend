@@ -10,6 +10,7 @@ on:
       - "services/core/tests/engine22MicroCPriceTouchV1.test.js"
       - "services/core/tests/engine22SubmicroCUpTouchV1.test.js"
       - "services/core/tests/engine22MicroBSubmicroADownWatch.test.js"
+      - "services/core/tests/engine22MicroCDownOwnerWatch.test.js"
       - ".github/workflows/engine22c-owner-price-touch-v1.yml"
   push:
     branches:
@@ -27,4 +28,4 @@ jobs:
       - run: node --check services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js
       - run: node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
       - run: node --check services/core/jobs/buildStrategySnapshot.js
-      - run: node --test services/core/tests/engine22OwnerPriceTouchPersistenceV1.test.js services/core/tests/engine22MicroCPriceTouchV1.test.js services/core/tests/engine22SubmicroCUpTouchV1.test.js services/core/tests/engine22MicroBSubmicroADownWatch.test.js
+      - run: node --test services/core/tests/engine22OwnerPriceTouchPersistenceV1.test.js services/core/tests/engine22MicroCPriceTouchV1.test.js services/core/tests/engine22SubmicroCUpTouchV1.test.js services/core/tests/engine22MicroBSubmicroADownWatch.test.js services/core/tests/engine22MicroCDownOwnerWatch.test.js
