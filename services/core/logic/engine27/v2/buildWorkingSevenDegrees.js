@@ -33,13 +33,13 @@ function summarize(degree, model) {
   return published(model?.headline, degree.toUpperCase()+" current structural state");
 }
 // Observational price direction only; never a wave invalidation, entry, or permission.
-const PERIODS={submicro:["10m",600000],micro:["10m",600000],subminute:["10m",600000],minute:["10m",600000],minor:["1h",3600000],intermediate:["4h",14400000],primary:["1d",86400000]};
+const PERIODS={submicro:["10m",600000,2],micro:["10m",600000,2],subminute:["10m",600000,2],minute:["1d",86400000,2],minor:["1d",86400000,5],intermediate:["1d",86400000,10],primary:["1d",86400000,20]};
 function timeMs(v){
  if(typeof v==="number"&&Number.isFinite(v))return v<1e11?v*1000:v;
  const t=Date.parse(v);return Number.isFinite(t)?t:null;
 }
 function priceDirection(snapshot,degree){
- const [timeframe,period]=PERIODS[degree]||["10m",600000];
+ const [timeframe,period,lookback]=PERIODS[degree]||["10m",600000,2];
  const posture=snapshot?.marketMeter?.layers?.emaPosture || snapshot?.emaPosture || {};
  const series=timeframe==="10m"?posture?.tenMinute?.bars:timeframe==="1h"?posture?.oneHour?.bars:timeframe==="4h"?posture?.fourHour?.bars:posture?.daily?.bars;
  const evaluated=timeMs(snapshot?.now??snapshot?.ts);
@@ -48,11 +48,11 @@ function priceDirection(snapshot,degree){
   const c=Number(b?.close??b?.c),t=timeMs(b?.time??b?.timestamp??b?.t);
   return Number.isFinite(c)&&c>0&&t!==null&&(b?.completed===true||b?.isComplete===true||t+period<=evaluated);
  }).sort((a,b)=>timeMs(a.time??a.timestamp??a.t)-timeMs(b.time??b.timestamp??b.t));
- if(closed.length<2)return {direction:"UNCONFIRMED",timeframe,evidence:"TWO_COMPLETED_CLOSES_REQUIRED"};
- const prev=closed[closed.length-2],last=closed[closed.length-1];
+ if(closed.length<lookback)return {direction:"UNCONFIRMED",timeframe,lookback,evidence:"COMPLETED_CANDLE_WINDOW_UNAVAILABLE"};
+ const prev=closed[closed.length-lookback],last=closed[closed.length-1];
  const difference=Number(last.close??last.c)-Number(prev.close??prev.c);
- return {direction:difference>0?"UP":difference<0?"DOWN":"NEUTRAL",timeframe,
-  evidence:"TWO_COMPLETED_CANDLE_CLOSES",previousClose:Number(prev.close??prev.c),
+ return {direction:difference>0?"UP":difference<0?"DOWN":"NEUTRAL",timeframe,lookback,
+  evidence:timeframe==="1d"?"COMPLETED_DAILY_WINDOW":"TWO_COMPLETED_CANDLE_CLOSES",previousClose:Number(prev.close??prev.c),
   latestClose:Number(last.close??last.c),latestBarTime:timeMs(last.time??last.timestamp??last.t)};
 }
 function directionAssessment(snapshot,degree,waveDirection,readiness){
@@ -65,7 +65,7 @@ function directionAssessment(snapshot,degree,waveDirection,readiness){
  const current=Number(snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.currentPrice);
  const zoneState=(!boundary||!Number.isFinite(current)||current<=0)?"UNAVAILABLE":current>=boundary.low&&current<=boundary.high?"AT_REVIEW_REFERENCE":"REFERENCE_ONLY";
  return {schema:"engine27.degreeDirectionalAssessment.v1",status,expectedWaveDirection:expected??"UNCONFIRMED",
-  observedPriceDirection:observed.direction,timeframe:observed.timeframe,evidence:observed.evidence,
+  observedPriceDirection:observed.direction,timeframe:observed.timeframe,lookback:observed.lookback??null,evidence:observed.evidence,
   previousClose:observed.previousClose??null,latestClose:observed.latestClose??null,
   latestBarTime:observed.latestBarTime??null,reviewZone:boundary,reviewZoneState:zoneState,
   invalidationStatus:readiness?.status??"NOT_PUBLISHED",officialInvalidationPrice:null,
