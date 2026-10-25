@@ -1,0 +1,16 @@
+import test from "node:test";import assert from "node:assert/strict";
+import {evaluatePositionIntelligence as run} from "../positionIntelligence/evaluatePositionIntelligence.js";
+const one={tradeId:"T1",accountMode:"REAL",brokerAccountLabel:"SCHWAB_6380",status:"OPEN",direction:"LONG",symbol:"/MESZ26:XCME",identity:{planId:"P1",candidateId:"C1",strategyId:"micro"},structuralContextAtEntry:{contractVersion:"engine10.structuralContextAtEntry.v1",historicalBackfill:false},realBroker:{contracts:[{contractId:"C01",status:"OPEN",entryPrice:7700}]}};
+const plan={planId:"P1",candidateId:"C1",strategyId:"micro",direction:"LONG",managementReady:true,official:true,officialStopPrice:7680,officialTargets:[{targetId:"T1",price:7720}]};
+const journal={ok:true,trades:[one]};
+test("missing Journal unavailable",()=>assert.equal(run().state,"UNAVAILABLE"));
+test("wrong physical account rejected",()=>assert.equal(run({journal,microAccount:"SCHWAB_0747"}).state,"UNAVAILABLE"));
+test("account isolation never imports Submicro",()=>{let x=run({journal:{ok:true,trades:[{...one,brokerAccountLabel:"SCHWAB_0747"}]}});assert.equal(x.state,"NO_OPEN_POSITIONS")});
+test("Micro real contract retained with entry and identity",()=>{const r=run({journal});assert.equal(r.positions[0].contractId,"C01");assert.equal(r.positions[0].entryPrice,7700);assert.equal(r.positions[0].unrealizedPnL,null)});
+test("official management requires full identity match",()=>{const r=run({journal,officialPlans:[plan]});assert.equal(r.positions[0].officialManagement.planId,"P1");assert.equal(r.state,"OPEN_POSITIONS_WITH_OFFICIAL_PLAN")});
+test("a plan with wrong candidate is never attached",()=>assert.equal(run({journal,officialPlans:[{...plan,candidateId:"OTHER"}]}).positions[0].officialManagement,null));
+test("a plan with wrong direction is never attached",()=>assert.equal(run({journal,officialPlans:[{...plan,direction:"SHORT"}]}).positions[0].officialManagement,null));
+test("paper or unapproved plans cannot be attached",()=>assert.equal(run({journal,officialPlans:[{...plan,managementReady:false}]}).positions[0].officialManagement,null));
+test("closed real contracts never count as open",()=>{const r=run({journal:{ok:true,trades:[{...one,status:"CLOSED",realBroker:{contracts:[{contractId:"C01",status:"CLOSED",entryPrice:7700}]}}]}});assert.equal(r.state,"NO_OPEN_POSITIONS")});
+test("invalid open contract fails closed",()=>assert.equal(run({journal:{ok:true,trades:[{...one,realBroker:{contracts:[{status:"OPEN",entryPrice:7700}]}}]}}).state,"UNAVAILABLE"));
+test("no synthetic PnL or exit authorization",()=>{const r=run({journal});assert.equal(r.positions[0].unrealizedPnL,null);assert.equal(r.noOrderModification,true);assert.equal(r.noExecution,true)});
