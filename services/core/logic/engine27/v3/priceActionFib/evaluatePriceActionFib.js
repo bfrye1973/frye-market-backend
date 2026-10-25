@@ -1,15 +1,16 @@
-import { CONTRACT_VERSION } from "../contracts/priceActionFib.v1.js";
-const finite = x => typeof x === "number" && Number.isFinite(x);
-export function evaluatePriceActionFib({degree="micro",owner=null,levels=null,candles=null,observedAt=null}={}) {
- const base={schema:CONTRACT_VERSION,degree,readOnly:true,sourceAuthority:"ENGINE22",state:"UNAVAILABLE",lastMeaningfulLevel:null,nextObjective:null,reasonCodes:[]};
- if(degree!=="micro") return {...base,reasonCodes:["MICRO_ONLY_INITIAL_SCOPE"]};
- if(!owner?.identity || owner.degree!=="micro" || !owner.direction) return {...base,reasonCodes:["OWNER_IDENTITY_UNAVAILABLE"]};
- if(!Array.isArray(levels)||!levels.length||levels.some(l=>!finite(l?.price)||!l?.id)) return {...base,reasonCodes:["ENGINE22_LEVELS_UNAVAILABLE"]};
- if(!Array.isArray(candles)||!candles.length) return {...base,reasonCodes:["COMPLETED_ES_CANDLES_UNAVAILABLE"]};
- if(!observedAt||candles.some(c=>c?.complete!==true||!finite(c.high)||!finite(c.low)||!finite(c.close)||!c.endTime||Date.parse(c.endTime)>Date.parse(observedAt))) return {...base,reasonCodes:["UNQUALIFIED_CANDLE_EVIDENCE"]};
- const last=candles[candles.length-1];
- const touched=levels.filter(l=>candles.some(c=>c.low<=l.price&&c.high>=l.price));
- if(!touched.length) return {...base,state:"AWAITING_REACTION",reasonCodes:["NO_LEVEL_TOUCH"]};
- const reached=touched[touched.length-1];
- return {...base,state:"UNCONFIRMED_TOUCH",lastMeaningfulLevel:{id:reached.id,price:reached.price},reasonCodes:["TOUCH_NOT_COMPLETION","CONFIRMATION_RULE_NOT_VERIFIED"],evidence:{lastCompletedCandleEnd:last.endTime}};
+import { CONTRACT_VERSION,AUTHORITY } from '../contracts/priceActionFib.v1.js';
+import { adaptEngine22Micro } from './adaptEngine22Micro.js';
+export function evaluatePriceActionFib(input={}) {
+ const result=adaptEngine22Micro(input);
+ const base={schema:CONTRACT_VERSION,degree:'micro',mode:'READ_ONLY',authority:AUTHORITY,available:false,state:'UNAVAILABLE',workingWave:null,ownerModelIdentity:null,lastMeaningfulLevel:null,nextObjective:null,nextReferenceLevel:null,confirmation:'UNCONFIRMED',evidence:null,reasonCodes:result.reasonCodes,noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
+ if(!result.available)return base;
+ const {owner,candles,observationTime}=result;
+ const from=Date.parse('2026-10-21T16:00:00Z');
+ const eligibleCandles=candles.filter(c=>Date.parse(c.startTime)>=from);
+ if(!eligibleCandles.length)return {...base,ownerModelIdentity:owner.modelIdentity,workingWave:{activeWave:owner.activeWave,direction:owner.direction,stage:owner.stage},reasonCodes:['POST_OWNER_CANDLE_EVIDENCE_UNAVAILABLE']};
+ const touched=owner.levels.flatMap(l=>{const hit=eligibleCandles.find(c=>c.low<=l.price&&c.high>=l.price);return hit?[{key:l.key,price:l.price,observedAt:hit.endTime,source:'ES_COMPLETED_10M_OHLC',provisional:true}]:[]});
+ const last=touched.length?touched[touched.length-1]:null;
+ const close=eligibleCandles.at(-1).close;
+ const reference=owner.levels.find(l=>l.price<close)??null;
+ return {...base,available:true,state:last?'UNCONFIRMED_TOUCH':'AWAITING_REACTION',workingWave:{activeWave:owner.activeWave,direction:owner.direction,stage:owner.stage,confirmationStatus:owner.confirmationStatus},ownerModelIdentity:owner.modelIdentity,lastMeaningfulLevel:last,nextReferenceLevel:reference?{key:reference.key,price:reference.price,provisional:true}:null,evidence:{source:result.source,observedAt:observationTime,lastCompletedCandleEnd:eligibleCandles.at(-1).endTime,completedCandles:eligibleCandles.length,verifiedTouchCount:touched.length},reasonCodes:last?['TOUCH_IS_NOT_WAVE_COMPLETION','OWNER_CONFIRMATION_NOT_PUBLISHED','ALL_OWNER_LEVELS_PROVISIONAL']:['NO_QUALIFIED_LEVEL_TOUCH','ALL_OWNER_LEVELS_PROVISIONAL']};
 }
