@@ -8,9 +8,9 @@ const own=(e22,d)=>{
  const cw=e22?.currentWavelength?.degrees;
  const minute=cw?.minute?.ownerMinuteW2Hypothesis;
  switch(d){
- case "submicro":return {model:cw?.submicro?.ownerSubmicroADown,path:"currentWavelength.degrees.submicro.ownerSubmicroADown",expected:"engine22.submicroADownOwnerWatch.v1"};
- case "micro":return {model:cw?.micro?.ownerMicroBDown,path:"currentWavelength.degrees.micro.ownerMicroBDown",expected:"engine22.microBDownOwnerWatch.v1"};
- case "subminute":return {model:minute?.childDegreeContext?.subminute,path:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis.childDegreeContext.subminute"};
+ case "submicro":return {model:cw?.submicro?.ownerSubmicroCDown,path:"currentWavelength.degrees.submicro.ownerSubmicroCDown",expected:"engine22.submicroCDownOwnerWatch.v1"};
+ case "micro":return {model:cw?.micro?.ownerMicroCDown,path:"currentWavelength.degrees.micro.ownerMicroCDown",expected:"engine22.microCDownOwnerWatch.v1"};
+ case "subminute":return {model:cw?.subminute?.ownerCurrentCDown,path:"currentWavelength.degrees.subminute.ownerCurrentCDown",expected:"engine22.subminuteCurrentCDownReference.v1"};
  case "minute":return {model:minute,path:"currentWavelength.degrees.minute.ownerMinuteW2Hypothesis",expected:"engine22.minuteW2ComplexCorrectionWatch.v1"};
  default:return {model:e22?.degreeStates?.[d],path:"degreeStates."+d};
  }

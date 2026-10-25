@@ -9,7 +9,7 @@ test("all seven degree slots fail closed without published owner models",()=>{
 });
 test("only canonical working owner level and explicit rule publish; Fib targets do not become invalidation",()=>{
  const out=build({snapshot:snapshot({
- currentWavelength:{degrees:{submicro:{ownerSubmicroADown:{version:"engine22.submicroADownOwnerWatch.v1",levels:[{price:7774}],invalidationLevel:7812.25,invalidationRule:"OWNER_BREAK"}}}},
+ currentWavelength:{degrees:{submicro:{ownerSubmicroCDown:{version:"engine22.submicroCDownOwnerWatch.v1",levels:[{price:7774}],invalidationLevel:7812.25,invalidationRule:"OWNER_BREAK"}}}},
  degreeStates:{minor:{invalidationLevel:7543.5,invalidationBreached:false}}
  })});
  assert.equal(out.degrees.submicro.price,7812.25);
@@ -20,7 +20,7 @@ test("only canonical working owner level and explicit rule publish; Fib targets 
  assert.equal(out.publishedCount,2);
 });
 test("old incompatible owner is never substituted and absent invalidation never borrows projection",()=>{
- const out=build({snapshot:snapshot({currentWavelength:{degrees:{micro:{ownerMicroBDown:{version:"superseded",invalidationLevel:9000}}}},
+ const out=build({snapshot:snapshot({currentWavelength:{degrees:{micro:{ownerMicroCDown:{version:"superseded",invalidationLevel:9000}}}},
  degreeStates:{primary:{levels:[{price:9000}]}}})});
  assert.equal(out.degrees.micro.status,"OWNER_MODEL_UNAVAILABLE");
  assert.equal(out.degrees.primary.status,"NOT_PUBLISHED");
