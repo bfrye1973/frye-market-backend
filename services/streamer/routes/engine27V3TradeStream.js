@@ -8,6 +8,8 @@ const router=express.Router();
 const wsUrl=process.env.POLY_FUTURES_WS_URL||process.env.POLYGON_FUTURES_WS_URL||"wss://socket.polygon.io/futures";
 const key=()=>process.env.POLYGON_API||process.env.POLYGON_API_KEY||process.env.POLY_API_KEY||"";
 const subscribers=new Set();
+const blocked=new Set();
+const MAX_WRITABLE_BYTES=65536;
 const MAX_SUBSCRIBERS=8;
 let socket=null,contract=null,starting=false,retry=null,retryAttempt=0,authenticated=false;
 const send=(res,x)=>{if(res.destroyed||res.writableEnded)return false;return res.write("data: "+JSON.stringify(x)+"\n\n")};
@@ -76,10 +78,11 @@ router.get("/",async(req,res)=>{
  res.setHeader("X-Accel-Buffering","no");
  res.flushHeaders?.();
  subscribers.add(res);
+ res.on("drain",()=>blocked.delete(res));
  if(authenticated&&contract)send(res,{ok:true,type:"snapshot",symbol:"ES",resolvedSymbol:contract,source:"POLYGON_DIRECT_ES_TRADE",readOnly:true});
  const heartbeat=setInterval(()=>{if(!res.destroyed)res.write(":heartbeat\n\n")},15000);
  req.on("close",()=>{
-  clearInterval(heartbeat);subscribers.delete(res);
+  clearInterval(heartbeat);subscribers.delete(res);blocked.delete(res);
   if(!subscribers.size)teardown();
  });
  void startSharedFeed();
