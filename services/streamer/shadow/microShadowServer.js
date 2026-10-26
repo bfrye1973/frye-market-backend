@@ -15,6 +15,7 @@ import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/position
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
 import {createSharedCrossMarketConsumer} from "./createSharedCrossMarketConsumer.js";
 import {createMicroCrossMarketAlignment} from "../../core/logic/engine27/v3/marketAlignment/createMicroCrossMarketAlignment.js";
+import {createMicroAlignmentAlertGate} from "../../core/logic/engine27/v3/marketAlignment/createMicroAlignmentAlertGate.js";
 import {createMicroAlignmentArchiveClient} from "./createMicroAlignmentArchiveClient.js";
 import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
@@ -31,8 +32,9 @@ const alignmentArchive=createMicroAlignmentArchiveClient({
  url:"https://frye-market-backend-1.onrender.com/api/v1/engine27/micro-alignment/history",
  token:process.env.ENGINE27_MICRO_ALIGNMENT_ARCHIVE_TOKEN
 });
+const alignmentAlertGate=createMicroAlignmentAlertGate();
 const alignmentObserver=createMicroCrossMarketAlignment({
- onFiveMinuteEvent:row=>alignmentArchive.enqueue(row)
+ onFiveMinuteEvent:row=>{alignmentArchive.enqueue(row);alignmentAlertGate.observe(row)}
 });
 const zonesState={QQQ:null,VIX:null};
 const zonesEventCount={QQQ:0,VIX:0};
@@ -113,6 +115,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
    vixConnected:crossObserver.status().VIX?.connectionState==="CONNECTED"
   }),
   microCrossMarketHistory:alignmentArchive.status(),
+  microAlignmentAlerts:alignmentAlertGate.status(),
 
   liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>{
    const feedStatus=crossObserver.status()[key];
