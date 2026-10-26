@@ -11,14 +11,27 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 .row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:7px 0;border-bottom:1px solid #1b2f46;font-size:13px}.row:last-child{border:0}
 .k{color:#94a9c0}.v{font-weight:700;text-align:right;overflow-wrap:anywhere}.amber{color:#f8bf58}.teal{color:#5de2b4}.red{color:#ff9191}
 .full{grid-column:1/-1}.foot{font-size:12px;color:#71889f;padding:16px 0}
+.metric-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:14px}.metric{background:#0b1725;border:1px solid #243951;border-radius:8px;padding:11px;min-width:0}.metric-label{color:#8cbfe1;font-size:10px;letter-spacing:.06em;text-transform:uppercase}.metric-value{font-weight:800;font-size:22px;margin-top:5px}.metric-sub{color:#94a9c0;font-size:10px;overflow-wrap:anywhere}
+.details{margin:8px 0 0;border-top:1px solid #243951;padding-top:9px}.details summary{cursor:pointer;font-size:12px;color:#8cbfe1;font-weight:700;list-style-position:inside}.details[open] summary{margin-bottom:8px}.micro-note{color:#94a9c0;font-size:11px;margin:9px 0 0}.compact-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.compact-grid>div{background:#0a1420;border:1px solid #243951;border-radius:6px;padding:10px;min-width:0}
+@media(max-width:700px){.metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.compact-grid{grid-template-columns:1fr}}
 @media(max-width:540px){main{padding:12px}h1{font-size:18px}.big{font-size:25px}}
 </style></head><body><main><header><div class="mast"><h1>ENGINE 27 V3 — MICRO INTELLIGENCE</h1><span class="pill">SHADOW / NOT TRADING</span></div>
 <p>Read-only observation. No entries, exits, stops, order changes or trade authorization.</p></header>
+<section aria-label="Engine 25 five metric overview"><div class="metric-strip">
+<div class="metric"><div class="metric-label">Market health</div><div class="metric-value" id="metricHealth">—</div><div class="metric-sub" id="metricHealthSub">Source pending</div></div>
+<div class="metric"><div class="metric-label">Breadth</div><div class="metric-value" id="metricBreadth">—</div><div class="metric-sub" id="metricBreadthSub">Source pending</div></div>
+<div class="metric"><div class="metric-label">Stock volume</div><div class="metric-value" id="metricVolume">—</div><div class="metric-sub" id="metricVolumeSub">Coverage, not directional volume</div></div>
+<div class="metric"><div class="metric-label">4H distribution</div><div class="metric-value" id="metricDistribution">—</div><div class="metric-sub" id="metricDistributionSub">Source pending</div></div>
+<div class="metric"><div class="metric-label">1H weak sectors</div><div class="metric-value" id="metricSectors">—</div><div class="metric-sub" id="metricSectorsSub">Source pending</div></div>
+</div><details class="details" id="hourDetails"><summary>View 1H participation details</summary><div class="compact-grid">
+<div><h2>Breadth and sectors — 1H</h2><div class="row"><span class="k">Participation</span><span class="v" id="hourState">UNAVAILABLE</span></div><div class="row"><span class="k">Strong / neutral / weak</span><span class="v" id="hourSectors">UNAVAILABLE</span></div><div class="row"><span class="k">Evidence freshness</span><span class="v" id="hourFreshness">UNAVAILABLE</span></div><div class="row"><span class="k">Source timestamp</span><span class="v" id="hourTimestamp">UNAVAILABLE</span></div></div>
+<div><h2>Stock volume — 1H</h2><div class="row"><span class="k">Advancing volume</span><span class="v">NOT IN THIS READER</span></div><div class="row"><span class="k">Declining volume</span><span class="v">NOT IN THIS READER</span></div><p class="micro-note">The current E25 canonical participation summary does not publish the pictured 1H totals directly. These are deliberately not reconstructed or invented in this first layout test.</p><div class="row"><span class="k">Live equity qualification</span><span class="v amber" id="hourQualification">NOT QUALIFIED</span></div></div>
+</div></details><p class="micro-note">Owner-reported market context only. Values are not independent live trade confirmation; ES price uses individual futures trades.</p></section>
 <div class="grid">
 <section class="card"><h2>Live ES price</h2><div class="big" id="price">UNAVAILABLE</div><div class="row"><span class="k">Feed state</span><span class="v" id="feed">UNAVAILABLE</span></div><div class="row"><span class="k">Last ES trade</span><span class="v" id="last">—</span></div><div class="row"><span class="k">Resolved contract</span><span class="v" id="contract">—</span></div><div class="row"><span class="k">Provider trade events</span><span class="v" id="received">0</span></div><div class="row"><span class="k">Qualified trades</span><span class="v" id="qualified">0</span></div><div class="row"><span class="k">Source latency</span><span class="v" id="lag">UNAVAILABLE</span></div><div class="row"><span class="k">Feed issue</span><span class="v amber" id="issue">UNAVAILABLE</span></div></section>
 <section class="card"><h2>Engine 22 Micro wave</h2><div class="big" id="wave">UNAVAILABLE</div><div class="row"><span class="k">Owner confirmation</span><span class="v" id="confirm">UNAVAILABLE</span></div><div class="row"><span class="k">Next provisional Fib</span><span class="v amber" id="fib">UNAVAILABLE</span></div><div class="row"><span class="k">Touch vs confirmation</span><span class="v amber" id="touch">UNAVAILABLE</span></div></section>
 <section class="card"><h2>Neighboring degrees</h2><div class="row"><span class="k">Submicro</span><span class="v" id="left">UNAVAILABLE</span></div><div class="row"><span class="k">Subminute</span><span class="v" id="right">UNAVAILABLE</span></div><div class="row"><span class="k">Assessment</span><span class="v" id="neighbors">UNAVAILABLE</span></div></section>
-<section class="card"><h2>Market evidence</h2>
+<section class="card"><h2>Other market evidence</h2><details class="details"><summary>View source quality and cross-market status</summary>
 <div class="row"><span class="k">Engine 25 ES regime</span><span class="v" id="e25">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Participation source</span><span class="v" id="e25source">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Breadth evidence</span><span class="v" id="breadth">UNAVAILABLE</span></div>
@@ -30,7 +43,7 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Engine 29 confirmation</span><span class="v amber" id="e29">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Engine 29 missing evidence</span><span class="v amber" id="e29missing">UNAVAILABLE</span></div>
 <div class="row"><span class="k">QQQ hourly reaction</span><span class="v" id="qqq">UNAVAILABLE</span></div>
-<div class="row"><span class="k">VIX hourly reaction</span><span class="v" id="vix">UNAVAILABLE</span></div></section>
+<div class="row"><span class="k">VIX hourly reaction</span><span class="v" id="vix">UNAVAILABLE</span></div></details></section>
 <section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN contracts</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
 <section class="card"><h2>Evidence quality</h2><div class="row"><span class="k">Snapshot state</span><span class="v" id="snapshot">UNAVAILABLE</span></div><div class="row"><span class="k">Historical calibration</span><span class="v">NOT CALIBRATED</span></div><div class="row"><span class="k">Execution permission</span><span class="v teal">DISABLED</span></div><div class="row"><span class="k">Last check</span><span class="v" id="updated">—</span></div></section>
 </div><p class="foot">A trade touching a Fibonacci reference is NOT an Elliott wave completion. Missing source data is shown as UNAVAILABLE. All displayed price observations are read-only.</p></main>
@@ -43,6 +56,15 @@ set("confirm",d.owner?.confirmationStatus??"UNAVAILABLE");set("fib",o.nextProvis
 set("touch",o.available?(o.provisionalTouches?.length?"PRICE TOUCH — NOT CONFIRMED":"NO NEW TOUCH"):"UNAVAILABLE");
 set("left",na.neighbors?.submicro?.direction??"UNAVAILABLE");set("right",na.neighbors?.subminute?.direction??"UNAVAILABLE");set("neighbors",na.state??"UNAVAILABLE");
 const ev=d.marketEvidence??{},a=ev.engine25??{},b=ev.engine29??{};
+const q=ev.microOverview??{},hour=ev.oneHour??{};
+set("metricHealth",Number.isFinite(q.health?.value)?Math.round(q.health.value):"—");set("metricHealthSub",q.health?.label??"UNAVAILABLE");
+set("metricBreadth",Number.isFinite(q.breadth?.value)?Math.round(q.breadth.value):"—");set("metricBreadthSub",q.breadth?.label??"UNAVAILABLE");
+set("metricVolume",Number.isFinite(q.volume?.value)?q.volume.value.toFixed(1)+"%":"—");set("metricVolumeSub",q.volume?.qualified?"COVERAGE QUALIFIED":"COVERAGE / NOT QUALIFIED");
+set("metricDistribution",Number.isFinite(q.distribution?.value)?Math.round(q.distribution.value):"—");set("metricDistributionSub",q.distribution?.label??"UNAVAILABLE");
+set("metricSectors",Number.isFinite(q.sectors?.value)?q.sectors.value:"—");set("metricSectorsSub",(q.sectors?.label??"UNAVAILABLE")+" · "+(q.sectors?.freshness??"UNAVAILABLE"));
+set("hourState",hour.state??"UNAVAILABLE");set("hourSectors",[hour.strong,hour.neutral,hour.weak].every(Number.isFinite)?[hour.strong,hour.neutral,hour.weak].join(" / "):"UNAVAILABLE");
+set("hourFreshness",hour.freshness??"UNAVAILABLE");set("hourTimestamp",hour.sourceTimestamp??"UNAVAILABLE");
+set("hourQualification",hour.sourceQualified?"QUALIFIED":"NOT QUALIFIED");
 set("e25",mkt.sources?.engine25?.state??"UNAVAILABLE");
 set("e25source",a.sourcePresent?"DATA PRESENT":"SOURCE UNAVAILABLE");
 set("breadth",a.breadth?.label?(a.breadth.score===null?a.breadth.label:(a.breadth.score+" — "+a.breadth.label)):"UNAVAILABLE");
