@@ -12,3 +12,11 @@ test("no synthetic prices embedded in shadow view",()=>{
  assert.match(microShadowHtml,/id="price">UNAVAILABLE/);
  assert.match(microShadowHtml,/id="feed">UNAVAILABLE/);
 });
+
+test("shadow card displays 10m informational alert without 1m notifications",()=>{
+ assert.match(microShadowHtml,/10-minute alignment alert/);
+ assert.match(microShadowHtml,/id="alert10State"/);
+ assert.match(microShadowHtml,/id="alert10Time"/);
+ assert.match(microShadowHtml,/OFF — DASHBOARD ONLY/);
+ assert.match(microShadowHtml,/microAlignmentAlerts/);
+});
