@@ -2,6 +2,7 @@
 // Fixture-based ES scenario unless caller supplies independently verified bars.
 // A replayed watch is observational; it never changes a canonical wave count.
 import {buildEngine22IntegratedObservationShadow} from "./buildIntegratedObservationShadow.js";
+import {validateEngine22EsReplayManifest} from "./validateReplaySourceManifest.js";
 
 const timeframes=Object.freeze({"5m":300000,"10m":600000,"1h":3600000,"4h":14400000,"1d":86400000});
 function eligibleBars(bars,timeframe){
@@ -19,11 +20,14 @@ function eligibleBars(bars,timeframe){
 }
 export function replayEngine22CompletionShadow({
   bars=[],timeframe="5m",degree="MICRO",ownerCount=null,canonical=null,
-  reviewRule=null,expectedSource=null,
+  reviewRule=null,expectedSource=null,sourceManifest=null,
 }={}){
  if(!eligibleBars(bars,timeframe))
    return {available:false,reasonCodes:["CONTIGUOUS_CLOSED_BAR_HISTORY_REQUIRED"],events:[],
      shadowOnly:true,noExecution:true};
+ const sourceGate=sourceManifest===null?null:validateEngine22EsReplayManifest({manifest:sourceManifest,bars});
+ if(sourceGate?.accepted===false)return {available:false,reasonCodes:sourceGate.reasonCodes,events:[],
+   sourceGate,shadowOnly:true,noExecution:true};
  const chronological=[],events=[],seen=new Set();
  let previous=null;
  for(let i=5;i<=bars.length;i++){
@@ -64,7 +68,8 @@ export function replayEngine22CompletionShadow({
    previous=watch;
  }
  return {available:true,schema:"engine22.completionReplayShadow.v1",degree,
-   sourceDataClass:"CALLER_SUPPLIED_REQUIRE_EXTERNAL_VERIFICATION",
+   sourceDataClass:sourceGate?"LINEAGE_METADATA_CHECKED_UNAUTHENTICATED":"CALLER_SUPPLIED_REQUIRE_EXTERNAL_VERIFICATION",
+   sourceGate:sourceGate??{accepted:false,reasonCodes:["NO_SOURCE_MANIFEST"],independentlyAuthenticated:false},
    events,chronological,finalStatus:previous?.status??"DEVELOPING",
    shadowOnly:true,noExecution:true,noPermissionCreated:true,
    publishAuthorized:false,countTransitionAuthorized:false};
