@@ -70,10 +70,12 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Price observation time</span><span class="v" id="qqqLiveTime">UNAVAILABLE</span></div></div>
 <div><h2>VIX — direct calculated index value</h2>
 <div class="big" id="vixLivePrice">—</div>
-<div class="row"><span class="k">Live feed</span><span class="v" id="vixLiveState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Feed connection</span><span class="v" id="vixLiveState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Index value freshness</span><span class="v" id="vixFreshness">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Last observed age</span><span class="v" id="vixAge">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Latest value change</span><span class="v" id="vixLiveMove">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Index observation time</span><span class="v" id="vixLiveTime">UNAVAILABLE</span></div></div>
-</div><p class="micro-note">Direct Polygon event observations; provider latency and connectivity are checked. VIX is a calculated index, not a traded stock. Live changes are diagnostic only and cannot authorize ES trades.</p></section>
+</div><p class="micro-note">Direct Polygon event observations; provider latency and connectivity are checked. A connected VIX feed can await its next calculated index update; values older than the strict live window are not shown as current. VIX is a calculated index, not a traded stock. Live changes are diagnostic only and cannot authorize ES trades.</p></section>
 <section class="card full"><h2>Live QQQ / VIX — major price-zone watch</h2>
 <div class="compact-grid">
 <div><h2>QQQ — prior daily zones</h2>
@@ -157,8 +159,12 @@ const cm=d.liveCrossMarket??{};
 for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
  const live=cm[key]??{};
  set(prefix+"LivePrice",live.available&&Number.isFinite(live.price)?live.price.toFixed(2):"—");
- set(prefix+"LiveState",live.state??"UNAVAILABLE");
+ set(prefix+"LiveState",key==="VIX"?(live.connectionState??live.state??"UNAVAILABLE"):(live.state??"UNAVAILABLE"));
  set(prefix+"LiveMove",live.available?live.movement:"UNAVAILABLE");
+ if(key==="VIX"){
+  set("vixFreshness",live.freshnessState??"UNAVAILABLE");
+  set("vixAge",Number.isFinite(live.lastObservedAgeSeconds)?live.lastObservedAgeSeconds+" seconds":"UNAVAILABLE");
+ }
  set(prefix+"LiveTime",live.sourceTime??"UNAVAILABLE");
 }
 const zoneWatch=d.liveCrossMarketZones??{};
