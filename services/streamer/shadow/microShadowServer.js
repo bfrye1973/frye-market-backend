@@ -99,7 +99,7 @@ async function refreshCanonicalOwners(){
   ownerMarket.reasonCodes.push("OWNER_READ_ONLY_TRANSPORT_UNAVAILABLE");
  }
 }
-const server=app.listen(PORT,"0.0.0",()=>{
+const server=app.listen(PORT,"0.0.0.0",()=>{
  console.log("[engine27-v3-shadow] Listening, shadow="+enabled+"; no trading authority");
 });
 if(enabled){
