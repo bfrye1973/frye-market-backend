@@ -13,6 +13,7 @@ import {projectMarketEvidenceForDisplay} from "../../core/logic/engine27/v3/mark
 import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmation/projectEngine29Micro.js";
 import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
+import {createCrossMarketLiveObserver} from "./createCrossMarketLiveObserver.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -23,6 +24,7 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
+const crossObserver=createCrossMarketLiveObserver({apiKey:process.env.POLYGON_API_KEY,enabled});
 let reportedMarketSourceStates=false;
 let reportedCanonicalOwnerSources=false;
 let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
@@ -58,6 +60,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
   ownerSourceReasons:ownerMarket.reasonCodes.slice(0,8),
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
+  liveCrossMarket:crossObserver.status(),
   engine10MicroAccount:projectSnapshotMicroAccount(snapshot),
   qqqVix:projectQqqVixStatus(m?.modules?.marketConfirmation, snapshot?.engine27Strategies?.engine27CrossMarketLevels,snapshot?.engine27Strategies?.engine27LiveCrossMarketReactions),
   micro:m?{modules:{
@@ -138,6 +141,7 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
  console.log("[engine27-v3-shadow] Listening, shadow="+enabled+"; no trading authority");
 });
 if(enabled){
+ crossObserver.start();
  await refreshSnapshot();
  await refreshCanonicalOwners();
  setInterval(()=>{void refreshSnapshot()},15000).unref();
