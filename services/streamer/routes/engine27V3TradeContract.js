@@ -13,7 +13,7 @@ export function inspectEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={})
  // Match existing Backend2 getTradePrice numeric-coercion semantics, but accept
  // ONLY a strict unsigned decimal, never symbols, exponentials or unit guessing.
  const p=message.p;
- const price=finite(p)?p:(typeof p==="string"&&/^[0-9]+(?:\\.[0-9]+)?$/.test(p.trim())?Number(p.trim()):NaN);
+ const price=finite(p)?p:(typeof p==="string"&&/^[0-9]+(?:[.][0-9]+)?$/.test(p.trim())?Number(p.trim()):NaN);
  if(!finite(price)||price<=0)return reject("INVALID_FUTURES_TRADE_PRICE");
  if(!Number.isSafeInteger(message.s)||message.s<=0)return reject("INVALID_FUTURES_TRADE_SIZE");
  if(!Number.isSafeInteger(message.t)||message.t<1e12||message.t>=1e13)return reject("INVALID_FUTURES_TRADE_TIMESTAMP_MS");
