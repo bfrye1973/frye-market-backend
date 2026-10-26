@@ -18,6 +18,7 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
+let reportedMarketSourceStates=false;
 const equal=(a,b)=>{const A=Buffer.from(a),B=Buffer.from(b);return A.length===B.length&&crypto.timingSafeEqual(A,B)};
 const auth=(req,res,next)=>{
  if(!USER||!PASS)return res.status(503).send("Shadow authentication not configured");
@@ -78,7 +79,19 @@ if(enabled){
    url:TRADE_URL,
    token:READ_TOKEN,
    readInputs:()=>({snapshot,...assembleSnapshotMarketSources(snapshot)}),
-   onObservation:m=>{latest=m}
+   onObservation:m=>{latest=m;
+    if(!reportedMarketSourceStates){
+      reportedMarketSourceStates=true;
+      const states=m?.modules?.marketConfirmation?.sources??{};
+      console.info("[engine27-v3-market-source-acceptance] "+JSON.stringify({
+        engine25:{state:states.engine25?.state??"UNAVAILABLE",availability:states.engine25?.availability??"UNAVAILABLE",reasonCodes:states.engine25?.reasonCodes??[]},
+        engine29:{state:states.engine29?.state??"UNAVAILABLE",availability:states.engine29?.availability??"UNAVAILABLE",reasonCodes:states.engine29?.reasonCodes??[]},
+        qqq:{state:states.qqq?.state??"UNAVAILABLE",availability:states.qqq?.availability??"UNAVAILABLE",reasonCodes:states.qqq?.reasonCodes??[]},
+        vix:{state:states.vix?.state??"UNAVAILABLE",availability:states.vix?.availability??"UNAVAILABLE",reasonCodes:states.vix?.reasonCodes??[]},
+        esZones:{state:states.esZones?.state??"UNAVAILABLE",availability:states.esZones?.availability??"UNAVAILABLE"}
+      }));
+    }
+  }
   });
   void retryRunner.run();
  }
