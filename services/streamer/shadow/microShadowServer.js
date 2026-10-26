@@ -8,6 +8,7 @@ import {microShadowHtml} from "./microShadowView.js";
 import tradeRouter,{getEngine27V3TradeDiagnostics} from "../routes/engine27V3TradeStream.js";
 import {createTradeIngestionRunner} from "../../core/logic/engine27/v3/livePriceObserver/createTradeIngestionRunner.js";
 import {assembleSnapshotMarketSources} from "../../core/logic/engine27/v3/marketConfirmation/assembleSnapshotMarketSources.js";
+import {assembleCanonicalOwnerMarket} from "../../core/logic/engine27/v3/marketConfirmation/assembleCanonicalOwnerMarket.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -19,6 +20,7 @@ const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
 let reportedMarketSourceStates=false;
+let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
 const equal=(a,b)=>{const A=Buffer.from(a),B=Buffer.from(b);return A.length===B.length&&crypto.timingSafeEqual(A,B)};
 const auth=(req,res,next)=>{
  if(!USER||!PASS)return res.status(503).send("Shadow authentication not configured");
@@ -45,6 +47,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
     provisionalTouches:observation.provisionalTouches,nextProvisionalReference:observation.nextProvisionalReference}:null,
   owner:owner?{activeWave:owner.activeWave,direction:owner.direction,confirmationStatus:owner.confirmationStatus,stage:owner.stage}:null,
   snapshotStatus:snapshot&&snapshotAt&&Date.now()-Date.parse(snapshotAt)<60000?"FRESH":"UNAVAILABLE",
+  participation:{state:ownerMarket.participationState.state,contextOnly:ownerMarket.participationState.contextOnly,liveConfirmationUsable:ownerMarket.participationState.liveConfirmationUsable,reason:ownerMarket.participationState.reason??null},
   micro:m?{modules:{
     marketConfirmation:{sources:Object.fromEntries(["engine25","engine29","qqq","vix"].map(k=>[k,{state:m.modules?.marketConfirmation?.sources?.[k]?.state??"UNAVAILABLE"}]))},
     neighboringAlignment:{state:m.modules?.neighboringAlignment?.state,neighbors:{
@@ -68,17 +71,48 @@ async function refreshSnapshot(){
   snapshot=j;snapshotAt=new Date().toISOString();sourceStatus="AVAILABLE";lastError=null;
  }catch{sourceStatus="UNAVAILABLE";lastError="CANONICAL_ES_SNAPSHOT_UNAVAILABLE"}
 }
-const server=app.listen(PORT,"0.0.0.0",()=>{
+async function refreshCanonicalOwners(){
+ // Dedicated read-only production endpoints; NEVER call refresh/update routes.
+ if(!SNAP_URL)return;
+ try{
+  const root=new URL(SNAP_URL);
+  if(root.origin!=="https://frye-market-backend-1.onrender.com")throw Error("OWNER_ORIGIN_NOT_ALLOWED");
+  const get=async route=>{
+   const response=await fetch(root.origin+route,{signal:AbortSignal.timeout(12000),
+    headers:{Accept:"application/json"},cache:"no-store"});
+   if(!response.ok)throw Error("CANONICAL_SOURCE_HTTP_UNAVAILABLE");
+   return response.json();
+  };
+  const [e25,e29]=await Promise.allSettled([
+    get("/api/v1/engine25/full-dashboard"),
+    get("/api/v1/engine29/cross-market-stress")
+  ]);
+  ownerMarket=assembleCanonicalOwnerMarket({
+   engine25Dashboard:e25.status==="fulfilled"?e25.value:null,
+   engine29Response:e29.status==="fulfilled"?e29.value:null,
+   now:new Date().toISOString()
+  });
+  if(e25.status==="rejected")ownerMarket.reasonCodes.push("ENGINE25_DIRECT_ENDPOINT_UNAVAILABLE");
+  if(e29.status==="rejected")ownerMarket.reasonCodes.push("ENGINE29_DIRECT_ENDPOINT_UNAVAILABLE");
+ }catch{
+  ownerMarket=assembleCanonicalOwnerMarket({now:new Date().toISOString()});
+  ownerMarket.reasonCodes.push("OWNER_READ_ONLY_TRANSPORT_UNAVAILABLE");
+ }
+}
+const server=app.listen(PORT,"0.0.0",()=>{
  console.log("[engine27-v3-shadow] Listening, shadow="+enabled+"; no trading authority");
 });
 if(enabled){
  await refreshSnapshot();
+ await refreshCanonicalOwners();
  setInterval(()=>{void refreshSnapshot()},15000).unref();
+ setInterval(()=>{void refreshCanonicalOwners()},30000).unref();
  if(READ_TOKEN&&SNAP_URL&&TRADE_URL){
   retryRunner=createTradeIngestionRunner({
    url:TRADE_URL,
    token:READ_TOKEN,
-   readInputs:()=>({snapshot,...assembleSnapshotMarketSources(snapshot)}),
+   readInputs:()=>({snapshot,...assembleSnapshotMarketSources(snapshot),
+      engine25:ownerMarket.engine25,engine29:ownerMarket.engine29}),
    onObservation:m=>{latest=m;
     if(!reportedMarketSourceStates){
       reportedMarketSourceStates=true;
