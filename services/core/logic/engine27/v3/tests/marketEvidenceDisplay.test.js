@@ -36,3 +36,19 @@ test("no mutation of source records",()=>{
  project({engine25Dashboard:e25,engine29Response:e29,ownerMarket:owner});
  assert.deepEqual(e25,a);assert.deepEqual(e29,b);assert.deepEqual(owner,o);
 });
+
+test("compact Micro overview retains source qualification and missing 1H instead of fabricating numbers",()=>{
+ const sample=structuredClone(e25);
+ sample.liveMarketHealth={score:46,regime:"DEFENSIVE_WARNING"};
+ sample.participationArtifact.sourceDiagnostics={"1h":{timeframeState:"STRONG",freshnessState:"FRESH",strongCount:6,neutralCount:3,weakCount:2,sourceTimestamp:"2026-10-26T12:55:00Z"}};
+ sample.participationArtifact.participation.distributionPressure={rawPressure:52.8,pressureLabel:"ELEVATED"};
+ const r=project({engine25Dashboard:sample,ownerMarket:owner});
+ assert.equal(r.microOverview.health.value,46);
+ assert.equal(r.microOverview.breadth.value,29);
+ assert.equal(r.microOverview.volume.value,44.52);
+ assert.equal(r.microOverview.distribution.value,52.8);
+ assert.equal(r.microOverview.sectors.value,2);
+ assert.equal(r.oneHour.strong,6);
+ assert.equal(r.oneHour.sourceQualified,false);
+ assert.equal(r.engine25.liveConfirmationQualified,false);
+});
