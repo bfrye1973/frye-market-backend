@@ -43,3 +43,21 @@ test("subscription limit fails closed and never claims live",()=>{
  assert.equal(owner.status().state,"SUBSCRIPTION_LIMIT");
  owner.stop();
 });
+
+test("unexpected disconnect waits at least 15 seconds before reconnect",()=>{
+ FakeSocket.all=[];
+ const original=globalThis.setTimeout;
+ const timers=[];
+ globalThis.setTimeout=(fn,delay)=>{const timer={fn,delay,unref(){}};timers.push(timer);return timer};
+ try{
+  const owner=createPolygonConnectionOwner({assetClass:"indices",apiKey:"TEST",Socket:FakeSocket});
+  owner.subscribe("V.I:VIX",()=>{});
+  FakeSocket.all[0].close();
+  assert.equal(timers.length,1);
+  assert.ok(timers[0].delay>=15000);
+  assert.equal(FakeSocket.all.length,1);
+  timers[0].fn();
+  assert.equal(FakeSocket.all.length,2);
+  owner.stop();
+ }finally{globalThis.setTimeout=original}
+});
