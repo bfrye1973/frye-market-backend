@@ -27,9 +27,9 @@ export function projectMarketEvidenceForDisplay({engine25Dashboard=null,engine29
    liveConfirmationQualified:ownerMarket?.participationState?.liveConfirmationUsable===true,
    breadth:canonical?{score:finite(breadth?.score)?breadth.score:null,
      label:str(breadth?.label)}:null,
-   sectors:canonical?{bullish:finite(sector?.bullish)?sector.bullish:null,
-     neutral:finite(sector?.neutral)?sector.neutral:null,
-     bearish:finite(sector?.bearish)?sector.bearish:null}:null,
+   sectors:canonical?{bullish:finite(sector?.bullishCount)?sector.bullishCount:null,
+     neutral:finite(sector?.neutralCount)?sector.neutralCount:null,
+     bearish:finite(sector?.bearishCount)?sector.bearishCount:null}:null,
    volumeCoveragePct:finite(coverage)?coverage:null,
    equitySession:str(freshness?.equityScannerSession?.session)??null,
    esRegime:str(ownerMarket?.engine25?.regime)??null
