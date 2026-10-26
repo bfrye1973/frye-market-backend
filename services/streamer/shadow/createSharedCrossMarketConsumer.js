@@ -2,16 +2,29 @@
 // Auth token goes only in Authorization header, never URL or client response.
 import {inspectDirectCrossMarketTick,applyDirectCrossMarketTick,presentDirectCrossMarketState}
  from "../../core/logic/engine27/v3/livePriceObserver/projectDirectCrossMarketTick.js";
+// Separate connected transport from observation freshness. An index can be connected
+// but not publish new values on every dashboard refresh. Never call an old value LIVE.
+export function presentSharedCrossMarketFeed(record,connection,key,reason=null,nowMs=Date.now()){
+ const live=presentDirectCrossMarketState(record,connection,nowMs);
+ const age=record?.sourceMs&&nowMs>=record.sourceMs?nowMs-record.sourceMs:null;
+ const connected=connection==="CONNECTED";
+ const lastObservationUsable=age!==null&&age<=120000&&
+   record?.sourceLatencyQualified===true&&Number.isFinite(record?.price);
+ return {...live,
+  connectionState:connection,
+  freshnessState:live.available?"CURRENT":connected?(record?"WAITING_FOR_NEXT_UPDATE":"AWAITING_FIRST_UPDATE"):"SOURCE_UNAVAILABLE",
+  lastObservedPrice:lastObservationUsable?record.price:null,
+  lastObservedAgeSeconds:lastObservationUsable?Math.floor(age/1000):null,
+  source:key==="QQQ"?"POLYGON_STOCK_TRADE":"POLYGON_INDEX_VALUE",
+  sourceSymbol:key==="QQQ"?"QQQ":"I:VIX",reason,noExecution:true};
+}
 export function createSharedCrossMarketConsumer({baseUrl,token,onTick=null,enabled=true,
  fetcher=fetch,clock=()=>Date.now()}={}){
  const statuses={QQQ:"NOT_STARTED",VIX:"NOT_STARTED"},reasons={QQQ:null,VIX:null};
  const records={QQQ:null,VIX:null};const controllers={QQQ:null,VIX:null};
  let stopped=false;
- function status(){return Object.fromEntries(["QQQ","VIX"].map(k=>[k,{
-  ...presentDirectCrossMarketState(records[k],statuses[k],clock()),
-  source:k==="QQQ"?"POLYGON_STOCK_TRADE":"POLYGON_INDEX_VALUE",
-  sourceSymbol:k==="QQQ"?"QQQ":"I:VIX",reason:reasons[k],noExecution:true
- }]))}
+ function status(){return Object.fromEntries(["QQQ","VIX"].map(k=>[k,
+  presentSharedCrossMarketFeed(records[k],statuses[k],k,reasons[k],clock())]))}
  async function run(key){
   let tries=0;
   while(!stopped){
