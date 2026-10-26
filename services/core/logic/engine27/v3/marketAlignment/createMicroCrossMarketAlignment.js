@@ -19,7 +19,10 @@ export function createMicroCrossMarketAlignment({clock=()=>Date.now()}={}){
   if(!point)return false;
   const list=series[symbol],prior=list.at(-1);
   if(prior&&point.at<=prior.at)return false;
-  list.push(point);
+  // Collapse heavy ES trade bursts to one latest sample per second.
+  // Without this, 512 ES trades could cover less than the required 20-second evidence window.
+  if(prior&&Math.floor(prior.at/1000)===Math.floor(point.at/1000))list[list.length-1]=point;
+  else list.push(point);
   while(list.length>MAX_ROWS||list[0]?.at<clock()-T_WINDOW)list.shift();
   return true;
  }
