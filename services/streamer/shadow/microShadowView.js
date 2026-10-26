@@ -79,7 +79,7 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Alert explanation / remaining restrictions</span><span class="v amber" id="alignReasons">UNAVAILABLE</span></div>
 <p class="micro-note">Alert is informational only. Confirms rising ES + rising QQQ + falling direct VIX from two consecutive completed 5-minute source-price closes; 1-minute completed price closes provide earlier, non-confirmed direction. never infers Micro wave reversal or authorizes entry. Market alignment and a qualified Micro LONG are separate requirements. Visible while this dashboard is open.</p>
 </section>
-<section class="card full"><h2>Micro alignment history — completed 5-minute observations</h2>
+<section class="card full"><h2>Engine 27 Micro — 10-minute alignment alert (shadow only)</h2>\n<div class="row"><span class="k">Alert state</span><span class="v" id="alert10State">WAITING FOR TWO COMPLETED 5M WINDOWS</span></div>\n<div class="row"><span class="k">Latest confirmed alert</span><span class="v" id="alert10Time">NONE</span></div>\n<div class="row"><span class="k">Notifications</span><span class="v" id="alert10Notifications">OFF — DASHBOARD ONLY</span></div>\n<p class="micro-note">One-minute observations are diagnostic only. A bullish alert requires two consecutive completed five-minute bullish market windows. One alert per uninterrupted alignment; resets when the alignment breaks. No order authority. No push notifications.</p>\n</section>\n<section class="card full"><h2>Micro alignment history — completed 5-minute observations</h2>
 <div class="row"><span class="k">Durable history archive</span><span class="v" id="alignArchiveState">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Events waiting for storage</span><span class="v" id="alignArchiveQueue">UNAVAILABLE</span></div>
 <div class="table-scroll"><table class="internals"><thead><tr><th>5-minute close</th><th>ES</th><th>QQQ</th><th>VIX</th><th>Alignment</th><th>Wave</th></tr></thead><tbody id="alignHistoryRows"></tbody></table></div>
@@ -189,7 +189,7 @@ set("align29",align.qualifications?.engine29Qualified?"QUALIFIED":"NOT QUALIFIED
 set("alignAlert",align.marketAligned?"CONFIRMED BULLISH MARKET ENVIRONMENT":"NOT CONFIRMED");
 set("alignEarly",align.earlyWarning?"EARLY BULLISH THREE-MARKET AGREEMENT":"NOT ESTABLISHED");
 set("alignClose",align.methodology?.closedAt??"UNAVAILABLE");
-const arh=d.microCrossMarketHistory??{};
+const alert10=d.microAlignmentAlerts??{};\nset("alert10State",alert10.active?"BULLISH ALIGNMENT CONFIRMED — 10M":"WAITING FOR TWO COMPLETED 5M WINDOWS");\nset("alert10Time",alert10.latestAlert?.at??"NONE");\nset("alert10Notifications","OFF — DASHBOARD ONLY");\nconst arh=d.microCrossMarketHistory??{};
 set("alignArchiveState",arh.persistenceVerified?"DURABLE — BACKEND 1 DISK":arh.state??"UNAVAILABLE");
 set("alignArchiveQueue",arh.queued??0);
 const tr=$("alignHistoryRows");tr.replaceChildren();
