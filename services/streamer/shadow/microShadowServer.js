@@ -20,6 +20,7 @@ const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
 let reportedMarketSourceStates=false;
+let reportedCanonicalOwnerSources=false;
 let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
 const equal=(a,b)=>{const A=Buffer.from(a),B=Buffer.from(b);return A.length===B.length&&crypto.timingSafeEqual(A,B)};
 const auth=(req,res,next)=>{
@@ -87,6 +88,24 @@ async function refreshCanonicalOwners(){
     get("/api/v1/engine25/full-dashboard"),
     get("/api/v1/engine29/cross-market-stress")
   ]);
+  if(!reportedCanonicalOwnerSources){
+    reportedCanonicalOwnerSources=true;
+    const e25Data=e25.status==="fulfilled"?e25.value:null;
+    const e29Data=e29.status==="fulfilled"?e29.value:null;
+    console.info("[engine27-v3-owner-source-audit] "+JSON.stringify({
+      engine25Transport:e25.status,engine25Error:e25.status==="rejected"?"CANONICAL_HTTP_READ_FAILED":null,
+      engine25EnvelopeKeys:e25Data&&typeof e25Data==="object"?Object.keys(e25Data).slice(0,30):[],
+      participationSchema:e25Data?.participationArtifact?.schema??null,
+      participationOwner:e25Data?.participationArtifact?.authority?.owner??null,
+      participationFreshness:e25Data?.participationArtifact?.freshness?.state??null,
+      contextAvailable:e25Data?.engine25Context?.ok??null,
+      engine29Transport:e29.status,engine29Error:e29.status==="rejected"?"CANONICAL_HTTP_READ_FAILED":null,
+      engine29EnvelopeKeys:e29Data&&typeof e29Data==="object"?Object.keys(e29Data).slice(0,15):[],
+      engine29Version:e29Data?.data?.version??null,engine29StatePresent:typeof e29Data?.data?.overallState==="string",
+      engine29TimestampPresent:typeof e29Data?.data?.timestamp==="string",
+      engine29Degraded:e29Data?.data?.dataDegraded??null
+    }));
+  }
   ownerMarket=assembleCanonicalOwnerMarket({
    engine25Dashboard:e25.status==="fulfilled"?e25.value:null,
    engine29Response:e29.status==="fulfilled"?e29.value:null,
