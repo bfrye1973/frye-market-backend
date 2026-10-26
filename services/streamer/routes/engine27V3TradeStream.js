@@ -12,6 +12,8 @@ const blocked=new Set();
 const MAX_WRITABLE_BYTES=65536;
 const MAX_SUBSCRIBERS=8;
 let socket=null,contract=null,starting=false,retry=null,retryAttempt=0,authenticated=false;
+const diagnostics={receivedTrades:0,acceptedTrades:0,lastTradeLagMs:null,lastProviderEventAt:null,lastNormalizedAt:null,lastRejectedReason:null,subscriptionStatus:"NOT_STARTED"};
+export function getEngine27V3TradeDiagnostics(){return {...diagnostics,contract:contract??null,subscriberCount:subscribers.size,authenticated};}
 const send=(res,x)=>{
  if(res.destroyed||res.writableEnded)return false;
  if(blocked.has(res))return true; // drop incoming ticks while backpressured, no unbounded queue
@@ -50,16 +52,25 @@ async function startSharedFeed(){
    for(const m of Array.isArray(msgs)?msgs:[msgs]){
     if(m?.ev==="status"){
      if(m.status==="auth_success"&&!authenticated){
-       authenticated=true;retryAttempt=0;
+       authenticated=true;retryAttempt=0;diagnostics.subscriptionStatus="AUTHENTICATED";
        ws.send(JSON.stringify({action:"subscribe",params:"T."+contract}));
        fanout({ok:true,type:"snapshot",symbol:"ES",resolvedSymbol:contract,source:"POLYGON_DIRECT_ES_TRADE",readOnly:true});
      }else if(m.status==="auth_failed"){fanout({ok:false,type:"status",reasonCode:"PROVIDER_AUTH_FAILED"});try{ws.close()}catch{}}
      continue;
     }
     if(!authenticated)continue;
+    if(m?.ev!=="T")continue;
+    diagnostics.receivedTrades++;
     const observedAt=new Date().toISOString();
+    diagnostics.lastProviderEventAt=observedAt;
+    if(typeof m.t==="number"&&Number.isFinite(m.t)){
+      diagnostics.lastTradeLagMs=Math.round(Date.parse(observedAt)-m.t);
+    }else diagnostics.lastTradeLagMs=null;
     const event=normalizeEngine27V3EsTrade(m,{resolvedSymbol:contract,observedAt});
-    if(event)fanout(event);
+    if(event){diagnostics.acceptedTrades++;diagnostics.lastNormalizedAt=observedAt;diagnostics.lastRejectedReason=null;fanout(event)}
+    else diagnostics.lastRejectedReason=m.sym!==contract?"CONTRACT_MISMATCH":!Number.isSafeInteger(m.q)?"SEQUENCE_UNAVAILABLE":
+      (Number.isFinite(diagnostics.lastTradeLagMs)&&diagnostics.lastTradeLagMs>30000?"PROVIDER_TRADE_DELAY_GT_30S":
+      "TRADE_SCHEMA_OR_TIMESTAMP_REJECTED");
    }
   });
   ws.on("error",()=>fanout({ok:false,type:"status",reasonCode:"PROVIDER_STREAM_ERROR"}));
