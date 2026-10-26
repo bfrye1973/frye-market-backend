@@ -18,6 +18,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { updateEngine12StorageHealthSafe } from "../logic/engine12/storageHealth.js";
+import { inspectEngine12ThirtyMinuteArchiveSlot } from "../logic/engine12/thirtyMinuteReplayCadence.js";
 
 const AZ_TZ = "America/Phoenix";
 const EXCHANGE_TZ = "America/Chicago";
@@ -1330,6 +1331,21 @@ function runReplayArchiveCore({
 
   const parts =
     azParts(now);
+
+  // Archive cadence only; every 3-minute Engine run, live snapshots, alert and
+  // paper execution paths continue unchanged. Write the first available snapshot
+  // in each Arizona half-hour slot instead of demanding exact :00/:30 timing.
+  const cadence = inspectEngine12ThirtyMinuteArchiveSlot({
+    replayRoot, dateYmd: parts.dateYmd, timeHHMM: parts.timeHHMM,
+  });
+  if (!cadence.ok) {
+    return {ok:false,replayWritten:false,skipped:true,
+      reason:cadence.reason,dateYmd:parts.dateYmd,timeHHMM:parts.timeHHMM};
+  }
+  if (cadence.skip) {
+    return {ok:true,replayWritten:false,skipped:true,
+      reason:cadence.reason,dateYmd:parts.dateYmd,timeHHMM:parts.timeHHMM};
+  }
 
   const source =
     readJsonSafe(
