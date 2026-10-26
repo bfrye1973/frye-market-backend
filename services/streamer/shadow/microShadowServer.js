@@ -10,6 +10,7 @@ import {createTradeIngestionRunner} from "../../core/logic/engine27/v3/livePrice
 import {assembleSnapshotMarketSources} from "../../core/logic/engine27/v3/marketConfirmation/assembleSnapshotMarketSources.js";
 import {assembleCanonicalOwnerMarket} from "../../core/logic/engine27/v3/marketConfirmation/assembleCanonicalOwnerMarket.js";
 import {projectMarketEvidenceForDisplay} from "../../core/logic/engine27/v3/marketConfirmation/projectMarketEvidenceForDisplay.js";
+import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmation/projectEngine29Micro.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -24,6 +25,7 @@ let reportedMarketSourceStates=false;
 let reportedCanonicalOwnerSources=false;
 let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
 let displayEvidence=projectMarketEvidenceForDisplay({ownerMarket});
+let engine29MicroDisplay=projectEngine29Micro();
 const equal=(a,b)=>{const A=Buffer.from(a),B=Buffer.from(b);return A.length===B.length&&crypto.timingSafeEqual(A,B)};
 const auth=(req,res,next)=>{
  if(!USER||!PASS)return res.status(503).send("Shadow authentication not configured");
@@ -53,6 +55,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
   participation:{state:ownerMarket.participationState.state,contextOnly:ownerMarket.participationState.contextOnly,liveConfirmationUsable:ownerMarket.participationState.liveConfirmationUsable,reason:ownerMarket.participationState.reason??null},
   ownerSourceReasons:ownerMarket.reasonCodes.slice(0,8),
   marketEvidence:displayEvidence,
+  engine29MicroDisplay,
   micro:m?{modules:{
     marketConfirmation:{sources:Object.fromEntries(["engine25","engine29","qqq","vix"].map(k=>[k,{state:m.modules?.marketConfirmation?.sources?.[k]?.state??"UNAVAILABLE"}]))},
     neighboringAlignment:{state:m.modules?.neighboringAlignment?.state,neighbors:{
@@ -119,10 +122,12 @@ async function refreshCanonicalOwners(){
   if(e29.status==="rejected")ownerMarket.reasonCodes.push("ENGINE29_DIRECT_ENDPOINT_UNAVAILABLE");
   displayEvidence=projectMarketEvidenceForDisplay({engine25Dashboard:e25.status==="fulfilled"?e25.value:null,
    engine29Response:e29.status==="fulfilled"?e29.value:null,ownerMarket});
+  engine29MicroDisplay=projectEngine29Micro(e29.status==="fulfilled"?e29.value:null,!!ownerMarket.engine29);
  }catch{
   ownerMarket=assembleCanonicalOwnerMarket({now:new Date().toISOString()});
   ownerMarket.reasonCodes.push("OWNER_READ_ONLY_TRANSPORT_UNAVAILABLE");
   displayEvidence=projectMarketEvidenceForDisplay({ownerMarket});
+  engine29MicroDisplay=projectEngine29Micro();
  }
 }
 const server=app.listen(PORT,"0.0.0.0",()=>{
