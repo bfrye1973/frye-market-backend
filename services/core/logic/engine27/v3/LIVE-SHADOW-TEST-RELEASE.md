@@ -65,3 +65,13 @@ V3-only source adapter `marketConfirmation/assembleSnapshotMarketSources.js` pas
 **Tests:** all six new field-mapping/fail-closed tests added to V3 isolation workflow, passed. Live Render preview deploy `dep-dbfa99g473hc73cdnj80` verified **LIVE** on feature-branch commit `19cb1519d9944ea71dfc01e26f68c3383416b584`.
 
 **Acceptance boundary:** field *paths and code* verified; actual runtime Engine25/29/QQQ/VIX qualified values NOT independently captured from protected shadow state yet. No claim all 4 sources are CURRENT, and the preview's underlying ES-trade streaming remains independent. Engine10 original immutable entry thesis and official Engine9 plans remain unverified; read-only journal audit is next.
+
+## Observed live protected staging market-source read — 2026-10-26T00:57:06Z
+After deploying `dep-dbfaaglg1s2s73f1subg`, I inspected the **single sanitized actual Render application log**, generated on receipt of a valid live ES trade by the Micro Manager. It recorded:
+- Engine25: **CURRENT** — `NEUTRAL_CHOP_WITH_RATE_PRESSURE`, no source reason code.
+- Engine29: **UNAVAILABLE** — `ENGINE29_SOURCE_UNAVAILABLE` (canonical snapshot-derived tactical source did not qualify; do not replace with guessed neutral).
+- QQQ: **PARTIAL / REACTIONS_STALE** — `REACTION_CANDLE_STALE`.
+- VIX: **PARTIAL / REACTIONS_STALE** — `REACTION_CANDLE_STALE`.
+- Engine1 ES zones: **PARTIAL / ZONE_GEOMETRY_ONLY**. No confirmed reaction inferred.
+
+Only enumerated states/reasons were logged, no raw trade values or account/journal records. This is real staging evidence, not a fixture. Qualified ES trade -> manager callback is confirmed since the log is emitted by `onObservation`; detailed original Engine10 contract provenance and official Engine9 joins remain separately unverified. V3 source freshness correctly fails closed on QQQ/VIX during equity nontrading windows. Further Engine29 source audit should inspect the canonical persisted runtime file and read-only summary endpoint, not fake freshness in V3.
