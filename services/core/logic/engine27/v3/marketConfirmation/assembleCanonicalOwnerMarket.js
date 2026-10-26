@@ -24,7 +24,11 @@ export function assembleCanonicalOwnerMarket({engine25Dashboard=null,engine29Res
  if(engine29Response?.ok===true&&typeof j?.overallState==="string"&&validTime(j?.timestamp)&&Number.isFinite(t)&&
  stateTime<=t&&t-stateTime<=300000&&j?.dataDegraded!==true&&j?.dataQuality&&typeof j.dataQuality==="object"){
   engine29=j;
- }else reasons.push("ENGINE29_CANONICAL_MISSING_STALE_OR_DEGRADED");
+ }else if(j?.dataDegraded===true)reasons.push("ENGINE29_CANONICAL_DATA_DEGRADED");
+ else if(engine29Response?.ok!==true||!j)reasons.push("ENGINE29_CANONICAL_SOURCE_UNAVAILABLE");
+ else if(!validTime(j.timestamp))reasons.push("ENGINE29_TIMESTAMP_INVALID");
+ else if(Number.isFinite(t)&&(stateTime>t||t-stateTime>300000))reasons.push("ENGINE29_CANONICAL_STALE");
+ else reasons.push("ENGINE29_CANONICAL_CONTRACT_INVALID");
  return {engine25,engine29,participationState:{
   source:"ENGINE25_PARTICIPATION_CANONICAL",schema:participation?.schema??null,
   state:!pValid?"UNAVAILABLE":closed?"LAST_VALID_EQUITY_READ":active?"FRESH":participation.freshness.state??"UNAVAILABLE",
