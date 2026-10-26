@@ -1,11 +1,10 @@
 import express from "express";
-import WebSocket from "ws";
+import {sharedOwner} from "../sharedMarketData/sharedMarketRuntime.js";
 import { DateTime } from "luxon";
 
 const router = express.Router();
 export default router;
 
-const POLY_WS_URL = "wss://socket.polygon.io/stocks";
 const HIST_BASE =
   process.env.HIST_BASE ||
   process.env.BACKEND1_BASE ||
@@ -338,66 +337,47 @@ router.get("/agg", async (req, res) => {
     sseSend(res, { ok: true, type: "bar", symbol, tf, mode, bar });
   }
 
-  const ws = new WebSocket(POLY_WS_URL);
+  // Shares one process-wide Stocks connection across all /stream/agg viewers.
+  // Current event formatting and each client's aggregation state remain unchanged.
+  const owner=sharedOwner("stocks");
+  let closeSubscriptions=()=>{};
   let tick1m = null;
   let aggBar = null;
 
-  ws.on("open", () => {
-    diag.wsOpen += 1;
-    ws.send(JSON.stringify({ action: "auth", params: apiKey }));
-    ws.send(JSON.stringify({ action: "subscribe", params: `AM.${symbol},T.${symbol}` }));
-  });
-
-  ws.on("message", (buf) => {
-    let arr;
-    try { arr = JSON.parse(buf.toString("utf8")); } catch { return; }
-    if (!Array.isArray(arr)) arr = [arr];
-
-    for (const msg of arr) {
-      const ev = msg?.ev;
-
-      if (ev === "status") {
-        const line = `${msg?.status || ""} ${msg?.message || ""}`.trim();
-        diag.status.push(line);
-        if (diag.status.length > 10) diag.status.shift();
-        continue;
-      }
-
-      if (ev === "AM" && String(msg?.sym || "").toUpperCase() === symbol) {
-        diag.amSeen += 1;
-        const bar1m = parseAM(msg);
-        if (!bar1m) continue;
-
-        const { agg, changed } = updateAggFrom1m(aggBar, bar1m, tfMin, mode);
-        aggBar = agg;
-        if (changed && aggBar) emitBar(aggBar);
-
-        tick1m = null;
-        continue;
-      }
-
-      if (ev === "T" && String(msg?.sym || "").toUpperCase() === symbol) {
-        diag.tSeen += 1;
-
-        // Fold trades into 1m
-        tick1m = applyTickTo1m(tick1m, msg);
-        if (!tick1m) continue;
-
-        const { agg, changed } = updateAggFrom1m(aggBar, tick1m, tfMin, mode);
-        aggBar = agg;
-        if (changed && aggBar) emitBar(aggBar);
-      }
+  function onPolygonEvent(msg) {
+    const ev=msg?.ev;
+    if (ev==="AM"&&String(msg?.sym||"").toUpperCase()===symbol) {
+      diag.amSeen++;
+      const bar1m=parseAM(msg);
+      if(!bar1m)return;
+      const {agg,changed}=updateAggFrom1m(aggBar,bar1m,tfMin,mode);
+      aggBar=agg;
+      if(changed&&aggBar)emitBar(aggBar);
+      tick1m=null;
     }
+    if(ev==="T"&&String(msg?.sym||"").toUpperCase()===symbol){
+      diag.tSeen++;
+      tick1m=applyTickTo1m(tick1m,msg);
+      if(!tick1m)return;
+      const {agg,changed}=updateAggFrom1m(aggBar,tick1m,tfMin,mode);
+      aggBar=agg;
+      if(changed&&aggBar)emitBar(aggBar);
+    }
+  }
+  const stopAM=owner.subscribe("AM."+symbol,({event})=>onPolygonEvent(event));
+  const stopT=owner.subscribe("T."+symbol,({event})=>onPolygonEvent(event));
+  const stopStatus=owner.onStatus(st=>{
+    if(st.state==="CONNECTED")diag.wsOpen++;
+    if(st.state==="DISCONNECTED")diag.wsClose++;
+    if(st.state==="CONNECTION_ERROR"||st.state==="SUBSCRIPTION_LIMIT")diag.wsError++;
+    diag.status.push(st.state);if(diag.status.length>10)diag.status.shift();
   });
-
-  ws.on("error", () => { diag.wsError += 1; });
-  ws.on("close", () => { diag.wsClose += 1; });
-
+  closeSubscriptions=()=>{stopAM();stopT();stopStatus()};
   req.on("close", () => {
     alive = false;
     clearInterval(ping);
     clearInterval(diagTimer);
-    try { ws.close(); } catch {}
+    closeSubscriptions();
     try { res.end(); } catch {}
   });
 });
