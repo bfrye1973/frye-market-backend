@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-const source=new URL("../../../../streamer/server.js",import.meta.url);
+const source=new URL("../../../../../streamer/server.js",import.meta.url);
 test("Backend2 does not import, run, or mount retired Engine5B",()=>{
  const s=fs.readFileSync(source,"utf8");
  assert.equal(s.includes("startEngine5B"),false);
