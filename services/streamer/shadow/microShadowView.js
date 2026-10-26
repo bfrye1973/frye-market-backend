@@ -61,6 +61,19 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
 <div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
 </details></section>
+<section class="card full"><h2>Live QQQ / VIX price action — independent of hourly candles</h2>
+<div class="compact-grid">
+<div><h2>QQQ — direct stock trades</h2>
+<div class="big" id="qqqLivePrice">—</div>
+<div class="row"><span class="k">Live feed</span><span class="v" id="qqqLiveState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Latest price change</span><span class="v" id="qqqLiveMove">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Price observation time</span><span class="v" id="qqqLiveTime">UNAVAILABLE</span></div></div>
+<div><h2>VIX — direct calculated index value</h2>
+<div class="big" id="vixLivePrice">—</div>
+<div class="row"><span class="k">Live feed</span><span class="v" id="vixLiveState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Latest value change</span><span class="v" id="vixLiveMove">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Index observation time</span><span class="v" id="vixLiveTime">UNAVAILABLE</span></div></div>
+</div><p class="micro-note">Direct Polygon event observations; provider latency and connectivity are checked. VIX is a calculated index, not a traded stock. Live changes are diagnostic only and cannot authorize ES trades.</p></section>
 <section class="card full"><h2>QQQ &amp; VIX — direct hourly market reactions</h2>
 <div class="compact-grid">
 <div><h2>QQQ · Nasdaq participation reference</h2>
@@ -123,6 +136,14 @@ for(const row of n29.rows??[]){
  body.appendChild(tr);
 }
 const a10=d.engine10MicroAccount??{};
+const cm=d.liveCrossMarket??{};
+for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
+ const live=cm[key]??{};
+ set(prefix+"LivePrice",live.available?live.price:"—");
+ set(prefix+"LiveState",live.state??"UNAVAILABLE");
+ set(prefix+"LiveMove",live.available?live.movement:"UNAVAILABLE");
+ set(prefix+"LiveTime",live.sourceTime??"UNAVAILABLE");
+}
 const xv=d.qqqVix??{};
 for(const [key,prefix] of [["qqq","qqq"],["vix","vix"]]){
  const z=xv[key]??{};
