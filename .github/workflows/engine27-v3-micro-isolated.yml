@@ -1,5 +1,13 @@
 name: Engine 27 V3 Micro isolated acceptance
 on:
+  push:
+    branches: [engine27-v3-micro-intelligence]
+    paths:
+      - 'services/streamer/sharedMarketData/**'
+      - 'services/streamer/routes/stream.js'
+      - 'services/streamer/shadow/**'
+      - 'services/core/logic/engine27/v3/**'
+      - '.github/workflows/engine27-v3-micro-isolated.yml'
   pull_request:
     paths:
       - 'services/core/logic/engine27/v3/**'
