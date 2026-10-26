@@ -14,6 +14,7 @@ import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmat
 import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
 import {createCrossMarketLiveObserver} from "./createCrossMarketLiveObserver.js";
+import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -24,7 +25,21 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
-const crossObserver=createCrossMarketLiveObserver({apiKey:process.env.POLYGON_API_KEY||process.env.POLYGON_API||process.env.POLY_API_KEY,enabled});
+const zonesState={QQQ:null,VIX:null};
+const zonesEventCount={QQQ:0,VIX:0};
+const crossObserver=createCrossMarketLiveObserver({
+ apiKey:process.env.POLYGON_API_KEY||process.env.POLYGON_API||process.env.POLY_API_KEY,enabled,
+ onTick:tick=>{
+  const key=tick.symbol;
+  const previous=zonesState[key]?.previous??null;
+  const result=observeLiveCrossMarketZones({
+    publication:snapshot?.engine27Strategies?.engine27CrossMarketLevels,
+    key,tick,previous,nowMs:Date.now()
+  });
+  zonesState[key]=result;
+  if(result.available)zonesEventCount[key]+=result.observedEvents.length;
+ }
+});
 let reportedMarketSourceStates=false;
 let reportedCanonicalOwnerSources=false;
 let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
@@ -61,6 +76,9 @@ app.get("/shadow/state",auth,(_req,res)=>{
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
   liveCrossMarket:crossObserver.status(),
+  liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>[key,{
+   ...projectLiveCrossMarketZonesForDisplay(zonesState[key]),observedEventsTotal:zonesEventCount[key]
+  }])),
   engine10MicroAccount:projectSnapshotMicroAccount(snapshot),
   qqqVix:projectQqqVixStatus(m?.modules?.marketConfirmation, snapshot?.engine27Strategies?.engine27CrossMarketLevels,snapshot?.engine27Strategies?.engine27LiveCrossMarketReactions),
   micro:m?{modules:{
