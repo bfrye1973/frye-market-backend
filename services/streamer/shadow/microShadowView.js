@@ -13,7 +13,7 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 .full{grid-column:1/-1}.foot{font-size:12px;color:#71889f;padding:16px 0}
 .metric-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin-bottom:14px}.metric{background:#0b1725;border:1px solid #243951;border-radius:8px;padding:11px;min-width:0}.metric-label{color:#8cbfe1;font-size:10px;letter-spacing:.06em;text-transform:uppercase}.metric-value{font-weight:800;font-size:22px;margin-top:5px}.metric-sub{color:#94a9c0;font-size:10px;overflow-wrap:anywhere}
 .details{margin:8px 0 0;border-top:1px solid #243951;padding-top:9px}.details summary{cursor:pointer;font-size:12px;color:#8cbfe1;font-weight:700;list-style-position:inside}.details[open] summary{margin-bottom:8px}.micro-note{color:#94a9c0;font-size:11px;margin:9px 0 0}.compact-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.compact-grid>div{background:#0a1420;border:1px solid #243951;border-radius:6px;padding:10px;min-width:0}
-@media(max-width:700px){.metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.compact-grid{grid-template-columns:1fr}}
+.e29-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:8px 0}.e29-summary>div{padding:8px;background:#0a1420;border:1px solid #243951;border-radius:6px;display:flex;flex-direction:column;gap:4px}.e29-summary strong{font-size:12px;overflow-wrap:anywhere}.table-scroll{overflow-x:auto}.internals{width:100%;border-collapse:collapse;font-size:12px}.internals td,.internals th{padding:7px;border-bottom:1px solid #243951;text-align:left;overflow-wrap:anywhere}.internals th{color:#8cbfe1}@media(max-width:700px){.e29-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.metric-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.compact-grid{grid-template-columns:1fr}}
 @media(max-width:540px){main{padding:12px}h1{font-size:18px}.big{font-size:25px}}
 </style></head><body><main><header><div class="mast"><h1>ENGINE 27 V3 — MICRO INTELLIGENCE</h1><span class="pill">SHADOW / NOT TRADING</span></div>
 <p>Read-only observation. No entries, exits, stops, order changes or trade authorization.</p></header>
@@ -44,6 +44,23 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Engine 29 missing evidence</span><span class="v amber" id="e29missing">UNAVAILABLE</span></div>
 <div class="row"><span class="k">QQQ hourly reaction</span><span class="v" id="qqq">UNAVAILABLE</span></div>
 <div class="row"><span class="k">VIX hourly reaction</span><span class="v" id="vix">UNAVAILABLE</span></div></details></section>
+<section class="card full"><h2>Engine 29 — Micro tactical evidence</h2>
+<div class="e29-summary">
+<div><span class="k">Bigger picture</span><strong id="e29big">UNAVAILABLE</strong></div>
+<div><span class="k">1H tactical</span><strong id="e29tactical">UNAVAILABLE</strong></div>
+<div><span class="k">30m fast shift</span><strong id="e29fast">UNAVAILABLE</strong></div>
+<div><span class="k">ES parent move</span><strong id="e29move">UNAVAILABLE</strong></div></div>
+<div class="row"><span class="k">Engine 29 evidence qualification</span><span class="v amber" id="e29quality">UNAVAILABLE</span></div>
+<details class="details"><summary>View liquidity, trap, squeeze and market internals</summary>
+<div class="e29-summary">
+<div><span class="k">Liquidity</span><strong id="e29liquidity">UNAVAILABLE</strong></div>
+<div><span class="k">Trap</span><strong id="e29trap">UNAVAILABLE</strong></div>
+<div><span class="k">Squeeze</span><strong id="e29squeeze">UNAVAILABLE</strong></div>
+<div><span class="k">Missing confirmation</span><strong id="e29missing2">UNAVAILABLE</strong></div></div>
+<div class="table-scroll"><table class="internals"><thead><tr><th>Market internal</th><th>Structural</th><th>1H tactical</th><th>30m fast</th></tr></thead><tbody id="e29rows"></tbody></table></div>
+<p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
+<div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
+</details></section>
 <section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN contracts</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
 <section class="card"><h2>Evidence quality</h2><div class="row"><span class="k">Snapshot state</span><span class="v" id="snapshot">UNAVAILABLE</span></div><div class="row"><span class="k">Historical calibration</span><span class="v">NOT CALIBRATED</span></div><div class="row"><span class="k">Execution permission</span><span class="v teal">DISABLED</span></div><div class="row"><span class="k">Last check</span><span class="v" id="updated">—</span></div></section>
 </div><p class="foot">A trade touching a Fibonacci reference is NOT an Elliott wave completion. Missing source data is shown as UNAVAILABLE. All displayed price observations are read-only.</p></main>
@@ -76,6 +93,22 @@ set("e29context",b.sourcePresent?(b.tacticalState??b.overallState??"DATA PRESENT
 set("e29",b.qualified?(mkt.sources?.engine29?.state??"QUALIFIED"):b.sourcePresent?(b.dataDegraded?"DEGRADED — NOT QUALIFIED":"NOT QUALIFIED"):"SOURCE UNAVAILABLE");
 set("e29missing",b.sourcePresent?(b.missingConfirmations?.length?b.missingConfirmations.join(", "):"NONE REPORTED"):"UNAVAILABLE");
 for(const [id,path] of [["qqq","qqq"],["vix","vix"]])set(id,mkt.sources?.[path]?.state??"UNAVAILABLE");
+const n29=d.engine29MicroDisplay??{};
+set("e29big",n29.biggerPicture??"UNAVAILABLE");set("e29tactical",n29.tactical??"UNAVAILABLE");
+set("e29fast",n29.fastShift??"UNAVAILABLE");set("e29move",n29.move??"UNAVAILABLE");
+set("e29quality",n29.qualified?"QUALIFIED":n29.present?(n29.quality+" — NOT QUALIFIED"):"SOURCE UNAVAILABLE");
+set("e29liquidity",n29.liquidity??"UNAVAILABLE");set("e29trap",n29.trap??"UNAVAILABLE");
+set("e29squeeze",n29.squeeze??"UNAVAILABLE");
+set("e29missing2",n29.present?(n29.missingConfirmations?.length?n29.missingConfirmations.join(", "):"NONE REPORTED"):"UNAVAILABLE");
+set("e29timestamp",n29.timestamp??"UNAVAILABLE");
+const body=$("e29rows");body.replaceChildren();
+for(const row of n29.rows??[]){
+ const tr=document.createElement("tr");
+ for(const value of [row.label,row.structural,row.hourly,row.thirtyMinute]){
+  const td=document.createElement("td");td.textContent=value??"UNAVAILABLE";tr.appendChild(td);
+ }
+ body.appendChild(tr);
+}
 set("positions",m.modules?.positionIntelligence?.available?m.positionAssessment?.openContractCount:"UNAVAILABLE");
 set("entry",m.modules?.entryThesisMemory?.positions?.length?m.modules.entryThesisMemory.positions[0].state:"ENTRY_STRUCTURE_UNAVAILABLE");
 set("plan",m.modules?.positionIntelligence?.available?"SEE VERIFIED PLAN DETAILS":"UNAVAILABLE");
