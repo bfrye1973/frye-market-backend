@@ -7,7 +7,7 @@ const e25={participationArtifact:{schema:"engine25.participation@1",
  authority:{owner:"ENGINE25"},freshness:{state:"UNAVAILABLE",reason:"NO_VALID_LAST_EQUITY_OBSERVATION"},
  participation:{breadth:{score:29,label:"BREADTH_PARTICIPATION_WEAK"},
   stockVolume:{intraday:{coveragePct:44.52}},
-  sectorParticipation:{intraday:{bullish:3,neutral:5,bearish:3}}}}};
+  sectorParticipation:{intraday:{bullishCount:3,neutralCount:5,bearishCount:3}}}}};
 const e29={ok:true,data:{timestamp:"2026-10-26T12:40:00Z",
  overallState:"BROAD_DETERIORATION",tacticalState:"CAUTION",
  dataDegraded:true,missingConfirmations:["CREDIT"]}};
@@ -16,6 +16,7 @@ test("data present and qualification absent remain distinct",()=>{
  assert.equal(r.engine25.sourcePresent,true);
  assert.equal(r.engine25.liveConfirmationQualified,false);
  assert.equal(r.engine25.breadth.score,29);
+ assert.deepEqual(r.engine25.sectors,{bullish:3,neutral:5,bearish:3});
  assert.equal(r.engine25.volumeCoveragePct,44.52);
  assert.equal(r.engine29.sourcePresent,true);
  assert.equal(r.engine29.qualified,false);
