@@ -55,7 +55,7 @@ export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSoc
   };
   const schedule=()=>{
    if(stopped||session.retry)return;
-   const delay=Math.min(30000,1000*2**Math.min(session.count++,5));
+   const delay=statuses[source.symbol]==="SUBSCRIPTION_LIMIT"?300000:Math.min(30000,1000*2**Math.min(session.count++,5));
    session.retry=setTimeout(()=>{session.retry=null;connect()},delay);
    session.retry.unref?.();
   };
