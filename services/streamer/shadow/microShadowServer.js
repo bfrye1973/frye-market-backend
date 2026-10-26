@@ -223,11 +223,12 @@ if(enabled){
       const selectedRegime=ownerMarket.engine25??canonical.engine25;
       return {snapshot,...canonical,engine25:selectedRegime,engine29:ownerMarket.engine29};
     },
+   onAcceptedTrade:event=>{
+    if(event?.type==="trade"&&event?.source==="POLYGON_DIRECT_ES_TRADE"&&
+      event?.symbol==="ES"&&Number.isFinite(event.price)&&event.tradeTime)
+      alignmentObserver.ingest("ES",event.price,event.tradeTime);
+   },
    onObservation:m=>{latest=m;
-    const live=m?.livePriceObservation;
-    const price=live?.currentPrice;
-    const when=live?.lastTradeAt??live?.sourceTime??live?.observedAt??null;
-    if(live?.available===true&&Number.isFinite(price)&&when)alignmentObserver.ingest("ES",price,when);
     if(!reportedMarketSourceStates){
       reportedMarketSourceStates=true;
       const states=m?.modules?.marketConfirmation?.sources??{};
