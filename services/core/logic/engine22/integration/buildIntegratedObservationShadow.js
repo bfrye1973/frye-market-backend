@@ -38,7 +38,9 @@ export function buildEngine22IntegratedObservationShadow({
  const candidateEvidence=isRecord(completionCandidate)&&recognition.pivotEvidence?.available &&
    recognition.pivotEvidence.pivots.some(x=>x.sourceBarId===completionCandidate.sourceBarId &&
      x.side===completionCandidate.side &&
-     x.price===completionCandidate.price) &&
+     x.price===completionCandidate.price &&
+     x.sourceTimestamp===completionCandidate.sourceTimestamp &&
+     x.confirmationTimestamp===completionCandidate.evidenceConfirmedAt) &&
    completionCandidate.countId===countId ? completionCandidate : null;
  const completion=idReady && recognition.available ?
    evaluateEngine22CompletionWatch({
