@@ -29,7 +29,7 @@ export function validateEngine22HistoryRecord(record, { canonical = null } = {})
     errors.push("PARENT_DEGREE_MISMATCH");
   if (!hasText(record.modelVersion)) errors.push("MODEL_VERSION_REQUIRED");
   if (!hasText(record.sourceTimestamp)) errors.push("SOURCE_TIMESTAMP_REQUIRED");
-  else if (!Number.isFinite(Date.parse(record.sourceTimestamp)) || !/[zZ]|[+-]\\d\\d:\\d\\d$/.test(record.sourceTimestamp))
+  else if (!Number.isFinite(Date.parse(record.sourceTimestamp)) || !/(?:[zZ]|[+-]\d{2}:\d{2})$/.test(record.sourceTimestamp))
     errors.push("TIMESTAMP_MUST_BE_OFFSET_AWARE");
   if (!isObject(record.provenance)) errors.push("PROVENANCE_REQUIRED");
   const classification = classifyEngine22Provenance(record);
