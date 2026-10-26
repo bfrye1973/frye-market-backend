@@ -7,7 +7,7 @@ const ROOTS=Object.freeze([
  {symbol:"QQQ",url:"wss://socket.polygon.io/stocks",topic:"T.QQQ"},
  {symbol:"VIX",url:"wss://socket.polygon.io/indices",topic:"V.I:VIX"}
 ]);
-export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSocket,clock=()=>Date.now()}={}){
+export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSocket,clock=()=>Date.now(),onTick=null}={}){
  const records={QQQ:null,VIX:null},statuses={QQQ:"NOT_STARTED",VIX:"NOT_STARTED"};
  const reasons={QQQ:null,VIX:null};
  const sessions=[];
@@ -40,6 +40,7 @@ export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSoc
      const inspected=inspectDirectCrossMarketTick(m,clock());
      if(inspected.ok&&inspected.tick.symbol===source.symbol){
       records[source.symbol]=applyDirectCrossMarketTick(records[source.symbol],inspected.tick,clock());
+      if(typeof onTick==="function"){try{onTick(inspected.tick)}catch{ /* display observer must never interfere with feed */ }}
       reasons[source.symbol]=null;
      }
     }
