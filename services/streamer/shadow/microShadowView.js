@@ -74,6 +74,23 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Latest value change</span><span class="v" id="vixLiveMove">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Index observation time</span><span class="v" id="vixLiveTime">UNAVAILABLE</span></div></div>
 </div><p class="micro-note">Direct Polygon event observations; provider latency and connectivity are checked. VIX is a calculated index, not a traded stock. Live changes are diagnostic only and cannot authorize ES trades.</p></section>
+<section class="card full"><h2>Live QQQ / VIX — major price-zone watch</h2>
+<div class="compact-grid">
+<div><h2>QQQ — prior daily zones</h2>
+<div class="row"><span class="k">Current zone condition</span><span class="v" id="qqqZoneState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Nearest verified zone</span><span class="v" id="qqqZoneRange">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Distance to zone</span><span class="v" id="qqqZoneDistance">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Zone type</span><span class="v" id="qqqZoneType">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Observed crossings / touches</span><span class="v" id="qqqZoneEvents">UNAVAILABLE</span></div></div>
+<div><h2>VIX — prior daily zones</h2>
+<div class="row"><span class="k">Current zone condition</span><span class="v" id="vixZoneState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Nearest verified zone</span><span class="v" id="vixZoneRange">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Distance to zone</span><span class="v" id="vixZoneDistance">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Zone type</span><span class="v" id="vixZoneType">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Observed crossings / touches</span><span class="v" id="vixZoneEvents">UNAVAILABLE</span></div></div>
+</div>
+<p class="micro-note">Zones come from Engine 27’s existing completed daily QQQ / direct VIX publications. Live price may approach, touch or cross them. These observations never confirm support, resistance, an Elliott turn, or trade permission.</p>
+</section>
 <section class="card full"><h2>QQQ &amp; VIX — direct hourly market reactions</h2>
 <div class="compact-grid">
 <div><h2>QQQ · Nasdaq participation reference</h2>
@@ -143,6 +160,15 @@ for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
  set(prefix+"LiveState",live.state??"UNAVAILABLE");
  set(prefix+"LiveMove",live.available?live.movement:"UNAVAILABLE");
  set(prefix+"LiveTime",live.sourceTime??"UNAVAILABLE");
+}
+const zoneWatch=d.liveCrossMarketZones??{};
+for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
+ const z=zoneWatch[key]??{},near=z.nearest??null;
+ set(prefix+"ZoneState",z.available?z.state:(z.reasonCodes?.[0]??"UNAVAILABLE"));
+ set(prefix+"ZoneRange",near?(near.low.toFixed(2)+" – "+near.high.toFixed(2)):"UNAVAILABLE");
+ set(prefix+"ZoneDistance",near?near.distance.toFixed(2):"UNAVAILABLE");
+ set(prefix+"ZoneType",near?.type??"UNAVAILABLE");
+ set(prefix+"ZoneEvents",z.available?(z.observedEventsTotal??0):"UNAVAILABLE");
 }
 const xv=d.qqqVix??{};
 for(const [key,prefix] of [["qqq","qqq"],["vix","vix"]]){
