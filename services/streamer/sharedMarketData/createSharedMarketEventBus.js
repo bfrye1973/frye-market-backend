@@ -3,15 +3,21 @@
 const ALLOWED = new Map([["T.SPY",{"ev":"T","sym":"SPY"}],["T.QQQ",{"ev":"T","sym":"QQQ"}],["AM.SPY",{"ev":"AM","sym":"SPY"}],["AM.QQQ",{"ev":"AM","sym":"QQQ"}],["V.I:VIX",{"ev":"V","T":"I:VIX"}]]);
 export function createSharedMarketEventBus({maxListenersPerTopic=16}={}){
  const registry=new Map([...ALLOWED.keys()].map(k=>[k,new Set()]));
+ const allowedTopic=t=>ALLOWED.has(t)||/^(?:T|AM)\.[A-Z][A-Z0-9.]{0,9}$/.test(t);
  let sequence=0;
  function subscribe(topic,listener){
-  if(!registry.has(topic)||typeof listener!=="function")throw Error("UNSUPPORTED_TOPIC_OR_LISTENER");
+  if(!allowedTopic(topic)||typeof listener!=="function")throw Error("UNSUPPORTED_TOPIC_OR_LISTENER");
+  if(!registry.has(topic)){
+   if(registry.size>=64)throw Error("MAX_DISTINCT_TOPICS");
+   registry.set(topic,new Set());
+  }
   const set=registry.get(topic);if(set.size>=maxListenersPerTopic)throw Error("MAX_LISTENERS");
   set.add(listener);let active=true;
   return ()=>{if(active){active=false;set.delete(listener)}};
  }
  function publish(topic,event,source="POLYGON_DIRECT",receivedAt=Date.now()){
-  const expected=ALLOWED.get(topic);
+  const expected=ALLOWED.get(topic)??(/^(T|AM)\.([A-Z][A-Z0-9.]{0,9})$/.exec(topic)?
+    {ev:topic.split(".")[0],sym:topic.slice(topic.indexOf(".")+1)}:null);
   if(!expected||!event||typeof event!=="object"||
    event.ev!==expected.ev||
    (expected.sym&&event.sym!==expected.sym)||
