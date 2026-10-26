@@ -18,7 +18,19 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <section class="card"><h2>Live ES price</h2><div class="big" id="price">UNAVAILABLE</div><div class="row"><span class="k">Feed state</span><span class="v" id="feed">UNAVAILABLE</span></div><div class="row"><span class="k">Last ES trade</span><span class="v" id="last">—</span></div><div class="row"><span class="k">Resolved contract</span><span class="v" id="contract">—</span></div><div class="row"><span class="k">Provider trade events</span><span class="v" id="received">0</span></div><div class="row"><span class="k">Qualified trades</span><span class="v" id="qualified">0</span></div><div class="row"><span class="k">Source latency</span><span class="v" id="lag">UNAVAILABLE</span></div><div class="row"><span class="k">Feed issue</span><span class="v amber" id="issue">UNAVAILABLE</span></div></section>
 <section class="card"><h2>Engine 22 Micro wave</h2><div class="big" id="wave">UNAVAILABLE</div><div class="row"><span class="k">Owner confirmation</span><span class="v" id="confirm">UNAVAILABLE</span></div><div class="row"><span class="k">Next provisional Fib</span><span class="v amber" id="fib">UNAVAILABLE</span></div><div class="row"><span class="k">Touch vs confirmation</span><span class="v amber" id="touch">UNAVAILABLE</span></div></section>
 <section class="card"><h2>Neighboring degrees</h2><div class="row"><span class="k">Submicro</span><span class="v" id="left">UNAVAILABLE</span></div><div class="row"><span class="k">Subminute</span><span class="v" id="right">UNAVAILABLE</span></div><div class="row"><span class="k">Assessment</span><span class="v" id="neighbors">UNAVAILABLE</span></div></section>
-<section class="card"><h2>Market evidence</h2><div class="row"><span class="k">Engine 25 participation</span><span class="v" id="participation">UNAVAILABLE</span></div><div class="row"><span class="k">Equity scanner</span><span class="v" id="equity">UNAVAILABLE</span></div><div class="row"><span class="k">Engine 25</span><span class="v" id="e25">UNAVAILABLE</span></div><div class="row"><span class="k">Engine 29</span><span class="v" id="e29">UNAVAILABLE</span></div><div class="row"><span class="k">QQQ</span><span class="v" id="qqq">UNAVAILABLE</span></div><div class="row"><span class="k">VIX</span><span class="v" id="vix">UNAVAILABLE</span></div></section>
+<section class="card"><h2>Market evidence</h2>
+<div class="row"><span class="k">Engine 25 ES regime</span><span class="v" id="e25">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Participation source</span><span class="v" id="e25source">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Breadth evidence</span><span class="v" id="breadth">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Sector evidence</span><span class="v" id="sectors">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Intraday volume coverage</span><span class="v" id="coverage">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Live equity confirmation</span><span class="v amber" id="equity">NOT QUALIFIED</span></div>
+<div class="row"><span class="k">Participation reason</span><span class="v amber" id="e25reason">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Engine 29 tactical data</span><span class="v" id="e29context">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Engine 29 confirmation</span><span class="v amber" id="e29">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Engine 29 missing evidence</span><span class="v amber" id="e29missing">UNAVAILABLE</span></div>
+<div class="row"><span class="k">QQQ hourly reaction</span><span class="v" id="qqq">UNAVAILABLE</span></div>
+<div class="row"><span class="k">VIX hourly reaction</span><span class="v" id="vix">UNAVAILABLE</span></div></section>
 <section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN contracts</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
 <section class="card"><h2>Evidence quality</h2><div class="row"><span class="k">Snapshot state</span><span class="v" id="snapshot">UNAVAILABLE</span></div><div class="row"><span class="k">Historical calibration</span><span class="v">NOT CALIBRATED</span></div><div class="row"><span class="k">Execution permission</span><span class="v teal">DISABLED</span></div><div class="row"><span class="k">Last check</span><span class="v" id="updated">—</span></div></section>
 </div><p class="foot">A trade touching a Fibonacci reference is NOT an Elliott wave completion. Missing source data is shown as UNAVAILABLE. All displayed price observations are read-only.</p></main>
@@ -30,8 +42,18 @@ set("wave",d.owner?.activeWave&&d.owner?.direction?d.owner.activeWave+" "+d.owne
 set("confirm",d.owner?.confirmationStatus??"UNAVAILABLE");set("fib",o.nextProvisionalReference?.price??"UNAVAILABLE");
 set("touch",o.available?(o.provisionalTouches?.length?"PRICE TOUCH — NOT CONFIRMED":"NO NEW TOUCH"):"UNAVAILABLE");
 set("left",na.neighbors?.submicro?.direction??"UNAVAILABLE");set("right",na.neighbors?.subminute?.direction??"UNAVAILABLE");set("neighbors",na.state??"UNAVAILABLE");
-set("participation",d.participation?.state??"UNAVAILABLE");set("equity",d.participation?.liveConfirmationUsable?"LIVE CONFIRMATION ELIGIBLE":d.participation?.contextOnly?"CLOSED — CONTEXT ONLY":"NOT LIVE CONFIRMED");
-for(const [id,path] of [["e25","engine25"],["e29","engine29"],["qqq","qqq"],["vix","vix"]])set(id,mkt.sources?.[path]?.state??"UNAVAILABLE");
+const ev=d.marketEvidence??{},a=ev.engine25??{},b=ev.engine29??{};
+set("e25",mkt.sources?.engine25?.state??"UNAVAILABLE");
+set("e25source",a.sourcePresent?"DATA PRESENT":"SOURCE UNAVAILABLE");
+set("breadth",a.breadth?.label?(a.breadth.score===null?a.breadth.label:(a.breadth.score+" — "+a.breadth.label)):"UNAVAILABLE");
+const sectors=a.sectors??{};set("sectors",Number.isFinite(sectors.bullish)&&Number.isFinite(sectors.neutral)&&Number.isFinite(sectors.bearish)?(sectors.bullish+" bullish / "+sectors.neutral+" neutral / "+sectors.bearish+" bearish"):"UNAVAILABLE");
+set("coverage",Number.isFinite(a.volumeCoveragePct)?a.volumeCoveragePct.toFixed(2)+"%":"UNAVAILABLE");
+set("equity",a.liveConfirmationQualified?"QUALIFIED":a.sourcePresent?"NOT QUALIFIED":"SOURCE UNAVAILABLE");
+set("e25reason",a.participationReason??a.participationFreshness??"UNAVAILABLE");
+set("e29context",b.sourcePresent?(b.tacticalState??b.overallState??"DATA PRESENT"):"SOURCE UNAVAILABLE");
+set("e29",b.qualified?(mkt.sources?.engine29?.state??"QUALIFIED"):b.sourcePresent?(b.dataDegraded?"DEGRADED — NOT QUALIFIED":"NOT QUALIFIED"):"SOURCE UNAVAILABLE");
+set("e29missing",b.sourcePresent?(b.missingConfirmations?.length?b.missingConfirmations.join(", "):"NONE REPORTED"):"UNAVAILABLE");
+for(const [id,path] of [["qqq","qqq"],["vix","vix"]])set(id,mkt.sources?.[path]?.state??"UNAVAILABLE");
 set("positions",m.modules?.positionIntelligence?.available?m.positionAssessment?.openContractCount:"UNAVAILABLE");
 set("entry",m.modules?.entryThesisMemory?.positions?.length?m.modules.entryThesisMemory.positions[0].state:"ENTRY_STRUCTURE_UNAVAILABLE");
 set("plan",m.modules?.positionIntelligence?.available?"SEE VERIFIED PLAN DETAILS":"UNAVAILABLE");
