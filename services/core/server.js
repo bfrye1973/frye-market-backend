@@ -1,3 +1,4 @@
+import engine27MicroAlignmentHistoryRouter from "./routes/engine27MicroAlignmentHistory.js";
 // services/core/server.js
 // Backend-1 (Core API) — Express entry (ESM)
 
@@ -208,6 +209,7 @@ app.use("/api/v1", engine25RefreshRouter);
 app.use("/api/v1", engine25ContextRouter);
 app.use("/api/v1", engine25IntradayMacroRouter);
 app.use("/api/v1", engine29CrossMarketStressRouter);
+app.use("/api/v1", engine27MicroAlignmentHistoryRouter);
 app.use("/api/v1", engine28APipelineDoctorRouter);
 app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1", engine26ManualHardSignalRouter);
