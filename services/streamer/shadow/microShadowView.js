@@ -61,6 +61,19 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
 <div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
 </details></section>
+<section class="card full"><h2>QQQ &amp; VIX — direct hourly market reactions</h2>
+<div class="compact-grid">
+<div><h2>QQQ · Nasdaq participation reference</h2>
+<div class="row"><span class="k">Reaction status</span><span class="v" id="qqqDirect">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Evidence qualification</span><span class="v amber" id="qqqQualification">NOT CURRENT</span></div>
+<div class="row"><span class="k">Latest completed 1H close</span><span class="v" id="qqqClose">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Confirmed / candidates</span><span class="v" id="qqqCounts">0 / 0</span></div></div>
+<div><h2>VIX · Direct volatility index</h2>
+<div class="row"><span class="k">Reaction status</span><span class="v" id="vixDirect">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Evidence qualification</span><span class="v amber" id="vixQualification">NOT CURRENT</span></div>
+<div class="row"><span class="k">Latest completed 1H close</span><span class="v" id="vixClose">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Confirmed / candidates</span><span class="v" id="vixCounts">0 / 0</span></div></div>
+</div><p class="micro-note">Completed hourly observations only. Candidate reactions are not confirmed. Stale or missing candles do not provide live ES trade permission.</p></section>
 <section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN MES units (REAL)</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Position direction</span><span class="v" id="positionDirection">UNAVAILABLE</span></div><div class="row"><span class="k">Position source</span><span class="v" id="positionSource">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
 <section class="card"><h2>Evidence quality</h2><div class="row"><span class="k">Snapshot state</span><span class="v" id="snapshot">UNAVAILABLE</span></div><div class="row"><span class="k">Historical calibration</span><span class="v">NOT CALIBRATED</span></div><div class="row"><span class="k">Execution permission</span><span class="v teal">DISABLED</span></div><div class="row"><span class="k">Last check</span><span class="v" id="updated">—</span></div></section>
 </div><p class="foot">A trade touching a Fibonacci reference is NOT an Elliott wave completion. Missing source data is shown as UNAVAILABLE. All displayed price observations are read-only.</p></main>
@@ -110,6 +123,14 @@ for(const row of n29.rows??[]){
  body.appendChild(tr);
 }
 const a10=d.engine10MicroAccount??{};
+const xv=d.qqqVix??{};
+for(const [key,prefix] of [["qqq","qqq"],["vix","vix"]]){
+ const z=xv[key]??{};
+ set(prefix+"Direct",z.state??"UNAVAILABLE");
+ set(prefix+"Qualification",z.qualification??"NOT CURRENT");
+ set(prefix+"Close",z.lastHourlyCandleCloseAt??"UNAVAILABLE");
+ set(prefix+"Counts",(z.confirmedCount??0)+" / "+(z.candidateCount??0));
+}
 set("positions",a10.available?a10.openContracts:"UNAVAILABLE");
 set("positionDirection",a10.available?a10.direction:"UNAVAILABLE");
 set("positionSource",a10.available?"ENGINE 10 / SNAPSHOT AGGREGATE":"UNAVAILABLE");
