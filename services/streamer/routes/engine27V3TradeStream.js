@@ -12,7 +12,7 @@ const blocked=new Set();
 const MAX_WRITABLE_BYTES=65536;
 const MAX_SUBSCRIBERS=8;
 let socket=null,contract=null,starting=false,retry=null,retryAttempt=0,authenticated=false;
-const diagnostics={receivedTrades:0,acceptedTrades:0,lastTradeLagMs:null,lastProviderEventAt:null,lastNormalizedAt:null,lastRejectedReason:null,lastRejectedShape:null,rejectionCounts:{},subscriptionStatus:"NOT_STARTED"};
+const diagnostics={receivedTrades:0,acceptedTrades:0,lastTradeLagMs:null,lastProviderEventAt:null,lastNormalizedAt:null,lastRejectedReason:null,lastRejectedShape:null,shapeAuditReported:false,rejectionCounts:{},subscriptionStatus:"NOT_STARTED"};
 export function getEngine27V3TradeDiagnostics(){return {...diagnostics,contract:contract??null,subscriberCount:subscribers.size,authenticated};}
 const send=(res,x)=>{
  if(res.destroyed||res.writableEnded)return false;
@@ -76,6 +76,10 @@ async function startSharedFeed(){
     }else{
       diagnostics.lastRejectedReason=inspected.reasonCode;
       diagnostics.lastRejectedShape=inspected.shape;
+      if(inspected.reasonCode==="INVALID_FUTURES_TRADE_PRICE"&&!diagnostics.shapeAuditReported){
+        diagnostics.shapeAuditReported=true;
+        console.info("[engine27-v3-source-shape] "+JSON.stringify({reasonCode:inspected.reasonCode,shape:inspected.shape}));
+      }
       const reason=inspected.reasonCode;
       diagnostics.rejectionCounts[reason]=(diagnostics.rejectionCounts[reason]??0)+1;
     }
