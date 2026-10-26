@@ -61,11 +61,13 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
 <div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
 </details></section>
-<section class="card full" id="crossMarketAlertCard"><h2>Engine 27 Micro — ES / QQQ / VIX directional alignment</h2>
+<section class="card full" id="crossMarketAlertCard"><h2>Engine 27 Micro — Completed 5-minute ES / QQQ / VIX alignment</h2>
 <div class="big" id="alignState">AWAITING VERIFIED MARKET MOVEMENT</div>
-<div class="row"><span class="k">Market-environment alert</span><span class="v amber" id="alignAlert">WAITING</span></div>
+<div class="row"><span class="k">5-minute confirmation</span><span class="v amber" id="alignAlert">WAITING</span></div>
+<div class="row"><span class="k">1-minute early warning (not confirmed)</span><span class="v" id="alignEarly">WAITING</span></div>
+<div class="row"><span class="k">Last completed 5-minute candle</span><span class="v" id="alignClose">UNAVAILABLE</span></div>
 <div class="compact-grid">
-<div><h2>Live move agreement</h2>
+<div><h2>Confirmed 5-minute close direction</h2>
 <div class="row"><span class="k">ES futures</span><span class="v" id="alignEs">OBSERVING</span></div>
 <div class="row"><span class="k">QQQ</span><span class="v" id="alignQqq">OBSERVING</span></div>
 <div class="row"><span class="k">VIX (inverse)</span><span class="v" id="alignVix">OBSERVING</span></div></div>
@@ -75,7 +77,13 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Engine 29 confirmation</span><span class="v" id="align29">NOT QUALIFIED</span></div></div>
 </div>
 <div class="row"><span class="k">Alert explanation / remaining restrictions</span><span class="v amber" id="alignReasons">UNAVAILABLE</span></div>
-<p class="micro-note">Alert is informational only. Requires rising ES + rising QQQ + falling direct VIX over measured live intervals; never infers Micro wave reversal or authorizes entry. Market alignment and a qualified Micro LONG are separate requirements. Visible while this dashboard is open.</p>
+<p class="micro-note">Alert is informational only. Confirms rising ES + rising QQQ + falling direct VIX from two consecutive completed 5-minute source-price closes; 1-minute completed price closes provide earlier, non-confirmed direction. never infers Micro wave reversal or authorizes entry. Market alignment and a qualified Micro LONG are separate requirements. Visible while this dashboard is open.</p>
+</section>
+<section class="card full"><h2>Micro alignment history — completed 5-minute observations</h2>
+<div class="row"><span class="k">Durable history archive</span><span class="v" id="alignArchiveState">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Events waiting for storage</span><span class="v" id="alignArchiveQueue">UNAVAILABLE</span></div>
+<div class="table-scroll"><table class="internals"><thead><tr><th>5-minute close</th><th>ES</th><th>QQQ</th><th>VIX</th><th>Alignment</th><th>Wave</th></tr></thead><tbody id="alignHistoryRows"></tbody></table></div>
+<p class="micro-note">Archive begins when the new observation pipeline is active. Historical alerts before activation are not reconstructed or backfilled from charts. Read-only events are separate from Engine10 Journal.</p>
 </section>
 <section class="card full"><h2>Live QQQ / VIX price action — independent of hourly candles</h2>
 <div class="compact-grid">
@@ -178,7 +186,20 @@ set("alignVix",ae.VIX?.state??"UNAVAILABLE");
 set("alignWave",align.microDirection??"UNAVAILABLE");
 set("align25",align.qualifications?.engine25Qualified?"QUALIFIED":"NOT QUALIFIED");
 set("align29",align.qualifications?.engine29Qualified?"QUALIFIED":"NOT QUALIFIED");
-set("alignAlert",align.marketAligned?"BULLISH CROSS-MARKET ENVIRONMENT":"NO TRIPLE ALIGNMENT");
+set("alignAlert",align.marketAligned?"CONFIRMED BULLISH MARKET ENVIRONMENT":"NOT CONFIRMED");
+set("alignEarly",align.earlyWarning?"EARLY BULLISH THREE-MARKET AGREEMENT":"NOT ESTABLISHED");
+set("alignClose",align.methodology?.closedAt??"UNAVAILABLE");
+const arh=d.microCrossMarketHistory??{};
+set("alignArchiveState",arh.persistenceVerified?"DURABLE — BACKEND 1 DISK":arh.state??"UNAVAILABLE");
+set("alignArchiveQueue",arh.queued??0);
+const tr=$("alignHistoryRows");tr.replaceChildren();
+for(const e of (arh.events?.length?arh.events:align.recentHistory??[]).slice(0,20)){
+ const trRow=document.createElement("tr");
+ for(const v of [e.closedAt,e.ES?.state,e.QQQ?.state,e.VIX?.state,e.marketAligned?"BULLISH":"NO TRIO",e.microDirection]){
+  const td=document.createElement("td");td.textContent=String(v??"UNAVAILABLE");trRow.appendChild(td);
+ }
+ tr.appendChild(trRow);
+}
 set("alignReasons",align.reasons?.length?align.reasons.join(" • "):"NONE");
 $("crossMarketAlertCard").style.borderColor=align.marketAligned?"#dcb552":"#243951";
 const a10=d.engine10MicroAccount??{};
