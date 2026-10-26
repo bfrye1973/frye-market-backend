@@ -5,6 +5,14 @@ const fresh = (when, now, maxAge) => {
   const t = Date.parse(when);
   return Number.isFinite(t) && t <= now && (now-t) <= maxAge;
 };
+// The canonical 1h producer publishes the OPEN time of its last COMPLETED
+// candle as lastCompletedAt. Convert to true close for freshness without
+// ever accepting an unfinished candle or extending the 90m qualification window.
+const completedHourlyClose = (read,now) => {
+ const open=Date.parse(read?.lastCompletedAt??"");
+ const close=open+3600000;
+ return Number.isFinite(open)&&close<=now?close:null;
+};
 const unavailable = (source,reasonCodes) => ({source,availability:"UNAVAILABLE",state:"UNAVAILABLE",reasonCodes});
 const report = (source,record,state,asOf,extra={}) => ({
   source,availability:"CURRENT",state,asOf,reasonCodes:[],...extra
@@ -37,15 +45,17 @@ function evaluateCrossMarket(key,levels,reactions,now){
   if(read?.sourceSymbol!==symbol || read?.timeframe!=="1h" || !Array.isArray(read.events))
     return {source:"ENGINE27_"+key+"_POLYGON_DIRECT_1H",availability:"PARTIAL",state:"REACTIONS_UNAVAILABLE",
       levelCount:level.levels.length,reasonCodes:["COMPLETED_HOURLY_REACTIONS_UNAVAILABLE"]};
-  if(!fresh(read.lastCompletedAt,now,90*60000))
+  const lastClose=completedHourlyClose(read,now);
+  if(lastClose===null||now-lastClose>90*60000)
     return {source:"ENGINE27_"+key+"_POLYGON_DIRECT_1H",availability:"PARTIAL",state:"REACTIONS_STALE",
-      levelCount:level.levels.length,reasonCodes:["REACTION_CANDLE_STALE"]};
+      levelCount:level.levels.length,asOf:read.lastCompletedAt??null,completedCloseAt:lastClose!==null?new Date(lastClose).toISOString():null,
+    reasonCodes:["REACTION_CANDLE_STALE"]};
   const permitted=read.events.filter(e=>e?.source==="POLYGON_DIRECT_1h" && typeof e?.time==="string" &&
-    fresh(e.time,now,90*60000) && [...QUALIFIED_REACTIONS,...CANDIDATE_REACTIONS].includes(e.event));
+    Number.isFinite(Date.parse(e.time)) && Date.parse(e.time)+3600000<=now && (now-Date.parse(e.time)-3600000)<=90*60000 && [...QUALIFIED_REACTIONS,...CANDIDATE_REACTIONS].includes(e.event));
   const confirmed=permitted.filter(e=>QUALIFIED_REACTIONS.includes(e.event));
   const candidates=permitted.filter(e=>CANDIDATE_REACTIONS.includes(e.event));
   return {source:"ENGINE27_"+key+"_POLYGON_DIRECT_1H",availability:"CURRENT",state:confirmed.length?"CONFIRMED_REACTION_OBSERVED":candidates.length?"CANDIDATE_REACTION_ONLY":"NO_QUALIFIED_REACTION",
-    levelCount:level.levels.length,asOf:read.lastCompletedAt,confirmedEvents:confirmed.map(e=>({event:e.event,time:e.time,id:e.id??null})),
+    levelCount:level.levels.length,asOf:read.lastCompletedAt,completedCloseAt:new Date(lastClose).toISOString(),confirmedEvents:confirmed.map(e=>({event:e.event,time:e.time,id:e.id??null})),
     candidateEvents:candidates.map(e=>({event:e.event,time:e.time,id:e.id??null})),
     reasonCodes:confirmed.length?[]:candidates.length?["CANDIDATE_NOT_CONFIRMED"]:["NO_QUALIFIED_REACTION"]};
 }
