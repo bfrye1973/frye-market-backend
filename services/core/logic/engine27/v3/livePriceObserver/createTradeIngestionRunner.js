@@ -4,7 +4,7 @@ import {createTradeSseParser} from "./parseTradeSse.js";
 import {createMicroTradeConsumer} from "./createMicroTradeConsumer.js";
 let activeRunner=null;
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-export function createTradeIngestionRunner({url,token,readInputs,onObservation,fetchStream=fetch,clock=()=>new Date().toISOString()}={}){
+export function createTradeIngestionRunner({url,token,readInputs,onObservation,onAcceptedTrade=null,fetchStream=fetch,clock=()=>new Date().toISOString()}={}){
  if(typeof url!=="string"||!url.startsWith("https://")||!url.includes("/stream/futures/trades-v3")||
  typeof token!=="string"||!token||typeof fetchStream!=="function")throw new TypeError("AUTHORIZED_READ_ONLY_TRADE_SOURCE_REQUIRED");
  const consumer=createMicroTradeConsumer({readInputs,onObservation});
@@ -33,7 +33,10 @@ export function createTradeIngestionRunner({url,token,readInputs,onObservation,f
        }else if(event?.type==="status"&&event.ok===false){
         connected=false;consumer.disconnect(event.reasonCode??"SOURCE_DISCONNECTED");
        }else if(connected&&event?.type==="trade"){
-        consumer.ingest(event,clock());
+        const accepted=consumer.ingest(event,clock());
+        if(accepted.accepted===true&&typeof onAcceptedTrade==="function"){
+         try{onAcceptedTrade(event)}catch{/* diagnostics cannot interrupt ES SSE */}
+        }
        }
       }
      }
