@@ -2,7 +2,7 @@
 // Feature branch only. No journal/order writes and no source secrets in output.
 import express from "express";
 import WebSocket from "ws";
-import {normalizeEngine27V3EsTrade} from "./engine27V3TradeContract.js";
+import {inspectEngine27V3EsTrade} from "./engine27V3TradeContract.js";
 import {resolveFuturesContract} from "./futuresStream.js";
 const router=express.Router();
 const wsUrl=process.env.POLY_FUTURES_WS_URL||process.env.POLYGON_FUTURES_WS_URL||"wss://socket.polygon.io/futures";
@@ -12,7 +12,7 @@ const blocked=new Set();
 const MAX_WRITABLE_BYTES=65536;
 const MAX_SUBSCRIBERS=8;
 let socket=null,contract=null,starting=false,retry=null,retryAttempt=0,authenticated=false;
-const diagnostics={receivedTrades:0,acceptedTrades:0,lastTradeLagMs:null,lastProviderEventAt:null,lastNormalizedAt:null,lastRejectedReason:null,subscriptionStatus:"NOT_STARTED"};
+const diagnostics={receivedTrades:0,acceptedTrades:0,lastTradeLagMs:null,lastProviderEventAt:null,lastNormalizedAt:null,lastRejectedReason:null,lastRejectedShape:null,rejectionCounts:{},subscriptionStatus:"NOT_STARTED"};
 export function getEngine27V3TradeDiagnostics(){return {...diagnostics,contract:contract??null,subscriberCount:subscribers.size,authenticated};}
 const send=(res,x)=>{
  if(res.destroyed||res.writableEnded)return false;
@@ -66,11 +66,19 @@ async function startSharedFeed(){
     if(typeof m.t==="number"&&Number.isFinite(m.t)){
       diagnostics.lastTradeLagMs=Math.round(Date.parse(observedAt)-m.t);
     }else diagnostics.lastTradeLagMs=null;
-    const event=normalizeEngine27V3EsTrade(m,{resolvedSymbol:contract,observedAt});
-    if(event){diagnostics.acceptedTrades++;diagnostics.lastNormalizedAt=observedAt;diagnostics.lastRejectedReason=null;fanout(event)}
-    else diagnostics.lastRejectedReason=m.sym!==contract?"CONTRACT_MISMATCH":!Number.isSafeInteger(m.q)?"SEQUENCE_UNAVAILABLE":
-      (Number.isFinite(diagnostics.lastTradeLagMs)&&diagnostics.lastTradeLagMs>30000?"PROVIDER_TRADE_DELAY_GT_30S":
-      "TRADE_SCHEMA_OR_TIMESTAMP_REJECTED");
+    const inspected=inspectEngine27V3EsTrade(m,{resolvedSymbol:contract,observedAt});
+    if(inspected.ok){
+      diagnostics.acceptedTrades++;
+      diagnostics.lastNormalizedAt=observedAt;
+      diagnostics.lastRejectedReason=null;
+      diagnostics.lastRejectedShape=null;
+      fanout(inspected.trade);
+    }else{
+      diagnostics.lastRejectedReason=inspected.reasonCode;
+      diagnostics.lastRejectedShape=inspected.shape;
+      const reason=inspected.reasonCode;
+      diagnostics.rejectionCounts[reason]=(diagnostics.rejectionCounts[reason]??0)+1;
+    }
    }
   });
   ws.on("error",()=>fanout({ok:false,type:"status",reasonCode:"PROVIDER_STREAM_ERROR"}));
