@@ -1,0 +1,18 @@
+name: Engine22E Count Lineage Replay
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/history/**"
+      - "services/core/tests/engine22CountLineage.test.js"
+      - ".github/workflows/engine22e-count-lineage.yml"
+permissions:
+  contents: read
+jobs:
+  lineage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22CountLineage.test.js services/core/tests/engine22HistoryTransactionAdapter.test.js
