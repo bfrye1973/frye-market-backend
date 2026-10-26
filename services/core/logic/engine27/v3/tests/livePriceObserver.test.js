@@ -1,0 +1,23 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {observeLiveEs as run} from "../livePriceObserver/observeLiveEs.js";
+const owner={version:"engine22.microCDownOwnerWatch.v1",activeWave:"C",direction:"DOWN",
+levels:[{key:"e236",price:7761.25,provisional:true},{key:"e382",price:7729.25,provisional:true}]};
+const at="2026-10-25T23:00:57.000Z";
+const event={type:"trade",source:"POLYGON_DIRECT_ES_TRADE",symbol:"ES",resolvedSymbol:"ESZ6",price:7762,size:2,tradeTime:"2026-10-25T23:00:56.050Z"};
+const base={owner,event,observedAt:at,expectedContract:"ESZ6"};
+test("accepts source-qualified ES trade with no bars",()=>{const x=run(base);assert.equal(x.currentPrice,7762);assert.equal(x.state,"LIVE_TRADE_OBSERVED");assert.equal(x.confirmedFibObjective,null)});
+test("requires actual trade event, rejects aggregated 10m bar",()=>assert.equal(run({...base,event:{...event,type:"bar",bar:{time:1792969200}}}).state,"UNAVAILABLE"));
+test("real-stream price near Fib does not pretend touch",()=>{const x=run({...base,event:{...event,price:7740}});assert.equal(x.provisionalTouches.length,0);assert.equal(x.nextProvisionalReference.key,"e382")});
+test("trade exactly at owner level is provisional touch",()=>{const x=run({...base,event:{...event,price:7761.25}});assert.equal(x.provisionalTouches[0].evidenceClass,"TRADE_AT_LEVEL");assert.equal(x.confirmedWaveCompletion,false)});
+test("two consecutive trades crossing owner level record price observation",()=>{let prev=run(base);let next=run({...base,previous:prev,event:{...event,price:7760,tradeTime:"2026-10-25T23:00:56.100Z"}});assert.equal(next.provisionalTouches[0].evidenceClass,"BETWEEN_CONSECUTIVE_TRADES")});
+test("no wave confirmation or execution from trade price",()=>{const x=run(base);assert.equal(x.noExecution,true);assert.equal(x.confirmedWaveCompletion,false)});
+test("wrong contract is unavailable",()=>assert.equal(run({...base,event:{...event,resolvedSymbol:"ESH7"}}).state,"UNAVAILABLE"));
+test("no valid resolved ES contract fails closed",()=>assert.equal(run({...base,expectedContract:"ES"}).state,"UNAVAILABLE"));
+test("no timestamp fails closed",()=>assert.equal(run({...base,event:{...event,tradeTime:null}}).state,"UNAVAILABLE"));
+test("stale trades fail closed",()=>assert.equal(run({...base,observedAt:"2026-10-25T23:03:00Z"}).state,"UNAVAILABLE"));
+test("future trades fail closed",()=>assert.equal(run({...base,event:{...event,tradeTime:"2026-10-25T23:01:00Z"}}).state,"UNAVAILABLE"));
+test("contract rollover resets",()=>{const prev=run(base);assert.equal(run({...base,previous:prev,expectedContract:"ESH7",event:{...event,resolvedSymbol:"ESH7"}}).reasonCodes[0],"ES_CONTRACT_ROLLOVER_REQUIRES_RESET")});
+test("out of order trade fails",()=>{const prev=run(base);assert.equal(run({...base,previous:prev,event:{...event,tradeTime:"2026-10-25T23:00:55Z"}}).reasonCodes[0],"OUT_OF_ORDER_ES_TRADE")});
+test("missing owner fails closed",()=>assert.equal(run({...base,owner:null}).state,"UNAVAILABLE"));
+test("no input mutation",()=>{const before=structuredClone(event);run(base);assert.deepEqual(event,before)});

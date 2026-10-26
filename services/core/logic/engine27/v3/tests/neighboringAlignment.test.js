@@ -1,0 +1,15 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {evaluateNeighboringAlignment as run} from '../neighboringAlignment/evaluateNeighboringAlignment.js';
+const micro={version:'engine22.microCDownOwnerWatch.v1',direction:'DOWN',activeWave:'C',parentDegree:'subminute',parentWave:'C'};
+const submicro={version:'engine22.submicroCDownOwnerWatch.v1',direction:'DOWN',activeWave:'C',parentDegree:'micro',parentWave:'C'};
+const subminute={version:'engine22.subminuteCurrentCDownReference.v1',direction:'DOWN',activeWave:'C',parentDegree:'minute',parentWave:'W2'};
+const snap=(a=micro,b=submicro,c=subminute)=>({symbol:'ES',strategies:{'intraday_scalp@10m':{engine22WaveStrategy:{currentWavelength:{degrees:{micro:{ownerMicroCDown:a},submicro:{ownerSubmicroCDown:b},subminute:{ownerCurrentCDown:c}}}}}}});
+test('nested owner models are structurally compatible',()=>assert.equal(run({snapshot:snap()}).state,'STRUCTURALLY_COMPATIBLE'));
+test('lower corrective opposite direction is not broken thesis',()=>{let x=run({snapshot:snap(micro,{...submicro,direction:'UP'})});assert.equal(x.state,'CORRECTIVE_MIXED_DIRECTION');assert.equal(x.structuralConflictConfirmed,false)});
+test('higher neighboring correction opposite direction is not automatic structural conflict',()=>assert.equal(run({snapshot:snap(micro,submicro,{...subminute,direction:'UP'})}).state,'CORRECTIVE_MIXED_DIRECTION'));
+test('parent identity mismatch is reported without falsely confirming invalidation',()=>{let x=run({snapshot:snap({...micro,parentWave:'W3'})});assert.equal(x.state,'PARENT_IDENTITY_CONFLICT');assert.equal(x.structuralConflictConfirmed,false)});
+test('missing Submicro is incomplete not neutral',()=>assert.equal(run({snapshot:snap(micro,null)}).state,'NEIGHBOR_EVIDENCE_INCOMPLETE'));
+test('missing Subminute is incomplete not neutral',()=>assert.equal(run({snapshot:snap(micro,submicro,null)}).state,'NEIGHBOR_EVIDENCE_INCOMPLETE'));
+test('incorrect model version is unavailable',()=>assert.equal(run({snapshot:snap({...micro,version:'old'})}).state,'UNAVAILABLE'));
+test('ES identity mismatch is unavailable',()=>assert.equal(run({snapshot:{...snap(),symbol:'SPY'}}).state,'UNAVAILABLE'));
+test('module remains read only',()=>{let x=run({snapshot:snap()});assert.equal(x.noExecution,true);assert.equal(x.noPermissionCreated,true)});
