@@ -49,6 +49,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
   owner:owner?{activeWave:owner.activeWave,direction:owner.direction,confirmationStatus:owner.confirmationStatus,stage:owner.stage}:null,
   snapshotStatus:snapshot&&snapshotAt&&Date.now()-Date.parse(snapshotAt)<60000?"FRESH":"UNAVAILABLE",
   participation:{state:ownerMarket.participationState.state,contextOnly:ownerMarket.participationState.contextOnly,liveConfirmationUsable:ownerMarket.participationState.liveConfirmationUsable,reason:ownerMarket.participationState.reason??null},
+  ownerSourceReasons:ownerMarket.reasonCodes.slice(0,8),
   micro:m?{modules:{
     marketConfirmation:{sources:Object.fromEntries(["engine25","engine29","qqq","vix"].map(k=>[k,{state:m.modules?.marketConfirmation?.sources?.[k]?.state??"UNAVAILABLE"}]))},
     neighboringAlignment:{state:m.modules?.neighboringAlignment?.state,neighbors:{
@@ -130,8 +131,13 @@ if(enabled){
   retryRunner=createTradeIngestionRunner({
    url:TRADE_URL,
    token:READ_TOKEN,
-   readInputs:()=>({snapshot,...assembleSnapshotMarketSources(snapshot),
-      engine25:ownerMarket.engine25,engine29:ownerMarket.engine29}),
+   readInputs:()=>{
+      const canonical=assembleSnapshotMarketSources(snapshot);
+      // ES REGIME may be independently published in the canonical ES snapshot.
+      // Never confuse that context with E25 scanner participation confirmation.
+      const selectedRegime=ownerMarket.engine25??canonical.engine25;
+      return {snapshot,...canonical,engine25:selectedRegime,engine29:ownerMarket.engine29};
+    },
    onObservation:m=>{latest=m;
     if(!reportedMarketSourceStates){
       reportedMarketSourceStates=true;
