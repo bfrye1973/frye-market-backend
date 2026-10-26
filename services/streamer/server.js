@@ -2,6 +2,7 @@
 import express from "express";
 import streamRouter from "./routes/stream.js";
 import futuresRouter from "./routes/futuresStream.js";
+import sharedMarketRoutes from "./sharedMarketData/sharedMarketRoutes.js";
 import engine27V3TradeRouter from "./routes/engine27V3TradeStream.js";
 
 
@@ -63,6 +64,7 @@ app.get("/healthz", (_req, res) => {
    Stream routes
 -------------------------------------------------- */
 app.use("/stream", streamRouter);
+app.use("/stream/shared", sharedMarketRoutes);
 
 /* -------------------------------------------------
    Futures routes
