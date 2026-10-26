@@ -76,9 +76,18 @@ app.get("/shadow/state",auth,(_req,res)=>{
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
   liveCrossMarket:crossObserver.status(),
-  liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>[key,{
-   ...projectLiveCrossMarketZonesForDisplay(zonesState[key]),observedEventsTotal:zonesEventCount[key]
-  }])),
+  liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>{
+   const feedStatus=crossObserver.status()[key];
+   const safe=feedStatus?.available===true;
+   return [key,safe?{
+    ...projectLiveCrossMarketZonesForDisplay(zonesState[key]),
+    observedEventsTotal:zonesEventCount[key]
+   }:{
+    available:false,state:feedStatus?.state??"SOURCE_UNAVAILABLE",
+    reasonCodes:[feedStatus?.reason??"LIVE_SOURCE_NOT_QUALIFIED"],
+    nearest:null,events:[],observedEventsTotal:null,noExecution:true
+   }];
+  })),
   engine10MicroAccount:projectSnapshotMicroAccount(snapshot),
   qqqVix:projectQqqVixStatus(m?.modules?.marketConfirmation, snapshot?.engine27Strategies?.engine27CrossMarketLevels,snapshot?.engine27Strategies?.engine27LiveCrossMarketReactions),
   micro:m?{modules:{
