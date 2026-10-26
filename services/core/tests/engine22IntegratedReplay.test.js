@@ -86,3 +86,19 @@ test("the replay does not mutate input bars, canonical model or working count",(
   replay(args);
   assert.deepEqual(args,before);
 });
+
+
+test("simulated C-down continuation touching target stays WATCH, not completion candidate",()=>{
+  const declining=bars.map((bar,i)=>i<4?bar:{
+    ...bar,
+    open:7649-(i-4)*1.5,
+    high:7650-(i-4)*1.5,
+    low:7647.5-(i-4)*1.5,
+    close:7648-(i-4)*1.5,
+  });
+  const result=replay({...args,bars:declining});
+  assert.equal(result.available,true,JSON.stringify(result.reasonCodes));
+  assert.equal(result.finalStatus,"TARGET_REACHED_WATCH");
+  assert.equal(result.events.some(e=>e.status==="COMPLETION_CANDIDATE"),false);
+  assert.equal(result.countTransitionAuthorized,false);
+});
