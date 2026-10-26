@@ -158,7 +158,7 @@ const a10=d.engine10MicroAccount??{};
 const cm=d.liveCrossMarket??{};
 for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
  const live=cm[key]??{};
- set(prefix+"LivePrice",live.available&&Number.isFinite(live.price)?live.price.toFixed(2):"—");
+ set(prefix+"LivePrice",live.available&&Number.isFinite(live.price)?live.price.toFixed(2):(key==="VIX"&&Number.isFinite(live.lastObservedPrice)?"LAST "+live.lastObservedPrice.toFixed(2):"—"));
  set(prefix+"LiveState",key==="VIX"?(live.connectionState??live.state??"UNAVAILABLE"):(live.state??"UNAVAILABLE"));
  set(prefix+"LiveMove",live.available?live.movement:"UNAVAILABLE");
  if(key==="VIX"){
