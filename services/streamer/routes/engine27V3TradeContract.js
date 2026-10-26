@@ -9,7 +9,12 @@ export function inspectEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={})
  if(!/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(resolvedSymbol??""))return reject("ES_CONTRACT_UNVERIFIED");
  if(message?.ev!=="T")return reject("NOT_FUTURES_TRADE");
  if(message?.sym!==resolvedSymbol)return reject("CONTRACT_MISMATCH");
- if(!finite(message.p)||message.p<=0)return reject("INVALID_FUTURES_TRADE_PRICE");
+ // Observed on live staging (2026-10-26): Polygon T.p arrives as a numeric string.
+ // Match existing Backend2 getTradePrice numeric-coercion semantics, but accept
+ // ONLY a strict unsigned decimal, never symbols, exponentials or unit guessing.
+ const p=message.p;
+ const price=finite(p)?p:(typeof p==="string"&&/^[0-9]+(?:\\.[0-9]+)?$/.test(p.trim())?Number(p.trim()):NaN);
+ if(!finite(price)||price<=0)return reject("INVALID_FUTURES_TRADE_PRICE");
  if(!Number.isSafeInteger(message.s)||message.s<=0)return reject("INVALID_FUTURES_TRADE_SIZE");
  if(!Number.isSafeInteger(message.t)||message.t<1e12||message.t>=1e13)return reject("INVALID_FUTURES_TRADE_TIMESTAMP_MS");
  if(!Number.isSafeInteger(message.q)||message.q<0)return reject("INVALID_FUTURES_TRADE_SEQUENCE");
@@ -20,7 +25,7 @@ export function inspectEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={})
  if(lagMs>30000)return reject("DELAYED_FUTURES_TRADE_GT_30S");
  return {ok:true,reasonCode:null,shape,lagMs,
   trade:{ok:true,type:"trade",source:SOURCE,symbol:"ES",resolvedSymbol,
-   price:message.p,size:message.s,tradeTime:new Date(message.t).toISOString(),
+   price,size:message.s,tradeTime:new Date(message.t).toISOString(),
    eventId:String(message.q),observedAt,readOnly:true}};
 }
 export function normalizeEngine27V3EsTrade(message,params={}){
