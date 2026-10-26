@@ -7,6 +7,7 @@ import crypto from "node:crypto";
 import {microShadowHtml} from "./microShadowView.js";
 import tradeRouter,{getEngine27V3TradeDiagnostics} from "../routes/engine27V3TradeStream.js";
 import {createTradeIngestionRunner} from "../../core/logic/engine27/v3/livePriceObserver/createTradeIngestionRunner.js";
+import {assembleSnapshotMarketSources} from "../../core/logic/engine27/v3/marketConfirmation/assembleSnapshotMarketSources.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -76,7 +77,7 @@ if(enabled){
   retryRunner=createTradeIngestionRunner({
    url:TRADE_URL,
    token:READ_TOKEN,
-   readInputs:()=>({snapshot}),
+   readInputs:()=>({snapshot,...assembleSnapshotMarketSources(snapshot)}),
    onObservation:m=>{latest=m}
   });
   void retryRunner.run();
