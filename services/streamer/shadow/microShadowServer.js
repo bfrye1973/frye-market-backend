@@ -15,6 +15,7 @@ import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/position
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
 import {createSharedCrossMarketConsumer} from "./createSharedCrossMarketConsumer.js";
 import {createMicroCrossMarketAlignment} from "../../core/logic/engine27/v3/marketAlignment/createMicroCrossMarketAlignment.js";
+import {createMicroAlignmentArchiveClient} from "./createMicroAlignmentArchiveClient.js";
 import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
@@ -26,7 +27,13 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
-const alignmentObserver=createMicroCrossMarketAlignment();
+const alignmentArchive=createMicroAlignmentArchiveClient({
+ url:"https://frye-market-backend-1.onrender.com/api/v1/engine27/micro-alignment/history",
+ token:process.env.ENGINE27_MICRO_ALIGNMENT_ARCHIVE_TOKEN
+});
+const alignmentObserver=createMicroCrossMarketAlignment({
+ onFiveMinuteEvent:row=>alignmentArchive.enqueue(row)
+});
 const zonesState={QQQ:null,VIX:null};
 const zonesEventCount={QQQ:0,VIX:0};
 const zoneEventLastSeen={QQQ:new Map(),VIX:new Map()};
@@ -100,8 +107,12 @@ app.get("/shadow/state",auth,(_req,res)=>{
    microDirection:owner?.direction??null,
    neighbors:m?.modules?.neighboringAlignment?.neighbors??null,
    engine25Qualified:ownerMarket.participationState?.liveConfirmationUsable===true,
-   engine29Qualified:!!ownerMarket.engine29
+   engine29Qualified:!!ownerMarket.engine29,
+   esConnected:feed?.status==="LIVE",
+   qqqConnected:crossObserver.status().QQQ?.connectionState==="CONNECTED",
+   vixConnected:crossObserver.status().VIX?.connectionState==="CONNECTED"
   }),
+  microCrossMarketHistory:alignmentArchive.status(),
 
   liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>{
    const feedStatus=crossObserver.status()[key];
@@ -196,6 +207,8 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
 });
 if(enabled){
  crossObserver.start();
+ void alignmentArchive.refresh();
+ setInterval(()=>{void alignmentArchive.flush();void alignmentArchive.refresh()},30000).unref();
  // Single sanitized entitlement acceptance report: no price, broker, API key or raw event.
  setTimeout(()=>{
   const checks=crossObserver.status();
