@@ -207,7 +207,9 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
 });
 if(enabled){
  crossObserver.start();
- void alignmentArchive.refresh();
+ void alignmentArchive.refresh().then(result=>{
+  console.info("[engine27-v3-micro-alignment-archive-acceptance] "+JSON.stringify({reachable:result.ok,state:result.state}));
+ });
  setInterval(()=>{void alignmentArchive.flush();void alignmentArchive.refresh()},30000).unref();
  // Single sanitized entitlement acceptance report: no price, broker, API key or raw event.
  setTimeout(()=>{
