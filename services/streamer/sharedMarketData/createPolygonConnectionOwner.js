@@ -10,12 +10,13 @@ export function createPolygonConnectionOwner({assetClass,apiKey,Socket=WebSocket
  if(!config)throw Error("UNSUPPORTED_ASSET_CLASS");
  const bus=createSharedMarketEventBus({maxListenersPerTopic});
  const demands=new Map(config.topics.map(t=>[t,0]));
+ const allowedTopic=t=>config.topics.includes(t)||(assetClass==="stocks"&&/^(?:T|AM)\.[A-Z][A-Z0-9.]{0,9}$/.test(t));
  let ws=null,retry=null,stopped=false,connected=false,generation=0,attempt=0;
  let state="IDLE",reason=null,lastEventAt=null;
  const notifyStatus=new Set();
  const emitStatus=()=>{for(const fn of notifyStatus){try{fn(status())}catch{}}};
  const topicOf=m=>m?.ev==="V"&&m.T==="I:VIX"?"V.I:VIX":
-   (m?.ev==="T"||m?.ev==="AM")&&["SPY","QQQ"].includes(m.sym)?m.ev+"."+m.sym:null;
+   (m?.ev==="T"||m?.ev==="AM")&&typeof m.sym==="string"?m.ev+"."+m.sym:null;
  function desired(){return [...demands].filter(([_,n])=>n>0).map(([t])=>t)}
  function schedule(){
   if(stopped||retry||desired().length===0)return;
@@ -66,7 +67,11 @@ export function createPolygonConnectionOwner({assetClass,apiKey,Socket=WebSocket
   });
  }
  function subscribe(topic,handler){
-  if(!demands.has(topic))throw Error("TOPIC_NOT_IN_ASSET_CLASS");
+  if(!allowedTopic(topic))throw Error("TOPIC_NOT_IN_ASSET_CLASS");
+  if(!demands.has(topic)){
+   if(demands.size>=64)throw Error("MAX_DISTINCT_TOPICS");
+   demands.set(topic,0);
+  }
   const unsub=bus.subscribe(topic,handler);
   const count=demands.get(topic);demands.set(topic,count+1);
   if(count===0&&connected)send("subscribe",[topic]);
