@@ -27,6 +27,8 @@ let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastErr
 let retryRunner=null;
 const zonesState={QQQ:null,VIX:null};
 const zonesEventCount={QQQ:0,VIX:0};
+const zoneEventLastSeen={QQQ:new Map(),VIX:new Map()};
+const DISTINCT_ZONE_EVENT_WINDOW_MS=60000;
 const crossObserver=createCrossMarketLiveObserver({
  apiKey:process.env.POLYGON_API_KEY||process.env.POLYGON_API||process.env.POLY_API_KEY,enabled,
  onTick:tick=>{
@@ -37,7 +39,21 @@ const crossObserver=createCrossMarketLiveObserver({
     key,tick,previous,nowMs:Date.now()
   });
   zonesState[key]=result;
-  if(result.available)zonesEventCount[key]+=result.observedEvents.length;
+  if(result.available){
+   // Display one transition per zone+kind within a minute; raw tick
+   // oscillations must not appear as dozens of independent major events.
+   for(const event of result.observedEvents){
+    const identity=event.zoneId+"|"+event.type;
+    const at=tick.sourceMs;
+    const last=zoneEventLastSeen[key].get(identity)??null;
+    if(last===null||at-last>=DISTINCT_ZONE_EVENT_WINDOW_MS){
+     zonesEventCount[key]++;
+     zoneEventLastSeen[key].set(identity,at);
+    }
+   }
+   // Bounded memory: each source has at most 12 zones, 3 transition kinds.
+   if(zoneEventLastSeen[key].size>36)zoneEventLastSeen[key].clear();
+  }
  }
 });
 let reportedMarketSourceStates=false;
