@@ -4,6 +4,7 @@ on:
     paths:
       - "services/core/logic/engine22/history/**"
       - "services/core/tests/engine22CountLineage.test.js"
+      - "services/core/tests/engine22MicroV2MigrationRehearsal.test.js"
       - ".github/workflows/engine22e-count-lineage.yml"
 permissions:
   contents: read
@@ -15,4 +16,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-      - run: node --test services/core/tests/engine22CountLineage.test.js services/core/tests/engine22HistoryTransactionAdapter.test.js
+      - run: node --test services/core/tests/engine22MicroV2MigrationRehearsal.test.js services/core/tests/engine22CountLineage.test.js services/core/tests/engine22HistoryTransactionAdapter.test.js
