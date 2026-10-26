@@ -26,7 +26,7 @@ export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSoc
     for(const m of Array.isArray(messages)?messages:[messages]){
      if(m?.ev==="status"){
       if(m.status==="auth_success"&&!session.authenticated){
-       session.authenticated=true;session.count=0;statuses[source.symbol]="CONNECTED";
+       session.authenticated=true;session.count=0;statuses[source.symbol]="CONNECTED";reasons[source.symbol]=null;
        ws.send(JSON.stringify({action:"subscribe",params:source.topic}));
       }else if(m.status==="auth_failed"||m.status==="max_connections"){
        statuses[source.symbol]=m.status==="auth_failed"?"AUTH_FAILED":"SUBSCRIPTION_LIMIT";
@@ -40,6 +40,7 @@ export function createCrossMarketLiveObserver({apiKey,enabled=true,Socket=WebSoc
      const inspected=inspectDirectCrossMarketTick(m,clock());
      if(inspected.ok&&inspected.tick.symbol===source.symbol){
       records[source.symbol]=applyDirectCrossMarketTick(records[source.symbol],inspected.tick,clock());
+      reasons[source.symbol]=null;
      }
     }
    });
