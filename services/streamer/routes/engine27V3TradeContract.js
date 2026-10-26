@@ -1,19 +1,28 @@
-// Source-specific Massive/Polygon Futures WebSocket T contract.
-// https://massive.com/docs/websocket/futures/trades — t is Unix milliseconds; q is
-// ticker-unique, increasing trade sequence (gaps are valid). Unlike Futures REST,
-// do NOT normalize nanoseconds or infer units by magnitude.
+// Source-specific Massive futures websocket T event (t=Unix MS, q=per-ticker sequence).
+// No guessed conversions. Rejections are shape-only; diagnostics never disclose raw trades.
 export const SOURCE="POLYGON_DIRECT_ES_TRADE";
-const validNumber=n=>typeof n==="number"&&Number.isFinite(n);
-export function normalizeEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={}){
- if(!/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(resolvedSymbol??""))return null;
- if(message?.ev!=="T"||message?.sym!==resolvedSymbol)return null;
- if(!validNumber(message.p)||message.p<=0||!Number.isSafeInteger(message.s)||message.s<=0)return null;
- const raw=message.t;
- if(!Number.isSafeInteger(raw)||raw<1e12||raw>=1e13)return null; // strict Unix MS
- if(!Number.isSafeInteger(message.q)||message.q<0)return null;
+const finite=n=>typeof n==="number"&&Number.isFinite(n);
+export function inspectEngine27V3EsTrade(message,{resolvedSymbol,observedAt}={}){
+ const shape={eventType:typeof message?.ev,symbolType:typeof message?.sym,priceType:typeof message?.p,
+  sizeType:typeof message?.s,timeType:typeof message?.t,sequenceType:typeof message?.q};
+ const reject=reasonCode=>({ok:false,reasonCode,shape});
+ if(!/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(resolvedSymbol??""))return reject("ES_CONTRACT_UNVERIFIED");
+ if(message?.ev!=="T")return reject("NOT_FUTURES_TRADE");
+ if(message?.sym!==resolvedSymbol)return reject("CONTRACT_MISMATCH");
+ if(!finite(message.p)||message.p<=0)return reject("INVALID_FUTURES_TRADE_PRICE");
+ if(!Number.isSafeInteger(message.s)||message.s<=0)return reject("INVALID_FUTURES_TRADE_SIZE");
+ if(!Number.isSafeInteger(message.t)||message.t<1e12||message.t>=1e13)return reject("INVALID_FUTURES_TRADE_TIMESTAMP_MS");
+ if(!Number.isSafeInteger(message.q)||message.q<0)return reject("INVALID_FUTURES_TRADE_SEQUENCE");
  const observed=Date.parse(observedAt??"");
- if(!Number.isFinite(observed)||raw>observed+2000||observed-raw>30000)return null;
- return {ok:true,type:"trade",source:SOURCE,symbol:"ES",resolvedSymbol,
-  price:message.p,size:message.s,tradeTime:new Date(raw).toISOString(),
-  eventId:String(message.q),observedAt,readOnly:true};
+ if(!Number.isFinite(observed))return reject("OBSERVATION_TIME_UNAVAILABLE");
+ const lagMs=observed-message.t;
+ if(lagMs< -2000)return reject("FUTURE_FUTURES_TRADE");
+ if(lagMs>30000)return reject("DELAYED_FUTURES_TRADE_GT_30S");
+ return {ok:true,reasonCode:null,shape,lagMs,
+  trade:{ok:true,type:"trade",source:SOURCE,symbol:"ES",resolvedSymbol,
+   price:message.p,size:message.s,tradeTime:new Date(message.t).toISOString(),
+   eventId:String(message.q),observedAt,readOnly:true}};
+}
+export function normalizeEngine27V3EsTrade(message,params={}){
+ return inspectEngine27V3EsTrade(message,params).trade??null;
 }
