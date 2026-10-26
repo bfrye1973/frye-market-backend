@@ -1,3 +1,11 @@
+## Update — Engine 5B retired from production (October 26, 2026)
+
+The owner explicitly confirmed Engine 5 is no longer used and authorized removal. Production `main` commit `f1521f2e` removed Engine5B startup and its obsolete /stream/scalp-status and /stream/scalp-events routes from `services/streamer/server.js`. Backend2 Render deployment `dep-dbfmca0m7kps739kvq30` is **LIVE**; its `[OK] streamer listening on :10000` startup is verified. Historical Engine5B source files remain in GitHub for rollback. Original ES futures and `/stream/agg` routes were preserved.
+
+**Revised architecture:** There is no need to preserve Engine5B's SPY tick consumer in the planned shared market-data owner. The next risk to audit/replace is per-client Stocks WebSockets from Backend2 `/stream/agg`, and any other *verified running* Stocks consumers. QQQ direct live price needs authorized shared event distribution; VIX separate Indices owner. Engine5B's previous SPY socket no longer competes after Backend2 replaces/drains its old instance. Do not assume subscription limits are solved until actual QQQ/VIX feed entitlement and connection stability are observed.
+
+---
+
 # Shared Polygon Stocks + Indices connection ownership
 
 **State:** Read-only operational audit completed, migration design only.
