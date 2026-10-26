@@ -1342,7 +1342,11 @@ function runReplayArchiveCore({
     return {ok:false,replayWritten:false,skipped:true,
       reason:cadence.reason,dateYmd:parts.dateYmd,timeHHMM:parts.timeHHMM};
   }
-  if (cadence.skip) {
+  // Preserve pre-existing exact-filename duplicate response semantics.
+  // An already archived HHMM stays immutable and uses the original writer's
+  // DUPLICATE_REPLAY_BLOCKED result; other files in this 30m slot skip here.
+  const sameMinuteFile = path.join(replayRoot,parts.dateYmd,parts.timeHHMM+".json");
+  if (cadence.skip && !fs.existsSync(sameMinuteFile)) {
     return {ok:true,replayWritten:false,skipped:true,
       reason:cadence.reason,dateYmd:parts.dateYmd,timeHHMM:parts.timeHHMM};
   }
