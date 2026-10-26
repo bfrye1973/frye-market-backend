@@ -20,7 +20,9 @@ export function createPolygonConnectionOwner({assetClass,apiKey,Socket=WebSocket
  function desired(){return [...demands].filter(([_,n])=>n>0).map(([t])=>t)}
  function schedule(){
   if(stopped||retry||desired().length===0)return;
-  // Massive recommends at least 15 seconds after unexpected disconnects.\n  // Keep subscription-limit backoff longer to avoid repeated account-limit collisions.\n  const delay=state==="SUBSCRIPTION_LIMIT"?300000:Math.min(30000,15000*2**Math.min(attempt++,1));
+  // Massive recommends at least 15 seconds after unexpected disconnects.
+  // Keep subscription-limit backoff longer to avoid repeated account-limit collisions.
+  const delay=state==="SUBSCRIPTION_LIMIT"?300000:Math.min(30000,15000*2**Math.min(attempt++,1));
   retry=setTimeout(()=>{retry=null;connect()},delay);retry.unref?.();
  }
  function send(action,topics){
