@@ -1,0 +1,19 @@
+name: Engine22AB Combined Shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/recognition/**"
+      - "services/core/tests/engine22ABRecognition.test.js"
+      - ".github/workflows/engine22ab-combined-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  recognition:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/recognition/buildWaveRecognitionShadow.js
+      - run: node --test services/core/tests/engine22ABRecognition.test.js services/core/tests/engine22V3SwingEvidence.test.js services/core/tests/engine22V3ImpulseGeometry.test.js
