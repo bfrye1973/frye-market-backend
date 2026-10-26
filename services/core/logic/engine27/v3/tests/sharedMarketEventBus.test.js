@@ -1,5 +1,5 @@
 import test from "node:test";import assert from "node:assert/strict";
-import {createSharedMarketEventBus} from "../../../../streamer/sharedMarketData/createSharedMarketEventBus.js";
+import {createSharedMarketEventBus} from "../../../../../streamer/sharedMarketData/createSharedMarketEventBus.js";
 test("one owner fans identical SPY trades to multiple isolated consumers",()=>{
  const bus=createSharedMarketEventBus(),seenA=[],seenB=[];
  const offA=bus.subscribe("T.SPY",e=>seenA.push(e));
