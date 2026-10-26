@@ -19,8 +19,8 @@ test("futures websocket nanoseconds cannot pass as milliseconds",()=>assert.equa
 test("missing provider q sequence rejected",()=>assert.equal(normalize({...base,q:undefined},{resolvedSymbol:"ESZ6",observedAt:at}),null));
 test("sequence passed without exposing credentials",()=>{const r=normalize(base,{resolvedSymbol:"ESZ6",observedAt:at});assert.equal(r.eventId,"32599300");assert.equal(Object.hasOwn(r,"apiKey"),false)});
 
-test("rejects wrong trade price with typed reason and no source fields",()=>{
- const r=inspect({...base,p:"7686.25"},{resolvedSymbol:"ESZ6",observedAt:at});
+test("rejects malformed trade price with typed reason and no source fields",()=>{
+ const r=inspect({...base,p:"$7686.25"},{resolvedSymbol:"ESZ6",observedAt:at});
  assert.equal(r.reasonCode,"INVALID_FUTURES_TRADE_PRICE");
  assert.equal(r.shape.priceType,"string");
  assert.equal(Object.hasOwn(r,"trade"),false);
@@ -42,4 +42,17 @@ test("documented timestamp test rejects nanoseconds with reason",()=>{
 test("future source trades remain unqualified with reason",()=>{
  const r=inspect({...base,t:Date.parse(at)+45000},{resolvedSymbol:"ESZ6",observedAt:at});
  assert.equal(r.reasonCode,"FUTURE_FUTURES_TRADE");
+});
+
+test("real staging Futures T trade decimal string p is accepted",()=>{
+ const raw={...base,p:"7686.25"};
+ const r=normalize(raw,{resolvedSymbol:"ESZ6",observedAt:at});
+ assert.equal(r.price,7686.25);
+ assert.equal(r.eventId,"32599300");
+ assert.equal(raw.p,"7686.25");
+});
+test("reject nondecimal string and no exponent or currency",()=>{
+ for(const p of ["$7686.25","7686x","7e3","0x1e","Infinity","-2","", "7,686.25"]){
+  assert.equal(normalize({...base,p},{resolvedSymbol:"ESZ6",observedAt:at}),null,p);
+ }
 });
