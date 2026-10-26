@@ -5,6 +5,7 @@ on:
       - "services/core/logic/engine22/integration/**"
       - "services/core/tests/engine22IntegratedObservation.test.js"
       - "services/core/tests/engine22IntegratedReplay.test.js"
+      - "services/core/tests/engine22ReplaySourceManifest.test.js"
       - ".github/workflows/engine22-integrated-observation.yml"
 permissions:
   contents: read
@@ -20,4 +21,4 @@ jobs:
       - name: Focused integration and V3 regressions
         run: |
           node --check services/core/logic/engine22/integration/buildIntegratedObservationShadow.js
-          node --test services/core/tests/engine22IntegratedReplay.test.js services/core/tests/engine22IntegratedObservation.test.js services/core/tests/engine22ABRecognition.test.js services/core/tests/engine22V3SwingEvidence.test.js services/core/tests/engine22V3ProtectedContracts.test.js
+          node --test services/core/tests/engine22ReplaySourceManifest.test.js services/core/tests/engine22IntegratedReplay.test.js services/core/tests/engine22IntegratedObservation.test.js services/core/tests/engine22ABRecognition.test.js services/core/tests/engine22V3SwingEvidence.test.js services/core/tests/engine22V3ProtectedContracts.test.js
