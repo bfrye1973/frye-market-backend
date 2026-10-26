@@ -5,7 +5,7 @@
 import express from "express";
 import crypto from "node:crypto";
 import {microShadowHtml} from "./microShadowView.js";
-import tradeRouter from "../routes/engine27V3TradeStream.js";
+import tradeRouter,{getEngine27V3TradeDiagnostics} from "../routes/engine27V3TradeStream.js";
 import {createTradeIngestionRunner} from "../../core/logic/engine27/v3/livePriceObserver/createTradeIngestionRunner.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
@@ -38,7 +38,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
  // Avoid exposing snapshots, journal records, broker identifiers or provider secrets.
  const m=latest;
  res.json({schema:"engine27.v3.microShadowDisplay.v1",mode:"SHADOW_NOT_TRADING",
-  updatedAt:new Date().toISOString(),feed:{status:feed?.status??"UNAVAILABLE",contract:feed?.contract??null},
+  updatedAt:new Date().toISOString(),feed:{status:feed?.status??"UNAVAILABLE",contract:feed?.contract??null,diagnostics:getEngine27V3TradeDiagnostics(),consumerReasonCodes:feed?.reasonCodes??[]},
   observation:observation?{available:true,currentPrice:observation.currentPrice,lastTradeAt:observation.lastTradeAt,
     provisionalTouches:observation.provisionalTouches,nextProvisionalReference:observation.nextProvisionalReference}:null,
   owner:owner?{activeWave:owner.activeWave,direction:owner.direction,confirmationStatus:owner.confirmationStatus,stage:owner.stage}:null,
