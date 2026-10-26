@@ -18,8 +18,27 @@ export function projectMarketEvidenceForDisplay({engine25Dashboard=null,engine29
   engine29Response.data:null;
  const n29=engine29;
  const reasonCodes=Array.isArray(ownerMarket?.reasonCodes)?ownerMarket.reasonCodes:[];
+ const diagnostic=p?.sourceDiagnostics?.["1h"]??null;
+ const distribution=p?.participation?.distributionPressure??null;
+ const hour=diagnostic?{
+  state:str(diagnostic.timeframeState),freshness:str(diagnostic.freshnessState),
+  sourceTimestamp:str(diagnostic.sourceTimestamp),
+  strong:finite(diagnostic.strongCount)?diagnostic.strongCount:null,
+  neutral:finite(diagnostic.neutralCount)?diagnostic.neutralCount:null,
+  weak:finite(diagnostic.weakCount)?diagnostic.weakCount:null
+ }:null;
+ const microOverview={
+  health:{value:finite(engine25Dashboard?.liveMarketHealth?.score)?engine25Dashboard.liveMarketHealth.score:null,label:str(engine25Dashboard?.liveMarketHealth?.regime)},
+  breadth:{value:finite(breadth?.score)?breadth.score:null,label:str(breadth?.label)},
+  volume:{value:finite(coverage)?coverage:null,label:"COVERAGE",qualified:p?.freshness?.intraday?.volumeCoverageValid===true},
+  distribution:{value:finite(distribution?.rawPressure)?distribution.rawPressure:null,label:str(distribution?.pressureLabel)},
+  sectors:{value:hour?.weak??null,label:"WEAK / 11",freshness:hour?.freshness??"UNAVAILABLE"}
+ };
+
  return {
   schema:"engine27.v3.microMarketEvidenceDisplay.v1",presentationOnly:true,noExecution:true,
+  microOverview,
+  oneHour:{...hour,sourceQualified:hour?.freshness==="FRESH"&&ownerMarket?.participationState?.liveConfirmationUsable===true},
   engine25:{
    sourcePresent:!!canonical,contextAvailable:!!canonical||ownerMarket?.engine25!==null&&present(ownerMarket?.engine25),
    participationFreshness:str(freshness?.state)??"UNAVAILABLE",
