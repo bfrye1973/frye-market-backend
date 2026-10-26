@@ -81,15 +81,15 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <div class="row"><span class="k">Nearest verified zone</span><span class="v" id="qqqZoneRange">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Distance to zone</span><span class="v" id="qqqZoneDistance">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Zone type</span><span class="v" id="qqqZoneType">UNAVAILABLE</span></div>
-<div class="row"><span class="k">Observed crossings / touches</span><span class="v" id="qqqZoneEvents">UNAVAILABLE</span></div></div>
+<div class="row"><span class="k">Distinct zone transitions (60s)</span><span class="v" id="qqqZoneEvents">UNAVAILABLE</span></div></div>
 <div><h2>VIX — prior daily zones</h2>
 <div class="row"><span class="k">Current zone condition</span><span class="v" id="vixZoneState">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Nearest verified zone</span><span class="v" id="vixZoneRange">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Distance to zone</span><span class="v" id="vixZoneDistance">UNAVAILABLE</span></div>
 <div class="row"><span class="k">Zone type</span><span class="v" id="vixZoneType">UNAVAILABLE</span></div>
-<div class="row"><span class="k">Observed crossings / touches</span><span class="v" id="vixZoneEvents">UNAVAILABLE</span></div></div>
+<div class="row"><span class="k">Distinct zone transitions (60s)</span><span class="v" id="vixZoneEvents">UNAVAILABLE</span></div></div>
 </div>
-<p class="micro-note">Zones come from Engine 27’s existing completed daily QQQ / direct VIX publications. Live price may approach, touch or cross them. These observations never confirm support, resistance, an Elliott turn, or trade permission.</p>
+<p class="micro-note">Zone transitions are de-duplicated by zone and event type over 60 seconds; this is not a count of independent confirmed reversals. Zones come from Engine 27’s existing completed daily QQQ / direct VIX publications. Live price may approach, touch or cross them. These observations never confirm support, resistance, an Elliott turn, or trade permission.</p>
 </section>
 <section class="card full"><h2>QQQ &amp; VIX — direct hourly market reactions</h2>
 <div class="compact-grid">
