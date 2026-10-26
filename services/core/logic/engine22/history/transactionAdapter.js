@@ -1,15 +1,16 @@
 // Engine22E T1.2 - isolated SQL transaction adapter. No production connection.
 export const ENGINE22_HISTORY_TX_SCHEMA="engine22.historyTransaction.v1";
 const str=v=>typeof v==="string"&&v.trim().length>0;
-export async function commitEngine22HistoryEvent({client,event,activation=null}={}){
+export async function commitEngine22HistoryEvent({client,event,activation=null,verifyEngine22GAuthorization=null}={}){
  if(!client||typeof client.query!=="function")return {ok:false,reason:"CLIENT_REQUIRED"};
  if(!event||![event.eventId,event.idempotencyKey,event.payloadHash,event.instrumentContextId,event.degree,event.type,event.disposition].every(str))
    return {ok:false,reason:"VALID_EVENT_REQUIRED"};
  if(activation && (!str(activation.authorizationId)||!str(activation.targetCountId)||
    !Number.isSafeInteger(activation.expectedVersion)||activation.expectedVersion<0 ||
-   activation.authorizationVerified!==true || event.authorizationId!==activation.authorizationId ||
+   typeof verifyEngine22GAuthorization!=="function" || event.authorizationId!==activation.authorizationId ||
    event.countId!==activation.targetCountId || event.disposition!=="APPROVED"))
    return {ok:false,reason:"VERIFIED_ENGINE22G_AUTHORIZATION_REQUIRED"};
+ if(activation && await verifyEngine22GAuthorization(activation,event)!==true)return {ok:false,reason:"ENGINE22G_AUTHORIZATION_NOT_VERIFIED"};
  await client.query("BEGIN");
  try {
    const dup=await client.query("SELECT event_id,payload_hash FROM engine22_wave_events WHERE idempotency_key=$1 FOR UPDATE",[event.idempotencyKey]);
