@@ -142,6 +142,18 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
 });
 if(enabled){
  crossObserver.start();
+ // Single sanitized entitlement acceptance report: no price, broker, API key or raw event.
+ setTimeout(()=>{
+  const checks=crossObserver.status();
+  console.info("[engine27-v3-live-cross-market-acceptance] "+JSON.stringify(
+   Object.fromEntries(["QQQ","VIX"].map(k=>[k,{
+    state:checks[k]?.state??"UNAVAILABLE",
+    source:checks[k]?.source??null,
+    available:checks[k]?.available===true,
+    reason:checks[k]?.reason??null
+   }]))
+  ));
+ },18000).unref();
  await refreshSnapshot();
  await refreshCanonicalOwners();
  setInterval(()=>{void refreshSnapshot()},15000).unref();
