@@ -13,7 +13,7 @@ import {projectMarketEvidenceForDisplay} from "../../core/logic/engine27/v3/mark
 import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmation/projectEngine29Micro.js";
 import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
-import {createCrossMarketLiveObserver} from "./createCrossMarketLiveObserver.js";
+import {createSharedCrossMarketConsumer} from "./createSharedCrossMarketConsumer.js";
 import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
@@ -29,8 +29,9 @@ const zonesState={QQQ:null,VIX:null};
 const zonesEventCount={QQQ:0,VIX:0};
 const zoneEventLastSeen={QQQ:new Map(),VIX:new Map()};
 const DISTINCT_ZONE_EVENT_WINDOW_MS=60000;
-const crossObserver=createCrossMarketLiveObserver({
- apiKey:process.env.POLYGON_API_KEY||process.env.POLYGON_API||process.env.POLY_API_KEY,enabled,
+const crossObserver=createSharedCrossMarketConsumer({
+ baseUrl:process.env.ENGINE27_SHARED_MARKET_RELAY_URL,
+ token:process.env.ENGINE27_SHARED_MARKET_READ_TOKEN,enabled,
  onTick:tick=>{
   const key=tick.symbol;
   const previous=zonesState[key]?.previous??null;
