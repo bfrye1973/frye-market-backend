@@ -14,6 +14,7 @@ import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmat
 import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
 import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
 import {createSharedCrossMarketConsumer} from "./createSharedCrossMarketConsumer.js";
+import {createMicroCrossMarketAlignment} from "../../core/logic/engine27/v3/marketAlignment/createMicroCrossMarketAlignment.js";
 import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
@@ -25,6 +26,7 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
+const alignmentObserver=createMicroCrossMarketAlignment();
 const zonesState={QQQ:null,VIX:null};
 const zonesEventCount={QQQ:0,VIX:0};
 const zoneEventLastSeen={QQQ:new Map(),VIX:new Map()};
@@ -34,6 +36,7 @@ const crossObserver=createSharedCrossMarketConsumer({
  token:process.env.ENGINE27_SHARED_MARKET_READ_TOKEN,enabled,
  onTick:tick=>{
   const key=tick.symbol;
+  alignmentObserver.ingest(key,tick.price,tick.sourceMs);
   const previous=zonesState[key]?.previous??null;
   const result=observeLiveCrossMarketZones({
     publication:snapshot?.engine27Strategies?.engine27CrossMarketLevels,
@@ -93,6 +96,13 @@ app.get("/shadow/state",auth,(_req,res)=>{
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
   liveCrossMarket:crossObserver.status(),
+  microCrossMarketAlignment:alignmentObserver.assess({
+   microDirection:owner?.direction??null,
+   neighbors:m?.modules?.neighboringAlignment?.neighbors??null,
+   engine25Qualified:ownerMarket.participationState?.liveConfirmationUsable===true,
+   engine29Qualified:!!ownerMarket.engine29
+  }),
+
   liveCrossMarketZones:Object.fromEntries(["QQQ","VIX"].map(key=>{
    const feedStatus=crossObserver.status()[key];
    const safe=feedStatus?.available===true;
@@ -214,6 +224,10 @@ if(enabled){
       return {snapshot,...canonical,engine25:selectedRegime,engine29:ownerMarket.engine29};
     },
    onObservation:m=>{latest=m;
+    const live=m?.livePriceObservation;
+    const price=live?.currentPrice;
+    const when=live?.lastTradeAt??live?.sourceTime??live?.observedAt??null;
+    if(live?.available===true&&Number.isFinite(price)&&when)alignmentObserver.ingest("ES",price,when);
     if(!reportedMarketSourceStates){
       reportedMarketSourceStates=true;
       const states=m?.modules?.marketConfirmation?.sources??{};
