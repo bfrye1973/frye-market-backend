@@ -50,3 +50,18 @@ Staging `POLYGON_API_KEY` is **not configured by this programmer**, because conn
 - Actual live ES trade source -> protected SSE -> Micro Manager -> UI evidence: **NOT YET VERIFIED**.
 
 **PRODUCTION STATUS: BLOCKED.** Shadow preview itself is isolated and started, but live trade source and private journal evidence incomplete.
+
+
+## Micro Market Evidence adapter milestone — October 26, 2026 00:54 UTC
+Verified directly in current production Backend1 source **code**, not a private runtime dump:
+- `snapshot.engine25Context` is explicitly attached to ES snapshot root by `buildStrategySnapshot.js`.
+- `snapshot.engine27Strategies.engine27UnifiedMarketContext.tactical` is a read-only derived Engine29 summary with `available, fresh, dataDegraded, timestamp, overallState`. Treat as valid only with explicit summary source identity/freshness, and independently check timestamp in V3.
+- `snapshot.engine27Strategies.engine27CrossMarketLevels` canonical `engine27.crossMarketSource.v1`, with QQQ and VIX separate instrument identities.
+- `snapshot.engine27Strategies.engine27LiveCrossMarketReactions` canonical `engine27.liveCrossMarketReactions.v1`, with completed hourly reaction events.
+- `snapshot.engine27Strategies.engine27EsInstitutionalContext` canonical ES zone context.
+
+V3-only source adapter `marketConfirmation/assembleSnapshotMarketSources.js` passes strictly validated fields into existing V3 `evaluateMarketConfirmation`, and shadow runner `readInputs()` now includes these independent source objects. This **does not** change Engine22, update Engine25/29, aggregate ES prices or invent QQQ/VIX events. Equity-market freshness must still satisfy each source policy; when closed/stale/unavailable, UI stays explicit instead of inferring neutral participation.
+
+**Tests:** all six new field-mapping/fail-closed tests added to V3 isolation workflow, passed. Live Render preview deploy `dep-dbfa99g473hc73cdnj80` verified **LIVE** on feature-branch commit `19cb1519d9944ea71dfc01e26f68c3383416b584`.
+
+**Acceptance boundary:** field *paths and code* verified; actual runtime Engine25/29/QQQ/VIX qualified values NOT independently captured from protected shadow state yet. No claim all 4 sources are CURRENT, and the preview's underlying ES-trade streaming remains independent. Engine10 original immutable entry thesis and official Engine9 plans remain unverified; read-only journal audit is next.
