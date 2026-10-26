@@ -11,6 +11,7 @@ import {assembleSnapshotMarketSources} from "../../core/logic/engine27/v3/market
 import {assembleCanonicalOwnerMarket} from "../../core/logic/engine27/v3/marketConfirmation/assembleCanonicalOwnerMarket.js";
 import {projectMarketEvidenceForDisplay} from "../../core/logic/engine27/v3/marketConfirmation/projectMarketEvidenceForDisplay.js";
 import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmation/projectEngine29Micro.js";
+import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -56,6 +57,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
   ownerSourceReasons:ownerMarket.reasonCodes.slice(0,8),
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
+  engine10MicroAccount:projectSnapshotMicroAccount(snapshot),
   micro:m?{modules:{
     marketConfirmation:{sources:Object.fromEntries(["engine25","engine29","qqq","vix"].map(k=>[k,{state:m.modules?.marketConfirmation?.sources?.[k]?.state??"UNAVAILABLE"}]))},
     neighboringAlignment:{state:m.modules?.neighboringAlignment?.state,neighbors:{
