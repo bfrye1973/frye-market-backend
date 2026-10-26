@@ -61,7 +61,7 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
 <div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
 </details></section>
-<section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN contracts</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
+<section class="card"><h2>Schwab Micro account ••••6380</h2><div class="row"><span class="k">OPEN MES units (REAL)</span><span class="v" id="positions">UNAVAILABLE</span></div><div class="row"><span class="k">Position direction</span><span class="v" id="positionDirection">UNAVAILABLE</span></div><div class="row"><span class="k">Position source</span><span class="v" id="positionSource">UNAVAILABLE</span></div><div class="row"><span class="k">Original entry structure</span><span class="v amber" id="entry">ENTRY_STRUCTURE_UNAVAILABLE</span></div><div class="row"><span class="k">Official Engine 9 plan</span><span class="v" id="plan">UNAVAILABLE</span></div><div class="row"><span class="k">Hold / exit recommendation</span><span class="v">NONE — SHADOW ONLY</span></div></section>
 <section class="card"><h2>Evidence quality</h2><div class="row"><span class="k">Snapshot state</span><span class="v" id="snapshot">UNAVAILABLE</span></div><div class="row"><span class="k">Historical calibration</span><span class="v">NOT CALIBRATED</span></div><div class="row"><span class="k">Execution permission</span><span class="v teal">DISABLED</span></div><div class="row"><span class="k">Last check</span><span class="v" id="updated">—</span></div></section>
 </div><p class="foot">A trade touching a Fibonacci reference is NOT an Elliott wave completion. Missing source data is shown as UNAVAILABLE. All displayed price observations are read-only.</p></main>
 <script>
@@ -109,9 +109,12 @@ for(const row of n29.rows??[]){
  }
  body.appendChild(tr);
 }
-set("positions",m.modules?.positionIntelligence?.available?m.positionAssessment?.openContractCount:"UNAVAILABLE");
-set("entry",m.modules?.entryThesisMemory?.positions?.length?m.modules.entryThesisMemory.positions[0].state:"ENTRY_STRUCTURE_UNAVAILABLE");
-set("plan",m.modules?.positionIntelligence?.available?"SEE VERIFIED PLAN DETAILS":"UNAVAILABLE");
+const a10=d.engine10MicroAccount??{};
+set("positions",a10.available?a10.openContracts:"UNAVAILABLE");
+set("positionDirection",a10.available?a10.direction:"UNAVAILABLE");
+set("positionSource",a10.available?"ENGINE 10 / SNAPSHOT AGGREGATE":"UNAVAILABLE");
+set("entry",a10.available?a10.entryThesisStatus:"ENTRY_STRUCTURE_UNAVAILABLE");
+set("plan",a10.officialPlanStatus??"OFFICIAL_PLAN_UNAVAILABLE");
 set("snapshot",d.snapshotStatus??"UNAVAILABLE");set("updated",d.updatedAt??"UNAVAILABLE");
 }catch{set("feed","UNAVAILABLE");set("price","UNAVAILABLE");set("last","UNAVAILABLE");set("snapshot","UNAVAILABLE");}}
 refresh();setInterval(refresh,2500);
