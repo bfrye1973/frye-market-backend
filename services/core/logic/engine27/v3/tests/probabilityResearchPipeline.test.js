@@ -42,3 +42,16 @@ test("future outcomes cannot be backfilled from earlier prices",()=>{
  const seed=extractReplayResearchSeed(replay,{resolvedContract:"ESZ26"});
  assert.equal(labelEsOutcome(seed,[{contract:"ESZ26",price:5805,observedAt:"2026-10-26T18:09:00Z"}]).available,false);
 });
+
+test("research ledger refuses concurrent writer lock without altering history",()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"engine27-lock-"));
+ try{
+  const ledger=createResearchLedger({root});
+  const seed=extractReplayResearchSeed(replay,{resolvedContract:"ESZ26"});
+  fs.mkdirSync(path.join(root,"predictions.ndjson.lock"));
+  assert.throws(()=>ledger.appendPrediction(seed),/RESEARCH_LEDGER_WRITER_BUSY/);
+  assert.equal(ledger.readPredictions().length,0);
+  fs.rmdirSync(path.join(root,"predictions.ndjson.lock"));
+  assert.equal(ledger.appendPrediction(seed).stored,true);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
