@@ -61,6 +61,22 @@ p{color:#96aec7;margin:6px 0 20px}header{border-bottom:2px solid #cfad49;padding
 <p class="micro-note">These columns come from Engine 29 owner-published group states. Missing rows remain unavailable. Degraded or stale evidence is not live confirmation.</p>
 <div class="row"><span class="k">Source timestamp</span><span class="v" id="e29timestamp">UNAVAILABLE</span></div>
 </details></section>
+<section class="card full" id="crossMarketAlertCard"><h2>Engine 27 Micro — ES / QQQ / VIX directional alignment</h2>
+<div class="big" id="alignState">AWAITING VERIFIED MARKET MOVEMENT</div>
+<div class="row"><span class="k">Market-environment alert</span><span class="v amber" id="alignAlert">WAITING</span></div>
+<div class="compact-grid">
+<div><h2>Live move agreement</h2>
+<div class="row"><span class="k">ES futures</span><span class="v" id="alignEs">OBSERVING</span></div>
+<div class="row"><span class="k">QQQ</span><span class="v" id="alignQqq">OBSERVING</span></div>
+<div class="row"><span class="k">VIX (inverse)</span><span class="v" id="alignVix">OBSERVING</span></div></div>
+<div><h2>Owner checks</h2>
+<div class="row"><span class="k">Engine 22 Micro direction</span><span class="v" id="alignWave">UNAVAILABLE</span></div>
+<div class="row"><span class="k">Engine 25 confirmation</span><span class="v" id="align25">NOT QUALIFIED</span></div>
+<div class="row"><span class="k">Engine 29 confirmation</span><span class="v" id="align29">NOT QUALIFIED</span></div></div>
+</div>
+<div class="row"><span class="k">Alert explanation / remaining restrictions</span><span class="v amber" id="alignReasons">UNAVAILABLE</span></div>
+<p class="micro-note">Alert is informational only. Requires rising ES + rising QQQ + falling direct VIX over measured live intervals; never infers Micro wave reversal or authorizes entry. Market alignment and a qualified Micro LONG are separate requirements. Visible while this dashboard is open.</p>
+</section>
 <section class="card full"><h2>Live QQQ / VIX price action — independent of hourly candles</h2>
 <div class="compact-grid">
 <div><h2>QQQ — direct stock trades</h2>
@@ -154,6 +170,17 @@ for(const row of n29.rows??[]){
  }
  body.appendChild(tr);
 }
+const align=d.microCrossMarketAlignment??{},ae=align.evidence??{};
+set("alignState",align.state??"AWAITING_QUALIFIED_PRICE_HISTORY");
+set("alignEs",ae.ES?.state??"UNAVAILABLE");
+set("alignQqq",ae.QQQ?.state??"UNAVAILABLE");
+set("alignVix",ae.VIX?.state??"UNAVAILABLE");
+set("alignWave",align.microDirection??"UNAVAILABLE");
+set("align25",align.qualifications?.engine25Qualified?"QUALIFIED":"NOT QUALIFIED");
+set("align29",align.qualifications?.engine29Qualified?"QUALIFIED":"NOT QUALIFIED");
+set("alignAlert",align.marketAligned?"BULLISH CROSS-MARKET ENVIRONMENT":"NO TRIPLE ALIGNMENT");
+set("alignReasons",align.reasons?.length?align.reasons.join(" • "):"NONE");
+$("crossMarketAlertCard").style.borderColor=align.marketAligned?"#dcb552":"#243951";
 const a10=d.engine10MicroAccount??{};
 const cm=d.liveCrossMarket??{};
 for(const [key,prefix] of [["QQQ","qqq"],["VIX","vix"]]){
