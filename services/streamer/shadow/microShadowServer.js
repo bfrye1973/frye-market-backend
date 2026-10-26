@@ -12,6 +12,7 @@ import {assembleCanonicalOwnerMarket} from "../../core/logic/engine27/v3/marketC
 import {projectMarketEvidenceForDisplay} from "../../core/logic/engine27/v3/marketConfirmation/projectMarketEvidenceForDisplay.js";
 import {projectEngine29Micro} from "../../core/logic/engine27/v3/marketConfirmation/projectEngine29Micro.js";
 import {projectSnapshotMicroAccount} from "../../core/logic/engine27/v3/positionIntelligence/projectSnapshotMicroAccount.js";
+import {projectQqqVixStatus} from "../../core/logic/engine27/v3/marketConfirmation/projectQqqVixStatus.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
 const USER=process.env.ENGINE27_V3_SHADOW_USERNAME||"";
@@ -58,6 +59,7 @@ app.get("/shadow/state",auth,(_req,res)=>{
   marketEvidence:displayEvidence,
   engine29MicroDisplay,
   engine10MicroAccount:projectSnapshotMicroAccount(snapshot),
+  qqqVix:projectQqqVixStatus(m?.modules?.marketConfirmation, snapshot?.engine27Strategies?.engine27CrossMarketLevels,snapshot?.engine27Strategies?.engine27LiveCrossMarketReactions),
   micro:m?{modules:{
     marketConfirmation:{sources:Object.fromEntries(["engine25","engine29","qqq","vix"].map(k=>[k,{state:m.modules?.marketConfirmation?.sources?.[k]?.state??"UNAVAILABLE"}]))},
     neighboringAlignment:{state:m.modules?.neighboringAlignment?.state,neighbors:{
