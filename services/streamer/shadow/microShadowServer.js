@@ -24,7 +24,7 @@ const TRADE_URL=process.env.ENGINE27_V3_TRADE_URL||"";
 const enabled=process.env.ENGINE27_V3_SHADOW_ENABLED==="true";
 let snapshot=null,snapshotAt=null,latest=null,sourceStatus="UNAVAILABLE",lastError=null;
 let retryRunner=null;
-const crossObserver=createCrossMarketLiveObserver({apiKey:process.env.POLYGON_API_KEY,enabled});
+const crossObserver=createCrossMarketLiveObserver({apiKey:process.env.POLYGON_API_KEY||process.env.POLYGON_API||process.env.POLY_API_KEY,enabled});
 let reportedMarketSourceStates=false;
 let reportedCanonicalOwnerSources=false;
 let ownerMarket={engine25:null,engine29:null,participationState:{state:"UNAVAILABLE",liveConfirmationUsable:false,contextOnly:false},reasonCodes:["CANONICAL_OWNER_CONTEXT_NOT_LOADED"]};
