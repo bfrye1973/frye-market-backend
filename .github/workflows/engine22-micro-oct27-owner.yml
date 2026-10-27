@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js"
       - "services/core/tests/engine22MicroOct27OwnerW1W2.test.js"
       - ".github/workflows/engine22-micro-oct27-owner.yml"
 permissions:
