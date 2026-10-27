@@ -294,22 +294,44 @@ export function buildCurrentWavelength({
   // W1/W2/W4 exact extrema have NOT been furnished; do not fabricate them.
   // W3 high is chart-labeled 7772.75; 4 and 5 are tentative annotations.
   // This is NOT an official Elliott completion or autonomous recount.
+  // Owner-specified October 27 Arizona 15m Submicro anchors.
+  // W1 to W4 are owner working marks; W5 is not yet confirmed.
   const ownerSubmicroFiveUp = {
     version:"engine22.submicroFiveUpOct27OwnerWatch.v1",
     degree:"submicro",parentDegree:"micro",parentWave:"W3",
     parentModelVersion:"engine22.microW3UpOct27Owner.v1",
     activeWave:"W5",direction:"UP",stage:"PROJECTED_W5_WATCH",
     interpretation:"PROVISIONAL_UPWARD_FIVE_WAVE_SCENARIO",
-    source:"OWNER_15M_CHART_2026_10_27_UNVERIFIED_ANCHORS",
-    wave1:{high:null,highStatus:"OWNER_MARKED_EXACT_PRICE_NOT_VERIFIED"},
-    wave2:{low:null,lowStatus:"OWNER_MARKED_EXACT_PRICE_NOT_VERIFIED"},
-    wave3:{high:7772.75,highStatus:"CHART_LABEL_ONLY_NOT_CANDLE_VERIFIED"},
-    wave4:{low:null,lowStatus:"PROVISIONAL_CHART_LABEL_NOT_VERIFIED"},
-    wave5:{high:null,status:"PROJECTED_NOT_STARTED_OR_CONFIRMED"},
+    source:"OWNER_SPECIFIED_2026_10_27_ARIZONA_ANCHORS",
+    wave1:{
+      low:7703.75,lowLocalTime:"2026-10-27 01:45",
+      high:7749.25,highLocalTime:"2026-10-27 05:15",
+      status:"OWNER_WORKING_ANCHORS_NOT_CANDLE_VERIFIED",
+    },
+    wave2:{
+      low:7712.75,lowLocalTime:"2026-10-27 07:15",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave3:{
+      high:7772.25,highLocalTime:"2026-10-27 09:00",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave4:{
+      low:7750.50,lowLocalTime:"2026-10-27 11:30",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave5:{high:null,status:"PROJECTED_NOT_CONFIRMED_COMPLETE"},
     priorCEnding:{price:7648.50,localTime:"2026-10-23 07:00",
       status:"OWNER_NOMINATED_PRIOR_C_ENDING_UNVERIFIED"},
-    fibStatus:"WAITING_FOR_VERIFIED_SUBMICRO_W1_W2_W4_ANCHORS",
-    levels:[],
+    wave1Length:45.50,
+    projectionMethod:"W4_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+    fibStatus:"OWNER_PROVISIONAL_W5_UP_PROJECTIONS",
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7750.50+(7749.25-7703.75)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,
+      touchEvidenceType:null,touchedAt:null,provisional:true,
+    })),
     confirmationStatus:"NO_SUBMICRO_WAVE_COMPLETION_CONFIRMED",
     previousModelVersion:"engine22.submicroCDownOwnerWatch.v1",
     historicFibTouchesPreserved:true,
