@@ -45,6 +45,7 @@ jobs:
           node --check services/core/logic/engine27/v3/probability/selectEngine25HistoricalFeatures.js
           node --check services/core/logic/engine27/v3/probability/readCanonicalReplayWindow.js
           node --check services/core/logic/engine27/v3/probability/backtestReplayOutcomes.js
+          node --check services/core/jobs/runEngine27ProbabilityReplayAudit.js
           node --check services/streamer/routes/stream.js
           node --check services/streamer/routes/engine27V3TradeStream.js
       - name: Verify legacy Engine 27 compatibility
