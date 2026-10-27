@@ -65,7 +65,8 @@ test("D-up touches before owner-nominated C low time are not fabricated",()=>{
   evaluationTimeMs:Date.parse("2026-10-22T12:00:00Z")});
  assert.ok(old.degrees.subminute.ownerCurrentDUp.levels.every(x=>x.status==="WATCH"));
 });
-\ntest("current Subminute D UP publication does not reuse prior C DOWN invalidation review",()=>{
+
+test("current Subminute D UP publication does not reuse prior C DOWN invalidation review",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7800,microBars5m:[]});
  const packet=buildSevenDegreeInvalidationsV1({currentWavelength:cw});
  assert.equal(packet.degrees.subminute.activeModel,"engine22.subminuteDUpOwnerWorking.v1");
