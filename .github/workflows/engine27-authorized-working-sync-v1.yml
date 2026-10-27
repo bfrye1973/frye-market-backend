@@ -1,0 +1,27 @@
+name: Engine27 Authorized Working Sync V1
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/**"
+      - "services/core/tests/engine27AuthorizedWorkingSyncV1.test.js"
+      - ".github/workflows/engine27-authorized-working-sync-v1.yml"
+  push:
+    branches:
+      - engine27-v3-micro-intelligence
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Authorized publication sync tests
+        run: node --test services/core/tests/engine27AuthorizedWorkingSyncV1.test.js services/core/tests/engine27TraderIntelligenceV2.test.js
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine27/v2/buildTraderIntelligenceV2.js
+          node --check services/core/logic/engine27/v3/engine22/readAuthorizedWorkingStructure.js
+          node --check services/core/logic/engine27/v3/neighboringAlignment/evaluateNeighboringAlignment.js
+          node --check services/core/logic/engine27/v3/manager/assembleMicroInputs.js
+          node --check services/core/logic/engine27/v3/priceActionFib/adaptEngine22Micro.js
