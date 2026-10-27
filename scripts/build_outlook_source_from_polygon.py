@@ -256,6 +256,7 @@ def process_symbol_10m(ticker: str, lookback_bars: int, days: int):
     """
     Fetch recent 10m bars for a symbol and compute intraday flags.
     """
+    started = time.monotonic()
     try:
         bars = fetch_10m_bars(ticker, days)
         today_bars = todays_completed_10m(bars)
@@ -266,13 +267,19 @@ def process_symbol_10m(ticker: str, lookback_bars: int, days: int):
         return nh, nl, u, d, volume
     except SystemExit:
         raise
-    except Exception:
+    except Exception as exc:
+        print(f"[10m][request-error] symbol={ticker} type={type(exc).__name__} detail={str(exc)[:160]}", flush=True)
         return 0,0,0,0,None
+    finally:
+        elapsed = time.monotonic() - started
+        if elapsed >= 5.0:
+            print(f"[10m][slow-symbol] symbol={ticker} seconds={elapsed:.2f}", flush=True)
 
 def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: int) -> Dict[str, Any]:
     """
     Compute aggregate NH/NL/U/D counts for a sector from intraday 10m bars.
     """
+    sector_started = time.monotonic()
     nh = nl = u = d = 0
     volume_observations = []
     if not symbols:
@@ -288,6 +295,7 @@ def process_sector(sector: str, symbols: List[str], lookback_bars: int, days: in
                 volume_observations.append({"classification": classification, "volume": f_volume})
             except Exception:
                 continue
+    print(f"[10m][sector-timing] sector={sector} symbols={len(symbols)} seconds={time.monotonic()-sector_started:.2f}", flush=True)
     return {"sector": sector, "nh": nh, "nl": nl, "u": u, "d": d, **aggregate_sector_volume(volume_observations)}
 
 def compute_sector_cards(sectors_dir: str, lookback_bars: int, days: int) -> List[Dict[str, Any]]:
