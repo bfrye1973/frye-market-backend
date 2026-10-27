@@ -1,5 +1,6 @@
 import test from "node:test";import assert from "node:assert/strict";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
+import {buildSevenDegreeInvalidationsV1} from "../logic/engine22/wave/buildSevenDegreeInvalidationsV1.js";
 import {applyOwnerPriceTouchesV1} from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 test("Subminute owner D-UP developing proposal preserves old C and Minute W2",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7760,microBars5m:[]});
@@ -63,4 +64,15 @@ test("D-up touches before owner-nominated C low time are not fabricated",()=>{
  const old=applyOwnerPriceTouchesV1({currentWavelength:cw,currentPrice:7900,
   evaluationTimeMs:Date.parse("2026-10-22T12:00:00Z")});
  assert.ok(old.degrees.subminute.ownerCurrentDUp.levels.every(x=>x.status==="WATCH"));
+});
+\ntest("current Subminute D UP publication does not reuse prior C DOWN invalidation review",()=>{
+ const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7800,microBars5m:[]});
+ const packet=buildSevenDegreeInvalidationsV1({currentWavelength:cw});
+ assert.equal(packet.degrees.subminute.activeModel,"engine22.subminuteDUpOwnerWorking.v1");
+ assert.equal(packet.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
+ assert.equal(packet.degrees.subminute.direction,"UP");
+ assert.equal(packet.degrees.subminute.invalidationReadiness.candidateZone,null);
+ assert.equal(packet.degrees.subminute.invalidationReadiness.officialInvalidationPrice,null);
+ assert.equal(packet.degrees.micro.waveIdentity,"MICRO_C_DOWN");
+ assert.equal(packet.degrees.submicro.waveIdentity,"SUBMICRO_C_DOWN");
 });
