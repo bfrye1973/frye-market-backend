@@ -42,9 +42,9 @@ test("unconfirmed and superseded pivots cannot fabricate zones",()=>{
  assert.equal(r.degrees.intermediate.invalidationReadiness.zoneAvailability,"QUALIFIED_PIVOT_REQUIRED");
 });
 
-test("all lower degree C-down reviews have anchored zones without any hard invalidation",()=>{
+test("current working wave reviews have owner anchors without hard invalidation",()=>{
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:wave()});
- const expected={submicro:7743,micro:7813.25};
+ const expected={submicro:7743,micro:7699.5,subminute:7648.5};
  for(const [degree,price] of Object.entries(expected)){
   const readiness=r.degrees[degree].invalidationReadiness;
   assert.deepEqual([readiness.candidateZone?.low,readiness.candidateZone?.high],[price,price]);
@@ -55,13 +55,16 @@ test("all lower degree C-down reviews have anchored zones without any hard inval
   assert.equal(readiness.officialInvalidationPrice,null);
   assert.ok(r.degrees[degree].rules.every(rule=>rule.price===null));
  }
- assert.equal(r.degrees.subminute.invalidationReadiness.candidateZone,null);
+ assert.equal(r.degrees.subminute.invalidationReadiness.candidateZone.reviewOnly,true);
  assert.equal(r.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
 });
 test("missing current owner models fail closed and cannot leak historic zone prices",()=>{
  const cw=wave();
  delete cw.degrees.submicro.ownerSubmicroCDown;
  delete cw.degrees.micro.ownerMicroCDown;
+ delete cw.degrees.micro.ownerMicroW3Up;
+ delete cw.degrees.subminute.ownerCurrentDUp;
+ delete cw.degrees.subminute.ownerCurrentCDown;
  delete cw.degrees.minute.ownerLargerCDownScenario;
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:cw});
  for(const degree of ["submicro","micro","subminute"]){
