@@ -19,13 +19,13 @@ test("seven independent active degree records, no invented invalidations",()=>{
  assert.deepEqual(Object.keys(output.degrees),degreeNames);
  assert.equal(output.evaluationTime,"2026-10-24T22:00:00.000Z");
  assert.equal(output.degrees.submicro.activeModel,"engine22.submicroCDownOwnerWatch.v1");
- assert.equal(output.degrees.micro.activeModel,"engine22.microCDownOwnerWatch.v1");
+ assert.equal(output.degrees.micro.activeModel,"engine22.microW3UpOct27Owner.v1");
  assert.equal(output.degrees.minute.activeModel,"engine22.minuteW2ComplexCorrectionWatch.v1");
  assert.equal(output.degrees.subminute.activeModel,"engine22.subminuteDUpOwnerWorking.v1");
  assert.equal(output.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
  assert.equal(output.degrees.minute.largerCorrectionDirection,"CORRECTIVE");
  assert.equal(output.degrees.minute.direction,"DOWN");
- assert.equal(output.degrees.micro.waveIdentity,"MICRO_C_DOWN");
+ assert.equal(output.degrees.micro.waveIdentity,"MICRO_W3_UP");
  assert.equal(output.degrees.submicro.waveIdentity,"SUBMICRO_C_DOWN");
  assert.deepEqual(output.degrees.minute.rules.map(x=>x.scope),["INTERNAL_C_DOWN","MINUTE_W2_DEGREE_COUNT","PARENT_STRUCTURE"]);
  for(const degree of degreeNames){
@@ -48,6 +48,7 @@ test("seven independent active degree records, no invented invalidations",()=>{
 test("legacy or superseded owner models never supply invalidation",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7760,microBars5m:[]});
  delete cw.degrees.micro.ownerMicroCDown;
+ delete cw.degrees.micro.ownerMicroW3Up;
  delete cw.degrees.submicro.ownerSubmicroCDown;
  delete cw.degrees.minute.ownerMinuteW2Hypothesis;
  const out=buildSevenDegreeInvalidationsV1({
