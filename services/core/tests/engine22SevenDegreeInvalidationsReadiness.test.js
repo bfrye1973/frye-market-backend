@@ -11,9 +11,9 @@ test("seven-degree readiness is readable by Engine27 but no false invalidation o
  const v=build();
  assert.deepEqual(Object.keys(v.degrees),names);
  assert.equal(v.degrees.submicro.invalidationReadiness.proposedReview.candidateReference,7743);
- assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.candidateReference,7813.25);
+ assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.candidateReference,7699.5);
  assert.equal(v.degrees.submicro.invalidationReadiness.proposedReview.reviewTimeframe,"10m");
- assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.reviewTimeframe,"1h");
+ assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.reviewTimeframe,null);
  for(const n of names){
   const d=v.degrees[n],q=d.invalidationReadiness;
   assert.equal(q.status,"OWNER_RULE_APPROVAL_REQUIRED");
@@ -28,12 +28,14 @@ test("seven-degree readiness is readable by Engine27 but no false invalidation o
  }
  assert.equal(v.warningEligible,false);
  assert.equal(v.currentCountIdsVerified,false);
- for(const n of names.slice(2))assert.equal(v.degrees[n].invalidationReadiness.proposedReview.candidateReference,null);
+ for(const n of names.slice(3))assert.equal(v.degrees[n].invalidationReadiness.proposedReview.candidateReference,null);
+ assert.equal(v.degrees.subminute.invalidationReadiness.proposedReview.candidateReference,7648.5);
 });
 test("superceded or missing owner model never leaks historical review reference",()=>{
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7672.5,microBars5m:[]});
  delete cw.degrees.submicro.ownerSubmicroCDown;
  delete cw.degrees.micro.ownerMicroCDown;
+ delete cw.degrees.micro.ownerMicroW3Up;
  const v=buildSevenDegreeInvalidationsV1({currentWavelength:cw});
  for(const n of ["submicro","micro"]){
   assert.equal(v.degrees[n].activeModel,null);
