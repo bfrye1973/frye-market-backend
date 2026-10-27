@@ -7,7 +7,7 @@ function findEsContractPaths(value){
  function walk(node,path,depth){
   if(depth>7||visited++>3000||hits.length>=12)return;
   if(typeof node==="string"){
-   if(/^\\/?ES[FGHJKMNQUVXZ]\\d{1,2}$/.test(node.trim().toUpperCase()))hits.push(path);
+   if(/^ES[FGHJKMNQUVXZ][0-9]{1,2}$/.test(node.trim().toUpperCase()))hits.push(path);
    return;
   }
   if(!node||typeof node!=="object")return;
