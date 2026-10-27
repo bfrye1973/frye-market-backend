@@ -1,6 +1,25 @@
 // Read-only production replay availability probe for isolated Engine27 shadow preview.
 // Emits only aggregate counts / field presence. Never logs prices, trade records or secrets.
 const endpoint="https://frye-market-backend-1.onrender.com";
+// Bounded metadata inspection: log contract-bearing field paths only, never raw contents.
+function findEsContractPaths(value){
+ const hits=[];let visited=0;
+ function walk(node,path,depth){
+  if(depth>7||visited++>3000||hits.length>=12)return;
+  if(typeof node==="string"){
+   if(/^\\/?ES[FGHJKMNQUVXZ]\\d{1,2}$/.test(node.trim().toUpperCase()))hits.push(path);
+   return;
+  }
+  if(!node||typeof node!=="object")return;
+  if(Array.isArray(node)){
+   for(let i=0;i<Math.min(5,node.length);i++)walk(node[i],path+"["+i+"]",depth+1);
+   return;
+  }
+  for(const [key,child] of Object.entries(node).slice(0,80))walk(child,path?path+"."+key:key,depth+1);
+ }
+ walk(value,"",0);
+ return hits;
+}
 const phoenixDate=()=>new Intl.DateTimeFormat("en-CA",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
 export async function auditReplayAvailability({date=phoenixDate(),fetcher=fetch}={}){
  const fail=(reason)=>({schema:"engine27.v3.replayAvailabilityAudit.v1",ok:false,date,reason,readOnly:true,noExecution:true});
@@ -30,6 +49,7 @@ export async function auditReplayAvailability({date=phoenixDate(),fetcher=fetch}
    hasStrategy1:!!candidate?.strategies?.["intraday_scalp@10m"],
    hasResolvedEsContract:typeof candidate?.resolvedEsContract==="string"||
     typeof candidate?.resolvedContract==="string",
+   verifiedContractCandidatePaths:findEsContractPaths(candidate),
    readOnly:true,noExecution:true};
  }catch{return fail("REPLAY_TRANSPORT_OR_PARSE_UNAVAILABLE")}
 }
