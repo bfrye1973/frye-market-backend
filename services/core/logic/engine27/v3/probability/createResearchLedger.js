@@ -32,7 +32,13 @@ export function createResearchLedger({root="/var/data/replay/engine27/probabilit
    if(entry?.schema!=="engine27.v3.probabilityOutcome.v1"||entry?.available!==true||
       typeof entry.predictionId!=="string"||!Number.isInteger(entry.horizonMinutes))
     throw Error("INVALID_OUTCOME");
-   if(!read(predictionFile).some(x=>x.id===entry.predictionId))throw Error("UNKNOWN_PREDICTION");
+   const source=read(predictionFile).find(x=>x.id===entry.predictionId);
+   if(!source)throw Error("UNKNOWN_PREDICTION");
+   if(source.resolvedEsContract!==entry.resolvedEsContract||
+      source.horizonMinutes!==entry.horizonMinutes||
+      !Number.isFinite(Date.parse(entry.observedAt))||
+      Date.parse(entry.observedAt)<Date.parse(source.predictionTimestampUtc)+entry.horizonMinutes*60000)
+    throw Error("OUTCOME_CONTRACT_OR_CHRONOLOGY_MISMATCH");
    return append(outcomeFile,entry,x=>x.predictionId+"|"+x.horizonMinutes);
   },
   readPredictions:()=>read(predictionFile),readOutcomes:()=>read(outcomeFile)
