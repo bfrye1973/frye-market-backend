@@ -1,0 +1,19 @@
+name: Engine22 C-down archive evidence inventory
+on:
+  pull_request:
+    paths:
+      - "services/core/scripts/auditCDownMorningArchiveReadOnly.js"
+      - "services/core/tests/engine22CDownArchiveAudit.test.js"
+      - ".github/workflows/engine22-cdown-real-history-audit.yml"
+permissions:
+  contents: read
+jobs:
+  cdown:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/scripts/auditCDownMorningArchiveReadOnly.js
+      - run: node --test services/core/tests/engine22CDownArchiveAudit.test.js services/core/tests/engine22IntegratedReplay.test.js
