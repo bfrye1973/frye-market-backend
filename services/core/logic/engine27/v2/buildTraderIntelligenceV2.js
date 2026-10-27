@@ -1,3 +1,4 @@
+import {readAuthorizedWorkingStructure} from "../v3/engine22/readAuthorizedWorkingStructure.js";
 // services/core/logic/engine27/v2/buildTraderIntelligenceV2.js
 //
 // Engine 27 V2 — additive read-only trader intelligence.
@@ -620,7 +621,25 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
 
   const snapshotTime = snapshotTimestamp(snapshot);
   const degrees = {};
+  const authorized = readAuthorizedWorkingStructure(snapshot);
 
+  if (authorized.available) {
+    for (const degree of DEGREE_ORDER) {
+      const w = authorized.publication.degrees[degree];
+      const previous = buildDegree({degree,state:degreeStates?.[degree]||null,display:null,wavelength:null,currentWavelength:{},snapshotTime});
+      const condition = w.stage || "NOT_PUBLISHED";
+      degrees[degree] = {...previous, activeWave:w.activeWave,waveDirection:w.direction,currentCondition:condition,
+        potentialCompletion:{nextLevel:null,levels:Array.isArray(w.levels)?w.levels:[],summary:"Engine 22 published working levels; touch is not completion."},
+        confirmationNeeded:{status:w.completionConfirmed===true?"CONFIRMED":"NOT_CONFIRMED",evidence:[],rule:null,note:null},
+        invalidation:{...previous.invalidation,price:w.officialInvalidation?.price??null,authorized:w.officialInvalidation??null,review:w.review??null},
+        parentContext:{parentDegree:w.parentDegree??null,parentWave:w.parentWave??null,displayText:null},
+        traderRead:{headline:`${DEGREE_LABELS[degree]} ${w.activeWave} ${w.direction} — ${condition}`,summary:`Engine 22 owner-selected working model: ${w.activeWave} ${w.direction}. Completion ${w.completionConfirmed===true?"confirmed":"not confirmed"}.`,rules:[]},
+        provenance:{structuralSource:"engine22WaveStrategy.authorizedWorkingStructure",sourceMap:{activeWave:w.sourcePath,waveDirection:w.sourcePath,currentCondition:w.sourcePath,potentialCompletion:w.sourcePath,invalidation:w.sourcePath,parentContext:w.sourcePath},confirmationStatus:w.completionConfirmed===true?"CONFIRMED":"NOT_CONFIRMED",freshness:freshnessRead({snapshotTime,evidenceTimestamp:authorized.publication.publishedAt}),modelFingerprint:authorized.publication.modelFingerprint,evidenceFingerprint:authorized.publication.evidenceFingerprint,modelVersion:w.modelVersion??null},
+      };
+    }
+  } else if (engine22?.authorizedWorkingStructure) {
+    for (const degree of DEGREE_ORDER) degrees[degree] = {...buildDegree({degree,state:null,display:null,wavelength:null,currentWavelength:{},snapshotTime}),activeWave:"NOT_PUBLISHED",waveDirection:null,currentCondition:"UNAVAILABLE",traderRead:{headline:"Engine 22 authorized publication unavailable",summary:authorized.reasonCode,rules:[]}};
+  } else {
   for (const degree of DEGREE_ORDER) {
     degrees[degree] = buildDegree({
       degree,
@@ -630,6 +649,8 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
       currentWavelength,
       snapshotTime,
     });
+  }
+
   }
 
   degrees.minute.strategy1Readiness =
