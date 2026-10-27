@@ -75,6 +75,7 @@ export function buildSevenDegreeInvalidationsV1({
   const cw=currentWavelength?.degrees||{};
   const parent=cw.minute?.ownerMinuteW2Hypothesis;
   const subminuteD=cw.subminute?.ownerCurrentDUp?.version==="engine22.subminuteDUpOwnerWorking.v1" && cw.subminute.ownerCurrentDUp.activeWave==="D" ? cw.subminute.ownerCurrentDUp:null;
+  const microW3=cw.micro?.ownerMicroW3Up?.version==="engine22.microW3UpOct27Owner.v1" && cw.micro.ownerMicroW3Up.activeWave==="W3" ? cw.micro.ownerMicroW3Up:null;
   const records={
     submicro:ownerRecord({
       degree:"submicro",model:cw.submicro?.ownerSubmicroCDown,
@@ -84,10 +85,10 @@ export function buildSevenDegreeInvalidationsV1({
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     micro:ownerRecord({
-      degree:"micro",model:cw.micro?.ownerMicroCDown,
-      expectedVersion:"engine22.microCDownOwnerWatch.v1",
-      waveIdentity:"MICRO_C_DOWN",parentDegree:"subminute",parentWave:"C",
-      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown",
+      degree:"micro",model:microW3||cw.micro?.ownerMicroCDown,
+      expectedVersion:microW3?"engine22.microW3UpOct27Owner.v1":"engine22.microCDownOwnerWatch.v1",
+      waveIdentity:microW3?"MICRO_W3_UP":"MICRO_C_DOWN",parentDegree:"subminute",parentWave:microW3?"D":"C",
+      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro."+(microW3?"ownerMicroW3Up":"ownerMicroCDown"),
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     subminute:{
@@ -182,6 +183,21 @@ export function buildSevenDegreeInvalidationsV1({
   const largerC=cw.minute?.ownerLargerCDownScenario;
   const largerB=largerC?.version==="engine22.largerCorrectionCDownWatch.v1"
     ? positive(largerC?.anchors?.bHigh):null;
+  // Owner wave-start review references only. No hard invalidation trigger.
+  const microW2Low=microW3?.wave2?.low===7699.50?microW3.wave2.low:null;
+  const subminuteCLow=subminuteD?.proposedPriorC?.endingPrice===7648.50
+    ?subminuteD.proposedPriorC.endingPrice:null;
+  const waveStartReview=(price,source,kind)=>price===null?null:{
+    low:price,high:price,kind,source,qualifiedMark:false,
+    ownerApprovedReference:true,reviewOnly:true,hardInvalidation:false,
+    triggerApproved:false,timeframeApproved:false,
+  };
+  const microW3Zone=waveStartReview(microW2Low,
+    "engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroW3Up.wave2.low",
+    "OWNER_MICRO_W2_LOW_W3_START_REVIEW");
+  const subminuteDZone=waveStartReview(subminuteCLow,
+    "engine22WaveStrategy.currentWavelength.degrees.subminute.ownerCurrentDUp.proposedPriorC.endingPrice",
+    "OWNER_SUBMINUTE_C_LOW_D_START_REVIEW");
   const subminuteZone=largerB===null?null:{
     low:largerB,high:largerB,kind:"PROVISIONAL_PARENT_C_DOWN_B_HIGH_RECOUNT_REFERENCE",
     source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario.anchors.bHigh",
@@ -189,8 +205,8 @@ export function buildSevenDegreeInvalidationsV1({
   };
   const candidateZones={
     submicro:ownerBZone(submicroReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown.waveB.high"),
-    micro:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
-    subminute:subminuteD?null:subminuteZone,
+    micro:microW3?microW3Zone:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
+    subminute:subminuteD?subminuteDZone:subminuteZone,
     minute:ownerMinuteBoundary || minuteZone,minor:minorPivot || ownerMinorBoundary || minorZone,
     intermediate:dynamicZone("intermediate","W2"),
     primary:dynamicZone("primary","W4"),
@@ -250,7 +266,16 @@ export function buildSevenDegreeInvalidationsV1({
       parentRecountOnReview:false,
     },
   };
-  if(subminuteD) reviewPlan.subminute={candidateReference:null,referenceType:"NONE_APPROVED",observation:"CURRENT_D_UP_WORKING; PREVIOUS_C_DOWN_RECOUNT_REFERENCE_HISTORICAL",reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",parentRecountOnReview:false};
+  if(microW3) reviewPlan.micro={candidateReference:microW2Low,
+    referenceType:"OWNER_MICRO_W2_LOW_REVIEW_ONLY",
+    observation:"PRICE_BELOW_NOMINATED_W2_LOW_REQUIRES_MICRO_W3_COUNT_REVIEW_NOT_HARD_INVALIDATION",
+    reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
+    parentRecountOnReview:false};
+  if(subminuteD) reviewPlan.subminute={candidateReference:subminuteCLow,
+    referenceType:"OWNER_SUBMINUTE_C_LOW_REVIEW_ONLY",
+    observation:"PRICE_BELOW_NOMINATED_C_LOW_REQUIRES_SUBMINUTE_D_COUNT_REVIEW_NOT_HARD_INVALIDATION",
+    reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
+    parentRecountOnReview:false};
   for(const degree of DEGREES){
     const proposal=reviewPlan[degree];
     const zone=candidateZones[degree]||null;
