@@ -401,6 +401,48 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // October 27 owner-selected working proposal. Not a completed-pattern
+      // confirmation, canonical count promotion, or autonomous transition.
+      // Earlier C DOWN and legacy W3 models remain below without mutation.
+      ownerCurrentDUp:{
+        version:"engine22.subminuteDUpOwnerWorking.v1",
+        activeWave:"D",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+        degree:"subminute",parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_APPROVED_2026_10_27_PR214",
+        proposedPriorC:{
+          direction:"DOWN",endingPrice:7648.50,
+          endingLocalTime:"2026-10-23 07:00",
+          timezone:"America/Phoenix",
+          source:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED",
+          confirmationStatus:"OWNER_WORKING_ENDING_NOT_STRUCTURALLY_VERIFIED",
+        },
+        parentCorrectionStatus:"MINUTE_W2_NOT_COMPLETE",
+        minuteW3Started:false,
+        structure:"ABCDE_TRIANGLE_CANDIDATE_NOT_CONFIRMED",
+        nextLeg:"E_DOWN_POSSIBLE_NOT_STARTED",
+        // D-UP retracements of the nominated B -> C decline.
+        // B high is an older owner chart reference; C low is not candle-verified.
+        // These are provisional upside objectives, never confirmation of D.
+        anchors:{
+          bHigh:7897.50,
+          cLow:7648.50,
+          cLowLocalTime:"2026-10-23 07:00",
+          cLowTimezone:"America/Phoenix",
+          status:"OWNER_REFERENCES_NOT_INDEPENDENTLY_VERIFIED",
+        },
+        projectionMethod:"C_LOW_PLUS_B_TO_C_RANGE_TIMES_RETRACEMENT_RATIO",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+          price:Math.round((7648.50+(7897.50-7648.50)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,touchedAt:null,provisional:true,
+        })),
+        fibLevelsStatus:"OWNER_PROVISIONAL_D_UP_RETRACEMENT",
+        previousModelVersion:"engine22.subminuteCurrentCDownReference.v1",
+        oldCDownHistoryPreserved:true,
+        publicationStatus:"OWNER_WORKING_PROVISIONAL",
+        noExecution:true,noPermissionCreated:true,
+      },
       // Owner-selected presentation of larger corrective C inside Minute W2.
       // The source scenario stays independently stored under Minute, and the
       // legacy Subminute W3 remains for historical audit.

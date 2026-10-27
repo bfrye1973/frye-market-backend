@@ -21,8 +21,8 @@ test("seven independent active degree records, no invented invalidations",()=>{
  assert.equal(output.degrees.submicro.activeModel,"engine22.submicroCDownOwnerWatch.v1");
  assert.equal(output.degrees.micro.activeModel,"engine22.microCDownOwnerWatch.v1");
  assert.equal(output.degrees.minute.activeModel,"engine22.minuteW2ComplexCorrectionWatch.v1");
- assert.equal(output.degrees.subminute.activeModel,"engine22.subminuteCurrentCDownReference.v1");
- assert.equal(output.degrees.subminute.waveIdentity,"SUBMINUTE_C_DOWN");
+ assert.equal(output.degrees.subminute.activeModel,"engine22.subminuteDUpOwnerWorking.v1");
+ assert.equal(output.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
  assert.equal(output.degrees.minute.largerCorrectionDirection,"CORRECTIVE");
  assert.equal(output.degrees.minute.direction,"DOWN");
  assert.equal(output.degrees.micro.waveIdentity,"MICRO_C_DOWN");

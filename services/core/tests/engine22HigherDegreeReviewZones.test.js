@@ -44,7 +44,7 @@ test("unconfirmed and superseded pivots cannot fabricate zones",()=>{
 
 test("all lower degree C-down reviews have anchored zones without any hard invalidation",()=>{
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:wave()});
- const expected={submicro:7743,micro:7813.25,subminute:7897.5};
+ const expected={submicro:7743,micro:7813.25};
  for(const [degree,price] of Object.entries(expected)){
   const readiness=r.degrees[degree].invalidationReadiness;
   assert.deepEqual([readiness.candidateZone?.low,readiness.candidateZone?.high],[price,price]);
@@ -55,7 +55,8 @@ test("all lower degree C-down reviews have anchored zones without any hard inval
   assert.equal(readiness.officialInvalidationPrice,null);
   assert.ok(r.degrees[degree].rules.every(rule=>rule.price===null));
  }
- assert.equal(r.degrees.subminute.invalidationReadiness.candidateZone.degreePlacementConfirmed,false);
+ assert.equal(r.degrees.subminute.invalidationReadiness.candidateZone,null);
+ assert.equal(r.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
 });
 test("missing current owner models fail closed and cannot leak historic zone prices",()=>{
  const cw=wave();
