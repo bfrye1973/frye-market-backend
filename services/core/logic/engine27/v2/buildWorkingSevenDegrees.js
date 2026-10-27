@@ -1,3 +1,4 @@
+import {readAuthorizedWorkingStructure} from "./readAuthorizedWorkingStructure.js";
 import { buildEngine27SevenInvalidationsV1 } from "./buildSevenInvalidationsV1.js";
 // Engine 27 additive seven-degree OWNER WORKING COUNT interpretation.
 // Read-only. Engine 22 alone owns wave identity, level geometry, touch status and confirmations.
@@ -118,6 +119,36 @@ export function buildEngine27WorkingSevenDegrees({snapshot} = {}) {
       provenance:{workingSource:source,workingModelVersion:model.version ?? null,confirmationStatus:confirmation,countId:model.sourceCountId ?? null,workingCount:true,confirmed:false},
       internalLeg:leg,largerCorrection:degree === "minute"?"W2":null,
       noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
+  }
+  // Once Engine22H publishes an authorized selection, it entirely supersedes the
+  // historical local selectors above. Invalid publications fail closed, never back to C DOWN.
+  const auth = readAuthorizedWorkingStructure(snapshot);
+  if (e22?.authorizedWorkingStructure) {
+    for (const degree of ENGINE27_WORKING_DEGREES) {
+      const m = auth.available ? auth.publication.degrees[degree] : null;
+      if (!m) {
+        degrees[degree] = {degree,label:degree.toUpperCase(),available:false,
+          activeWave:"NOT_PUBLISHED",waveDirection:"NOT_PUBLISHED",currentCondition:"UNAVAILABLE",
+          confirmationNeeded:{status:"NOT_PUBLISHED",evidence:[]},
+          potentialCompletion:{levels:[],nextLevel:null,summary:"Authorized Engine 22 working model unavailable."},
+          parentContext:{parentDegree:null,parentWave:null,displayText:null},
+          invalidation:{price:null,status:"UNAVAILABLE",review:null},
+          traderRead:{headline:"Authorized Engine 22 model unavailable",summary:auth.reasonCode,rules:[]},
+          provenance:{workingSource:"engine22WaveStrategy.authorizedWorkingStructure",workingModelVersion:null,confirmationStatus:"NOT_PUBLISHED",modelFingerprint:null},noExecution:true};
+        continue;
+      }
+      const story = `${degree.toUpperCase()} ${m.activeWave} ${m.direction} — ${m.stage||"NOT_PUBLISHED"}; completion ${m.completionConfirmed===true?"confirmed":"not confirmed"}.`;
+      degrees[degree] = {degree,label:degree.toUpperCase(),available:true,
+        activeWave:m.activeWave,waveDirection:m.direction,currentCondition:m.stage??"NOT_PUBLISHED",
+        confirmationNeeded:{status:m.completionConfirmed===true?"CONFIRMED":"NOT_CONFIRMED",evidence:[],rule:null,note:"Owner working pivot selection does not itself confirm completion."},
+        potentialCompletion:{levels:levels(m.levels),nextLevel:null,summary:"Authorized Engine 22 owner-model levels; not a completion signal."},
+        invalidation:{price:m.officialInvalidation?.price??null,rule:null,status:m.officialInvalidation?"APPROVED_ACTIVE":"NOT_PUBLISHED",review:m.review??null},
+        parentContext:{parentDegree:m.parentDegree??null,parentWave:m.parentWave??null,displayText:null},
+        traderRead:{headline:story,summary:story,rules:[]},
+        provenance:{workingSource:"engine22WaveStrategy.authorizedWorkingStructure",sourcePath:m.sourcePath,workingModelVersion:m.modelVersion??null,confirmationStatus:m.completionConfirmed===true?"CONFIRMED":"NOT_CONFIRMED",countId:m.countId??null,modelFingerprint:auth.publication.modelFingerprint,evidenceFingerprint:auth.publication.evidenceFingerprint,workingCount:true,confirmed:m.completionConfirmed===true},
+        internalLeg:null,largerCorrection:degree==="minute"?"W2":null,
+        noPermissionCreated:true,noSizingCreated:true,noExecution:true,noJournalWrite:true};
+    }
   }
   // Engine 22 is the sole owner of higher-degree protection; Engine 27 displays it.
   const higherProtection=e22?.higherDegreeBearishProtection?.degrees ?? {};
