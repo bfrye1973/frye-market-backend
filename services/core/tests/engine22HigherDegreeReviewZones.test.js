@@ -44,7 +44,7 @@ test("unconfirmed and superseded pivots cannot fabricate zones",()=>{
 
 test("current working wave reviews have owner anchors without hard invalidation",()=>{
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:wave()});
- const expected={submicro:7743,micro:7699.5,subminute:7648.5};
+ const expected={submicro:7750.5,micro:7699.5,subminute:7648.5};
  for(const [degree,price] of Object.entries(expected)){
   const readiness=r.degrees[degree].invalidationReadiness;
   assert.deepEqual([readiness.candidateZone?.low,readiness.candidateZone?.high],[price,price]);
@@ -61,6 +61,7 @@ test("current working wave reviews have owner anchors without hard invalidation"
 test("missing current owner models fail closed and cannot leak historic zone prices",()=>{
  const cw=wave();
  delete cw.degrees.submicro.ownerSubmicroCDown;
+ delete cw.degrees.submicro.ownerSubmicroFiveUp;
  delete cw.degrees.micro.ownerMicroCDown;
  delete cw.degrees.micro.ownerMicroW3Up;
  delete cw.degrees.subminute.ownerCurrentDUp;

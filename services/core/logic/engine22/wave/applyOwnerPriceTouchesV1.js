@@ -307,6 +307,56 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // Owner Submicro W5-up projections: independent per-model touch memory.
+  // Never overwrite historical C-down Fib status or its disk identity.
+  const submicroW5=root.degrees?.submicro?.ownerSubmicroFiveUp;
+  if(submicroW5?.version==="engine22.submicroFiveUpOct27OwnerWatch.v1" &&
+     submicroW5.wave4?.low===7750.50 && Array.isArray(submicroW5.levels)){
+    const id=JSON.stringify(["submicro","ownerSubmicroFiveUp",submicroW5.version,
+      submicroW5.wave1?.low,submicroW5.wave1?.high,submicroW5.wave4?.low,
+      submicroW5.levels.map(x=>[x.key,x.price])]);
+    const previous=previousWavelength?.degrees?.submicro?.ownerSubmicroFiveUp;
+    const same=previous?.version===submicroW5.version &&
+      previous.wave1?.low===submicroW5.wave1.low &&
+      previous.wave1?.high===submicroW5.wave1.high &&
+      previous.wave4?.low===submicroW5.wave4.low;
+    const retained=disk[id]||{};
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const start=Date.parse("2026-10-27T18:30:00.000Z"); // owner W4 low 11:30 AZ
+    const price=finite(currentPrice);
+    const previousPrice=same?finite(previousWavelength?.currentPrice):null;
+    const seen=[];
+    if(now>=start && price!==null)
+      seen.push({high:previousPrice===null?price:Math.max(price,previousPrice),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(b?.time),high=finite(b?.high);
+      if(!Number.isSafeInteger(t)||t<=0||high===null)continue;
+      if(t*1000<start||t*1000+600000>now)continue;
+      seen.push({high,time:new Date(t*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC"});
+    }
+    submicroW5.levels=submicroW5.levels.map(l=>{
+      const prior=retained[l.key]||(same?previous.levels?.find(x=>
+        x.key===l.key&&x.price===l.price):null);
+      const persist=prior?.status==="TOUCHED"&&prior?.price===l.price;
+      const hit=persist?null:seen.find(x=>x.high>=l.price);
+      return {...l,status:persist||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(persist||hit),
+        touchEvidenceType:persist?prior.touchEvidenceType||"PREVIOUS_SNAPSHOT":hit?.source||null,
+        touchedAt:persist?prior.touchedAt||null:hit?.time||null,
+        touchEvidence:persist||hit?{
+          verified:hit?.source==="ES_10M_COMPLETED_OHLC"||
+            prior?.touchEvidence?.verified===true,
+          evidenceClass:hit?.source==="ES_10M_COMPLETED_OHLC"?
+            "COMPLETED_CANDLE":persist?"RETAINED_OBSERVATION":"SNAPSHOT_PRICE",
+        }:null};
+    });
+    disk[id]=Object.fromEntries(submicroW5.levels.filter(x=>x.status==="TOUCHED")
+      .map(x=>[x.key,{key:x.key,price:x.price,status:x.status,
+        touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
+        touchEvidence:x.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
