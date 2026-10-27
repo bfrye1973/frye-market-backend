@@ -289,6 +289,32 @@ export function buildCurrentWavelength({
   // not an independently confirmed Submicro A projection.
   // Current owner working Submicro ABC DOWN inside Micro C DOWN.
   // B time corrected to Oct 22 18:50 Arizona, after A low at 14:30.
+  // Owner chart, 2026-10-27 (15m ES): proposed bullish subdivisions
+  // developing inside Micro W3 UP, which sits within Subminute D UP.
+  // W1/W2/W4 exact extrema have NOT been furnished; do not fabricate them.
+  // W3 high is chart-labeled 7772.75; 4 and 5 are tentative annotations.
+  // This is NOT an official Elliott completion or autonomous recount.
+  const ownerSubmicroFiveUp = {
+    version:"engine22.submicroFiveUpOct27OwnerWatch.v1",
+    degree:"submicro",parentDegree:"micro",parentWave:"W3",
+    parentModelVersion:"engine22.microW3UpOct27Owner.v1",
+    activeWave:"W5",direction:"UP",stage:"PROJECTED_W5_WATCH",
+    interpretation:"PROVISIONAL_UPWARD_FIVE_WAVE_SCENARIO",
+    source:"OWNER_15M_CHART_2026_10_27_UNVERIFIED_ANCHORS",
+    wave1:{high:null,highStatus:"OWNER_MARKED_EXACT_PRICE_NOT_VERIFIED"},
+    wave2:{low:null,lowStatus:"OWNER_MARKED_EXACT_PRICE_NOT_VERIFIED"},
+    wave3:{high:7772.75,highStatus:"CHART_LABEL_ONLY_NOT_CANDLE_VERIFIED"},
+    wave4:{low:null,lowStatus:"PROVISIONAL_CHART_LABEL_NOT_VERIFIED"},
+    wave5:{high:null,status:"PROJECTED_NOT_STARTED_OR_CONFIRMED"},
+    priorCEnding:{price:7648.50,localTime:"2026-10-23 07:00",
+      status:"OWNER_NOMINATED_PRIOR_C_ENDING_UNVERIFIED"},
+    fibStatus:"WAITING_FOR_VERIFIED_SUBMICRO_W1_W2_W4_ANCHORS",
+    levels:[],
+    confirmationStatus:"NO_SUBMICRO_WAVE_COMPLETION_CONFIRMED",
+    previousModelVersion:"engine22.submicroCDownOwnerWatch.v1",
+    historicFibTouchesPreserved:true,
+    noExecution:true,noPermissionCreated:true,ownerWorkingOnly:true,
+  };
   const ownerSubmicroCDown = {
     version:"engine22.submicroCDownOwnerWatch.v1",
     activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
@@ -408,6 +434,7 @@ export function buildCurrentWavelength({
       ownerSubmicroAbc,
       ownerSubmicroADown,
       ownerSubmicroCDown,
+      ownerSubmicroFiveUp,
       levels:submicroW2Levels,
       nextLevel:null,lastTouchedLevel:null,
       noExecution:true,
