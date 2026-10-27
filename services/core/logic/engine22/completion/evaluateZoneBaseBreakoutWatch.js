@@ -68,7 +68,7 @@ export function evaluateEngine22ZoneBaseBreakoutWatch({
  };
  if(!above||!strong) return output({available:true,status:"BASE_ESTABLISHED",
    reasonCodes:[above?"UPWARD_BREAKOUT_NOT_FORCEFUL":"AWAITING_UPWARD_CLOSE_OUTSIDE_ZONE"],evidence});
- const priorSame=previous?.countId===countId&&previous?.degreeId===degreeId&&
+ const priorSame=previous?.evidence?.countId===countId&&previous?.evidence?.degreeId===degreeId&&
    previous?.evidence?.zoneId===zone.zoneId&&
    previous?.evidence?.breakoutBarId===breakout.sourceBarId;
  if(priorSame)return output({available:true,status:"C_COMPLETION_EARLY_WATCH",
