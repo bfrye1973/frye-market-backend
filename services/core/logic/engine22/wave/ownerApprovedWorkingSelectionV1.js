@@ -5,7 +5,7 @@ export const OWNER_APPROVED_SELECTION_SCHEMA="engine22.ownerApprovedWorkingSelec
 export const ownerApprovedWorkingSelection=Object.freeze({
   schema:OWNER_APPROVED_SELECTION_SCHEMA,
   selectionRevision:1,
-  approvalReference:"OWNER_WORKING_COUNTS_2026_10_27",
+  approvalReference:null,
   degrees:Object.freeze({
     submicro:Object.freeze({key:"ownerSubmicroFiveUp",modelVersion:"engine22.submicroFiveUpOct27OwnerWatch.v1",activeWave:"W5",direction:"UP",stage:"PROJECTED_W5_WATCH",parentDegree:"micro",parentWave:"W3"}),
     micro:Object.freeze({key:"ownerMicroW3Up",modelVersion:"engine22.microW3UpOct27Owner.v1",activeWave:"W3",direction:"UP",stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentWave:"D"}),
