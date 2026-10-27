@@ -1,3 +1,4 @@
+import {readAuthorizedWorkingStructure} from "../engine22/readAuthorizedWorkingStructure.js";
 import { MICRO_INPUT_SCHEMA } from "../contracts/manager.v1.js";
 const timestamp=s=>typeof s==="string"&&Number.isFinite(Date.parse(s));
 export function assembleMicroInputs({
@@ -9,10 +10,11 @@ export function assembleMicroInputs({
  const at=evaluatedAt??snapshot?.now??snapshot?.ts??null;
  if(snapshot?.symbol!=="ES")reasonCodes.push("SNAPSHOT_ES_IDENTITY_UNAVAILABLE");
  if(!timestamp(at))reasonCodes.push("EVALUATION_TIMESTAMP_UNAVAILABLE");
- const owner=snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown;
- if(owner?.version!=="engine22.microCDownOwnerWatch.v1")reasonCodes.push("MICRO_OWNER_MODEL_UNAVAILABLE");
+ const authorized=readAuthorizedWorkingStructure(snapshot);
+ if(!authorized.available)reasonCodes.push(authorized.reasonCode);
+ const owner=authorized.available?authorized.publication.degrees.micro:null;
  return {contract:{schema:MICRO_INPUT_SCHEMA,mode:"READ_ONLY",qualified:reasonCodes.length===0,
- degree:"micro",evaluatedAt:at,ownerVersion:owner?.version??null,reasonCodes},
+ degree:"micro",evaluatedAt:at,ownerVersion:owner?.modelVersion??null,reasonCodes},
  sources:{snapshot,evaluatedAt:at,engine25,engine29,crossMarketLevels,crossMarketReactions,
  esInstitutionalContext,journal,officialPlans,replay}};
 }
