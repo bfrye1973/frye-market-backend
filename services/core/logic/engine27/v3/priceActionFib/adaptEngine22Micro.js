@@ -1,8 +1,14 @@
+import {readAuthorizedWorkingStructure} from "../engine22/readAuthorizedWorkingStructure.js";
 import { OWNER_VERSION } from '../contracts/priceActionFib.v1.js';
 const positive = n => typeof n === 'number' && Number.isFinite(n) && n > 0;
 const fail = code => ({available:false,reasonCodes:[code],owner:null,candles:[],observationTime:null});
 export function adaptEngine22Micro({snapshot=null,esBars10m=null,evaluatedAt=null,sourceSymbol='ES',maxAgeMs=3600000}={}) {
  if(snapshot?.symbol!=='ES'||sourceSymbol!=='ES')return fail('ES_SOURCE_IDENTITY_MISMATCH');
+ const auth=readAuthorizedWorkingStructure(snapshot);
+ // This older extension-specific C DOWN ladder cannot consume an UP W3 ladder.
+ // Never silently synthesize a C DOWN probability from the new authorized model.
+ if(snapshot?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.authorizedWorkingStructure)
+   return fail(auth.available?'LEGACY_C_DOWN_FIB_ADAPTER_MODEL_MISMATCH':auth.reasonCode);
  const owner=snapshot?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown;
  if(owner?.version!==OWNER_VERSION||owner?.activeWave!=='C'||owner?.direction!=='DOWN'||owner?.parentDegree!=='subminute')return fail('CURRENT_MICRO_OWNER_UNAVAILABLE');
  if(!positive(owner.waveA?.high)||!positive(owner.waveA?.low)||!positive(owner.waveB?.high)||owner.waveA.high<=owner.waveA.low)return fail('MICRO_OWNER_ANCHORS_INVALID');
