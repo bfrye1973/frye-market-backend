@@ -1,3 +1,4 @@
+import {buildEngine27WorkingSevenDegrees} from "../logic/engine27/v2/buildWorkingSevenDegrees.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {readAuthorizedWorkingStructure} from "../logic/engine27/v3/engine22/readAuthorizedWorkingStructure.js";
@@ -46,4 +47,23 @@ test("wrong parent linkage fails closed",()=>{
 test("legacy C DOWN-specific Fibonacci adapter cannot interpret authorized Micro W3 UP",()=>{
  const r=adaptEngine22Micro({snapshot:fixture()});assert.equal(r.available,false);
  assert.deepEqual(r.reasonCodes,["LEGACY_C_DOWN_FIB_ADAPTER_MODEL_MISMATCH"]);
+});
+
+test("canonical seven working cards follow owner publication, not old bearish selectors",()=>{
+ const r=buildEngine27WorkingSevenDegrees({snapshot:fixture()});
+ assert.equal(r.degrees.submicro.activeWave,"W5");
+ assert.equal(r.degrees.micro.activeWave,"W3");
+ assert.equal(r.degrees.subminute.activeWave,"D");
+ assert.equal(r.degrees.minute.activeWave,"W2");
+ assert.equal(r.degrees.micro.waveDirection,"UP");
+ assert.match(r.degrees.micro.traderRead.headline,/W3 UP/);
+ assert.ok(!r.workingAlignment.marketStory.includes("Micro C DOWN"));
+ assert.equal(r.degrees.micro.provenance.workingSource,"engine22WaveStrategy.authorizedWorkingStructure");
+});
+test("canonical cards fail closed when publication conflicts",()=>{
+ const x=fixture(); x.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.degrees.subminute.available=false;
+ const r=buildEngine27WorkingSevenDegrees({snapshot:x});
+ assert.equal(r.degrees.micro.available,false);
+ assert.equal(r.degrees.subminute.available,false);
+ assert.ok(!r.degrees.micro.traderRead.headline.includes("C DOWN"));
 });
