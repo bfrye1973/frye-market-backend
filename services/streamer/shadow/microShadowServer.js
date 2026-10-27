@@ -17,6 +17,7 @@ import {createSharedCrossMarketConsumer} from "./createSharedCrossMarketConsumer
 import {createMicroCrossMarketAlignment} from "../../core/logic/engine27/v3/marketAlignment/createMicroCrossMarketAlignment.js";
 import {createMicroAlignmentAlertGate} from "../../core/logic/engine27/v3/marketAlignment/createMicroAlignmentAlertGate.js";
 import {createMicroAlignmentArchiveClient} from "./createMicroAlignmentArchiveClient.js";
+import {auditReplayAvailability} from "../../core/logic/engine27/v3/probability/auditReplayAvailability.js";
 import {observeLiveCrossMarketZones,projectLiveCrossMarketZonesForDisplay} from "../../core/logic/engine27/v3/livePriceObserver/evaluateLiveCrossMarketZones.js";
 const app=express();app.disable("x-powered-by");app.set("etag",false);
 const PORT=Number(process.env.PORT)||10000;
@@ -209,6 +210,8 @@ const server=app.listen(PORT,"0.0.0.0",()=>{
  console.log("[engine27-v3-shadow] Listening, shadow="+enabled+"; no trading authority");
 });
 if(enabled){
+ // One bounded, sanitized read-only historical availability probe per preview startup.
+ void auditReplayAvailability().then(report=>console.info("[engine27-v3-probability-replay-audit] "+JSON.stringify(report)));
  crossObserver.start();
  void alignmentArchive.refresh().then(result=>{
   console.info("[engine27-v3-micro-alignment-archive-acceptance] "+JSON.stringify({reachable:result.ok,state:result.state}));
