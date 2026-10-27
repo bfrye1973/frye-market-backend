@@ -224,6 +224,38 @@ export function buildCurrentWavelength({
     confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
     noExecution:true,noPermissionCreated:true,
   };
+  // October 27 owner working Micro impulse-up recount, independent from
+  // existing C DOWN and historical Micro models; do not infer missing W1 high.
+  const ownerMicroW3Up = {
+    version:"engine22.microW3UpOct27Owner.v1",
+    degree:"micro",direction:"UP",activeWave:"W3",
+    stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",
+    parentWave:"D",parentModelVersion:"engine22.subminuteDUpOwnerWorking.v1",
+    wave1:{
+      low:7651.75,lowLocalTime:"2026-10-25 15:00",
+      high:7739.50,highLocalTime:"2026-10-26 08:00",
+      highStatus:"OWNER_CONFIRMED_PRICE_NOT_INDEPENDENTLY_OHLC_VERIFIED",
+    },
+    wave2:{
+      low:7699.50,lowLocalTime:"2026-10-27 01:00",
+      status:"OWNER_WORKING_ENDING_PROVISIONAL",
+    },
+    wave3:{direction:"UP",stage:"DEVELOPING_CANDIDATE",
+      startPrice:7699.50,completionConfirmed:false},
+    projectionMethod:"W2_LOW_PLUS_W1_LENGTH_TIMES_EXTENSION",
+    fibStatus:"OWNER_PROVISIONAL_MICRO_W3_UP_EXTENSIONS",
+    fibAnchorStatus:"OWNER_PRICE_LEVELS_NOT_INDEPENDENTLY_CANDLE_VERIFIED",
+    wave1Length:7739.50-7651.75,
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7699.50+(7739.50-7651.75)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,
+      touchEvidenceType:null,touchedAt:null,provisional:true,
+    })),
+    previousModelVersion:"engine22.microCDownOwnerWatch.v1",
+    oldCDownHistoryPreserved:true,ownerWorkingOnly:true,
+    noExecution:true,noPermissionCreated:true,
+  };
   // Owner working recount October 22: Micro A completed, B DOWN developing.
   // Keep prior C-UP owner model as historical, without promoting wave confirmation.
   // Current owner working count: A DOWN complete, B UP complete, C DOWN developing.
@@ -387,6 +419,7 @@ export function buildCurrentWavelength({
       ownerMicroAbc,
       ownerMicroBDown,
       ownerMicroCDown,
+      ownerMicroW3Up,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
         activeWave:"W3",direction:"UP",anchors:microW3Anchors,

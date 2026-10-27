@@ -256,6 +256,57 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // Independent Micro W3-up Fib touch memory. The historical Micro C-down
+  // model remains the legacy degree model; never overwrite its touch ledger.
+  const microW3=root.degrees?.micro?.ownerMicroW3Up;
+  if(microW3?.version==="engine22.microW3UpOct27Owner.v1" &&
+     microW3.activeWave==="W3" &&
+     Array.isArray(microW3.levels) && microW3.wave1?.high===7739.50){
+    const key=JSON.stringify(["micro","ownerMicroW3Up",microW3.version,
+      microW3.wave1.low,microW3.wave1.high,microW3.wave2?.low,
+      microW3.levels.map(l=>[l.key,l.price])]);
+    const previous=previousWavelength?.degrees?.micro?.ownerMicroW3Up;
+    const matching=previous?.version===microW3.version &&
+      previous.wave1?.low===microW3.wave1.low &&
+      previous.wave1?.high===microW3.wave1.high &&
+      previous.wave2?.low===microW3.wave2?.low;
+    const priorTouches=disk[key]||{};
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const start=Date.parse("2026-10-27T08:00:00.000Z");
+    const price=finite(currentPrice);
+    const previousQuote=matching?finite(previousWavelength?.currentPrice):null;
+    const observations=[];
+    if(now>=start && price!==null)
+      observations.push({high:previousQuote===null?price:Math.max(price,previousQuote),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const time=Number(bar?.time),high=finite(bar?.high);
+      if(!Number.isSafeInteger(time)||time<=0||high===null)continue;
+      if(time*1000<start||time*1000+600000>now)continue;
+      observations.push({high,time:new Date(time*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC"});
+    }
+    microW3.levels=microW3.levels.map(level=>{
+      const old=priorTouches[level.key]||
+        (matching?previous.levels?.find(l=>l.key===level.key&&l.price===level.price):null);
+      const retained=old?.status==="TOUCHED"&&old?.price===level.price;
+      const fresh=retained?null:observations.find(o=>o.high>=level.price);
+      return {...level,status:retained||fresh?"TOUCHED":"WATCH",
+        provisional:true,touchEvidenceAvailable:Boolean(retained||fresh),
+        touchEvidenceType:retained?old.touchEvidenceType||"PREVIOUS_SNAPSHOT":fresh?.source||null,
+        touchedAt:retained?old.touchedAt||null:fresh?.time||null,
+        touchEvidence:retained||fresh?{
+          verified:fresh?.source==="ES_10M_COMPLETED_OHLC"||
+            old?.touchEvidence?.verified===true,
+          evidenceClass:fresh?.source==="ES_10M_COMPLETED_OHLC"?
+            "COMPLETED_CANDLE":retained?"RETAINED_OBSERVATION":"SNAPSHOT_PRICE",
+        }:null};
+    });
+    disk[key]=Object.fromEntries(microW3.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
