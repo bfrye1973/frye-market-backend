@@ -1,0 +1,19 @@
+name: Engine22E T1.4 Store Integrity Audit
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/history/**"
+      - "services/core/tests/engine22MicroV2StoreAudit.test.js"
+      - ".github/workflows/engine22e-t14-store-integrity.yml"
+permissions:
+  contents: read
+jobs:
+  store-integrity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/history/auditMicroV2StoreReadOnly.js
+      - run: node --test services/core/tests/engine22MicroV2StoreAudit.test.js services/core/tests/engine22MicroV2MigrationRehearsal.test.js services/core/tests/engine22MicroDurableCountsV2.test.js
