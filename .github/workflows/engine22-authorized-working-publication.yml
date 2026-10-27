@@ -1,0 +1,19 @@
+name: Engine22H Authorized Working Publication
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js"
+      - "services/core/logic/engine22/wave/buildEngine22WaveStrategy.js"
+      - "services/core/tests/engine22AuthorizedWorkingStructureV1.test.js"
+      - ".github/workflows/engine22-authorized-working-publication.yml"
+permissions:
+  contents: read
+jobs:
+  authorized-publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22AuthorizedWorkingStructureV1.test.js services/core/tests/engine22SubmicroFiveUpOwnerOct27.test.js services/core/tests/engine22MicroOct27OwnerW1W2.test.js services/core/tests/engine22SubminuteDUpOwnerWorking.test.js
