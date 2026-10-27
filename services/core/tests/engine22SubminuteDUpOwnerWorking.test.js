@@ -10,7 +10,7 @@ test("Subminute owner D-UP developing proposal preserves old C and Minute W2",()
  assert.equal(d.proposedPriorC.endingPrice,7648.5);
  assert.equal(d.proposedPriorC.endingLocalTime,"2026-10-23 07:00");
  assert.equal(d.proposedPriorC.confirmationStatus,"OWNER_WORKING_ENDING_NOT_STRUCTURALLY_VERIFIED");
- assert.deepEqual(d.levels,[]);
+ assert.deepEqual(d.levels.map(x=>x.price),[7707.25,7743.5,7773,7802.5,7844.25,7869,7897.5]);
  assert.equal(cw.degrees.subminute.ownerCurrentCDown.activeWave,"C");
  assert.equal(cw.degrees.subminute.ownerCurrentCDown.direction,"DOWN");
  assert.equal(cw.degrees.minute.ownerMinuteW2Retracement.activeWave,"W2");
