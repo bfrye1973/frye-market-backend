@@ -420,8 +420,24 @@ export function buildCurrentWavelength({
         minuteW3Started:false,
         structure:"ABCDE_TRIANGLE_CANDIDATE_NOT_CONFIRMED",
         nextLeg:"E_DOWN_POSSIBLE_NOT_STARTED",
-        levels:[], // do not relabel old C-down fibs as D-up targets
-        fibLevelsStatus:"D_UP_FIBS_NOT_AUTHORIZED",
+        // D-UP retracements of the nominated B -> C decline.
+        // B high is an older owner chart reference; C low is not candle-verified.
+        // These are provisional upside objectives, never confirmation of D.
+        anchors:{
+          bHigh:7897.50,
+          cLow:7648.50,
+          cLowLocalTime:"2026-10-23 07:00",
+          cLowTimezone:"America/Phoenix",
+          status:"OWNER_REFERENCES_NOT_INDEPENDENTLY_VERIFIED",
+        },
+        projectionMethod:"C_LOW_PLUS_B_TO_C_RANGE_TIMES_RETRACEMENT_RATIO",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+          price:Math.round((7648.50+(7897.50-7648.50)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,touchedAt:null,provisional:true,
+        })),
+        fibLevelsStatus:"OWNER_PROVISIONAL_D_UP_RETRACEMENT",
         previousModelVersion:"engine22.subminuteCurrentCDownReference.v1",
         oldCDownHistoryPreserved:true,
         publicationStatus:"OWNER_WORKING_PROVISIONAL",
