@@ -401,6 +401,32 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // October 27 owner-selected working proposal. Not a completed-pattern
+      // confirmation, canonical count promotion, or autonomous transition.
+      // Earlier C DOWN and legacy W3 models remain below without mutation.
+      ownerCurrentDUp:{
+        version:"engine22.subminuteDUpOwnerWorking.v1",
+        activeWave:"D",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+        degree:"subminute",parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_APPROVED_2026_10_27_PR214",
+        proposedPriorC:{
+          direction:"DOWN",endingPrice:7648.50,
+          endingLocalTime:"2026-10-23 07:00",
+          timezone:"America/Phoenix",
+          source:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED",
+          confirmationStatus:"OWNER_WORKING_ENDING_NOT_STRUCTURALLY_VERIFIED",
+        },
+        parentCorrectionStatus:"MINUTE_W2_NOT_COMPLETE",
+        minuteW3Started:false,
+        structure:"ABCDE_TRIANGLE_CANDIDATE_NOT_CONFIRMED",
+        nextLeg:"E_DOWN_POSSIBLE_NOT_STARTED",
+        levels:[], // do not relabel old C-down fibs as D-up targets
+        fibLevelsStatus:"D_UP_FIBS_NOT_AUTHORIZED",
+        previousModelVersion:"engine22.subminuteCurrentCDownReference.v1",
+        oldCDownHistoryPreserved:true,
+        publicationStatus:"OWNER_WORKING_PROVISIONAL",
+        noExecution:true,noPermissionCreated:true,
+      },
       // Owner-selected presentation of larger corrective C inside Minute W2.
       // The source scenario stays independently stored under Minute, and the
       // legacy Subminute W3 remains for historical audit.
