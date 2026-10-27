@@ -74,6 +74,7 @@ export function buildSevenDegreeInvalidationsV1({
 }={}){
   const cw=currentWavelength?.degrees||{};
   const parent=cw.minute?.ownerMinuteW2Hypothesis;
+  const subminuteD=cw.subminute?.ownerCurrentDUp?.version==="engine22.subminuteDUpOwnerWorking.v1" && cw.subminute.ownerCurrentDUp.activeWave==="D" ? cw.subminute.ownerCurrentDUp:null;
   const records={
     submicro:ownerRecord({
       degree:"submicro",model:cw.submicro?.ownerSubmicroCDown,
@@ -91,15 +92,15 @@ export function buildSevenDegreeInvalidationsV1({
     }),
     subminute:{
       degree:"subminute",
-      activeModel:cw.subminute?.ownerCurrentCDown?.version === "engine22.subminuteCurrentCDownReference.v1"
+      activeModel:subminuteD ? subminuteD.version : cw.subminute?.ownerCurrentCDown?.version === "engine22.subminuteCurrentCDownReference.v1"
         ? "engine22.subminuteCurrentCDownReference.v1":null,
-      expectedModelVersion:"engine22.subminuteCurrentCDownReference.v1",
-      modelSource:"engine22WaveStrategy.currentWavelength.degrees.subminute.ownerCurrentCDown",
-      modelStatus:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"
+      expectedModelVersion:subminuteD?.version||"engine22.subminuteCurrentCDownReference.v1",
+      modelSource:"engine22WaveStrategy.currentWavelength.degrees.subminute."+(subminuteD?"ownerCurrentDUp":"ownerCurrentCDown"),
+      modelStatus:subminuteD?"OWNER_WORKING_DEGREE_PLACEMENT_PROVISIONAL":cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"
         ?"OWNER_WORKING_DEGREE_PLACEMENT_PROVISIONAL":"NOT_PUBLISHED",
-      waveIdentity:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"SUBMINUTE_C_DOWN":null,
-      direction:cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"DOWN":null,
-      stage:cw.subminute?.ownerCurrentCDown?.stage||null,
+      waveIdentity:subminuteD?"SUBMINUTE_D_UP":cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"SUBMINUTE_C_DOWN":null,
+      direction:subminuteD?"UP":cw.subminute?.ownerCurrentCDown?.version==="engine22.subminuteCurrentCDownReference.v1"?"DOWN":null,
+      stage:subminuteD?.stage||cw.subminute?.ownerCurrentCDown?.stage||null,
       parentDegree:"minute",parentWave:"W2",
       sourceCountId:null,countIdentityStatus:"NOT_PUBLISHED",modelRevision:null,sourceTimestamp:null,
       rules:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"].map(scope=>unpublished(scope)),
@@ -189,7 +190,7 @@ export function buildSevenDegreeInvalidationsV1({
   const candidateZones={
     submicro:ownerBZone(submicroReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown.waveB.high"),
     micro:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
-    subminute:subminuteZone,
+    subminute:subminuteD?null:subminuteZone,
     minute:ownerMinuteBoundary || minuteZone,minor:minorPivot || ownerMinorBoundary || minorZone,
     intermediate:dynamicZone("intermediate","W2"),
     primary:dynamicZone("primary","W4"),
@@ -249,6 +250,7 @@ export function buildSevenDegreeInvalidationsV1({
       parentRecountOnReview:false,
     },
   };
+  if(subminuteD) reviewPlan.subminute={candidateReference:null,referenceType:"NONE_APPROVED",observation:"CURRENT_D_UP_WORKING; PREVIOUS_C_DOWN_RECOUNT_REFERENCE_HISTORICAL",reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_PROPOSED",parentRecountOnReview:false};
   for(const degree of DEGREES){
     const proposal=reviewPlan[degree];
     const zone=candidateZones[degree]||null;
