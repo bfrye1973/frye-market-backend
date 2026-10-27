@@ -55,3 +55,16 @@ test("research ledger refuses concurrent writer lock without altering history",(
   assert.equal(ledger.appendPrediction(seed).stored,true);
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test("research ledger rejects wrong-contract and premature outcome writes",()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"engine27-outcome-"));
+ try{
+  const ledger=createResearchLedger({root});
+  const seed=extractReplayResearchSeed(replay,{resolvedContract:"ESZ26"});
+  ledger.appendPrediction(seed);
+  const valid=labelEsOutcome(seed,[{contract:"ESZ26",price:5804,observedAt:"2026-10-26T18:10:00Z"}]);
+  assert.throws(()=>ledger.appendOutcome({...valid,resolvedEsContract:"ESH27"}),/OUTCOME_CONTRACT_OR_CHRONOLOGY_MISMATCH/);
+  assert.throws(()=>ledger.appendOutcome({...valid,observedAt:"2026-10-26T18:09:59Z"}),/OUTCOME_CONTRACT_OR_CHRONOLOGY_MISMATCH/);
+  assert.equal(ledger.readOutcomes().length,0);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
