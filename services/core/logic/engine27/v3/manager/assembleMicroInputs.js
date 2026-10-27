@@ -11,10 +11,13 @@ export function assembleMicroInputs({
  if(snapshot?.symbol!=="ES")reasonCodes.push("SNAPSHOT_ES_IDENTITY_UNAVAILABLE");
  if(!timestamp(at))reasonCodes.push("EVALUATION_TIMESTAMP_UNAVAILABLE");
  const authorized=readAuthorizedWorkingStructure(snapshot);
- if(!authorized.available)reasonCodes.push(authorized.reasonCode);
- const owner=authorized.available?authorized.publication.degrees.micro:null;
+ const hasPublication=Boolean(snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.authorizedWorkingStructure);
+ const legacyOwner=!hasPublication?snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.currentWavelength?.degrees?.micro?.ownerMicroCDown:null;
+ if(hasPublication&&!authorized.available)reasonCodes.push(authorized.reasonCode);
+ if(!hasPublication&&legacyOwner?.version!=="engine22.microCDownOwnerWatch.v1")reasonCodes.push("MICRO_OWNER_MODEL_UNAVAILABLE");
+ const owner=authorized.available?authorized.publication.degrees.micro:legacyOwner;
  return {contract:{schema:MICRO_INPUT_SCHEMA,mode:"READ_ONLY",qualified:reasonCodes.length===0,
- degree:"micro",evaluatedAt:at,ownerVersion:owner?.modelVersion??null,reasonCodes},
+ degree:"micro",evaluatedAt:at,ownerVersion:owner?.modelVersion??owner?.version??null,reasonCodes},
  sources:{snapshot,evaluatedAt:at,engine25,engine29,crossMarketLevels,crossMarketReactions,
  esInstitutionalContext,journal,officialPlans,replay}};
 }
