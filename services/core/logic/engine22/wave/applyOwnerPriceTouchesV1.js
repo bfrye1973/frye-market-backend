@@ -207,6 +207,55 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
         touchEvidence:x.touchEvidence}]));
   }
+  // Subminute D UP retracements use an independent memory key from the
+  // earlier Subminute C-down and Minute W2 levels. No old touch history reset.
+  const subminuteD=root.degrees?.subminute?.ownerCurrentDUp;
+  if(subminuteD?.version==="engine22.subminuteDUpOwnerWorking.v1" &&
+     subminuteD.activeWave==="D" && Array.isArray(subminuteD.levels)){
+    const id=JSON.stringify(["subminute","ownerCurrentDUp",subminuteD.version,
+      subminuteD.anchors?.bHigh,subminuteD.anchors?.cLow,
+      subminuteD.levels.map(l=>[l.key,l.price])]);
+    const priorModel=previousWavelength?.degrees?.subminute?.ownerCurrentDUp;
+    const same=priorModel?.version===subminuteD.version &&
+      priorModel.anchors?.bHigh===subminuteD.anchors?.bHigh &&
+      priorModel.anchors?.cLow===subminuteD.anchors?.cLow;
+    const historical=disk[id]||{};
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const from=Date.parse("2026-10-23T14:00:00.000Z");
+    const quote=finite(currentPrice);
+    const previousQuote=same?finite(previousWavelength?.currentPrice):null;
+    const observed=[];
+    if(now>=from && quote!==null)
+      observed.push({high:previousQuote===null?quote:Math.max(quote,previousQuote),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(bar?.time),high=finite(bar?.high);
+      if(!Number.isSafeInteger(t)||t<=0||high===null)continue;
+      if(t*1000<from||t*1000+600000>now)continue;
+      observed.push({high,time:new Date(t*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC"});
+    }
+    subminuteD.levels=subminuteD.levels.map(level=>{
+      const prior=historical[level.key] || (same?priorModel.levels?.find(l=>
+        l.key===level.key&&l.price===level.price):null);
+      const retained=prior?.status==="TOUCHED"&&prior?.price===level.price;
+      const hit=retained?null:observed.find(o=>o.high>=level.price);
+      return {...level,status:retained||hit?"TOUCHED":"WATCH",
+        provisional:true,touchEvidenceAvailable:Boolean(retained||hit),
+        touchEvidenceType:retained?prior.touchEvidenceType||"PREVIOUS_SNAPSHOT":hit?.source||null,
+        touchedAt:retained?prior.touchedAt||null:hit?.time||null,
+        touchEvidence:retained||hit?{
+          verified:hit?.source==="ES_10M_COMPLETED_OHLC"||
+            prior?.touchEvidence?.verified===true,
+          evidenceClass:hit?.source==="ES_10M_COMPLETED_OHLC"?
+            "COMPLETED_CANDLE":retained?"RETAINED_OBSERVATION":"SNAPSHOT_PRICE",
+        }:null};
+    });
+    disk[id]=Object.fromEntries(subminuteD.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
