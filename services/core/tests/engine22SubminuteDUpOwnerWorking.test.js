@@ -72,8 +72,9 @@ test("current Subminute D UP publication does not reuse prior C DOWN invalidatio
  assert.equal(packet.degrees.subminute.activeModel,"engine22.subminuteDUpOwnerWorking.v1");
  assert.equal(packet.degrees.subminute.waveIdentity,"SUBMINUTE_D_UP");
  assert.equal(packet.degrees.subminute.direction,"UP");
- assert.equal(packet.degrees.subminute.invalidationReadiness.candidateZone,null);
+ assert.equal(packet.degrees.subminute.invalidationReadiness.candidateZone.low,7648.5);
+ assert.equal(packet.degrees.subminute.invalidationReadiness.candidateZone.reviewOnly,true);
  assert.equal(packet.degrees.subminute.invalidationReadiness.officialInvalidationPrice,null);
- assert.equal(packet.degrees.micro.waveIdentity,"MICRO_C_DOWN");
+ assert.equal(packet.degrees.micro.waveIdentity,"MICRO_W3_UP");
  assert.equal(packet.degrees.submicro.waveIdentity,"SUBMICRO_C_DOWN");
 });
