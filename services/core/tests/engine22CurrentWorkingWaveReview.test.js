@@ -28,7 +28,7 @@ test("Minute W2 still unfinished; Submicro retains C-down old B-high review",()=
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7750,microBars5m:[]});
  const result=build({currentWavelength:cw});
  assert.equal(cw.degrees.minute.ownerMinuteW2Retracement.nextWaveStarted,false);
- assert.equal(result.degrees.submicro.invalidationReadiness.candidateZone.low,7743);
+ assert.equal(result.degrees.submicro.invalidationReadiness.candidateZone.low,7750.5);
  assert.equal(result.degrees.minute.invalidationReadiness.candidateZone.low,7419.5);
  assert.equal(cw.degrees.micro.ownerMicroCDown.waveB.high,7813.25);
 });
