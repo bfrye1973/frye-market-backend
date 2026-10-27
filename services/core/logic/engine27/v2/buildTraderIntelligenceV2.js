@@ -22,6 +22,7 @@ const DEGREE_ORDER = Object.freeze([
 ]);
 
 const DEGREE_LABELS = Object.freeze({
+  submicro: "Submicro",
   micro: "Micro",
   subminute: "Subminute",
   minute: "Minute",
@@ -624,7 +625,7 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
   const authorized = readAuthorizedWorkingStructure(snapshot);
 
   if (authorized.available) {
-    for (const degree of DEGREE_ORDER) {
+    for (const degree of ["submicro",...DEGREE_ORDER]) {
       const w = authorized.publication.degrees[degree];
       const previous = buildDegree({degree,state:degreeStates?.[degree]||null,display:null,wavelength:null,currentWavelength:{},snapshotTime});
       const condition = w.stage || "NOT_PUBLISHED";
@@ -638,7 +639,7 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
       };
     }
   } else if (engine22?.authorizedWorkingStructure) {
-    for (const degree of DEGREE_ORDER) degrees[degree] = {...buildDegree({degree,state:null,display:null,wavelength:null,currentWavelength:{},snapshotTime}),activeWave:"NOT_PUBLISHED",waveDirection:null,currentCondition:"UNAVAILABLE",traderRead:{headline:"Engine 22 authorized publication unavailable",summary:authorized.reasonCode,rules:[]}};
+    for (const degree of ["submicro",...DEGREE_ORDER]) degrees[degree] = {...buildDegree({degree,state:null,display:null,wavelength:null,currentWavelength:{},snapshotTime}),activeWave:"NOT_PUBLISHED",waveDirection:null,currentCondition:"UNAVAILABLE",traderRead:{headline:"Engine 22 authorized publication unavailable",summary:authorized.reasonCode,rules:[]}};
   } else {
   for (const degree of DEGREE_ORDER) {
     degrees[degree] = buildDegree({
@@ -663,7 +664,7 @@ export function buildEngine27TraderIntelligenceV2({ snapshot } = {}) {
     symbol: textOrNull(snapshot?.symbol),
     builtAt: new Date().toISOString(),
 
-    degreeOrder: [...DEGREE_ORDER],
+    degreeOrder: authorized.available || engine22?.authorizedWorkingStructure ? ["submicro",...DEGREE_ORDER] : [...DEGREE_ORDER],
     degrees,
 
     architecture: {
