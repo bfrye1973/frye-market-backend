@@ -14,7 +14,8 @@ export function extractReplayResearchSeed(replay,{resolvedContract=null,sourcePa
  if(reasons.length)return {available:false,reasons,noExecution:true};
  const snapshot=JSON.stringify({at,p,identity,sourcePath});
  const id="E27-ES10-"+createHash("sha256").update(snapshot).digest("hex").slice(0,24);
- return Object.freeze({schema:"engine27.v3.probabilityResearchSeed.v1",available:true,\n  historicalResearchOnly:true,wasIssuedLive:false,id,
+ return Object.freeze({schema:"engine27.v3.probabilityResearchSeed.v1",available:true,
+  historicalResearchOnly:true,wasIssuedLive:false,id,
   predictionTimestampUtc:at,predictionPrice:p,resolvedEsContract:identity,
   source:"CANONICAL_ENGINE12_REPLAY",sourcePath,
   strategyId:"intraday_scalp@10m",horizonMinutes:10,
