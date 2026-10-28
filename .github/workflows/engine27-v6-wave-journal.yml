@@ -22,3 +22,13 @@ jobs:
       - name: Syntax check
         run: node --check services/core/logic/engine27/waveObservation/createWaveObservationJournal.js
         node --check services/core/logic/engine27/waveObservation/inspectOct26MicroHistory.js
+
+  replay-probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read-only Oct26-28 replay provenance availability
+        run: node services/core/jobs/auditEngine27V6MicroReplayOct26.js
