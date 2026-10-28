@@ -1,0 +1,23 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
+import {buildAuthorizedWorkingStructureV1} from "../logic/engine22/wave/buildAuthorizedWorkingStructureV1.js";
+import {ownerApprovedWorkingSelection} from "../logic/engine22/wave/ownerApprovedWorkingSelectionV1.js";
+test("Oct28 selection has active W4 and A with preserved historical W3/W5",()=>{
+const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7788.50});
+const m=cw.degrees.micro, s=cw.degrees.submicro;
+assert.equal(ownerApprovedWorkingSelection.selectionRevision,2);
+assert.equal(m.ownerMicroW4Down.activeWave,"W4");
+assert.equal(s.ownerSubmicroADownInsideMicroW4.activeWave,"A");
+assert.equal(m.ownerMicroW3Up.wave3.ownerEnding.price,7788.50);
+assert.equal(s.ownerSubmicroFiveUp.wave5.ownerEnding.price,7788.50);
+assert.equal(m.ownerMicroW4Down.wave4.completionConfirmed,false);
+assert.equal(s.ownerSubmicroADownInsideMicroW4.waveA.completionConfirmed,false);
+assert.equal(m.ownerMicroW4Down.levels.find(x=>x.key==="r618").price,7733.50);
+assert.equal(s.ownerSubmicroADownInsideMicroW4.levels.find(x=>x.key==="e618").price,7736.00);
+const a=buildAuthorizedWorkingStructureV1({currentWavelength:cw,degreeStates:{minor:{activeWave:"W5"},intermediate:{activeWave:"W3"},primary:{activeWave:"W5"}}});
+assert.equal(a.degrees.micro.activeWave,"W4");
+assert.equal(a.degrees.submicro.activeWave,"A");
+assert.equal(a.degrees.micro.completionConfirmed,false);
+assert.equal(a.degrees.submicro.completionConfirmed,false);
+});
