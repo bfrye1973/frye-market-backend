@@ -49,9 +49,10 @@ test("owner W4 anchor is review only, not a hard invalidation",()=>{
  const c=buildCurrentWavelength({symbol:"ES",currentPrice:7760,microBars5m:[]});
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:c});
  const d=r.degrees.submicro;
- assert.equal(d.waveIdentity,"SUBMICRO_FIVE_UP_WATCH");
- assert.equal(d.parentWave,"W3");
- assert.equal(d.invalidationReadiness.candidateZone.low,7750.5);
+ assert.equal(d.waveIdentity,"SUBMICRO_A_DOWN_MICRO_W4");
+ assert.equal(c.degrees.submicro.ownerSubmicroFiveUp.wave5.ownerEnding.price,7788.50);
+ assert.equal(d.parentWave,"W4");
+ assert.equal(d.invalidationReadiness.candidateZone.low,7788.50);
  assert.equal(d.invalidationReadiness.candidateZone.reviewOnly,true);
  assert.equal(d.invalidationReadiness.officialInvalidationPrice,null);
  assert.equal(d.invalidationReadiness.confirmedInvalidation,false);
