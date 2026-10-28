@@ -6,8 +6,8 @@ test("Oct28 owner ending prices preserved without automatic structural completio
  const code=buildCurrentWavelength({symbol:"ES",currentPrice:7788.50});
  const sub=code.degrees.submicro.ownerSubmicroFiveUp;
  const micro=code.degrees.micro.ownerMicroW3Up;
- assert.equal(sub.wave5.high,7788.50);
- assert.equal(sub.wave5.highLocalTime,"2026-10-28 11:00");
+ assert.equal(sub.wave5.ownerEnding.price,7788.50);
+ assert.equal(sub.wave5.ownerEnding.localTime,"2026-10-28 11:00");
  assert.equal(sub.wave5.completionConfirmed,false);
  assert.equal(micro.wave3.ownerEnding.price,7788.50);
  assert.equal(micro.wave3.completionConfirmed,false);
