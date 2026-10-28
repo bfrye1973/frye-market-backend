@@ -1,6 +1,6 @@
 // Read-only historical availability probe. Prints counts and provenance status only.
 // Never logs Replay payloads, prices, contracts, broker identifiers or secrets.
-import {inspectMicroReplayFile} from "../waveObservation/inspectOct26MicroHistory.js";
+import {inspectMicroReplayFile} from "../logic/engine27/waveObservation/inspectOct26MicroHistory.js";
 const origin="https://frye-market-backend-1.onrender.com";
 const dates=["2026-10-26","2026-10-27","2026-10-28"];
 async function get(url){
