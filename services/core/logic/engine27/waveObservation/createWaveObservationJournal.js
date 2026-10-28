@@ -10,10 +10,24 @@ const timestamp = value => typeof value === "string" && Number.isFinite(Date.par
 const recordSchema = "engine27.waveObservation.v1";
 const physicalContract = value => typeof value === "string" && /^ES[FGHJKMNQUVXZ]\d{1,2}$/.test(value) ? value : null;
 const clone = value => JSON.parse(JSON.stringify(value));
+// Source identity must be supplied from the original Replay file bytes, not
+// inferred from a re-serialized HTTP response.
+function replayIdentity(value) {
+  if (value == null) return {ok:true,value:null};
+  const {date,time,path:sourcePath,sha256,snapshotTimeUtc,hashBasis}=value;
+  const expected="/var/data/replay/es/"+date+"/"+time+".json";
+  const valid=/^\d{4}-\d{2}-\d{2}$/.test(date??"") && /^\d{4}$/.test(time??"")
+    && sourcePath===expected && /^[a-f0-9]{64}$/.test(sha256??"")
+    && timestamp(snapshotTimeUtc) && hashBasis==="ORIGINAL_REPLAY_FILE_BYTES";
+  return valid ? {ok:true,value:clone({date,time,path:sourcePath,sha256,snapshotTimeUtc,hashBasis})}
+    : {ok:false,value:null};
+}
 
-export function projectWaveObservation(snapshot, {observedAt, physicalEsContract=null, marketEvidence=null, zoneContext=null, reactionEvidence=null, participationEvidence=null}={}) {
+export function projectWaveObservation(snapshot, {observedAt, physicalEsContract=null, sourceReplay=null, marketEvidence=null, zoneContext=null, reactionEvidence=null, participationEvidence=null}={}) {
   const observed = timestamp(observedAt);
   if (!observed) return {ok:false,reason:"OBSERVATION_TIME_REQUIRED",events:[]};
+  const replay=replayIdentity(sourceReplay);
+  if (!replay.ok) return {ok:false,reason:"INVALID_OR_UNVERIFIED_REPLAY_IDENTITY",events:[]};
   const auth = readAuthorizedWorkingStructure(snapshot);
   if (!auth.available) return {ok:false,reason:auth.reasonCode,events:[]};
   const p = auth.publication;
@@ -39,7 +53,7 @@ export function projectWaveObservation(snapshot, {observedAt, physicalEsContract
     selectionApprovalReference:p.selectionApprovalReference??null,
     pointInTimeAsOfAvailable:p.pointInTimeAsOfAvailable===true,
     snapshotTime:timestamp(snapshot?.now)??timestamp(snapshot?.ts)??null
-  },observedAt:observed,physicalEsContract:physicalContract(physicalEsContract),
+  },observedAt:observed,sourceReplay:replay.value,physicalEsContract:physicalContract(physicalEsContract),
   // Unknown is explicitly unknown; optional evidence cannot be backfilled into prior records.
   marketEvidence:marketEvidence?clone(marketEvidence):null,
   zoneContext:zoneContext?clone(zoneContext):null,
@@ -79,7 +93,7 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
         const lastMs=previous?Date.parse(previous.observedAt):null;
         if(lastMs!==null && observedMs<=lastMs)return {ok:false,reason:"OUT_OF_ORDER_OBSERVATION",stored,duplicates};
         const eventId=hash({degree:wave.degree,stateHash,previousEventId:previous?.eventId??null});
-        const event={schema:recordSchema,eventId,degree:wave.degree,
+        const event={schema:recordSchema,eventId,degree:wave.degree,sourceReplay:projected.sourceReplay,
           eventType:previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
           previousEventId:previous?.eventId??null,stateHash,observedAt:projected.observedAt,
           source:projected.source,...contents,noTradingAuthority:true,noWaveAuthority:true};
