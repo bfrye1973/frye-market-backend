@@ -41,6 +41,7 @@ import { buildWaveOpportunity } from "../opportunity/buildWaveOpportunity.js";
 import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLifecycleState.js";
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
+import { buildAuthorizedWorkingStructureV1 } from "./buildAuthorizedWorkingStructureV1.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildSevenDegreeInvalidationsV1 } from "./buildSevenDegreeInvalidationsV1.js";
@@ -2347,6 +2348,16 @@ export function buildEngine22WaveStrategy(input = {}) {
       symbol:context.symbol,
       barsByTf:context.barsByTf,
       evaluationTimeMs:context.evaluationTimeMs,
+    }),
+    authorizedWorkingStructure: buildAuthorizedWorkingStructureV1({
+      currentWavelength: publishedCurrentWavelength,
+      degreeStates: publishedDegreeStates,
+      sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
+        currentWavelength: publishedCurrentWavelength,
+        degreeStates: publishedDegreeStates,
+        evaluationTimeMs: context.evaluationTimeMs,
+      }),
+      publicationTime: Number.isFinite(context.evaluationTimeMs) ? new Date(context.evaluationTimeMs).toISOString() : null,
     }),
     sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
       currentWavelength:publishedCurrentWavelength,

@@ -1,0 +1,22 @@
+name: Engine22 Owner Selection Registry V1
+on:
+  push:
+    branches:
+      - engine22-authorized-selection-registry-20261027
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js"
+      - "services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV1.js"
+      - "services/core/tests/engine22OwnerSelectionRegistryV1.test.js"
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/core/tests/engine22OwnerSelectionRegistryV1.test.js services/core/tests/engine22AuthorizedWorkingStructureV1.test.js
+      - run: |
+          node --check services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js
+          node --check services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV1.js
