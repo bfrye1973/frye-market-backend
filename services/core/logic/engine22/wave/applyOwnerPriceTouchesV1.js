@@ -365,9 +365,9 @@ export function applyOwnerPriceTouchesV1({
   ]){
     const model=root.degrees?.[degree]?.[modelKey];
     if(model?.version!==version||!Array.isArray(model.levels))continue;
-    const beginning=Date.parse("2026-10-28T18:00:00Z");
+    const beginning=Date.parse("2026-10-28T20:00:00Z");
     const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
-    const id=JSON.stringify([degree,modelKey,version,7788.50,
+    const id=JSON.stringify([degree,modelKey,version,7820.00,
       model.levels.map(l=>[l.key,l.price])]);
     const old=previousWavelength?.degrees?.[degree]?.[modelKey];
     const same=old?.version===version;
