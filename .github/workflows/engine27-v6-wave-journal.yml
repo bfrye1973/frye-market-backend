@@ -49,3 +49,4 @@ jobs:
         run: |
           node services/core/jobs/auditEngine27V6MicroReplayOct26.js
           node services/core/jobs/auditEngine27Oct28WaveCompletionEvidence.js
+          node services/core/jobs/auditEngine27Oct28FuturesCandles.js
