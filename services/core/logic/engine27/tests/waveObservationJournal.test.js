@@ -77,3 +77,17 @@ test("market evidence missingness explicit, no invented physical contract",()=>w
  assert.equal(j.readEvents()[0].physicalEsContract,"ESZ26");
  assert.equal(j.readEvents()[0].zoneContext,null);
 }));
+
+test("changing optional market context alone does not generate new wave events",()=>withJournal(root=>{
+ const j=createWaveObservationJournal({root}),s=snapshot();
+ assert.equal(j.append(s,{observedAt:observe,marketEvidence:{price:7770}}).stored,7);
+ assert.equal(j.append(s,{observedAt:"2026-10-28T15:42:00Z",marketEvidence:{price:7775}}).stored,0);
+ assert.equal(j.readEvents().length,7);
+}));
+test("interrupted pending write fails closed instead of silently erasing evidence",()=>withJournal(root=>{
+ const j=createWaveObservationJournal({root}),s=snapshot();
+ fs.mkdirSync(j.storagePath,{recursive:true});
+ fs.writeFileSync(path.join(j.storagePath,"interrupted.pending"),"incomplete");
+ assert.equal(j.append(s,{observedAt:observe}).reason,"INCOMPLETE_PENDING_EVENT_REQUIRES_RECOVERY");
+ assert.equal(j.readEvents().length,0);
+}));
