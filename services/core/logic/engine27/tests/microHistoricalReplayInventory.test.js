@@ -50,3 +50,9 @@ test("malformed replay and over-limit windows fail closed",()=>{
  assert.equal(inspectOct26MicroReplayHistory({root,dates:["2026-10-27"],maxFilesPerDay:1}).days[0].reason,"DAY_EXCEEDS_SCAN_LIMIT");
  }finally{fs.rmSync(root,{force:true,recursive:true})}
 });
+
+test("original Micro event source time remains absent when it was never published",()=>{
+ const r=inspectMicroReplayFile(JSON.stringify(base()),{date:"2026-10-26",file:"0800.json"});
+ assert.equal(r.originalMicro,null);
+ assert.equal(r.retrospectiveW3Applied,false);
+});
