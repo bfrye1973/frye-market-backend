@@ -224,6 +224,44 @@ export function buildCurrentWavelength({
     confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
     noExecution:true,noPermissionCreated:true,
   };
+  // October 28 owner working transition: Micro W4 DOWN and Submicro A DOWN.
+  // Prior W3/W5 records remain unchanged, and no completion is inferred.
+  const ownerMicroW4Down = {
+    version:"engine22.microW4DownOct28OwnerWorking.v1",
+    degree:"micro",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"D",
+    priorW3Ending:{price:7788.50,localTime:"2026-10-28 11:00",timezone:"America/Phoenix",
+      status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"},
+    precedingW3:{low:7699.50,high:7788.50,length:89.00},
+    projectionMethod:"W3_HIGH_MINUS_W3_LENGTH_TIMES_RETRACEMENT",
+    levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+      key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7788.50-89*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    wave4:{low:null,completionConfirmed:false},
+    nextWave:"W5_UP_POSSIBLE_NOT_STARTED",
+    previousModelVersion:"engine22.microW3UpOct27Owner.v1",
+    ownerWorkingOnly:true,noExecution:true,noPermissionCreated:true,
+  };
+  const ownerSubmicroADownInsideMicroW4 = {
+    version:"engine22.submicroADownMicroW4Oct28OwnerWorking.v1",
+    degree:"submicro",activeWave:"A",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"W4",
+    priorW5Ending:{price:7788.50,localTime:"2026-10-28 11:00",timezone:"America/Phoenix",
+      status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"},
+    sequence:{A:"DOWN_DEVELOPING",B:"UP_PENDING",C:"DOWN_PENDING"},
+    projectionBasis:{priorLow:7703.75,priorHigh:7788.50,length:84.75},
+    projectionMethod:"PRIOR_HIGH_MINUS_PRIOR_ADVANCE_TIMES_RATIO",
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7788.50-84.75*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    waveA:{low:null,completionConfirmed:false},
+    previousModelVersion:"engine22.submicroFiveUpOct27OwnerWatch.v1",
+    ownerWorkingOnly:true,noExecution:true,noPermissionCreated:true,
+  };
   // October 27 owner working Micro impulse-up recount, independent from
   // existing C DOWN and historical Micro models; do not infer missing W1 high.
   const ownerMicroW3Up = {
@@ -458,6 +496,7 @@ export function buildCurrentWavelength({
       ownerSubmicroADown,
       ownerSubmicroCDown,
       ownerSubmicroFiveUp,
+      ownerSubmicroADownInsideMicroW4,
       levels:submicroW2Levels,
       nextLevel:null,lastTouchedLevel:null,
       noExecution:true,
@@ -470,6 +509,7 @@ export function buildCurrentWavelength({
       ownerMicroBDown,
       ownerMicroCDown,
       ownerMicroW3Up,
+      ownerMicroW4Down,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
         activeWave:"W3",direction:"UP",anchors:microW3Anchors,
