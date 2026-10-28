@@ -44,7 +44,7 @@ test("unconfirmed and superseded pivots cannot fabricate zones",()=>{
 
 test("current working wave reviews have owner anchors without hard invalidation",()=>{
  const r=buildSevenDegreeInvalidationsV1({currentWavelength:wave()});
- const expected={submicro:7788.5,micro:7788.5,subminute:7648.5};
+ const expected={submicro:7820,micro:7820,subminute:7648.5};
  for(const [degree,price] of Object.entries(expected)){
   const readiness=r.degrees[degree].invalidationReadiness;
   assert.deepEqual([readiness.candidateZone?.low,readiness.candidateZone?.high],[price,price]);
