@@ -8,9 +8,8 @@ import {readAuthorizedWorkingStructure, DEGREE_ORDER} from "../v2/readAuthorized
 const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const timestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
 const recordSchema = "engine27.waveObservation.v1";
-const physicalContract = value => typeof value === "string" && /^ES[FGHJKMNQUVXZ]\\d{1,2}$/.test(value) ? value : null;
+const physicalContract = value => typeof value === "string" && /^ES[FGHJKMNQUVXZ]\d{1,2}$/.test(value) ? value : null;
 const clone = value => JSON.parse(JSON.stringify(value));
-const nonempty = v => typeof v === "string" && v.trim() ? v : null;
 
 export function projectWaveObservation(snapshot, {observedAt, physicalEsContract=null, marketEvidence=null, zoneContext=null, reactionEvidence=null, participationEvidence=null}={}) {
   const observed = timestamp(observedAt);
