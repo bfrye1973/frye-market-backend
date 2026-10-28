@@ -51,7 +51,7 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
   const directory=path.join(root,"events"), lock=path.join(root,".writer-lock");
   function existing() {
     if(!fs.existsSync(directory))return [];
-    return fs.readdirSync(directory).filter(x=>/^\\d{13}-[a-f0-9]{64}\\.json$/.test(x))
+    return fs.readdirSync(directory).filter(x=>/^\d{13}-[a-f0-9]{64}\.json$/.test(x))
       .sort().map(name=>JSON.parse(fs.readFileSync(path.join(directory,name),"utf8")));
   }
   function append(snapshot,options={}) {
