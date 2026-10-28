@@ -91,3 +91,24 @@ test("interrupted pending write fails closed instead of silently erasing evidenc
  assert.equal(j.append(s,{observedAt:observe}).reason,"INCOMPLETE_PENDING_EVENT_REQUIRES_RECOVERY");
  assert.equal(j.readEvents().length,0);
 }));
+
+test("source Replay identity is preserved without fabricating original SHA",()=>withJournal(root=>{
+ const j=createWaveObservationJournal({root}),s=snapshot();
+ const sourceReplay={date:"2026-10-28",time:"0840",
+   path:"/var/data/replay/es/2026-10-28/0840.json",
+   sha256:"b".repeat(64),snapshotTimeUtc:"2026-10-28T15:40:00Z",
+   hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
+ assert.equal(j.append(s,{observedAt:observe,sourceReplay}).stored,7);
+ assert.deepEqual(j.readEvents()[0].sourceReplay,sourceReplay);
+ assert.equal(j.append(s,{observedAt:"2026-10-28T15:42:00Z",sourceReplay}).stored,0);
+}));
+test("unverified Replay hash and inconsistent source path fail closed",()=>withJournal(root=>{
+ const j=createWaveObservationJournal({root}),s=snapshot();
+ const fake={date:"2026-10-28",time:"0840",
+   path:"/var/data/replay/es/2026-10-28/0840.json",sha256:"b".repeat(64),
+   snapshotTimeUtc:"2026-10-28T15:40:00Z",hashBasis:"RESERIALIZED_API_RESPONSE"};
+ assert.equal(j.append(s,{observedAt:observe,sourceReplay:fake}).reason,"INVALID_OR_UNVERIFIED_REPLAY_IDENTITY");
+ fake.hashBasis="ORIGINAL_REPLAY_FILE_BYTES";fake.path="/wrong/path";
+ assert.equal(j.append(s,{observedAt:observe,sourceReplay:fake}).stored,0);
+ assert.equal(j.readEvents().length,0);
+}));
