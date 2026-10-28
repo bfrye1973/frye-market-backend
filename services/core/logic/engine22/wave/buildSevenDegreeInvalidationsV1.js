@@ -77,19 +77,21 @@ export function buildSevenDegreeInvalidationsV1({
   const subminuteD=cw.subminute?.ownerCurrentDUp?.version==="engine22.subminuteDUpOwnerWorking.v1" && cw.subminute.ownerCurrentDUp.activeWave==="D" ? cw.subminute.ownerCurrentDUp:null;
   const microW3=cw.micro?.ownerMicroW3Up?.version==="engine22.microW3UpOct27Owner.v1" && cw.micro.ownerMicroW3Up.activeWave==="W3" ? cw.micro.ownerMicroW3Up:null;
   const submicroFiveUp=cw.submicro?.ownerSubmicroFiveUp?.version==="engine22.submicroFiveUpOct27OwnerWatch.v1" && cw.submicro.ownerSubmicroFiveUp.stage==="PROJECTED_W5_WATCH" ? cw.submicro.ownerSubmicroFiveUp:null;
+  const microW4=cw.micro?.ownerMicroW4Down?.version==="engine22.microW4DownOct28OwnerWorking.v1"?cw.micro.ownerMicroW4Down:null;
+  const submicroA=cw.submicro?.ownerSubmicroADownInsideMicroW4?.version==="engine22.submicroADownMicroW4Oct28OwnerWorking.v1"?cw.submicro.ownerSubmicroADownInsideMicroW4:null;
   const records={
     submicro:ownerRecord({
-      degree:"submicro",model:submicroFiveUp||cw.submicro?.ownerSubmicroCDown,
-      expectedVersion:submicroFiveUp?"engine22.submicroFiveUpOct27OwnerWatch.v1":"engine22.submicroCDownOwnerWatch.v1",
-      waveIdentity:submicroFiveUp?"SUBMICRO_FIVE_UP_WATCH":"SUBMICRO_C_DOWN",parentDegree:"micro",parentWave:submicroFiveUp?"W3":"C",
-      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.submicro."+(submicroFiveUp?"ownerSubmicroFiveUp":"ownerSubmicroCDown"),
+      degree:"submicro",model:submicroA||submicroFiveUp||cw.submicro?.ownerSubmicroCDown,
+      expectedVersion:submicroA?submicroA.version:submicroFiveUp?"engine22.submicroFiveUpOct27OwnerWatch.v1":"engine22.submicroCDownOwnerWatch.v1",
+      waveIdentity:submicroA?"SUBMICRO_A_DOWN_MICRO_W4":submicroFiveUp?"SUBMICRO_FIVE_UP_WATCH":"SUBMICRO_C_DOWN",parentDegree:"micro",parentWave:submicroA?"W4":submicroFiveUp?"W3":"C",
+      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.submicro."+(submicroA?"ownerSubmicroADownInsideMicroW4":submicroFiveUp?"ownerSubmicroFiveUp":"ownerSubmicroCDown"),
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     micro:ownerRecord({
-      degree:"micro",model:microW3||cw.micro?.ownerMicroCDown,
-      expectedVersion:microW3?"engine22.microW3UpOct27Owner.v1":"engine22.microCDownOwnerWatch.v1",
-      waveIdentity:microW3?"MICRO_W3_UP":"MICRO_C_DOWN",parentDegree:"subminute",parentWave:microW3?"D":"C",
-      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro."+(microW3?"ownerMicroW3Up":"ownerMicroCDown"),
+      degree:"micro",model:microW4||microW3||cw.micro?.ownerMicroCDown,
+      expectedVersion:microW4?microW4.version:microW3?"engine22.microW3UpOct27Owner.v1":"engine22.microCDownOwnerWatch.v1",
+      waveIdentity:microW4?"MICRO_W4_DOWN":microW3?"MICRO_W3_UP":"MICRO_C_DOWN",parentDegree:"subminute",parentWave:microW3?"D":"C",
+      sourcePath:"engine22WaveStrategy.currentWavelength.degrees.micro."+(microW4?"ownerMicroW4Down":microW3?"ownerMicroW3Up":"ownerMicroCDown"),
       scopes:["INTERNAL_LEG","DEGREE_COUNT","PARENT_STRUCTURE"],
     }),
     subminute:{
@@ -204,13 +206,19 @@ export function buildSevenDegreeInvalidationsV1({
     source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario.anchors.bHigh",
     qualifiedMark:false,degreePlacementConfirmed:false,
   };
+  const newDownReview=waveStartReview(7788.50,
+    "engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroW4Down.priorW3Ending.price",
+    "OWNER_W4_START_HIGH_RECOUNT_REVIEW_ONLY");
+  const newAReview=waveStartReview(7788.50,
+    "engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroADownInsideMicroW4.priorW5Ending.price",
+    "OWNER_A_START_HIGH_RECOUNT_REVIEW_ONLY");
   const candidateZones={
-    submicro:submicroFiveUp?waveStartReview(
+    submicro:submicroA?newAReview:submicroFiveUp?waveStartReview(
       submicroFiveUp.wave4?.low===7750.50?7750.50:null,
       "engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroFiveUp.wave4.low",
       "OWNER_SUBMICRO_W4_LOW_W5_START_REVIEW"
     ):ownerBZone(submicroReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroCDown.waveB.high"),
-    micro:microW3?microW3Zone:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
+    micro:microW4?newDownReview:microW3?microW3Zone:ownerBZone(microReviewHigh,"engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroCDown.waveB.high"),
     subminute:subminuteD?subminuteDZone:subminuteZone,
     minute:ownerMinuteBoundary || minuteZone,minor:minorPivot || ownerMinorBoundary || minorZone,
     intermediate:dynamicZone("intermediate","W2"),
@@ -271,14 +279,26 @@ export function buildSevenDegreeInvalidationsV1({
       parentRecountOnReview:false,
     },
   };
-  if(submicroFiveUp) reviewPlan.submicro={
+  if(submicroA) reviewPlan.submicro={
+    candidateReference:7788.50,referenceType:"OWNER_A_START_HIGH_REVIEW_ONLY",
+    observation:"MOVE_ABOVE_A_START_REQUIRES_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
+    reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
+    parentRecountOnReview:false,
+  };
+  if(microW4) reviewPlan.micro={
+    candidateReference:7788.50,referenceType:"OWNER_W4_START_HIGH_REVIEW_ONLY",
+    observation:"MOVE_ABOVE_W4_START_REQUIRES_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
+    reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
+    parentRecountOnReview:false,
+  };
+  if(submicroFiveUp&&!submicroA) reviewPlan.submicro={
     candidateReference:submicroFiveUp.wave4?.low===7750.50?7750.50:null,
     referenceType:"OWNER_SUBMICRO_W4_LOW_REVIEW_ONLY",
     observation:"BELOW_NOMINATED_SUBMICRO_W4_LOW_REQUIRES_W5_COUNT_REVIEW_NOT_HARD_INVALIDATION",
     reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
     parentRecountOnReview:false,
   };
-  if(microW3) reviewPlan.micro={candidateReference:microW2Low,
+  if(microW3&&!microW4) reviewPlan.micro={candidateReference:microW2Low,
     referenceType:"OWNER_MICRO_W2_LOW_REVIEW_ONLY",
     observation:"PRICE_BELOW_NOMINATED_W2_LOW_REQUIRES_MICRO_W3_COUNT_REVIEW_NOT_HARD_INVALIDATION",
     reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
