@@ -10,6 +10,7 @@ on:
       - "services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js"
       - "services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js"
       - "services/core/logic/engine27/tests/compactWaveEvidence.test.js"
+      - "services/core/logic/engine27/tests/waveZoneCandleStudy.test.js"
       - ".github/workflows/engine27-v6-wave-journal.yml"
 jobs:
   journal:
@@ -20,13 +21,14 @@ jobs:
         with:
           node-version: "22"
       - name: Wave observation journal regression tests
-        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js
+        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js services/core/logic/engine27/tests/waveZoneCandleStudy.test.js
       - name: Syntax check
         run: |
           node --check services/core/logic/engine27/waveObservation/createWaveObservationJournal.js
           node --check services/core/logic/engine27/waveObservation/inspectOct26MicroHistory.js
           node --check services/core/logic/engine27/waveObservation/inspectSubmicroHistory.js
           node --check services/core/logic/engine27/waveObservation/extractCompactWaveEvidence.js
+          node --check services/core/logic/engine27/waveObservation/studyWaveZoneCandle.js
 
   replay-probe:
     runs-on: ubuntu-latest
