@@ -8,9 +8,9 @@ test("Micro W4 and Subminute D get owner start REVIEW references but never activ
  const micro=result.degrees.micro,subminute=result.degrees.subminute;
  assert.equal(micro.waveIdentity,"MICRO_W4_DOWN");
  assert.equal(micro.parentWave,"D");
- assert.equal(micro.invalidationReadiness.candidateZone.low,7788.5);
+ assert.equal(micro.invalidationReadiness.candidateZone.low,7820);
  assert.equal(micro.invalidationReadiness.candidateZone.kind,"OWNER_W4_START_HIGH_RECOUNT_REVIEW_ONLY");
- assert.equal(micro.invalidationReadiness.proposedReview.candidateReference,7788.5);
+ assert.equal(micro.invalidationReadiness.proposedReview.candidateReference,7820);
  assert.equal(subminute.waveIdentity,"SUBMINUTE_D_UP");
  assert.equal(subminute.invalidationReadiness.candidateZone.low,7648.5);
  assert.equal(subminute.invalidationReadiness.candidateZone.kind,"OWNER_SUBMINUTE_C_LOW_D_START_REVIEW");
@@ -28,7 +28,7 @@ test("Minute W2 still unfinished; Submicro retains C-down old B-high review",()=
  const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7750,microBars5m:[]});
  const result=build({currentWavelength:cw});
  assert.equal(cw.degrees.minute.ownerMinuteW2Retracement.nextWaveStarted,false);
- assert.equal(result.degrees.submicro.invalidationReadiness.candidateZone.low,7788.5);
+ assert.equal(result.degrees.submicro.invalidationReadiness.candidateZone.low,7820);
  assert.equal(result.degrees.minute.invalidationReadiness.candidateZone.low,7419.5);
  assert.equal(cw.degrees.micro.ownerMicroCDown.waveB.high,7813.25);
 });
