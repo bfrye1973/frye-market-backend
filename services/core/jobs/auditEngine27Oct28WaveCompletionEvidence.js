@@ -20,6 +20,10 @@ for(const time of sample)try{
   micro:summarise(micro),submicro:summarise(sub),
   negotiated:zone?.location?.type??null,zoneIdAvailable:Boolean(zone.zoneId),
   zoneBoundsPresent:Boolean(zone?.entryZone?.low!=null && zone?.entryZone?.high!=null),
+  zoneLow:zone?.entryZone?.low??null,zoneHigh:zone?.entryZone?.high??null,
+  zoneMidline:zone?.entryZone?.midline??null,
+  microPriorEnding:eng?.currentWavelength?.degrees?.micro?.ownerMicroW4Down?.priorW3Ending?.price??null,
+  submicroPriorEnding:eng?.currentWavelength?.degrees?.submicro?.ownerSubmicroADownInsideMicroW4?.priorW5Ending?.price??null,
   rawCandleInReplay:Boolean(strategy?.bars10m||strategy?.candles10m),
   physicalContractPresent:Boolean(s.resolvedEsContract||s.resolvedContract)})+"\n");
 }catch(e){process.stdout.write(JSON.stringify({date,time,error:String(e.message).slice(0,50)})+"\n");}
