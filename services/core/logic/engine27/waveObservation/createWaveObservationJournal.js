@@ -64,18 +64,20 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
     }
     let stored=0, duplicates=0;
     try {
+      if(fs.readdirSync(directory).some(name=>name.endsWith('.pending')))return {ok:false,reason:'INCOMPLETE_PENDING_EVENT_REQUIRES_RECOVERY',stored,duplicates};
       const prior=new Map();
       for(const old of existing())if(DEGREE_ORDER.includes(old.degree))prior.set(old.degree,old);
       for(const wave of projected.degrees) {
         const contents={wave,physicalEsContract:projected.physicalEsContract,
           marketEvidence:projected.marketEvidence,zoneContext:projected.zoneContext,
           reactionEvidence:projected.reactionEvidence,participationEvidence:projected.participationEvidence};
-        const stateHash=hash(contents);
+        // Routine changing market context must not itself create a new wave event.
+        const stateHash=hash(wave);
         const previous=prior.get(wave.degree)??null;
         if(previous?.stateHash===stateHash){duplicates++;continue;}
         const observedMs=Date.parse(projected.observedAt);
         const lastMs=previous?Date.parse(previous.observedAt):null;
-        if(lastMs!==null && observedMs<lastMs)return {ok:false,reason:"OUT_OF_ORDER_OBSERVATION",stored,duplicates};
+        if(lastMs!==null && observedMs<=lastMs)return {ok:false,reason:"OUT_OF_ORDER_OBSERVATION",stored,duplicates};
         const eventId=hash({degree:wave.degree,stateHash,previousEventId:previous?.eventId??null});
         const event={schema:recordSchema,eventId,degree:wave.degree,
           eventType:previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
