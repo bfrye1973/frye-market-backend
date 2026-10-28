@@ -7,8 +7,8 @@ import {createHash} from "node:crypto";
 const digest = bytes => createHash("sha256").update(bytes).digest("hex");
 const iso = value => typeof value==="string"&&Number.isFinite(Date.parse(value))?value:null;
 const DAY=/^2026-10-(26|27|28)$/;
-const NAME=/^\\d{4}\\.json$/;
-const physical = value => typeof value==="string" && /^ES[FGHJKMNQUVXZ]\\d{1,2}$/.test(value) ? value:null;
+const NAME=/^\d{4}\.json$/;
+const physical = value => typeof value==="string" && /^ES[FGHJKMNQUVXZ]\d{1,2}$/.test(value) ? value:null;
 
 export function inspectMicroReplayFile(raw,{date,file}={}) {
   let replay;
