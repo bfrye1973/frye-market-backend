@@ -206,10 +206,10 @@ export function buildSevenDegreeInvalidationsV1({
     source:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario.anchors.bHigh",
     qualifiedMark:false,degreePlacementConfirmed:false,
   };
-  const newDownReview=waveStartReview(7788.50,
+  const newDownReview=waveStartReview(microW4?.priorW3Ending?.price===7788.50?7788.50:null,
     "engine22WaveStrategy.currentWavelength.degrees.micro.ownerMicroW4Down.priorW3Ending.price",
     "OWNER_W4_START_HIGH_RECOUNT_REVIEW_ONLY");
-  const newAReview=waveStartReview(7788.50,
+  const newAReview=waveStartReview(submicroA?.priorW5Ending?.price===7788.50?7788.50:null,
     "engine22WaveStrategy.currentWavelength.degrees.submicro.ownerSubmicroADownInsideMicroW4.priorW5Ending.price",
     "OWNER_A_START_HIGH_RECOUNT_REVIEW_ONLY");
   const candidateZones={
@@ -280,13 +280,13 @@ export function buildSevenDegreeInvalidationsV1({
     },
   };
   if(submicroA) reviewPlan.submicro={
-    candidateReference:7788.50,referenceType:"OWNER_A_START_HIGH_REVIEW_ONLY",
+    candidateReference:submicroA?.priorW5Ending?.price===7788.50?7788.50:null,referenceType:"OWNER_A_START_HIGH_REVIEW_ONLY",
     observation:"MOVE_ABOVE_A_START_REQUIRES_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
     reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
     parentRecountOnReview:false,
   };
   if(microW4) reviewPlan.micro={
-    candidateReference:7788.50,referenceType:"OWNER_W4_START_HIGH_REVIEW_ONLY",
+    candidateReference:microW4?.priorW3Ending?.price===7788.50?7788.50:null,referenceType:"OWNER_W4_START_HIGH_REVIEW_ONLY",
     observation:"MOVE_ABOVE_W4_START_REQUIRES_RECOUNT_REVIEW_NOT_HARD_INVALIDATION",
     reviewTimeframe:null,reviewTrigger:null,timeframeStatus:"NOT_APPROVED",
     parentRecountOnReview:false,
