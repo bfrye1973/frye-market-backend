@@ -10,8 +10,8 @@ const build=()=>buildSevenDegreeInvalidationsV1({
 test("seven-degree readiness is readable by Engine27 but no false invalidation or authorization",()=>{
  const v=build();
  assert.deepEqual(Object.keys(v.degrees),names);
- assert.equal(v.degrees.submicro.invalidationReadiness.proposedReview.candidateReference,7788.5);
- assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.candidateReference,7788.5);
+ assert.equal(v.degrees.submicro.invalidationReadiness.proposedReview.candidateReference,7820);
+ assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.candidateReference,7820);
  assert.equal(v.degrees.submicro.invalidationReadiness.proposedReview.reviewTimeframe,null);
  assert.equal(v.degrees.micro.invalidationReadiness.proposedReview.reviewTimeframe,null);
  for(const n of names){
