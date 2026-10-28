@@ -321,7 +321,7 @@ export function buildCurrentWavelength({
       low:7750.50,lowLocalTime:"2026-10-27 11:30",
       status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
     },
-    wave5:{high:7788.50,highLocalTime:"2026-10-28 11:00",timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED",completionConfirmed:false},
+    wave5:{high:7788.50,highLocalTime:"2026-10-28 11:00",timezone:"America/Phoenix",status:"PROJECTED_NOT_CONFIRMED_COMPLETE",ownerEndingStatus:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED",completionConfirmed:false},
     priorCEnding:{price:7648.50,localTime:"2026-10-23 07:00",
       status:"OWNER_NOMINATED_PRIOR_C_ENDING_UNVERIFIED"},
     wave1Length:45.50,
