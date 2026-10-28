@@ -13,6 +13,7 @@ on:
       - "services/core/logic/engine27/tests/waveZoneCandleStudy.test.js"
       - "services/core/logic/engine27/tests/waveNegotiatedZone.test.js"
       - "services/core/logic/engine27/tests/waveTransitionStudy.test.js"
+      - "services/core/logic/engine27/tests/qualifyEngine3WaveCandle.test.js"
       - ".github/workflows/engine27-v6-wave-journal.yml"
 jobs:
   journal:
@@ -23,7 +24,7 @@ jobs:
         with:
           node-version: "22"
       - name: Wave observation journal regression tests
-        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js services/core/logic/engine27/tests/waveZoneCandleStudy.test.js services/core/logic/engine27/tests/waveNegotiatedZone.test.js services/core/logic/engine27/tests/waveTransitionStudy.test.js
+        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js services/core/logic/engine27/tests/waveZoneCandleStudy.test.js services/core/logic/engine27/tests/waveNegotiatedZone.test.js services/core/logic/engine27/tests/waveTransitionStudy.test.js services/core/logic/engine27/tests/qualifyEngine3WaveCandle.test.js
       - name: Syntax check
         run: |
           node --check services/core/logic/engine27/waveObservation/createWaveObservationJournal.js
@@ -33,6 +34,7 @@ jobs:
           node --check services/core/logic/engine27/waveObservation/studyWaveZoneCandle.js
           node --check services/core/logic/engine27/waveObservation/studyWaveNegotiatedZone.js
           node --check services/core/logic/engine27/waveObservation/buildWaveTransitionStudy.js
+          node --check services/core/logic/engine27/waveObservation/qualifyEngine3WaveCandle.js
 
   replay-probe:
     runs-on: ubuntu-latest
