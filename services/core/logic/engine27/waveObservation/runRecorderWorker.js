@@ -46,7 +46,7 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
    if(!space.ok){writeRecorderHeartbeat({root:rootDir,status:"FAILED",cycleCount:cycles,lastErrorCode:space.reason});
     return {ok:false,status:"STORAGE_PREFLIGHT_BLOCKED",cycles,reason:space.reason};}
    const report=await onCycle({replayRoot,root:rootDir,dates,
-    maxBatch:maxBatchPerCycle,maxTotalBatch:maxBatchPerCycle,commit:true,enricher});
+    maxBatch:maxBatchPerCycle,maxTotalBatch:maxBatchPerCycle,commit:true,currentFirst:true,enricher});
    cycles++;lastResult=report;
    writeRecorderHeartbeat({root:rootDir,status:report?.ok?"RUNNING":"FAILED",cycleCount:cycles,
     lastErrorCode:report?.ok?null:report?.reason??"CYCLE_FAILED"});
