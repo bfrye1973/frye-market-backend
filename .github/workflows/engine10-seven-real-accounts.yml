@@ -24,6 +24,7 @@ jobs:
           node --check services/core/logic/journal/tradeJournalStore.js
           node --check services/core/logic/journal/oct29ChronologicalRecoveryPlan.js
           node --check services/core/scripts/preflightEngine10BOct29ChronologicalRecovery.js
+          node --check services/core/scripts/applyEngine10BOct29ChronologicalRecovery.js
           node --check services/core/logic/journal/journalMaintenanceGuard.js
           node --check services/core/logic/journal/realAccountClassification.js
           node --check services/core/logic/journal/verifiedPrecutoverProvenance.js
