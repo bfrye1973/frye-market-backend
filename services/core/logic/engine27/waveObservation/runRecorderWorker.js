@@ -7,9 +7,11 @@ import {writeRecorderHeartbeat} from "./writeRecorderHeartbeat.js";
 import {checkRecorderStorage} from "./checkRecorderStorage.js";
 const root="/var/data/replay/engine27/wave-observations";
 export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDER_ENABLED==="true",
- replayRoot="/var/data/replay/es",rootDir=root,storagePreflight=checkRecorderStorage,
+ replayRoot="/var/data/replay/es",rootDir=root,storagePreflight=checkRecorderStorage,clock=()=>new Date(),retentionDays=14,
  onCycle=runWaveObservationBackfill,signal=null,sleepMs=60000,maxCycles=Infinity}={}){
  if(!enabled)return {ok:true,status:"DISABLED",cycles:0};
+ if(!Number.isInteger(retentionDays)||retentionDays<2||retentionDays>14)
+  return {ok:false,status:"INVALID_REPLAY_RETENTION_WINDOW"};
  if(!Number.isInteger(sleepMs)||sleepMs<1000||sleepMs>300000)
   return {ok:false,status:"INVALID_RECORDER_INTERVAL"};
  if(!fs.existsSync(replayRoot)||!fs.statSync(replayRoot).isDirectory())
@@ -21,17 +23,26 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
  writeRecorderHeartbeat({root:rootDir,status:"STARTING"});
  try{
   while(!signal?.aborted&&cycles<maxCycles){
-   const azParts=new Intl.DateTimeFormat("en-US",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+   const azParts=new Intl.DateTimeFormat("en-US",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(clock());
    const part=name=>azParts.find(x=>x.type===name)?.value;
    const az=part("year")+"-"+part("month")+"-"+part("day");
+   // Sweep the entire retained Arizona calendar window, oldest-first, while
+   // accepting at most one Replay file per cycle. Yesterday remains eligible
+   // after midnight, including late-arriving files and restarts.
+   const dates=Array.from({length:retentionDays},(_,i)=>{
+    const day=new Date(Date.UTC(Number(part("year")),Number(part("month"))-1,
+      Number(part("day"))-(retentionDays-1-i)));
+    return day.toISOString().slice(0,10);
+   });
    const space=storagePreflight({root:rootDir,diskMount:path.dirname(replayRoot)});
    if(!space.ok){writeRecorderHeartbeat({root:rootDir,status:"FAILED",cycleCount:cycles,lastErrorCode:space.reason});
     return {ok:false,status:"STORAGE_PREFLIGHT_BLOCKED",cycles,reason:space.reason};}
-   const report=await onCycle({replayRoot,root:rootDir,dates:[az],maxBatch:1,commit:true});
+   const report=await onCycle({replayRoot,root:rootDir,dates,maxBatch:1,maxTotalBatch:1,commit:true});
    cycles++;lastResult=report;
    writeRecorderHeartbeat({root:rootDir,status:report?.ok?"RUNNING":"FAILED",cycleCount:cycles,
     lastErrorCode:report?.ok?null:report?.reason??"CYCLE_FAILED"});
-   if(!report?.ok)return {ok:false,status:"CYCLE_FAILED",cycles,reason:report?.reason??"UNKNOWN"};
+   if(!report?.ok&&report?.reason!=="CANDLE_REQUEST_BACKPRESSURE")
+    return {ok:false,status:"CYCLE_FAILED",cycles,reason:report?.reason??"UNKNOWN"};
    if(signal?.aborted||cycles>=maxCycles)break;
    await new Promise(resolve=>{
     const timer=setTimeout(resolve,sleepMs);
