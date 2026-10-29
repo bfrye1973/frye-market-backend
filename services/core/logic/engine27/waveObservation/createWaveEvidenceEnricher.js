@@ -4,7 +4,7 @@ import {fetchBoundedWaveCandles} from "./fetchBoundedWaveCandles.js";
 import {createWaveEvidenceRecorder} from "./createWaveEvidenceRecorder.js";
 import {createCandleRequestGate} from "./createCandleRequestGate.js";
 const valid=s=>typeof s==="string"&&Number.isFinite(Date.parse(s));
-export function createWaveEvidenceEnricher({root,request=fetch,gate=createCandleRequestGate()}={}){
+export function createWaveEvidenceEnricher({root,request=fetch,gate=createCandleRequestGate(),now=()=>Date.now()}={}){
  const recorder=createWaveEvidenceRecorder({root});
  const cache=new Map();
  return async ({snapshot,sourceReplay}={})=>{
@@ -13,6 +13,9 @@ export function createWaveEvidenceEnricher({root,request=fetch,gate=createCandle
   const end=Date.parse(snapshot.snapshotTime);
   const completedBucket=Math.floor(end/600000)*600000;
   const key="ES:10m:"+completedBucket;
+  // Deterministic historical expiry, not a temporary provider outage.
+  if(now()-end>14*86400000)return {ok:true,disposition:"HISTORICAL_OHLC_UNAVAILABLE",
+   reason:"HISTORICAL_10M_OHLC_UNAVAILABLE",sourceReplaySha256:sourceReplay.sha256};
   let packet=cache.get(key);
   if(!packet){
    const fromUtc=new Date(completedBucket-60*60000).toISOString();
