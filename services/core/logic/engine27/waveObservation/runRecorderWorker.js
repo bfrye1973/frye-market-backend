@@ -21,7 +21,9 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
  writeRecorderHeartbeat({root:rootDir,status:"STARTING"});
  try{
   while(!signal?.aborted&&cycles<maxCycles){
-   const az=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+   const azParts=new Intl.DateTimeFormat("en-US",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(new Date());
+   const part=name=>azParts.find(x=>x.type===name)?.value;
+   const az=part("year")+"-"+part("month")+"-"+part("day");
    const space=storagePreflight({root:rootDir,diskMount:path.dirname(replayRoot)});
    if(!space.ok){writeRecorderHeartbeat({root:rootDir,status:"FAILED",cycleCount:cycles,lastErrorCode:space.reason});
     return {ok:false,status:"STORAGE_PREFLIGHT_BLOCKED",cycles,reason:space.reason};}
