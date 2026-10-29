@@ -17,7 +17,7 @@ export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence
   const processed=ledger.processedFor(date);
   const plan=planReplayIntake({date,times,processed,maxBatch});
   if(!plan.ok)return {ok:false,reason:plan.reason,processed:0,blocked:null};
-  let count=0;
+  let count=0,legacySkipped=0;
   for(const item of plan.items){
    try{
     const source=await readOriginalReplay(item);
@@ -38,7 +38,7 @@ export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence
     if(authorized===undefined||authorized===null){
      const skipped=ledger.acknowledgeLegacyWithoutPublication({item,sourceReplay,acknowledgedAt:stamp});
      if(!skipped.ok)return {ok:false,reason:skipped.reason,processed:count,blocked:item.key};
-     count++;continue;
+     count++;legacySkipped++;continue;
     }
     const delivery=journal.append(snapshot,{observedAt:stamp,sourceReplay});
     if(!delivery.ok)return {ok:false,reason:delivery.reason,processed:count,blocked:item.key};
@@ -53,7 +53,7 @@ export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence
     count++;
    }catch(error){return {ok:false,reason:"REPLAY_INTAKE_SOURCE_OR_WRITE_FAILURE",errorClass:error?.name??"Error",processed:count,blocked:item.key};}
   }
-  return {ok:true,processed:count,remaining:plan.remaining-count,hasMore:plan.hasMore,
+  return {ok:true,processed:count,legacySkipped,remaining:plan.remaining-count,hasMore:plan.hasMore,
    researchOnly:true,productionActivated:false};
  }
  return Object.freeze({consumeDate,readEvents:journal.readEvents,processedFor:ledger.processedFor});
