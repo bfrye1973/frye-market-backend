@@ -112,3 +112,18 @@ test("unverified Replay hash and inconsistent source path fail closed",()=>withJ
  assert.equal(j.append(s,{observedAt:observe,sourceReplay:fake}).stored,0);
  assert.equal(j.readEvents().length,0);
 }));
+
+test("historical Replay snapshot time is distinct from later recording ingestion",()=>withJournal(root=>{
+ const j=createWaveObservationJournal({root}),s=snapshot();
+ s.snapshotTime="2026-10-28T15:40:00Z";
+ const sourceReplay={date:"2026-10-28",time:"0840",
+   path:"/var/data/replay/es/2026-10-28/0840.json",
+   sha256:"b".repeat(64),snapshotTimeUtc:"2026-10-28T15:40:00Z",
+   hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
+ const r=j.append(s,{observedAt:"2026-10-29T17:00:00Z",sourceReplay});
+ assert.equal(r.ok,true);
+ const event=j.readEvents()[0];
+ assert.equal(event.source.snapshotTime,"2026-10-28T15:40:00Z");
+ assert.equal(event.ingestedAt,"2026-10-29T17:00:00Z");
+ assert.equal(event.retrospectiveIngestion,true);
+}));
