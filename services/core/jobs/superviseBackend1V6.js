@@ -55,7 +55,15 @@ export function startBackend1Supervisor({
   live:[...children.keys()],pids:Object.fromEntries([...children].map(([name,child])=>[name,child.pid]))})});
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
- const supervisor=startBackend1Supervisor();
+ // Test-only child overrides cannot affect normal production configuration.
+ const test=process.env.NODE_ENV==="test";
+ const supervisor=startBackend1Supervisor(test?{
+  watcherScript:process.env.ENGINE27_TEST_WATCHER_SCRIPT||undefined,
+  serverScript:process.env.ENGINE27_TEST_SERVER_SCRIPT||undefined,
+  recorderScript:process.env.ENGINE27_TEST_RECORDER_SCRIPT||undefined,
+  recorderEnabled:process.env.ENGINE27_TEST_RECORDER_ENABLED==="true",
+  terminationGraceMs:1000
+ }:{});
  process.once("SIGTERM",()=>{void supervisor.stop("SIGTERM")});
  process.once("SIGINT",()=>{void supervisor.stop("SIGINT")});
  await supervisor.done;
