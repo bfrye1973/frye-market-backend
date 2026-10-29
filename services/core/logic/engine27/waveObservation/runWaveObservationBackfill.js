@@ -25,8 +25,11 @@ export async function runWaveObservationBackfill({
  const reports=[];
  for(const date of [...new Set(dates)].sort()){
   const folder=path.join(replayRoot,date);
-  if(!fs.existsSync(folder)||!fs.statSync(folder).isDirectory())
+  if(!fs.existsSync(folder)){
+   if(commit)continue;
    return {ok:false,reason:"REPLAY_DATE_NOT_FOUND",date,reports};
+  }
+  if(!fs.statSync(folder).isDirectory())return {ok:false,reason:"INVALID_REPLAY_DIRECTORY",date,reports};
   const times=fs.readdirSync(folder).filter(t=>/^([01]\d|2[0-3])[0-5]\d\.json$/.test(t))
    .map(name=>name.slice(0,4)).sort();
   if(commit&&!times.some(time=>!ledger.processedFor(date).includes(date+"/"+time)))continue;
