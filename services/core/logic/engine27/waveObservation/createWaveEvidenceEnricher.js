@@ -1,25 +1,32 @@
-// Inject into createWaveReplayConsumer(onWaveEvidence) for isolated point-in-time
-// futures-candle enrichment. No scheduler, no changes to live Engine22 or orders.
+// Engine27 V6 read-only enrichment. Completed 10m is primary Micro/Submicro
+// evidence; 5m/1m are optional research, never polled in unattended intake.
 import {fetchBoundedWaveCandles} from "./fetchBoundedWaveCandles.js";
 import {createWaveEvidenceRecorder} from "./createWaveEvidenceRecorder.js";
+import {createCandleRequestGate} from "./createCandleRequestGate.js";
 const valid=s=>typeof s==="string"&&Number.isFinite(Date.parse(s));
-export function createWaveEvidenceEnricher({root,request=fetch}={}){
+export function createWaveEvidenceEnricher({root,request=fetch,gate=createCandleRequestGate()}={}){
  const recorder=createWaveEvidenceRecorder({root});
+ const cache=new Map();
  return async ({snapshot,sourceReplay}={})=>{
   if(!valid(snapshot?.snapshotTime)||!sourceReplay?.sha256)
    return {ok:false,reason:"REPLAY_EVIDENCE_SOURCE_UNVERIFIED"};
-  const end=Date.parse(snapshot.snapshotTime),start=end-60*60*1000;
-  const ohlc={};
-  for(const timeframe of ["10m","5m","1m"]){
-   const p=await fetchBoundedWaveCandles({timeframe,fromUtc:new Date(start).toISOString(),
-    toUtc:new Date(end).toISOString(),request});
-   if(p.available)ohlc[timeframe]=p;
-   else if(timeframe==="10m")return {ok:false,reason:"PRIMARY_COMPLETED_10M_SOURCE_UNAVAILABLE",sourceReason:p.reason};
+  const end=Date.parse(snapshot.snapshotTime);
+  const completedBucket=Math.floor(end/600000)*600000;
+  const key="ES:10m:"+completedBucket;
+  let packet=cache.get(key);
+  if(!packet){
+   const fromUtc=new Date(completedBucket-60*60000).toISOString();
+   const toUtc=new Date(completedBucket).toISOString();
+   const attempt=await gate.execute(()=>fetchBoundedWaveCandles({
+    timeframe:"10m",fromUtc,toUtc,request}));
+   if(!attempt?.available)return {ok:false,reason:attempt?.reason==="CANDLE_REQUEST_BACKPRESSURE"
+    ?"CANDLE_REQUEST_BACKPRESSURE":"PRIMARY_COMPLETED_10M_SOURCE_UNAVAILABLE",
+    sourceReason:attempt?.reason??null};
+   packet=attempt;
+   cache.clear();cache.set(key,packet);
   }
-  const strategy=snapshot?.strategies?.["intraday_scalp@10m"];
-  const zoneCandidate=strategy?.engine26LocationCandidate??null;
-  return recorder.record({snapshot,sourceReplay,ohlc,zoneCandidate,
-    // Extreme is unknown unless a verified source supplies it; do not infer.
+  const zoneCandidate=snapshot?.strategies?.["intraday_scalp@10m"]?.engine26LocationCandidate??null;
+  return recorder.record({snapshot,sourceReplay,ohlc:{"10m":packet},zoneCandidate,
     waveExtremePrices:{},asOf:snapshot.snapshotTime});
  };
 }
