@@ -2,6 +2,7 @@
 // Engine27 V6 recorder. Proposal only: Render startCommand remains unchanged.
 import {spawn} from "node:child_process";
 import {fileURLToPath} from "node:url";
+import path from "node:path";
 
 export function startBackend1Supervisor({
  watcherScript="services/core/jobs/watchEngine8RealSchwabFills.js",
@@ -53,7 +54,7 @@ export function startBackend1Supervisor({
  return Object.freeze({stop,done,status:()=>({stopping,watcherStarts,recorderStarts,
   live:[...children.keys()]})});
 }
-if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
+if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
  const supervisor=startBackend1Supervisor();
  process.once("SIGTERM",()=>{void supervisor.stop("SIGTERM")});
  process.once("SIGINT",()=>{void supervisor.stop("SIGINT")});
