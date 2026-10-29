@@ -4,12 +4,15 @@ import {createHash} from "node:crypto";
 import {planReplayIntake} from "./planReplayIntake.js";
 import {createReplayIntakeLedger} from "./createReplayIntakeLedger.js";
 import {createWaveObservationJournal} from "./createWaveObservationJournal.js";
+import {recoverCommittedWavePending} from "./recoverCommittedWavePending.js";
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 export function createWaveReplayConsumer({root,readOriginalReplay}={}){
  if(typeof readOriginalReplay!=="function")throw Error("ORIGINAL_REPLAY_READER_REQUIRED");
  const journal=createWaveObservationJournal({root});
  const ledger=createReplayIntakeLedger({root});
  async function consumeDate({date,times,maxBatch=120,observedAt}={}){
+  const recovery=recoverCommittedWavePending({root});
+  if(!recovery.ok)return {ok:false,reason:recovery.reason,processed:0,blocked:null};
   const processed=ledger.processedFor(date);
   const plan=planReplayIntake({date,times,processed,maxBatch});
   if(!plan.ok)return {ok:false,reason:plan.reason,processed:0,blocked:null};
