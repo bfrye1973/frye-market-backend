@@ -4,9 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import {runWaveObservationBackfill} from "./runWaveObservationBackfill.js";
 import {writeRecorderHeartbeat} from "./writeRecorderHeartbeat.js";
+import {checkRecorderStorage} from "./checkRecorderStorage.js";
 const root="/var/data/replay/engine27/wave-observations";
 export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDER_ENABLED==="true",
- replayRoot="/var/data/replay/es",rootDir=root,
+ replayRoot="/var/data/replay/es",rootDir=root,storagePreflight=checkRecorderStorage,
  onCycle=runWaveObservationBackfill,signal=null,sleepMs=60000,maxCycles=Infinity}={}){
  if(!enabled)return {ok:true,status:"DISABLED",cycles:0};
  if(!Number.isInteger(sleepMs)||sleepMs<1000||sleepMs>300000)
@@ -21,6 +22,9 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
  try{
   while(!signal?.aborted&&cycles<maxCycles){
    const az=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
+   const space=storagePreflight({root:rootDir,diskMount:path.dirname(replayRoot)});
+   if(!space.ok){writeRecorderHeartbeat({root:rootDir,status:"FAILED",cycleCount:cycles,lastErrorCode:space.reason});
+    return {ok:false,status:"STORAGE_PREFLIGHT_BLOCKED",cycles,reason:space.reason};}
    const report=await onCycle({replayRoot,root:rootDir,dates:[az],maxBatch:1,commit:true});
    cycles++;lastResult=report;
    writeRecorderHeartbeat({root:rootDir,status:report?.ok?"RUNNING":"FAILED",cycleCount:cycles,
