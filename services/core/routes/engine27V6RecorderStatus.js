@@ -20,10 +20,17 @@ router.get("/",(req,res)=>{
   receipts+=count("replay-intake-receipts/"+date,/^\d{4}\.json$/)}catch{}
  const pending=count("events",/\.pending$/)+count("candle-evidence",/\.pending$/);
  const lease=fs.existsSync(path.join(base,".single-worker-lease"));
+ let heartbeat=null;
+ try{heartbeat=JSON.parse(fs.readFileSync(path.join(base,"worker-status.json"),"utf8"))}catch{}
+ const ageMs=heartbeat?.updatedAt?Date.now()-Date.parse(heartbeat.updatedAt):null;
+ const fresh=Number.isFinite(ageMs)&&ageMs>=0&&ageMs<180000;
  res.set("Cache-Control","no-store").json({ok:true,enabled:process.env.ENGINE27_V6_RECORDER_ENABLED==="true",
-  running:"UNVERIFIED_NO_HEARTBEAT",singletonLeasePresent:lease,
+  running:lease&&fresh&&heartbeat.status==="RUNNING",
+  heartbeatState:heartbeat?.status??"UNAVAILABLE",lastHeartbeatAt:heartbeat?.updatedAt??null,
+  heartbeatStale:!fresh,lastErrorCode:heartbeat?.lastErrorCode??null,
+  singletonLeasePresent:lease,
   eventCount:events,tenMinuteCandleEvidenceCount:candles,intakeReceiptCount:receipts,
-  pendingFileCount:pending,source:"DURABLE_DISK_ONLY",workerHeartbeatAvailable:false,
+  pendingFileCount:pending,source:"DURABLE_DISK_ONLY",workerHeartbeatAvailable:Boolean(heartbeat),
   deploymentSha:process.env.RENDER_GIT_COMMIT??null});
 });
 export default router;
