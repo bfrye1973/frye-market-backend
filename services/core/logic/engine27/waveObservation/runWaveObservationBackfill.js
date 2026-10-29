@@ -10,7 +10,7 @@ import {createReplayIntakeLedger} from "./createReplayIntakeLedger.js";
 const validDate=d=>typeof d==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(d);
 export async function runWaveObservationBackfill({
  replayRoot="/var/data/replay/es",root="/var/data/replay/engine27/wave-observations",
- dates=[],maxBatch=30,commit=false,request=fetch,gate=null,maxTotalBatch=1
+ dates=[],maxBatch=30,commit=false,request=fetch,gate=null,enricher=null,maxTotalBatch=1
 }={}){
  if(!Array.isArray(dates)||dates.length<1||dates.length>14||dates.some(d=>!validDate(d))||
     !Number.isInteger(maxBatch)||maxBatch<1||maxBatch>120||
@@ -18,9 +18,10 @@ export async function runWaveObservationBackfill({
   return {ok:false,reason:"INVALID_BACKFILL_SCOPE"};
  const reader=createOriginalReplayFileReader({replayRoot});
  const sharedGate=commit?(gate??createCandleRequestGate({root})):null;
- const enriched=commit?createWaveEvidenceEnricher({root,request,gate:sharedGate}):null;
+ const enriched=commit?(enricher??createWaveEvidenceEnricher({root,request,gate:sharedGate})):null;
  const ledger=commit?createReplayIntakeLedger({root}):null;
  let totalProcessed=0;
+ let totalLegacySkipped=0;
  const consumer=commit?createWaveReplayConsumer({root,readOriginalReplay:reader,onWaveEvidence:enriched}):null;
  const reports=[];
  for(const date of [...new Set(dates)].sort()){
@@ -59,9 +60,11 @@ export async function runWaveObservationBackfill({
   if(capacity<=0)break;
   const result=await consumer.consumeDate({date,times,maxBatch:capacity});
   totalProcessed+=result.processed??0;
+  totalLegacySkipped+=result.legacySkipped??0;
   reports.push({date,mode:"COMMIT",...result});
   if(!result.ok)return {ok:false,reason:result.reason,date,reports};
   if(totalProcessed>=maxTotalBatch)break;
  }
- return {ok:true,productionDeployed:false,dryRun:commit!==true,reports};
+ return {ok:true,productionDeployed:false,dryRun:commit!==true,reports,
+  processed:totalProcessed,legacySkipped:totalLegacySkipped};
 }
