@@ -36,3 +36,23 @@ test("never retroactively promote absent authoritative wave into history",()=>{
  assert.deepEqual(assembleWaveEvidence({snapshot:missing,degree:"micro",ohlc,asOf:when}),
   {ok:false,reason:"ORIGINAL_AUTHORIZED_WAVE_UNAVAILABLE"});
 });
+
+test("Micro/Submicro require completed 10-minute candle for primary wick signal",()=>{
+ const ten={...ohlc["1m"],bars:[{...bar,time:Date.parse("2026-10-28T19:50:00Z")/1000}]};
+ for(const degree of ["micro","submicro"]){
+  const r=assembleWaveEvidence({snapshot,degree,ohlc:{"1m":ohlc["1m"],"10m":ten},asOf:when});
+  assert.equal(r.wickDetection.primary,"10m");
+  assert.equal(r.wickDetection.primaryAvailable,true);
+  assert.equal(r.wickDetection.primaryCandle.candle.high,7819.5);
+  assert.deepEqual(r.wickDetection.supporting,["5m","1m"]);
+  const missing=assembleWaveEvidence({snapshot,degree,ohlc,asOf:when});
+  assert.equal(missing.wickDetection.primaryAvailable,false);
+  assert.equal(missing.wickDetection.primaryCandle,null);
+  assert.equal(missing.wickDetection.status,"PRIMARY_COMPLETED_10M_UNAVAILABLE");
+ }
+});
+test("larger degrees have no unapproved primary candle timeframe",()=>{
+ const r=assembleWaveEvidence({snapshot,degree:"primary",ohlc,asOf:when});
+ assert.equal(r.wickDetection.primary,null);
+ assert.equal(r.wickDetection.status,"NOT_CONFIGURED");
+});
