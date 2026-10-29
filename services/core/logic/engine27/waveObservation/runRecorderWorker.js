@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {runWaveObservationBackfill} from "./runWaveObservationBackfill.js";
+import {writeRecorderHeartbeat} from "./writeRecorderHeartbeat.js";
 const root="/var/data/replay/engine27/wave-observations";
 export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDER_ENABLED==="true",
  replayRoot="/var/data/replay/es",rootDir=root,
@@ -16,11 +17,14 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
  const lease=path.join(rootDir,".single-worker-lease");
  try{fs.mkdirSync(lease)}catch(e){if(e?.code==="EEXIST")return {ok:false,status:"ANOTHER_WORKER_OR_STALE_LEASE"};throw e}
  let cycles=0,stopped=false,lastResult=null;
+ writeRecorderHeartbeat({root:rootDir,status:"STARTING"});
  try{
   while(!signal?.aborted&&cycles<maxCycles){
    const az=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Phoenix",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date());
    const report=await onCycle({replayRoot,root:rootDir,dates:[az],maxBatch:1,commit:true});
    cycles++;lastResult=report;
+   writeRecorderHeartbeat({root:rootDir,status:report?.ok?"RUNNING":"FAILED",cycleCount:cycles,
+    lastErrorCode:report?.ok?null:report?.reason??"CYCLE_FAILED"});
    if(!report?.ok)return {ok:false,status:"CYCLE_FAILED",cycles,reason:report?.reason??"UNKNOWN"};
    if(signal?.aborted||cycles>=maxCycles)break;
    await new Promise(resolve=>{
@@ -29,6 +33,7 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
    });
   }
   stopped=true;
+  writeRecorderHeartbeat({root:rootDir,status:"STOPPED",cycleCount:cycles});
   return {ok:true,status:signal?.aborted?"STOPPED":"CYCLE_LIMIT_REACHED",cycles,lastResult};
  }finally{
   // Lease release only by owner process; any crash leaves stale lease for review.
