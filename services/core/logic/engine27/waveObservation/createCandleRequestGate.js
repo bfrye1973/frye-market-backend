@@ -27,10 +27,7 @@ export function createCandleRequestGate({
      hits=parsed.hits.filter(t=>tick-t<60000);
     }else hits=[];
     last=hits.length?hits[hits.length-1]:-Infinity;
-   }catch(e){throw e}
-   finally{
-    // Persistence below takes place while holding the lock. Leave it until exit.
-   }
+   }catch(e){fs.rmdirSync(lock);throw e}
   }
   const retryAfterMs=Math.max(
    hits.length>=maxPerMinute?60000-(tick-hits[0]):0,
