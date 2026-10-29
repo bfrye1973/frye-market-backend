@@ -17,7 +17,7 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
  fs.mkdirSync(rootDir,{recursive:true});
  const lease=path.join(rootDir,".single-worker-lease");
  try{fs.mkdirSync(lease)}catch(e){if(e?.code==="EEXIST")return {ok:false,status:"ANOTHER_WORKER_OR_STALE_LEASE"};throw e}
- let cycles=0,stopped=false,lastResult=null;
+ let cycles=0,lastResult=null;
  writeRecorderHeartbeat({root:rootDir,status:"STARTING"});
  try{
   while(!signal?.aborted&&cycles<maxCycles){
@@ -36,11 +36,11 @@ export async function runRecorderWorker({enabled=process.env.ENGINE27_V6_RECORDE
     if(signal){signal.addEventListener("abort",()=>{clearTimeout(timer);resolve()},{once:true})}
    });
   }
-  stopped=true;
   writeRecorderHeartbeat({root:rootDir,status:"STOPPED",cycleCount:cycles});
   return {ok:true,status:signal?.aborted?"STOPPED":"CYCLE_LIMIT_REACHED",cycles,lastResult};
  }finally{
-  // Lease release only by owner process; any crash leaves stale lease for review.
-  if(stopped||signal?.aborted){try{fs.rmdirSync(lease)}catch{}}
+  // Controlled exits relinquish ownership. A hard crash cannot run finally,
+  // so its lease remains for explicit stale-owner review.
+  try{fs.rmdirSync(lease)}catch{}
  }
 }
