@@ -31,6 +31,15 @@ export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence
       sha256:hash(source.bytes),snapshotTimeUtc:snapshot.snapshotTime,hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
     // Original observation time and ingestion time are deliberately distinct.
     const stamp=observedAt??new Date().toISOString();
+    // A legacy Replay with no original authorized publisher is valid source
+    // evidence but cannot be retroactively labeled as an Engine22 working wave.
+    // Preserve a separate immutable disposition instead of stalling the archive.
+    const authorized=snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.authorizedWorkingStructure;
+    if(authorized===undefined||authorized===null){
+     const skipped=ledger.acknowledgeLegacyWithoutPublication({item,sourceReplay,acknowledgedAt:stamp});
+     if(!skipped.ok)return {ok:false,reason:skipped.reason,processed:count,blocked:item.key};
+     count++;continue;
+    }
     const delivery=journal.append(snapshot,{observedAt:stamp,sourceReplay});
     if(!delivery.ok)return {ok:false,reason:delivery.reason,processed:count,blocked:item.key};
     // Optional source-qualified research enrichment must be durable before intake ACK.
