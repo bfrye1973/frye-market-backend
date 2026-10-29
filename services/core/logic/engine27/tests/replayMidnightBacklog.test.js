@@ -35,3 +35,31 @@ test("midnight, restart and prior-day late arrival produce durable source-qualif
   assert.equal(fs.existsSync(path.join(root,"events")),false);
  }finally{fs.rmSync(folder,{recursive:true,force:true})}
 });
+
+test("newest current Replay receipt precedes 14-day backlog without losing the old key",async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"e27-current-first-"));
+ try{
+  const replayRoot=path.join(dir,"es"),root=path.join(dir,"research");
+  const dates=["2026-10-28","2026-10-29"];
+  for(const date of dates)fs.mkdirSync(path.join(replayRoot,date),{recursive:true});
+  const add=(date,time)=>fs.writeFileSync(path.join(replayRoot,date,time+".json"),
+   JSON.stringify({schema:"engine12.multiStrategyReplay.v1",replayContract:"CANONICAL_MULTI_STRATEGY_REPLAY",
+    snapshotTime:date+"T"+time.slice(0,2)+":"+time.slice(2)+":00Z",symbol:"ES"})+"\n");
+  add(dates[0],"1000");add(dates[0],"1001");add(dates[1],"1013");
+  const options={replayRoot,root,dates,commit:true,currentFirst:true,maxBatch:1,maxTotalBatch:1};
+  const first=await runWaveObservationBackfill(options);
+  assert.equal(first.ok,true);
+  assert.equal(first.reports[0].lane,"CURRENT");
+  assert.equal(first.reports[0].date,dates[1]);
+  const ledger=createReplayIntakeLedger({root});
+  assert.deepEqual(ledger.processedFor(dates[0]),[]);
+  assert.deepEqual(ledger.processedFor(dates[1]),[dates[1]+"/1013"]);
+  const second=await runWaveObservationBackfill(options);
+  assert.equal(second.ok,true);
+  assert.equal(second.reports[0].date,dates[0]);
+  add(dates[1],"1016");
+  const third=await runWaveObservationBackfill(options);
+  assert.equal(third.reports[0].lane,"CURRENT");
+  assert.deepEqual(ledger.processedFor(dates[1]),[dates[1]+"/1013",dates[1]+"/1016"]);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
