@@ -37,3 +37,26 @@ test("unavailable primary 10m source blocks intake",async()=>{
   assert.equal(result.ok,false);assert.equal(result.reason,"PRIMARY_COMPLETED_10M_SOURCE_UNAVAILABLE");
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
+
+test("outside 14-day historical 10m lookback is terminal missingness without provider call",async()=>{
+ let calls=0;
+ const enrich=createWaveEvidenceEnricher({
+  root:fs.mkdtempSync(os.tmpdir()+"/e27-expiry-"),
+  now:()=>Date.parse("2026-11-16T20:11:00Z"),
+  request:async()=>{calls++;throw Error("expired window must not be queried")}
+ });
+ const result=await enrich({snapshot,sourceReplay});
+ assert.equal(result.ok,true);
+ assert.equal(result.disposition,"HISTORICAL_OHLC_UNAVAILABLE");
+ assert.equal(calls,0);
+});
+test("recent 10m provider 502 remains retryable and cannot be terminally classified",async()=>{
+ const enrich=createWaveEvidenceEnricher({
+  root:fs.mkdtempSync(os.tmpdir()+"/e27-transient-"),
+  now:()=>Date.parse("2026-10-28T21:11:00Z"),
+  request:async()=>({ok:false,status:502})
+ });
+ const result=await enrich({snapshot,sourceReplay});
+ assert.equal(result.ok,false);
+ assert.notEqual(result.disposition,"HISTORICAL_OHLC_UNAVAILABLE");
+});
