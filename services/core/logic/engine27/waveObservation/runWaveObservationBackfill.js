@@ -28,7 +28,7 @@ export async function runWaveObservationBackfill({
   const latestDate=[...new Set(dates)].sort().at(-1);
   const folder=path.join(replayRoot,latestDate);
   if(fs.existsSync(folder)){
-   const times=fs.readdirSync(folder).filter(t=>/^\\d{4}\\.json$/.test(t)).map(t=>t.slice(0,4)).sort().reverse();
+   const times=fs.readdirSync(folder).filter(t=>/^\d{4}\.json$/.test(t)).map(t=>t.slice(0,4)).sort().reverse();
    const done=new Set(ledger.processedFor(latestDate));
    const latest=times.find(t=>!done.has(latestDate+"/"+t));
    if(latest){
