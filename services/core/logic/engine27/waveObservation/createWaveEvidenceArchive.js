@@ -28,7 +28,7 @@ export function createWaveEvidenceArchive({root="/var/data/replay/engine27/wave-
   const key=sha(JSON.stringify({degree:record.degree,source:record.sourceReplay.sha256,
    model:record.wave.modelVersion,primaryClose:primary?.primaryCandle?.candleClosedAt??null}));
   const file=path.join(dir,key+".json");fs.mkdirSync(dir,{recursive:true});
-  const currentBytes=fs.readdirSync(dir).filter(name=>/^[a-f0-9]{64}\\.json$/.test(name))
+  const currentBytes=fs.readdirSync(dir).filter(name=>/^[a-f0-9]{64}\.json$/.test(name))
    .reduce((sum,name)=>sum+fs.statSync(path.join(dir,name)).size,0);
   if(!fs.existsSync(file)&&currentBytes+body.length>maxArchiveBytes)
    return {ok:false,reason:"EVIDENCE_ARCHIVE_STORAGE_BUDGET_EXCEEDED",currentBytes,maxArchiveBytes};
