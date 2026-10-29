@@ -5,12 +5,14 @@ import {planReplayIntake} from "./planReplayIntake.js";
 import {createReplayIntakeLedger} from "./createReplayIntakeLedger.js";
 import {createWaveObservationJournal} from "./createWaveObservationJournal.js";
 import {recoverCommittedWavePending} from "./recoverCommittedWavePending.js";
+import {createMissingCandleDisposition} from "./createMissingCandleDisposition.js";
 const hash=bytes=>createHash("sha256").update(bytes).digest("hex");
 export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence=null}={}){
  if(typeof readOriginalReplay!=="function")throw Error("ORIGINAL_REPLAY_READER_REQUIRED");
  if(onWaveEvidence!==null&&typeof onWaveEvidence!=="function")throw Error("INVALID_EVIDENCE_CALLBACK");
  const journal=createWaveObservationJournal({root});
  const ledger=createReplayIntakeLedger({root});
+ const missingCandle=createMissingCandleDisposition({root});
  async function consumeDate({date,times,maxBatch=120,observedAt}={}){
   const recovery=recoverCommittedWavePending({root});
   if(!recovery.ok)return {ok:false,reason:recovery.reason,processed:0,blocked:null};
@@ -47,6 +49,12 @@ export function createWaveReplayConsumer({root,readOriginalReplay,onWaveEvidence
     if(onWaveEvidence){
      const evidence=await onWaveEvidence({snapshot,sourceReplay,observedAt:stamp,item});
      if(evidence?.ok!==true)return {ok:false,reason:evidence?.reason??"WAVE_EVIDENCE_NOT_DURABLE",processed:count,blocked:item.key};
+     if(evidence.disposition==="HISTORICAL_OHLC_UNAVAILABLE"){
+      for(const degree of ["micro","submicro"]){
+       const saved=missingCandle.append({sourceReplay,degree,recordedAt:stamp});
+       if(!saved.ok)return {ok:false,reason:saved.reason,processed:count,blocked:item.key};
+      }
+     }
     }
     const receipt=ledger.acknowledge({item,sourceReplay,writeResult:delivery,acknowledgedAt:stamp});
     if(!receipt.ok)return {ok:false,reason:receipt.reason,processed:count,blocked:item.key};
