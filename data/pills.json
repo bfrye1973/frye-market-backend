@@ -1,7 +1,7 @@
 {
   "version": "5m-deltas-r12.8",
-  "deltasUpdatedAt": "2026-10-29T20:05:51.958555+00:00",
-  "sourceUpdatedAt": "2026-10-29T20:03:43Z",
+  "deltasUpdatedAt": "2026-10-29T20:10:51.112873+00:00",
+  "sourceUpdatedAt": "2026-10-29T20:05:43Z",
   "deltas": {
     "sectors": {
       "Information Technology": {
@@ -14,7 +14,7 @@
         "netTilt": 9.41
       },
       "Communication Services": {
-        "netTilt": 21.53
+        "netTilt": 20.4
       },
       "Real Estate": {
         "netTilt": 20.98
@@ -26,7 +26,7 @@
         "netTilt": 2.81
       },
       "Consumer Discretionary": {
-        "netTilt": 21.48
+        "netTilt": 21.34
       },
       "Financials": {
         "netTilt": 25.31
