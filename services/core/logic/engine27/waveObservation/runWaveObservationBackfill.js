@@ -27,7 +27,7 @@ export async function runWaveObservationBackfill({
  if(commit&&currentFirst){
   // Recent original Replay is processed in ascending source order, not just
   // the newest file. Keep one worker, journal, ledger and durable OHLC gate.
-  const recentDates=[...new Set(dates)].sort().slice(-2);
+  const recentDates=[...new Set(dates)].sort().slice(-1);
   let remainingCurrent=Math.min(maxBatch,maxTotalBatch);
   for(const date of recentDates){
    if(remainingCurrent<=0)break;
@@ -36,9 +36,12 @@ export async function runWaveObservationBackfill({
    const times=fs.readdirSync(folder).filter(t=>/^([01]\\d|2[0-3])[0-5]\\d\\.json$/.test(t))
     .map(t=>t.slice(0,4)).sort();
    const done=new Set(ledger.processedFor(date));
-   // Only the most recent bounded source-time window receives priority.
+   // Only the latest 60 source-clock minutes receive priority; process the\n   // oldest pending in that window first to prevent starvation from new arrivals.
    // Older unacknowledged records remain eligible for historical recovery.
-   const recent=times.slice(-Math.min(times.length,12)).filter(t=>!done.has(date+"/"+t));
+   const newest=times.at(-1);
+   const minutes=t=>Number(t.slice(0,2))*60+Number(t.slice(2));
+   const floor=newest?minutes(newest)-60:0;
+   const recent=times.filter(t=>minutes(t)>=floor&&!done.has(date+"/"+t));
    if(!recent.length)continue;
    const result=await consumer.consumeDate({date,times:recent,maxBatch:remainingCurrent});
    totalProcessed+=result.processed??0;
