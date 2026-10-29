@@ -15,7 +15,7 @@ const snap=(time)=>({schema:"engine12.multiStrategyReplay.v1",replayContract:"CA
   selectionStatus:i<4?"OWNER_SELECTED_WORKING":"CANONICAL_DEGREE_STATE",
   sourcePath:"currentWavelength.degrees."+degree,modelVersion:"model."+degree+".v1",
   activeWave:"W3",direction:"UP",stage:"DEVELOPING",
-  parentDegree:degrees[i+1]??null,parentWave:i===0?"W3":i===1?"D":i===2?"W2":null,
+  parentDegree:degrees[i+1]??null,parentWave:i<3?"W3":null,
   levels:[],review:null,officialInvalidation:null}]))}}}}});
 const temp=async fn=>{const root=fs.mkdtempSync(path.join(os.tmpdir(),"e27-intake-"));try{await fn(root)}finally{fs.rmSync(root,{recursive:true,force:true})}};
 test("original bytes deliver seven events and restart resumes remaining Replay",()=>temp(async root=>{
