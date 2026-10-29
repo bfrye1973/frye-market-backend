@@ -31,6 +31,8 @@ on:
       - "services/core/logic/engine27/tests/candleRequestGate.test.js"
       - "services/core/logic/engine27/tests/recorderWorker.test.js"
       - ".github/workflows/engine27-v6-wave-journal.yml"
+      - "services/core/routes/engine27V6RecorderStatus.js"
+      - "services/core/server.js"
 jobs:
   journal:
     runs-on: ubuntu-latest
@@ -65,6 +67,8 @@ jobs:
           node --check services/core/logic/engine27/waveObservation/createWaveEvidenceEnricher.js
           node --check services/core/logic/engine27/waveObservation/createCandleRequestGate.js
           node --check services/core/logic/engine27/waveObservation/runRecorderWorker.js
+          node --check services/core/routes/engine27V6RecorderStatus.js
+          node --check services/core/server.js
           node --check services/core/logic/engine27/waveObservation/createWaveOutcomeArchive.js
           node --check services/core/logic/engine27/waveObservation/runWaveObservationBackfill.js
 
