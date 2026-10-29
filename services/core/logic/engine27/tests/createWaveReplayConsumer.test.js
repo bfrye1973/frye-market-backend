@@ -59,3 +59,26 @@ test("failed candle persistence blocks receipt; restart retries enrichment witho
  assert.equal(restored.readEvents().length,7);
  assert.deepEqual(restored.processedFor(date),[date+"/1301"]);
 }));
+
+test("legacy Replay without original authorized publisher receives immutable skip receipt",()=>temp(async root=>{
+ const s=snap("1301");
+ delete s.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure;
+ const reader=async()=>({bytes:Buffer.from(JSON.stringify(s))});
+ const consumer=createWaveReplayConsumer({root,readOriginalReplay:reader});
+ const first=await consumer.consumeDate({date,times:["1301"],observedAt:"2026-10-28T20:05:00Z"});
+ assert.equal(first.ok,true);assert.equal(first.processed,1);
+ assert.equal(consumer.readEvents().length,0);
+ assert.deepEqual(consumer.processedFor(date),[date+"/1301"]);
+ const receipt=JSON.parse(fs.readFileSync(path.join(root,"replay-intake-receipts",date,"1301.json"),"utf8"));
+ assert.equal(receipt.disposition,"SKIPPED_NO_ORIGINAL_AUTHORIZED_PUBLICATION");
+ assert.equal(receipt.sevenDegreeJournalAck,false);
+ const repeat=await consumer.consumeDate({date,times:["1301"]});
+ assert.equal(repeat.processed,0);
+}));
+test("partial or conflicting authorized publication does NOT qualify for legacy skip",()=>temp(async root=>{
+ const s=snap("1301");
+ s.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.status="BROKEN";
+ const consumer=createWaveReplayConsumer({root,readOriginalReplay:async()=>({bytes:Buffer.from(JSON.stringify(s))})});
+ const r=await consumer.consumeDate({date,times:["1301"],observedAt:"2026-10-28T20:05:00Z"});
+ assert.equal(r.ok,false);assert.deepEqual(consumer.processedFor(date),[]);
+}));
