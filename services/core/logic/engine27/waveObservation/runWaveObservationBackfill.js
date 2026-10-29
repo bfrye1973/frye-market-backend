@@ -10,7 +10,7 @@ import {createReplayIntakeLedger} from "./createReplayIntakeLedger.js";
 const validDate=d=>typeof d==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(d);
 export async function runWaveObservationBackfill({
  replayRoot="/var/data/replay/es",root="/var/data/replay/engine27/wave-observations",
- dates=[],maxBatch=30,commit=false,request=fetch,gate=null,enricher=null,maxTotalBatch=1
+ dates=[],maxBatch=30,commit=false,request=fetch,gate=null,enricher=null,maxTotalBatch=1,currentFirst=false
 }={}){
  if(!Array.isArray(dates)||dates.length<1||dates.length>14||dates.some(d=>!validDate(d))||
     !Number.isInteger(maxBatch)||maxBatch<1||maxBatch>120||
@@ -24,7 +24,24 @@ export async function runWaveObservationBackfill({
  let totalLegacySkipped=0;
  const consumer=commit?createWaveReplayConsumer({root,readOriginalReplay:reader,onWaveEvidence:enriched}):null;
  const reports=[];
+ if(commit&&currentFirst){
+  const latestDate=[...new Set(dates)].sort().at(-1);
+  const folder=path.join(replayRoot,latestDate);
+  if(fs.existsSync(folder)){
+   const times=fs.readdirSync(folder).filter(t=>/^\\d{4}\\.json$/.test(t)).map(t=>t.slice(0,4)).sort().reverse();
+   const done=new Set(ledger.processedFor(latestDate));
+   const latest=times.find(t=>!done.has(latestDate+"/"+t));
+   if(latest){
+    const result=await consumer.consumeDate({date:latestDate,times:[latest],maxBatch:1});
+    totalProcessed+=result.processed??0;
+    totalLegacySkipped+=result.legacySkipped??0;
+    reports.push({date:latestDate,lane:"CURRENT",...result});
+    if(!result.ok)return {ok:false,reason:result.reason,reports,processed:totalProcessed};
+   }
+  }
+ }
  for(const date of [...new Set(dates)].sort()){
+  if(commit&&totalProcessed>=maxTotalBatch)break;
   const folder=path.join(replayRoot,date);
   if(!fs.existsSync(folder)){
    if(commit)continue;
