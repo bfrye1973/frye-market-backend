@@ -36,3 +36,14 @@ test("10/30/60 outcomes distinguish pending, missing, and unverified contract",(
  const noBars=scoreWaveOutcomes({eventClosedAt,eventPrice:7785,asOf:"2026-10-28T21:15:00Z"});
  assert.equal(noBars.horizons["10m"].status,"OUTCOME_MISSING");
 });
+
+test("archive budget fails closed before writing a new event",()=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),"e27-budget-"));
+ try{
+  const archive=createWaveEvidenceArchive({root,maxArchiveBytes:1});
+  const result=archive.append(e);
+  assert.equal(result.ok,false);
+  assert.equal(result.reason,"EVIDENCE_ARCHIVE_STORAGE_BUDGET_EXCEEDED");
+  assert.equal(fs.readdirSync(archive.storagePath).length,0);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
+});
