@@ -25,21 +25,30 @@ export async function runWaveObservationBackfill({
  const consumer=commit?createWaveReplayConsumer({root,readOriginalReplay:reader,onWaveEvidence:enriched}):null;
  const reports=[];
  if(commit&&currentFirst){
-  const latestDate=[...new Set(dates)].sort().at(-1);
-  const folder=path.join(replayRoot,latestDate);
-  if(fs.existsSync(folder)){
-   const times=fs.readdirSync(folder).filter(t=>/^\d{4}\.json$/.test(t)).map(t=>t.slice(0,4)).sort().reverse();
-   const done=new Set(ledger.processedFor(latestDate));
-   const latest=times.find(t=>!done.has(latestDate+"/"+t));
-   if(latest){
-    const result=await consumer.consumeDate({date:latestDate,times:[latest],maxBatch:1});
-    totalProcessed+=result.processed??0;
-    totalLegacySkipped+=result.legacySkipped??0;
-    reports.push({date:latestDate,lane:"CURRENT",...result});
-    if(!result.ok)return {ok:false,reason:result.reason,reports,processed:totalProcessed};
-   }
+  // Recent original Replay is processed in ascending source order, not just
+  // the newest file. Keep one worker, journal, ledger and durable OHLC gate.
+  const recentDates=[...new Set(dates)].sort().slice(-2);
+  let remainingCurrent=Math.min(maxBatch,maxTotalBatch);
+  for(const date of recentDates){
+   if(remainingCurrent<=0)break;
+   const folder=path.join(replayRoot,date);
+   if(!fs.existsSync(folder))continue;
+   const times=fs.readdirSync(folder).filter(t=>/^([01]\\d|2[0-3])[0-5]\\d\\.json$/.test(t))
+    .map(t=>t.slice(0,4)).sort();
+   const done=new Set(ledger.processedFor(date));
+   // Only the most recent bounded source-time window receives priority.
+   // Older unacknowledged records remain eligible for historical recovery.
+   const recent=times.slice(-Math.min(times.length,12)).filter(t=>!done.has(date+"/"+t));
+   if(!recent.length)continue;
+   const result=await consumer.consumeDate({date,times:recent,maxBatch:remainingCurrent});
+   totalProcessed+=result.processed??0;
+   totalLegacySkipped+=result.legacySkipped??0;
+   remainingCurrent-=result.processed??0;
+   reports.push({date,lane:"CURRENT",...result});
+   if(!result.ok)return {ok:false,reason:result.reason,reports,processed:totalProcessed};
   }
  }
+
  for(const date of [...new Set(dates)].sort()){
   if(commit&&totalProcessed>=maxTotalBatch)break;
   const folder=path.join(replayRoot,date);
