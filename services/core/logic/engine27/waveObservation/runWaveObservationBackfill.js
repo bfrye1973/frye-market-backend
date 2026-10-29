@@ -5,16 +5,22 @@ import path from "node:path";
 import {createOriginalReplayFileReader} from "./createOriginalReplayFileReader.js";
 import {createWaveReplayConsumer} from "./createWaveReplayConsumer.js";
 import {createWaveEvidenceEnricher} from "./createWaveEvidenceEnricher.js";
+import {createCandleRequestGate} from "./createCandleRequestGate.js";
+import {createReplayIntakeLedger} from "./createReplayIntakeLedger.js";
 const validDate=d=>typeof d==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(d);
 export async function runWaveObservationBackfill({
  replayRoot="/var/data/replay/es",root="/var/data/replay/engine27/wave-observations",
- dates=[],maxBatch=30,commit=false,request=fetch
+ dates=[],maxBatch=30,commit=false,request=fetch,gate=null,maxTotalBatch=1
 }={}){
  if(!Array.isArray(dates)||dates.length<1||dates.length>14||dates.some(d=>!validDate(d))||
-    !Number.isInteger(maxBatch)||maxBatch<1||maxBatch>120)
+    !Number.isInteger(maxBatch)||maxBatch<1||maxBatch>120||
+    !Number.isInteger(maxTotalBatch)||maxTotalBatch<1||maxTotalBatch>120)
   return {ok:false,reason:"INVALID_BACKFILL_SCOPE"};
  const reader=createOriginalReplayFileReader({replayRoot});
- const enriched=commit?createWaveEvidenceEnricher({root,request}):null;
+ const sharedGate=commit?(gate??createCandleRequestGate({root})):null;
+ const enriched=commit?createWaveEvidenceEnricher({root,request,gate:sharedGate}):null;
+ const ledger=commit?createReplayIntakeLedger({root}):null;
+ let totalProcessed=0;
  const consumer=commit?createWaveReplayConsumer({root,readOriginalReplay:reader,onWaveEvidence:enriched}):null;
  const reports=[];
  for(const date of [...new Set(dates)].sort()){
@@ -23,6 +29,7 @@ export async function runWaveObservationBackfill({
    return {ok:false,reason:"REPLAY_DATE_NOT_FOUND",date,reports};
   const times=fs.readdirSync(folder).filter(t=>/^([01]\d|2[0-3])[0-5]\d\.json$/.test(t))
    .map(name=>name.slice(0,4)).sort();
+  if(commit&&!times.some(time=>!ledger.processedFor(date).includes(date+"/"+time)))continue;
   if(!commit){
    // Unlike a listing-only dry run, verify original bytes and canonical contract
    // for a bounded sample. Never create journal or receipt directories.
@@ -45,9 +52,13 @@ export async function runWaveObservationBackfill({
    if(invalid.length)return {ok:false,reason:"DRY_RUN_ORIGINAL_REPLAY_VALIDATION_FAILED",date,reports};
    continue;
   }
-  const result=await consumer.consumeDate({date,times,maxBatch});
+  const capacity=Math.min(maxBatch,maxTotalBatch-totalProcessed);
+  if(capacity<=0)break;
+  const result=await consumer.consumeDate({date,times,maxBatch:capacity});
+  totalProcessed+=result.processed??0;
   reports.push({date,mode:"COMMIT",...result});
   if(!result.ok)return {ok:false,reason:result.reason,date,reports};
+  if(totalProcessed>=maxTotalBatch)break;
  }
  return {ok:true,productionDeployed:false,dryRun:commit!==true,reports};
 }
