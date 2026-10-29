@@ -9,6 +9,13 @@ export const WAVE_DEGREES=Object.freeze(["submicro","micro","subminute","minute"
 const validTime=s=>typeof s==="string"&&Number.isFinite(Date.parse(s));
 const finite=n=>typeof n==="number"&&Number.isFinite(n);
 const durations={"1m":60000,"5m":300000,"10m":600000};
+// Owner-selected research signal for Micro/Submicro: completed 10m bar only.
+// Smaller bars remain supporting evidence, never a substitute for missing 10m data.
+export function wickTimeframePolicy(degree){
+ return ["micro","submicro"].includes(degree)
+  ? {primary:"10m",supporting:["5m","1m"],status:"OWNER_APPROVED_RESEARCH_CONFIGURATION"}
+  : {primary:null,supporting:["10m","5m","1m"],status:"DEGREE_PRIMARY_TIMEFRAME_NOT_SET"};
+}
 function selectedWave(snapshot,degree){
  const states=snapshot?.strategies?.["intraday_scalp@10m"]?.engine22WaveStrategy?.authorizedWorkingStructure;
  if(states?.status!=="COMPLETE_WORKING_SELECTION")return null;
@@ -62,6 +69,8 @@ export function assembleWaveEvidence({snapshot,degree,sourceReplay=null,ohlc=nul
    reason:!sequence.available?sequence.reason:!candle?.available?"NO_COMPLETED_CANDLE":null};
   if(!results[timeframe].available)missing.push(timeframe.toUpperCase()+"_RESEARCH_UNAVAILABLE");
  }
+ const wickPolicy=wickTimeframePolicy(degree);
+ const primaryStudy=wickPolicy.primary?results[wickPolicy.primary]??null:null;
  const zone=studyWaveNegotiatedZone({waveExtremePrice,engine26Candidate:zoneCandidate,
   sourceSnapshotTime:snapshot.snapshotTime});
  if(!zone.available)missing.push("ORIGINAL_NEGOTIATED_ZONE_UNAVAILABLE");
@@ -70,7 +79,10 @@ export function assembleWaveEvidence({snapshot,degree,sourceReplay=null,ohlc=nul
   engine27AssembledAt:observedAt,
   wave:{activeWave:wave.activeWave??null,direction:wave.direction??null,stage:wave.stage??null,
    modelVersion:wave.modelVersion??null,levels:wave.levels??[]},
-  candleStudies:results,negotiatedZone:zone.available?zone:null,
+  candleStudies:results,wickDetection:{...wickPolicy,
+   primaryAvailable:primaryStudy?.available===true,
+   primaryCandle:primaryStudy?.available?primaryStudy.lastCandle:null,
+   status:wickPolicy.primary?(primaryStudy?.available?"PRIMARY_COMPLETED_10M_AVAILABLE":"PRIMARY_COMPLETED_10M_UNAVAILABLE"):"NOT_CONFIGURED"},negotiatedZone:zone.available?zone:null,
   physicalReplayContract:null,contractIdentityStatus:"REPLAY_CONTRACT_UNVERIFIED",
   missingEvidence:missing,completionConfirmed:false,noWaveAuthority:true,noExecution:true};
 }
