@@ -52,7 +52,7 @@ export function startBackend1Supervisor({
  if(recorderEnabled)start("recorder",recorderScript);
  start("server",serverScript);
  return Object.freeze({stop,done,status:()=>({stopping,watcherStarts,recorderStarts,
-  live:[...children.keys()]})});
+  live:[...children.keys()],pids:Object.fromEntries([...children].map(([name,child])=>[name,child.pid]))})});
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===path.resolve(process.argv[1])){
  const supervisor=startBackend1Supervisor();
