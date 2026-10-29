@@ -1,4 +1,5 @@
 import engine27MicroAlignmentHistoryRouter from "./routes/engine27MicroAlignmentHistory.js";
+import engine27V6RecorderStatusRouter from "./routes/engine27V6RecorderStatus.js";
 // services/core/server.js
 // Backend-1 (Core API) — Express entry (ESM)
 
@@ -132,6 +133,8 @@ app.use((req, res, next) => {
 
 // --- Static (optional) ---
 app.use(express.static(path.join(__dirname, "public")));
+
+app.use("/api/v1/engine27/v6/recorder/status",engine27V6RecorderStatusRouter);
 
 // --- Health endpoints ---
 app.get("/healthz", (_req, res) => {
