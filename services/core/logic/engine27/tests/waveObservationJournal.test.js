@@ -127,3 +127,23 @@ test("historical Replay snapshot time is distinct from later recording ingestion
  assert.equal(event.ingestedAt,"2026-10-29T17:00:00Z");
  assert.equal(event.retrospectiveIngestion,true);
 }));
+
+test("late original-time replay never reverses current event chain",()=>withJournal(root=>{
+ const journal=createWaveObservationJournal({root});
+ const newer=snapshot(),older=snapshot();
+ const newWave=newer.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.degrees.micro;
+ newWave.activeWave="W4";
+ const newSource={date:"2026-10-28",time:"1100",path:"/var/data/replay/es/2026-10-28/1100.json",
+  sha256:"c".repeat(64),snapshotTimeUtc:"2026-10-28T18:00:00Z",hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
+ const oldSource={date:"2026-10-28",time:"0930",path:"/var/data/replay/es/2026-10-28/0930.json",
+  sha256:"d".repeat(64),snapshotTimeUtc:"2026-10-28T16:30:00Z",hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
+ assert.equal(journal.append(newer,{observedAt:"2026-10-28T18:01:00Z",sourceReplay:newSource}).ok,true);
+ assert.equal(journal.append(older,{observedAt:"2026-10-28T19:00:00Z",sourceReplay:oldSource}).ok,true);
+ const micro=journal.readEvents().filter(e=>e.degree==="micro");
+ assert.equal(micro.length,2);
+ assert.equal(micro[1].eventType,"LATE_HISTORICAL_SOURCE_OBSERVATION");
+ assert.equal(micro[1].previousEventId,null);
+ assert.equal(micro[1].sourceObservedAt,"2026-10-28T16:30:00Z");
+ assert.equal(journal.readSourceChronology().filter(e=>e.degree==="micro")[0].sourceReplay.time,"0930");
+ assert.equal(journal.append(newer,{observedAt:"2026-10-28T19:01:00Z",sourceReplay:newSource}).duplicates,7);
+}));
