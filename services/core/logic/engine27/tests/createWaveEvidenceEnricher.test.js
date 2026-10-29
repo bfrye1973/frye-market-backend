@@ -38,17 +38,20 @@ test("unavailable primary 10m source blocks intake",async()=>{
  }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 
-test("outside 14-day historical 10m lookback is terminal missingness without provider call",async()=>{
- let calls=0;
- const enrich=createWaveEvidenceEnricher({
-  root:fs.mkdtempSync(os.tmpdir()+"/e27-expiry-"),
-  now:()=>Date.parse("2026-11-16T20:11:00Z"),
-  request:async()=>{calls++;throw Error("expired window must not be queried")}
- });
- const result=await enrich({snapshot,sourceReplay});
- assert.equal(result.ok,true);
- assert.equal(result.disposition,"HISTORICAL_OHLC_UNAVAILABLE");
- assert.equal(calls,0);
+test("older-than-14-day OHLC remains unresolved when provider fails",async()=>{
+ const root=fs.mkdtempSync(os.tmpdir()+"/e27-expiry-");
+ try{
+  let calls=0;
+  const enrich=createWaveEvidenceEnricher({root,
+   now:()=>Date.parse("2026-11-16T20:11:00Z"),
+   request:async()=>{calls++;return {ok:false,status:502}}
+  });
+  const result=await enrich({snapshot,sourceReplay});
+  assert.equal(result.ok,false);
+  assert.equal(result.reason,"PRIMARY_COMPLETED_10M_SOURCE_UNAVAILABLE");
+  assert.notEqual(result.disposition,"HISTORICAL_OHLC_UNAVAILABLE");
+  assert.equal(calls,1);
+ }finally{fs.rmSync(root,{recursive:true,force:true})}
 });
 test("recent 10m provider 502 remains retryable and cannot be terminally classified",async()=>{
  const enrich=createWaveEvidenceEnricher({
