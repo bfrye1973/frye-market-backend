@@ -133,6 +133,7 @@ test("late original-time replay never reverses current event chain",()=>withJour
  const newer=snapshot(),older=snapshot();
  const newWave=newer.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.degrees.micro;
  newWave.activeWave="W4";
+ newer.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.degrees.submicro.parentWave="W4";
  const newSource={date:"2026-10-28",time:"1100",path:"/var/data/replay/es/2026-10-28/1100.json",
   sha256:"c".repeat(64),snapshotTimeUtc:"2026-10-28T18:00:00Z",hashBasis:"ORIGINAL_REPLAY_FILE_BYTES"};
  const oldSource={date:"2026-10-28",time:"0930",path:"/var/data/replay/es/2026-10-28/0930.json",
