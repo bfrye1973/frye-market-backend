@@ -4,6 +4,7 @@ import express from "express";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import {measureReplayBacklog} from "../logic/engine27/waveObservation/measureReplayBacklog.js";
 const router=express.Router();
 const base="/var/data/replay/engine27/wave-observations";
 function count(dir,pattern){try{return fs.readdirSync(path.join(base,dir)).filter(s=>pattern.test(s)).length}catch{return 0}}
@@ -14,6 +15,7 @@ router.get("/",(req,res)=>{
  if(!token)return res.status(503).json({ok:false,error:"STATUS_AUTH_UNCONFIGURED"});
  if(!verify(req.header("X-ENGINE-CRON-TOKEN"),token))
   return res.status(401).json({ok:false,error:"UNAUTHORIZED"});
+ const backlog=measureReplayBacklog();
  const events=count("events",/^\d{13}-[a-f0-9]{64}\.json$/);
  const candles=count("candle-evidence",/^[a-f0-9]{64}\.json$/);
  let receipts=0;try{for(const date of fs.readdirSync(path.join(base,"replay-intake-receipts")))
@@ -31,6 +33,11 @@ router.get("/",(req,res)=>{
   singletonLeasePresent:lease,
   eventCount:events,tenMinuteCandleEvidenceCount:candles,intakeReceiptCount:receipts,
   pendingFileCount:pending,source:"DURABLE_DISK_ONLY",workerHeartbeatAvailable:Boolean(heartbeat),
+  remainingBacklogCount:backlog.available?backlog.remainingBacklogCount:null,
+  oldestUnprocessedReplayArizona:backlog.available?backlog.oldestUnprocessedReplayArizona:null,
+  newestAcknowledgedReplayArizona:backlog.available?backlog.newestAcknowledgedReplayArizona:null,
+  recordingLagMinutes:backlog.available?backlog.recordingLagMinutes:null,
+  backlogStatus:backlog.available?"AVAILABLE":backlog.reason,
   deploymentSha:process.env.RENDER_GIT_COMMIT??null});
 });
 export default router;
