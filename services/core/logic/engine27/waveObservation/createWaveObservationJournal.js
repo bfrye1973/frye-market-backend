@@ -80,7 +80,13 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
     try {
       if(fs.readdirSync(directory).some(name=>name.endsWith('.pending')))return {ok:false,reason:'INCOMPLETE_PENDING_EVENT_REQUIRES_RECOVERY',stored,duplicates};
       const prior=new Map();
-      for(const old of existing())if(DEGREE_ORDER.includes(old.degree))prior.set(old.degree,old);
+      const all=existing();
+      for(const old of all)if(DEGREE_ORDER.includes(old.degree)){
+       const source=Date.parse(old.sourceObservedAt??old.sourceReplay?.snapshotTimeUtc??old.source?.snapshotTime??old.observedAt);
+       const current=prior.get(old.degree);
+       const latest=current?Date.parse(current.sourceObservedAt??current.sourceReplay?.snapshotTimeUtc??current.source?.snapshotTime??current.observedAt):-Infinity;
+       if(source>latest)prior.set(old.degree,old);
+      }
       for(const wave of projected.degrees) {
         const contents={wave,physicalEsContract:projected.physicalEsContract,
           marketEvidence:projected.marketEvidence,zoneContext:projected.zoneContext,
@@ -88,14 +94,23 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
         // Routine changing market context must not itself create a new wave event.
         const stateHash=hash(wave);
         const previous=prior.get(wave.degree)??null;
-        if(previous?.stateHash===stateHash){duplicates++;continue;}
+        const sourceObservedAt=projected.sourceReplay?.snapshotTimeUtc??projected.source.snapshotTime??projected.observedAt;
+        const previousSource=previous?Date.parse(previous.sourceObservedAt??previous.sourceReplay?.snapshotTimeUtc??previous.source?.snapshotTime??previous.observedAt):null;
+        const late=previousSource!==null&&Date.parse(sourceObservedAt)<previousSource;
+        if(projected.sourceReplay&&all.some(e=>e.degree===wave.degree&&
+           e.sourceReplay?.sha256===projected.sourceReplay.sha256&&
+           e.sourceReplay?.path===projected.sourceReplay.path)){duplicates++;continue;}
+        if(!late&&previous?.stateHash===stateHash){duplicates++;continue;}
         const observedMs=Date.parse(projected.observedAt);
         const lastMs=previous?Date.parse(previous.observedAt):null;
         if(lastMs!==null && observedMs<=lastMs)return {ok:false,reason:"OUT_OF_ORDER_OBSERVATION",stored,duplicates};
-        const eventId=hash({degree:wave.degree,stateHash,previousEventId:previous?.eventId??null});
+        const eventId=hash({degree:wave.degree,stateHash,previousEventId:late?null:previous?.eventId??null,
+          sourceObservedAt,sourceReplaySha256:projected.sourceReplay?.sha256??null});
         const event={schema:recordSchema,eventId,degree:wave.degree,sourceReplay:projected.sourceReplay,
-          eventType:previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
-          previousEventId:previous?.eventId??null,stateHash,observedAt:projected.observedAt,
+          eventType:late?"LATE_HISTORICAL_SOURCE_OBSERVATION":
+            previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
+          previousEventId:late?null:previous?.eventId??null,
+          sourceObservedAt,stateHash,observedAt:projected.observedAt,
           ingestedAt:projected.observedAt,retrospectiveIngestion:projected.sourceReplay!==null&&
            projected.sourceReplay.snapshotTimeUtc!==projected.observedAt,
           source:projected.source,...contents,noTradingAuthority:true,noWaveAuthority:true};
@@ -109,11 +124,16 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
         finally{fs.unlinkSync(tmp);}
         const dirfd=fs.openSync(directory,"r");
         try{fs.fsyncSync(dirfd);}finally{fs.closeSync(dirfd);}
-        prior.set(wave.degree,event);stored++;
+        if(!late)prior.set(wave.degree,event);
+        all.push(event);stored++;
       }
       return {ok:true,stored,duplicates,reason:null};
     } finally {fs.rmdirSync(lock);}
   }
-  return Object.freeze({append,readEvents:()=>existing(),storagePath:directory,
+  return Object.freeze({append,readEvents:()=>existing(),
+    readSourceChronology:()=>existing().sort((a,b)=>
+      Date.parse(a.sourceObservedAt??a.sourceReplay?.snapshotTimeUtc??a.observedAt)-
+      Date.parse(b.sourceObservedAt??b.sourceReplay?.snapshotTimeUtc??b.observedAt)),
+    storagePath:directory,
     retention:"PERMANENT_UNTIL_EXPLICIT_OWNER_AUTHORIZED_ARCHIVE_MIGRATION"});
 }
