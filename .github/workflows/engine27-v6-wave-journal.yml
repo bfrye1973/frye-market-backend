@@ -34,6 +34,7 @@ on:
       - ".github/workflows/engine27-v6-wave-journal.yml"
       - "services/core/routes/engine27V6RecorderStatus.js"
       - "services/core/server.js"
+      - "services/core/jobs/startBackend1WithEngine27V6.sh"
 jobs:
   journal:
     runs-on: ubuntu-latest
@@ -73,6 +74,7 @@ jobs:
           node --check services/core/logic/engine27/waveObservation/writeRecorderHeartbeat.js
           node --check services/core/logic/engine27/waveObservation/checkRecorderStorage.js
           node --check services/core/jobs/runEngine27V6Recorder.js
+          sh -n services/core/jobs/startBackend1WithEngine27V6.sh
           node --check services/core/logic/engine27/waveObservation/createWaveOutcomeArchive.js
           node --check services/core/logic/engine27/waveObservation/runWaveObservationBackfill.js
 
