@@ -4,8 +4,10 @@ import fs from "node:fs";
 import path from "node:path";
 import {createHash} from "node:crypto";
 const sha=x=>createHash("sha256").update(x).digest("hex");
-export function createWaveEvidenceArchive({root="/var/data/replay/engine27/wave-observations",maxRecordBytes=262144}={}){
+export function createWaveEvidenceArchive({root="/var/data/replay/engine27/wave-observations",maxRecordBytes=262144,maxArchiveBytes=512*1024*1024}={}){
  const dir=path.join(root,"candle-evidence");
+ if(!Number.isInteger(maxArchiveBytes)||maxArchiveBytes<1||maxArchiveBytes>2*1024*1024*1024)
+  throw Error("INVALID_EVIDENCE_ARCHIVE_BUDGET");
  function append(evidence){
   if(evidence?.ok!==true||!evidence.sourceReplay?.sha256||
     !/^[a-f0-9]{64}$/.test(evidence.sourceReplay.sha256)||
@@ -26,6 +28,10 @@ export function createWaveEvidenceArchive({root="/var/data/replay/engine27/wave-
   const key=sha(JSON.stringify({degree:record.degree,source:record.sourceReplay.sha256,
    model:record.wave.modelVersion,primaryClose:primary?.primaryCandle?.candleClosedAt??null}));
   const file=path.join(dir,key+".json");fs.mkdirSync(dir,{recursive:true});
+  const currentBytes=fs.readdirSync(dir).filter(name=>/^[a-f0-9]{64}\\.json$/.test(name))
+   .reduce((sum,name)=>sum+fs.statSync(path.join(dir,name)).size,0);
+  if(!fs.existsSync(file)&&currentBytes+body.length>maxArchiveBytes)
+   return {ok:false,reason:"EVIDENCE_ARCHIVE_STORAGE_BUDGET_EXCEEDED",currentBytes,maxArchiveBytes};
   const tmp=file+"."+process.pid+".pending";let fd;
   try{
    fd=fs.openSync(tmp,"wx");fs.writeFileSync(fd,body);fs.fsyncSync(fd);fs.closeSync(fd);fd=null;
