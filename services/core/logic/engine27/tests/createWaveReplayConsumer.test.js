@@ -82,3 +82,29 @@ test("partial or conflicting authorized publication does NOT qualify for legacy 
  const r=await consumer.consumeDate({date,times:["1301"],observedAt:"2026-10-28T20:05:00Z"});
  assert.equal(r.ok,false);assert.deepEqual(consumer.processedFor(date),[]);
 }));
+
+test("permanently expired 10m bars receive explicit immutable missingness before receipt",()=>temp(async root=>{
+ const reader=async()=>({bytes:Buffer.from(JSON.stringify(snap("1301")))});
+ const consumer=createWaveReplayConsumer({root,readOriginalReplay:reader,
+  onWaveEvidence:async()=>({ok:true,disposition:"HISTORICAL_OHLC_UNAVAILABLE"})});
+ const res=await consumer.consumeDate({date,times:["1301"],observedAt:"2026-10-29T20:05:00Z"});
+ assert.equal(res.ok,true);assert.equal(res.processed,1);
+ assert.equal(consumer.readEvents().length,7);
+ for(const degree of ["micro","submicro"]){
+  const dir=path.join(root,"candle-evidence-dispositions");
+  const files=fs.readdirSync(dir).filter(x=>x.endsWith("-"+degree+".json"));
+  assert.equal(files.length,1);
+  const p=JSON.parse(fs.readFileSync(path.join(dir,files[0]),"utf8"));
+  assert.equal(p.status,"HISTORICAL_OHLC_UNAVAILABLE");
+  assert.equal(p.verified,false);assert.equal(p.bars,null);
+ }
+ assert.deepEqual(consumer.processedFor(date),[date+"/1301"]);
+}));
+test("temporary provider outage never creates terminal missingness or Replay receipt",()=>temp(async root=>{
+ const consumer=createWaveReplayConsumer({root,readOriginalReplay:async()=>({bytes:Buffer.from(JSON.stringify(snap("1301")))}),
+  onWaveEvidence:async()=>({ok:false,reason:"PRIMARY_COMPLETED_10M_SOURCE_UNAVAILABLE"})});
+ const res=await consumer.consumeDate({date,times:["1301"],observedAt:"2026-10-29T20:05:00Z"});
+ assert.equal(res.ok,false);
+ assert.deepEqual(consumer.processedFor(date),[]);
+ assert.equal(fs.existsSync(path.join(root,"candle-evidence-dispositions")),false);
+}));
