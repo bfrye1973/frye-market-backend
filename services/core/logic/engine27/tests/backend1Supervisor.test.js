@@ -15,7 +15,6 @@ const delay=ms=>new Promise(r=>setTimeout(r,ms));
 function exists(pid){try{process.kill(pid,0);return true}catch{return false}}
 test("SIGTERM/INT stop the actual watcher, server and enabled recorder children",()=>fixture(async({keep})=>{
  for(const reason of ["SIGTERM","SIGINT"]){
-  const pids=[];
   const s=startBackend1Supervisor({watcherScript:keep,serverScript:keep,recorderScript:keep,
    recorderEnabled:true,terminationGraceMs:500});
   // Capture concrete child PIDs by observing the process list through a wrapper
@@ -23,8 +22,12 @@ test("SIGTERM/INT stop the actual watcher, server and enabled recorder children"
   // the child exit completion is awaited by stop().
   await delay(100);
   assert.deepEqual(new Set(s.status().live),new Set(["watcher","server","recorder"]));
+  const ownedPids=Object.values(s.status().pids);
+  assert.equal(ownedPids.length,3);
   await s.stop(reason);
   assert.equal(s.status().live.length,0);
+  await delay(30);
+  assert.ok(ownedPids.every(pid=>!exists(pid)),"No watcher, HTTP server, or recorder child PID survives shutdown");
   assert.equal((await s.done).reason,reason);
  }
 }));
