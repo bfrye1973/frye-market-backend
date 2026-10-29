@@ -18,6 +18,7 @@ on:
       - "services/core/logic/engine27/tests/assembleWaveEvidence.test.js"
       - "services/core/logic/engine27/tests/fetchBoundedWaveCandles.test.js"
       - "services/core/logic/engine27/tests/planReplayIntake.test.js"
+      - "services/core/logic/engine27/tests/createReplayIntakeLedger.test.js"
       - ".github/workflows/engine27-v6-wave-journal.yml"
 jobs:
   journal:
@@ -28,7 +29,7 @@ jobs:
         with:
           node-version: "22"
       - name: Wave observation journal regression tests
-        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js services/core/logic/engine27/tests/waveZoneCandleStudy.test.js services/core/logic/engine27/tests/waveNegotiatedZone.test.js services/core/logic/engine27/tests/waveTransitionStudy.test.js services/core/logic/engine27/tests/qualifyEngine3WaveCandle.test.js services/core/logic/engine27/tests/fibReactionSequence.test.js services/core/logic/engine27/tests/assembleWaveEvidence.test.js services/core/logic/engine27/tests/fetchBoundedWaveCandles.test.js services/core/logic/engine27/tests/planReplayIntake.test.js
+        run: node --test services/core/logic/engine27/tests/waveObservationJournal.test.js services/core/logic/engine27/tests/microHistoricalReplayInventory.test.js services/core/logic/engine27/tests/submicroHistoricalReplayInventory.test.js services/core/logic/engine27/tests/compactWaveEvidence.test.js services/core/logic/engine27/tests/waveZoneCandleStudy.test.js services/core/logic/engine27/tests/waveNegotiatedZone.test.js services/core/logic/engine27/tests/waveTransitionStudy.test.js services/core/logic/engine27/tests/qualifyEngine3WaveCandle.test.js services/core/logic/engine27/tests/fibReactionSequence.test.js services/core/logic/engine27/tests/assembleWaveEvidence.test.js services/core/logic/engine27/tests/fetchBoundedWaveCandles.test.js services/core/logic/engine27/tests/planReplayIntake.test.js services/core/logic/engine27/tests/createReplayIntakeLedger.test.js
       - name: Syntax check
         run: |
           node --check services/core/logic/engine27/waveObservation/createWaveObservationJournal.js
@@ -43,6 +44,7 @@ jobs:
           node --check services/core/logic/engine27/waveObservation/assembleWaveEvidence.js
           node --check services/core/logic/engine27/waveObservation/fetchBoundedWaveCandles.js
           node --check services/core/logic/engine27/waveObservation/planReplayIntake.js
+          node --check services/core/logic/engine27/waveObservation/createReplayIntakeLedger.js
 
   replay-probe:
     runs-on: ubuntu-latest
