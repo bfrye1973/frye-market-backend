@@ -24,8 +24,26 @@ export async function runWaveObservationBackfill({
   const times=fs.readdirSync(folder).filter(t=>/^([01]\d|2[0-3])[0-5]\d\.json$/.test(t))
    .map(name=>name.slice(0,4)).sort();
   if(!commit){
+   // Unlike a listing-only dry run, verify original bytes and canonical contract
+   // for a bounded sample. Never create journal or receipt directories.
+   const checked=[];
+   for(const time of times.slice(0,maxBatch)){
+    const item={date,time,key:date+"/"+time,sourceReplayPath:
+      "/var/data/replay/es/"+date+"/"+time+".json"};
+    try{
+     const {bytes}=await reader(item);
+     const snapshot=JSON.parse(bytes.toString("utf8"));
+     checked.push({time,valid:snapshot?.schema==="engine12.multiStrategyReplay.v1"&&
+       snapshot?.replayContract==="CANONICAL_MULTI_STRATEGY_REPLAY"&&
+       typeof snapshot?.snapshotTime==="string"&&Number.isFinite(Date.parse(snapshot.snapshotTime))});
+    }catch(error){checked.push({time,valid:false,reason:error?.code??error?.name??"SOURCE_READ_ERROR"});}
+   }
+   const invalid=checked.filter(x=>!x.valid);
    reports.push({date,mode:"DRY_RUN",filesAvailable:times.length,
-    canReadOriginalFileBytes:true,willWrite:false});continue;
+    filesChecked:checked.length,invalidCount:invalid.length,invalid:invalid.slice(0,10),
+    remainingUnchecked:times.length-checked.length,willWrite:false});
+   if(invalid.length)return {ok:false,reason:"DRY_RUN_ORIGINAL_REPLAY_VALIDATION_FAILED",date,reports};
+   continue;
   }
   const result=await consumer.consumeDate({date,times,maxBatch});
   reports.push({date,mode:"COMMIT",...result});
