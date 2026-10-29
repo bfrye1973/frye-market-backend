@@ -43,3 +43,19 @@ test("bad canonical source cannot become a seven-degree journal record",()=>temp
  assert.equal(r.reason,"CANONICAL_REPLAY_CONTRACT_UNVERIFIED");
  assert.equal(consumer.readEvents().length,0);
 }));
+
+test("failed candle persistence blocks receipt; restart retries enrichment without duplicate wave events",()=>temp(async root=>{
+ const reader=async()=>({bytes:Buffer.from(JSON.stringify(snap("1301")))});
+ const failed=createWaveReplayConsumer({root,readOriginalReplay:reader,
+   onWaveEvidence:async()=>({ok:false,reason:"TEN_MINUTE_EVIDENCE_NOT_SAVED"})});
+ const first=await failed.consumeDate({date,times:["1301"],observedAt:"2026-10-28T20:05:00Z"});
+ assert.equal(first.ok,false);assert.equal(first.reason,"TEN_MINUTE_EVIDENCE_NOT_SAVED");
+ assert.equal(failed.readEvents().length,7);
+ assert.deepEqual(failed.processedFor(date),[]);
+ const restored=createWaveReplayConsumer({root,readOriginalReplay:reader,
+   onWaveEvidence:async({sourceReplay})=>({ok:sourceReplay.sha256.length===64})});
+ const retry=await restored.consumeDate({date,times:["1301"],observedAt:"2026-10-28T20:06:00Z"});
+ assert.equal(retry.ok,true);assert.equal(retry.processed,1);
+ assert.equal(restored.readEvents().length,7);
+ assert.deepEqual(restored.processedFor(date),[date+"/1301"]);
+}));
