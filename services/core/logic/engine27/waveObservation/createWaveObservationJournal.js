@@ -52,7 +52,7 @@ export function projectWaveObservation(snapshot, {observedAt, physicalEsContract
     publicationId:p.publicationId??null,publicationTime:sourceTime,
     selectionApprovalReference:p.selectionApprovalReference??null,
     pointInTimeAsOfAvailable:p.pointInTimeAsOfAvailable===true,
-    snapshotTime:timestamp(snapshot?.now)??timestamp(snapshot?.ts)??null
+    snapshotTime:timestamp(snapshot?.snapshotTime)??timestamp(snapshot?.now)??timestamp(snapshot?.ts)??null
   },observedAt:observed,sourceReplay:replay.value,physicalEsContract:physicalContract(physicalEsContract),
   // Unknown is explicitly unknown; optional evidence cannot be backfilled into prior records.
   marketEvidence:marketEvidence?clone(marketEvidence):null,
@@ -96,6 +96,8 @@ export function createWaveObservationJournal({root="/var/data/replay/engine27/wa
         const event={schema:recordSchema,eventId,degree:wave.degree,sourceReplay:projected.sourceReplay,
           eventType:previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
           previousEventId:previous?.eventId??null,stateHash,observedAt:projected.observedAt,
+          ingestedAt:projected.observedAt,retrospectiveIngestion:projected.sourceReplay!==null&&
+           projected.sourceReplay.snapshotTimeUtc!==projected.observedAt,
           source:projected.source,...contents,noTradingAuthority:true,noWaveAuthority:true};
         const filename=String(observedMs).padStart(13,"0")+"-"+eventId+".json";
         const target=path.join(directory,filename), tmp=target+".pending";
