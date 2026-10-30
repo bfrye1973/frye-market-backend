@@ -153,6 +153,27 @@ def flags(bars):
             suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
             out[f"momswing10_rawadr_{suffix}_3p0"]=(up,dn)
 
+    # Focused family: fixed multi-day close move at exactly 3 ADR,
+    # with the event remembered for several sessions. This is the strongest
+    # remaining hypothesis from the prior reconstruction work.
+    for move_span in (3,4,5,6,7):
+        for persistence in range(1,11):
+            for lookback in (10,14,20):
+                for include_event_day in (False,True):
+                    up=0; dn=0
+                    start_idx=max(move_span,len(bars)-persistence)
+                    for idx in range(start_idx,len(bars)):
+                        event_move=bars[idx]["c"]-bars[idx-move_span]["c"]
+                        src_end=idx+1 if include_event_day else idx
+                        sample=bars[:src_end][-lookback:]
+                        ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                        if not ranges: continue
+                        adr=sum(ranges)/len(ranges)
+                        if event_move >= 3.0*adr: up=1
+                        if event_move <= -3.0*adr: dn=1
+                    suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                    out[f"momfixed_span{move_span}_roll{persistence}_rawadr_{suffix}_3p0"]=(up,dn)
+
     # Preserve the earlier broad 5-session search as a control only.
     for persistence in range(2,11):
         for lookback in (5,10,14,20):
@@ -217,6 +238,7 @@ def run_sector(name,cfg):
     momentum10=rank(totals,cfg["targets"],["mom10roll"],2)
     momentum_within10=rank(totals,cfg["targets"],["momwithin10_"],2)
     momentum_swing10=rank(totals,cfg["targets"],["momswing10_"],2)
+    momentum_fixed=rank(totals,cfg["targets"],["momfixed_"],2)
     momentum5_control=rank(totals,cfg["targets"],["mom5roll"],2)
     return {
       "symbols":len(syms),
@@ -225,6 +247,7 @@ def run_sector(name,cfg):
       "bestMomentum10Day3ADR":momentum10[:5],
       "bestMomentumWithin10DayWindow3ADR":momentum_within10[:5],
       "bestMomentumSwing10Day3ADR":momentum_swing10[:5],
+      "bestMomentumFixedSpan3ADR":momentum_fixed[:10],
       "bestMomentum5DayControl":momentum5_control[:3]
     }
 
