@@ -1,5 +1,8 @@
 name: engine25-eod-spreadsheet-research
 on:
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
   push:
     branches:
