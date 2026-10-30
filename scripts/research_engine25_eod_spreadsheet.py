@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse,csv,json,math,os,time,urllib.parse,urllib.request
+import csv,json,os,time,urllib.parse,urllib.request
 from datetime import datetime,timedelta,timezone
 from pathlib import Path
 
@@ -7,9 +7,18 @@ POLY="https://api.polygon.io"
 KEY=os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API")
 UTC=timezone.utc
 
+TARGETS={
+ "2026-10-29":{"breadth":[224,157],"momentum":[27,23]},
+ "2026-10-28":{"breadth":[215,119],"momentum":[25,19]},
+ "2026-10-27":{"breadth":[203,175],"momentum":[25,34]},
+ "2026-10-26":{"breadth":[197,269],"momentum":[30,73]},
+ "2026-10-23":{"breadth":[239,292],"momentum":[46,108]},
+ "2026-10-22":{"breadth":[245,275],"momentum":[46,104]},
+ "2026-10-21":{"breadth":[220,247],"momentum":[35,74]},
+}
+
 def get_json(url,params):
-    p=dict(params)
-    p["apiKey"]=KEY
+    p=dict(params); p["apiKey"]=KEY
     full=url+"?"+urllib.parse.urlencode(p)
     last=None
     for attempt in range(4):
@@ -22,8 +31,8 @@ def get_json(url,params):
             if attempt<3: time.sleep(0.4*(1.7**attempt))
     raise last
 
-def bars_for(sym,asof,days=75):
-    end=datetime.strptime(asof,"%Y-%m-%d").date()
+def fetch_history(sym,max_date,days=120):
+    end=datetime.strptime(max_date,"%Y-%m-%d").date()
     start=end-timedelta(days=days)
     url=f"{POLY}/v2/aggs/ticker/{sym}/range/1/day/{start}/{end}"
     j=get_json(url,{"adjusted":"true","sort":"asc","limit":50000})
@@ -37,29 +46,22 @@ def bars_for(sym,asof,days=75):
             pass
     return out
 
-def adr_raw(bars,n=20,exclude_latest=False):
-    src=bars[:-1] if exclude_latest else bars
-    src=src[-n:]
-    vals=[b["h"]-b["l"] for b in src if b["h"]>=b["l"]]
-    return sum(vals)/len(vals) if vals else None
+def slice_asof(bars,asof):
+    return [b for b in bars if b["d"]<=asof]
 
 def flags(bars):
-    if len(bars)<31: return None
+    if len(bars)<31: return {}
     last=bars[-1]
-
     out={}
 
-    # Breadth candidates:
-    # "current" means today's bar only.
-    # "rollingN" means the stock printed at least one 10-day breakout/breakdown
-    # during the most recent N sessions.
+    # Breadth: did the stock print a 10-session breakout/breakdown during
+    # the most recent N sessions?
     for mode in ("close","hilo"):
-        for n_sessions in range(1,11):
+        for n_sessions in range(1,6):
             nh=0; nl=0
             start=max(10,len(bars)-n_sessions)
             for idx in range(start,len(bars)):
-                prior=bars[idx-10:idx]
-                cur=bars[idx]
+                prior=bars[idx-10:idx]; cur=bars[idx]
                 if len(prior)<10: continue
                 if mode=="close":
                     if cur["c"]>max(x["c"] for x in prior): nh=1
@@ -69,9 +71,8 @@ def flags(bars):
                     if cur["l"]<min(x["l"] for x in prior): nl=1
             out[f"breadth_{mode}_rolling{n_sessions}"]=(nh,nl)
 
-    # ADR momentum candidates. Spreadsheet columns are 5U / 5D, so test
-    # a five-session close-to-close move against several conventional ADR
-    # windows. ADR is the average daily high-low range.
+    # Spreadsheet columns are 5U / 5D. Test a five-session close move
+    # against conventional ADR windows.
     if len(bars)>=6:
         move5=last["c"]-bars[-6]["c"]
         move5pct=(last["c"]/bars[-6]["c"]-1.0) if bars[-6]["c"] else 0.0
@@ -82,8 +83,7 @@ def flags(bars):
                 ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
                 pct_ranges=[(x["h"]-x["l"])/x["c"] for x in sample if x["c"] and x["h"]>=x["l"]]
                 if not ranges or not pct_ranges: continue
-                adr=sum(ranges)/len(ranges)
-                adrp=sum(pct_ranges)/len(pct_ranges)
+                adr=sum(ranges)/len(ranges); adrp=sum(pct_ranges)/len(pct_ranges)
                 suffix=f"{lookback}d_"+("incl" if include_latest else "prior")
                 for mult in (2.5,2.75,3.0,3.25,3.5,3.75,4.0):
                     tag=str(mult).replace(".","p")
@@ -91,34 +91,57 @@ def flags(bars):
                     out[f"mom5_pctadr_{suffix}_{tag}"]=(int(move5pct>=mult*adrp),int(move5pct<=-mult*adrp))
     return out
 
-def symbols_from_csv(path):
+def symbols(path):
     with open(path,newline="",encoding="utf-8-sig") as f:
-        return [((r.get("Symbol") or r.get("symbol") or "").strip().upper()) for r in csv.DictReader(f) if (r.get("Symbol") or r.get("symbol") or "").strip()]
+        return [(r.get("Symbol") or r.get("symbol") or "").strip().upper() for r in csv.DictReader(f) if (r.get("Symbol") or r.get("symbol") or "").strip()]
+
+def score_candidates(totals,kind):
+    scored=[]
+    for candidate in next(iter(totals.values())).keys():
+        if not candidate.startswith(kind): continue
+        err=0
+        per={}
+        for date,target in TARGETS.items():
+            got=totals[date].get(candidate,[0,0])
+            want=target["breadth" if kind=="breadth_" else "momentum"]
+            e=abs(got[0]-want[0])+abs(got[1]-want[1])
+            err+=e
+            per[date]={"got":got,"target":want,"absError":e}
+        scored.append({"candidate":candidate,"totalAbsError":err,"perDate":per})
+    return sorted(scored,key=lambda x:(x["totalAbsError"],x["candidate"]))
 
 def main():
-    ap=argparse.ArgumentParser()
-    ap.add_argument("--asof",default="2026-10-29")
-    ap.add_argument("--csv",default="data/sectors/tech.csv")
-    ap.add_argument("--out",default="/tmp/eod-research.json")
-    args=ap.parse_args()
     if not KEY: raise SystemExit("POLYGON_API_KEY missing")
-    syms=symbols_from_csv(args.csv)
-    totals={}
-    valid=0; errors=[]
+    csv_path="data/sectors/tech.csv"
+    syms=symbols(csv_path)
+    dates=sorted(TARGETS)
+    totals={d:{} for d in dates}; valid={d:0 for d in dates}
+    max_date=max(dates)
     for i,s in enumerate(syms,1):
         try:
-            b=bars_for(s,args.asof)
-            f=flags(b)
-            if not f: continue
-            valid+=1
-            for k,(u,d) in f.items():
-                totals.setdefault(k,[0,0])
-                totals[k][0]+=u; totals[k][1]+=d
-        except Exception as e:
-            errors.append({"symbol":s,"error":str(e)})
-        if i%100==0: print(f"processed {i}/{len(syms)} valid={valid}",flush=True)
-    out={"asof":args.asof,"csv":args.csv,"symbols":len(syms),"valid":valid,"totals":totals,"targetTech1029":{"breadth":[224,157],"momentum":[27,23]},"errors":errors[:25]}
-    Path(args.out).write_text(json.dumps(out,indent=2)+"\n")
+            hist=fetch_history(s,max_date)
+            for d in dates:
+                b=slice_asof(hist,d); f=flags(b)
+                if not f: continue
+                valid[d]+=1
+                for k,(u,dn) in f.items():
+                    totals[d].setdefault(k,[0,0])
+                    totals[d][k][0]+=u; totals[d][k][1]+=dn
+        except Exception:
+            pass
+        if i%100==0: print(f"processed {i}/{len(syms)}",flush=True)
+
+    breadth=score_candidates(totals,"breadth_")
+    momentum=score_candidates(totals,"mom5_")
+    out={
+      "universe":"Tech",
+      "symbols":len(syms),
+      "validByDate":valid,
+      "targets":TARGETS,
+      "bestBreadth":breadth[:10],
+      "bestMomentum":momentum[:10],
+    }
+    Path("/tmp/eod-research.json").write_text(json.dumps(out,indent=2)+"\n")
     print(json.dumps(out,indent=2))
 
 if __name__=="__main__": main()
