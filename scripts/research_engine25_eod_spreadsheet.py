@@ -109,6 +109,26 @@ def flags(bars):
                 suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
                 out[f"mom10roll{persistence}_rawadr_{suffix}_3p0"]=(up,dn)
 
+    # Alternative reading of the spreadsheet wording: within the trailing
+    # 10 trading sessions, did price complete a 3-ADR directional move over
+    # any fixed sub-span? Both endpoints must lie inside that 10-session window.
+    for move_span in range(1,10):
+        for lookback in (10,14,20):
+            for include_event_day in (False,True):
+                up=0; dn=0
+                window_start=max(move_span,len(bars)-10+move_span)
+                for idx in range(window_start,len(bars)):
+                    event_move=bars[idx]["c"]-bars[idx-move_span]["c"]
+                    src_end=idx+1 if include_event_day else idx
+                    sample=bars[:src_end][-lookback:]
+                    ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                    if not ranges: continue
+                    adr=sum(ranges)/len(ranges)
+                    if event_move >= 3.0*adr: up=1
+                    if event_move <= -3.0*adr: dn=1
+                suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                out[f"momwithin10_span{move_span}_rawadr_{suffix}_3p0"]=(up,dn)
+
     # Preserve the earlier broad 5-session search as a control only.
     for persistence in range(2,11):
         for lookback in (5,10,14,20):
@@ -171,12 +191,14 @@ def run_sector(name,cfg):
         if i%100==0: print(f"{name}: processed {i}/{len(syms)}",flush=True)
     breadth=rank(totals,cfg["targets"],["breadth_"],0)
     momentum10=rank(totals,cfg["targets"],["mom10roll"],2)
+    momentum_within10=rank(totals,cfg["targets"],["momwithin10_"],2)
     momentum5_control=rank(totals,cfg["targets"],["mom5roll"],2)
     return {
       "symbols":len(syms),
       "validByDate":valid,
       "bestBreadth":breadth[:3],
       "bestMomentum10Day3ADR":momentum10[:5],
+      "bestMomentumWithin10DayWindow3ADR":momentum_within10[:5],
       "bestMomentum5DayControl":momentum5_control[:3]
     }
 
