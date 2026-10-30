@@ -88,7 +88,28 @@ def flags(bars):
                     if cur["l"]<min(x["l"] for x in prior): nl=1
             out[f"breadth_{mode}_rolling{n_sessions}"]=(nh,nl)
 
-    # Five-session move remembered for 2-10 sessions, compared with raw ADR.
+    # Spreadsheet-documented momentum family:
+    # "3ADR up in 10 days vs 3ADR down in 10 days".
+    # Test the exact 10-session close-to-close move at a fixed 3.0x raw ADR.
+    # Remaining ambiguities: ADR lookback, event-day inclusion, short persistence.
+    for persistence in range(1,6):
+        for lookback in (10,14,20):
+            for include_event_day in (False,True):
+                up=0; dn=0
+                start_idx=max(10,len(bars)-persistence)
+                for idx in range(start_idx,len(bars)):
+                    event_move=bars[idx]["c"]-bars[idx-10]["c"]
+                    src_end=idx+1 if include_event_day else idx
+                    sample=bars[:src_end][-lookback:]
+                    ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                    if not ranges: continue
+                    adr=sum(ranges)/len(ranges)
+                    if event_move >= 3.0*adr: up=1
+                    if event_move <= -3.0*adr: dn=1
+                suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                out[f"mom10roll{persistence}_rawadr_{suffix}_3p0"]=(up,dn)
+
+    # Preserve the earlier broad 5-session search as a control only.
     for persistence in range(2,11):
         for lookback in (5,10,14,20):
             for include_event_day in (False,True):
@@ -149,12 +170,14 @@ def run_sector(name,cfg):
             pass
         if i%100==0: print(f"{name}: processed {i}/{len(syms)}",flush=True)
     breadth=rank(totals,cfg["targets"],["breadth_"],0)
-    momentum=rank(totals,cfg["targets"],["mom5roll"],2)
+    momentum10=rank(totals,cfg["targets"],["mom10roll"],2)
+    momentum5_control=rank(totals,cfg["targets"],["mom5roll"],2)
     return {
       "symbols":len(syms),
       "validByDate":valid,
       "bestBreadth":breadth[:3],
-      "bestMomentum":momentum[:3]
+      "bestMomentum10Day3ADR":momentum10[:5],
+      "bestMomentum5DayControl":momentum5_control[:3]
     }
 
 def main():
