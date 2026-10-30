@@ -1,6 +1,9 @@
 name: engine25-eod-spreadsheet-research
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - engine25-eod-spreadsheet-reconstruction
 jobs:
   research:
     runs-on: ubuntu-latest
