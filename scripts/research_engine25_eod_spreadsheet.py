@@ -174,6 +174,30 @@ def flags(bars):
                     suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
                     out[f"momfixed_span{move_span}_roll{persistence}_rawadr_{suffix}_3p0"]=(up,dn)
 
+    # One-measure-per-stock interpretations of "3ADR up/down in 10 days".
+    # Keep exactly one directional test for the trailing 10 sessions.
+    if len(bars) >= 10:
+        w=bars[-10:]
+        for lookback in (10,14,20):
+            for include_event_day in (False,True):
+                src_end=len(bars) if include_event_day else len(bars)-1
+                sample=bars[:src_end][-lookback:]
+                ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                if ranges:
+                    adr=sum(ranges)/len(ranges)
+                    variants={
+                        "close_firstclose": w[-1]["c"]-w[0]["c"],
+                        "close_firstopen": w[-1]["c"]-w[0]["o"],
+                        "high_firstclose": max(x["h"] for x in w)-w[0]["c"],
+                        "close_firstlow": w[-1]["c"]-w[0]["l"],
+                        "lastlow_firsthigh": w[-1]["l"]-w[0]["h"],
+                    }
+                    for name,move in variants.items():
+                        up=int(move >= 3.0*adr)
+                        dn=int(move <= -3.0*adr)
+                        suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                        out[f"mom10single_{name}_rawadr_{suffix}_3p0"]=(up,dn)
+
     # Preserve the earlier broad 5-session search as a control only.
     for persistence in range(2,11):
         for lookback in (5,10,14,20):
@@ -239,6 +263,7 @@ def run_sector(name,cfg):
     momentum_within10=rank(totals,cfg["targets"],["momwithin10_"],2)
     momentum_swing10=rank(totals,cfg["targets"],["momswing10_"],2)
     momentum_fixed=rank(totals,cfg["targets"],["momfixed_"],2)
+    momentum_single10=rank(totals,cfg["targets"],["mom10single_"],2)
     momentum5_control=rank(totals,cfg["targets"],["mom5roll"],2)
     return {
       "symbols":len(syms),
@@ -248,6 +273,7 @@ def run_sector(name,cfg):
       "bestMomentumWithin10DayWindow3ADR":momentum_within10[:5],
       "bestMomentumSwing10Day3ADR":momentum_swing10[:5],
       "bestMomentumFixedSpan3ADR":momentum_fixed[:10],
+      "bestMomentumSingle10Day3ADR":momentum_single10[:10],
       "bestMomentum5DayControl":momentum5_control[:3]
     }
 
