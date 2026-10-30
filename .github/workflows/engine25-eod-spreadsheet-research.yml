@@ -1,0 +1,20 @@
+name: engine25-eod-spreadsheet-research
+on:
+  workflow_dispatch:
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: engine25-eod-spreadsheet-reconstruction
+      - name: Run Tech 10/29 reconstruction
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          python -u scripts/research_engine25_eod_spreadsheet.py --asof 2026-10-29 --csv data/sectors/tech.csv --out /tmp/eod-research.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eod-research
+          path: /tmp/eod-research.json
