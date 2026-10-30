@@ -60,17 +60,44 @@ def flags(bars):
     excursion_dn=max(c10)-last["c"]
     hi_exc=last["h"]-min(b["l"] for b in prior10)
     lo_exc=max(b["h"] for b in prior10)-last["l"]
-    return {
+    # Did this stock print a rolling 10-day breakout/breakdown at any point
+    # during the most recent 10 completed sessions?
+    rolling_close_nh = 0
+    rolling_close_nl = 0
+    rolling_hilo_nh = 0
+    rolling_hilo_nl = 0
+    if len(bars) >= 21:
+        start = max(10, len(bars) - 10)
+        for idx in range(start, len(bars)):
+            prior = bars[idx-10:idx]
+            cur = bars[idx]
+            if len(prior) < 10:
+                continue
+            if cur["c"] > max(x["c"] for x in prior):
+                rolling_close_nh = 1
+            if cur["c"] < min(x["c"] for x in prior):
+                rolling_close_nl = 1
+            if cur["h"] > max(x["h"] for x in prior):
+                rolling_hilo_nh = 1
+            if cur["l"] < min(x["l"] for x in prior):
+                rolling_hilo_nl = 1
+
+    out = {
       "close10":(close10_nh,close10_nl),
       "highlow10":(highlow10_nh,highlow10_nl),
-      "net10_3adr":(int(net10>=3*adr20),int(net10<=-3*adr20)),
-      "latest_vs_extreme_3adr":(int(excursion_up>=3*adr20),int(excursion_dn>=3*adr20)),
-      "range_excursion_3adr":(int(hi_exc>=3*adr20),int(lo_exc>=3*adr20)),
-      "net5_3adr":(
-        int(len(bars)>=6 and last["c"]-bars[-6]["c"]>=3*adr20),
-        int(len(bars)>=6 and last["c"]-bars[-6]["c"]<=-3*adr20)
-      ),
+      "rolling10_close_break":(rolling_close_nh,rolling_close_nl),
+      "rolling10_hilo_break":(rolling_hilo_nh,rolling_hilo_nl),
     }
+    for mult in (2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0):
+        tag=str(mult).replace(".","p")
+        out[f"net10_{tag}adr"]=(int(net10>=mult*adr20),int(net10<=-mult*adr20))
+        out[f"latest_vs_extreme_{tag}adr"]=(int(excursion_up>=mult*adr20),int(excursion_dn>=mult*adr20))
+        out[f"range_excursion_{tag}adr"]=(int(hi_exc>=mult*adr20),int(lo_exc>=mult*adr20))
+        out[f"net5_{tag}adr"]=(
+          int(len(bars)>=6 and last["c"]-bars[-6]["c"]>=mult*adr20),
+          int(len(bars)>=6 and last["c"]-bars[-6]["c"]<=-mult*adr20)
+        )
+    return out
 
 def symbols_from_csv(path):
     with open(path,newline="",encoding="utf-8-sig") as f:
@@ -84,7 +111,7 @@ def main():
     args=ap.parse_args()
     if not KEY: raise SystemExit("POLYGON_API_KEY missing")
     syms=symbols_from_csv(args.csv)
-    totals={k:[0,0] for k in ["close10","highlow10","net10_3adr","latest_vs_extreme_3adr","range_excursion_3adr","net5_3adr"]}
+    totals={}
     valid=0; errors=[]
     for i,s in enumerate(syms,1):
         try:
@@ -93,6 +120,7 @@ def main():
             if not f: continue
             valid+=1
             for k,(u,d) in f.items():
+                totals.setdefault(k,[0,0])
                 totals[k][0]+=u; totals[k][1]+=d
         except Exception as e:
             errors.append({"symbol":s,"error":str(e)})
