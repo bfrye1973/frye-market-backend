@@ -123,12 +123,17 @@ def symbols(path):
 def score_candidates(totals,kind):
     scored=[]
     for candidate in next(iter(totals.values())).keys():
-        if not candidate.startswith(kind): continue
+        if kind=="breadth":
+            if not candidate.startswith("breadth_"): continue
+            target_key="breadth"
+        else:
+            if not (candidate.startswith("mom5_") or candidate.startswith("mom5roll")): continue
+            target_key="momentum"
         err=0
         per={}
         for date,target in TARGETS.items():
             got=totals[date].get(candidate,[0,0])
-            want=target["breadth" if kind=="breadth_" else "momentum"]
+            want=target[target_key]
             e=abs(got[0]-want[0])+abs(got[1]-want[1])
             err+=e
             per[date]={"got":got,"target":want,"absError":e}
@@ -156,8 +161,8 @@ def main():
             pass
         if i%100==0: print(f"processed {i}/{len(syms)}",flush=True)
 
-    breadth=score_candidates(totals,"breadth_")
-    momentum=score_candidates(totals,"mom5_")
+    breadth=score_candidates(totals,"breadth")
+    momentum=score_candidates(totals,"momentum")
     out={
       "universe":"Tech",
       "symbols":len(syms),
