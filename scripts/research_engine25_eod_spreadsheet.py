@@ -89,6 +89,31 @@ def flags(bars):
                     tag=str(mult).replace(".","p")
                     out[f"mom5_rawadr_{suffix}_{tag}"]=(int(move5>=mult*adr),int(move5<=-mult*adr))
                     out[f"mom5_pctadr_{suffix}_{tag}"]=(int(move5pct>=mult*adrp),int(move5pct<=-mult*adrp))
+
+    # "3ADR up in 10 days vs 3ADR down in 10 days":
+    # test whether a qualifying five-session move occurred at any point
+    # during the most recent persistence window.
+    for persistence in range(2,11):
+        for lookback in (5,10,14,20):
+            for include_event_day in (False,True):
+                for mult in (2.5,2.75,3.0,3.25,3.5,3.75,4.0):
+                    up=0; dn=0
+                    start_idx=max(5,len(bars)-persistence)
+                    for idx in range(start_idx,len(bars)):
+                        if idx < 5: continue
+                        event_move=bars[idx]["c"]-bars[idx-5]["c"]
+                        src_end=idx+1 if include_event_day else idx
+                        src=bars[:src_end]
+                        sample=src[-lookback:]
+                        if not sample: continue
+                        ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                        if not ranges: continue
+                        adr=sum(ranges)/len(ranges)
+                        if event_move >= mult*adr: up=1
+                        if event_move <= -mult*adr: dn=1
+                    tag=str(mult).replace(".","p")
+                    suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                    out[f"mom5roll{persistence}_rawadr_{suffix}_{tag}"]=(up,dn)
     return out
 
 def symbols(path):
