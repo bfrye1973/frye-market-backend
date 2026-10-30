@@ -44,59 +44,51 @@ def adr_raw(bars,n=20,exclude_latest=False):
     return sum(vals)/len(vals) if vals else None
 
 def flags(bars):
-    if len(bars)<21: return None
+    if len(bars)<31: return None
     last=bars[-1]
-    prior10=bars[-11:-1]
-    c10=[b["c"] for b in prior10]
-    h10=[b["h"] for b in prior10]
-    l10=[b["l"] for b in prior10]
-    adr20=adr_raw(bars,20,True)
-    if not adr20 or adr20<=0: return None
-    close10_nh=int(last["c"]>max(c10)); close10_nl=int(last["c"]<min(c10))
-    highlow10_nh=int(last["h"]>max(h10)); highlow10_nl=int(last["l"]<min(l10))
-    start10=bars[-11]["c"]
-    net10=last["c"]-start10
-    excursion_up=last["c"]-min(c10)
-    excursion_dn=max(c10)-last["c"]
-    hi_exc=last["h"]-min(b["l"] for b in prior10)
-    lo_exc=max(b["h"] for b in prior10)-last["l"]
-    # Did this stock print a rolling 10-day breakout/breakdown at any point
-    # during the most recent 10 completed sessions?
-    rolling_close_nh = 0
-    rolling_close_nl = 0
-    rolling_hilo_nh = 0
-    rolling_hilo_nl = 0
-    if len(bars) >= 21:
-        start = max(10, len(bars) - 10)
-        for idx in range(start, len(bars)):
-            prior = bars[idx-10:idx]
-            cur = bars[idx]
-            if len(prior) < 10:
-                continue
-            if cur["c"] > max(x["c"] for x in prior):
-                rolling_close_nh = 1
-            if cur["c"] < min(x["c"] for x in prior):
-                rolling_close_nl = 1
-            if cur["h"] > max(x["h"] for x in prior):
-                rolling_hilo_nh = 1
-            if cur["l"] < min(x["l"] for x in prior):
-                rolling_hilo_nl = 1
 
-    out = {
-      "close10":(close10_nh,close10_nl),
-      "highlow10":(highlow10_nh,highlow10_nl),
-      "rolling10_close_break":(rolling_close_nh,rolling_close_nl),
-      "rolling10_hilo_break":(rolling_hilo_nh,rolling_hilo_nl),
-    }
-    for mult in (2.5,3.0,3.5,4.0,4.5,5.0,5.5,6.0):
-        tag=str(mult).replace(".","p")
-        out[f"net10_{tag}adr"]=(int(net10>=mult*adr20),int(net10<=-mult*adr20))
-        out[f"latest_vs_extreme_{tag}adr"]=(int(excursion_up>=mult*adr20),int(excursion_dn>=mult*adr20))
-        out[f"range_excursion_{tag}adr"]=(int(hi_exc>=mult*adr20),int(lo_exc>=mult*adr20))
-        out[f"net5_{tag}adr"]=(
-          int(len(bars)>=6 and last["c"]-bars[-6]["c"]>=mult*adr20),
-          int(len(bars)>=6 and last["c"]-bars[-6]["c"]<=-mult*adr20)
-        )
+    out={}
+
+    # Breadth candidates:
+    # "current" means today's bar only.
+    # "rollingN" means the stock printed at least one 10-day breakout/breakdown
+    # during the most recent N sessions.
+    for mode in ("close","hilo"):
+        for n_sessions in range(1,11):
+            nh=0; nl=0
+            start=max(10,len(bars)-n_sessions)
+            for idx in range(start,len(bars)):
+                prior=bars[idx-10:idx]
+                cur=bars[idx]
+                if len(prior)<10: continue
+                if mode=="close":
+                    if cur["c"]>max(x["c"] for x in prior): nh=1
+                    if cur["c"]<min(x["c"] for x in prior): nl=1
+                else:
+                    if cur["h"]>max(x["h"] for x in prior): nh=1
+                    if cur["l"]<min(x["l"] for x in prior): nl=1
+            out[f"breadth_{mode}_rolling{n_sessions}"]=(nh,nl)
+
+    # ADR momentum candidates. Spreadsheet columns are 5U / 5D, so test
+    # a five-session close-to-close move against several conventional ADR
+    # windows. ADR is the average daily high-low range.
+    if len(bars)>=6:
+        move5=last["c"]-bars[-6]["c"]
+        move5pct=(last["c"]/bars[-6]["c"]-1.0) if bars[-6]["c"] else 0.0
+        for lookback in (5,10,14,20):
+            for include_latest in (False,True):
+                src=bars if include_latest else bars[:-1]
+                sample=src[-lookback:]
+                ranges=[x["h"]-x["l"] for x in sample if x["h"]>=x["l"]]
+                pct_ranges=[(x["h"]-x["l"])/x["c"] for x in sample if x["c"] and x["h"]>=x["l"]]
+                if not ranges or not pct_ranges: continue
+                adr=sum(ranges)/len(ranges)
+                adrp=sum(pct_ranges)/len(pct_ranges)
+                suffix=f"{lookback}d_"+("incl" if include_latest else "prior")
+                for mult in (2.5,2.75,3.0,3.25,3.5,3.75,4.0):
+                    tag=str(mult).replace(".","p")
+                    out[f"mom5_rawadr_{suffix}_{tag}"]=(int(move5>=mult*adr),int(move5<=-mult*adr))
+                    out[f"mom5_pctadr_{suffix}_{tag}"]=(int(move5pct>=mult*adrp),int(move5pct<=-mult*adrp))
     return out
 
 def symbols_from_csv(path):
