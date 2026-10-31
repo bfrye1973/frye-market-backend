@@ -123,11 +123,20 @@ def aggregate(rows):
     nl=sum(int(r.get("nl",0) or 0) for r in rows)
     up=sum(int(r.get("up",0) or 0) for r in rows)
     down=sum(int(r.get("down",0) or 0) for r in rows)
+    prior_nh=sum(int(r.get("prior_nh",0) or 0) for r in rows)
+    prior_nl=sum(int(r.get("prior_nl",0) or 0) for r in rows)
+    prior_up=sum(int(r.get("prior_up",0) or 0) for r in rows)
+    prior_down=sum(int(r.get("prior_down",0) or 0) for r in rows)
     def p(a,b):
         d=a+b
         return round(100*a/d,2) if d else 50.0
-    return {"members":len(rows),"nh":nh,"nl":nl,"up":up,"down":down,
-            "breadth_pct":p(nh,nl),"momentum_pct":p(up,down)}
+    return {
+        "members":len(rows),
+        "nh":nh,"nl":nl,"up":up,"down":down,
+        "breadth_pct":p(nh,nl),"momentum_pct":p(up,down),
+        "prior":{"nh":prior_nh,"nl":prior_nl,"up":prior_up,"down":prior_down,
+                 "breadth_pct":p(prior_nh,prior_nl),"momentum_pct":p(prior_up,prior_down)}
+    }
 
 def cap_groups(symbol_rows,caps):
     groups={"all":[],"large":[],"mid":[],"small":[],"unknown":[]}
@@ -192,12 +201,27 @@ def main():
     cap_summary["marketCapAvailable"]=bool(caps)
     cap_summary["marketCapReason"]=cap_reason
 
+    by_sector={}
+    for row in symbol_rows:
+        sec=str(row.get("sector") or "")
+        if sec:
+            by_sector.setdefault(sec,[]).append(row)
+    sector_prior={}
+    for card in shadow_cards:
+        sec=str(card.get("sector") or "")
+        rows=by_sector.get(sec,[])
+        if rows:
+            sector_prior[sec]=aggregate(rows).get("prior")
+        else:
+            sector_prior[sec]=None
+
     out={
       "ok":True,"engine":"engine25.reconstructedEod.v1","mode":"SHADOW_ONLY",
       "updated_at_utc":datetime.now(UTC).isoformat(),
       "completedSessionDate":cutoff,"score":round(score,1),"state":state,
       "breadthScore":round(avg_b,1),"momentumScore":round(avg_m,1),
       "sectorCards":shadow_cards,
+      "sectorPrior": sector_prior,
       "indicesVsMAs":index_reads,
       "capGroups":cap_summary,
       "formula":{
