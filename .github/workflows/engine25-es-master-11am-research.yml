@@ -1,0 +1,25 @@
+name: engine25-es-master-11am-research
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - engine25-eod-spreadsheet-reconstruction
+jobs:
+  es_master:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: engine25-eod-spreadsheet-reconstruction
+      - name: Reconstruct ES Master at 11am Arizona on 2026-10-29
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ES_RESEARCH_CONTRACT: ESZ6
+          ES_RESEARCH_CUTOFF: 2026-10-29T18:00:00+00:00
+        run: |
+          python -u scripts/research_es_master_20261029_1100.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: es-master-2026-10-29-1100
+          path: /tmp/es-master-2026-10-29-1100.json
