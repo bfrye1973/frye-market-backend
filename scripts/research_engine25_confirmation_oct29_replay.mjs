@@ -18,6 +18,9 @@ function readJson(path, label) {
 }
 
 const asOfUtc = arg("--as-of", "2026-10-29T15:00:00.000Z");
+if (asOfUtc !== "2026-10-29T15:00:00.000Z") {
+  throw new Error("OCT29_0800_CUTOFF_LOCKED: expected 2026-10-29T15:00:00.000Z");
+}
 const marketMeterPath = arg("--market-meter");
 const eodPath = arg("--eod-shadow");
 const participationPath = arg("--participation");
@@ -41,7 +44,7 @@ const packet = buildEngine25ConfirmationPacket({
       archiveReference: marketMeterPath,
     },
     fourHour: {
-      kind: "ARCHIVED_OR_RETROSPECTIVE_INPUT",
+      kind: "RETROSPECTIVE_RECONSTRUCTION",
       reconstructed: true,
       originallyPublished: false,
       archiveReference: marketMeterPath,
@@ -62,6 +65,12 @@ const output = {
     asOfUtc,
     purpose: "NO_LOOKAHEAD_CROSS_ENGINE_ACCEPTANCE",
     currentLiveDataQueried: false,
+    engine22HistoricalState: "ENGINE22_HISTORICAL_STATE_NOT_VERIFIED",
+    ownerWorkingModelIdentity: null,
+    originalEngine25TradePermissionPublicationVerified: false,
+    researchEstimateOnly: true,
+    // Pre-cutoff underlying bars are not proof that a publication or alert existed then.
+    entryTimeWarningActuallyIssued: "NOT_VERIFIED",
   },
   packet,
 };
