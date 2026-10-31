@@ -98,15 +98,16 @@ test("historical cutoff rejects any required source published after as-of time",
   input.marketMeter.updated_at_utc = "2026-10-29T15:00:30.000Z";
   input.marketMeter.lights["4h"].updated_at_utc = "2026-10-29T14:59:00.000Z";
   input.marketMeter.lights["4h"].lastBar.time = Date.parse("2026-10-29T10:00:00.000Z") / 1000;
-  input.reconstructedEod.updated_at_utc = "2026-10-29T14:55:00.000Z";
+  input.reconstructedEod.updated_at_utc = "2026-10-28T20:00:00.000Z";
+  input.reconstructedEod.completedSessionDate = "2026-10-28";
 
   const packet = buildEngine25ConfirmationPacket({
     ...input,
     mode: "HISTORICAL_REPLAY",
     provenance: {
-      esMaster: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true },
-      fourHour: { kind: "ARCHIVED_PUBLISHED", originallyPublished: true },
-      reconstructedEod: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true },
+      esMaster: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/es" },
+      fourHour: { kind: "ARCHIVED_PUBLISHED", originallyPublished: true, reconstructed: false, archiveReference: "fixture/4h" },
+      reconstructedEod: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/eod" },
     },
   });
 
@@ -122,15 +123,16 @@ test("historical provenance remains explicit when inputs are valid", () => {
   input.marketMeter.updated_at_utc = "2026-10-29T14:59:30.000Z";
   input.marketMeter.lights["4h"].updated_at_utc = "2026-10-29T14:59:00.000Z";
   input.marketMeter.lights["4h"].lastBar.time = Date.parse("2026-10-29T10:00:00.000Z") / 1000;
-  input.reconstructedEod.updated_at_utc = "2026-10-29T14:55:00.000Z";
+  input.reconstructedEod.updated_at_utc = "2026-10-28T20:00:00.000Z";
+  input.reconstructedEod.completedSessionDate = "2026-10-28";
 
   const packet = buildEngine25ConfirmationPacket({
     ...input,
     mode: "HISTORICAL_REPLAY",
     provenance: {
-      esMaster: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true },
-      fourHour: { kind: "ARCHIVED_PUBLISHED", originallyPublished: true },
-      reconstructedEod: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true },
+      esMaster: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/es" },
+      fourHour: { kind: "ARCHIVED_PUBLISHED", originallyPublished: true, reconstructed: false, archiveReference: "fixture/4h" },
+      reconstructedEod: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/eod" },
     },
   });
 
@@ -155,4 +157,77 @@ test("threshold classifications preserve current frontend bands", () => {
   assert.equal(classifyTradePermission(45).state, "AVOID_NEW_LONGS_SHORT_WATCH");
   assert.equal(classifyTradePermission(35).state, "BEARISH_SHORTS_FAVORED");
   assert.equal(classifyTradePermission(34.99).state, "STRONG_DEFENSIVE_BEARISH");
+});
+
+function historicalInputs() {
+  const input = baseInputs();
+  input.mode = "HISTORICAL_REPLAY";
+  input.asOfUtc = "2026-10-29T15:00:00.000Z";
+  input.marketMeter.updated_at_utc = "2026-10-29T14:50:00.000Z";
+  input.marketMeter.lights["4h"].updated_at_utc = "2026-10-29T12:00:00.000Z";
+  input.marketMeter.lights["4h"].lastBar.time = Date.parse("2026-10-29T08:00:00Z") / 1000;
+  input.reconstructedEod.updated_at_utc = "2026-10-28T20:00:00.000Z";
+  input.reconstructedEod.completedSessionDate = "2026-10-28";
+  input.provenance = {
+    esMaster: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/es" },
+    fourHour: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/4h" },
+    reconstructedEod: { kind: "RETROSPECTIVE_RECONSTRUCTION", reconstructed: true, originallyPublished: false, archiveReference: "fixture/eod" },
+  };
+  return input;
+}
+
+test("historical valid reconstruction stays explicitly non-published", () => {
+  const p = buildEngine25ConfirmationPacket(historicalInputs());
+  assert.notEqual(p.tradePermissionShadow.score, null);
+  assert.equal(p.tradePermissionShadow.historicalDecisionAvailability, "RETROSPECTIVE_ESTIMATE_ONLY");
+  assert(p.warnings.some((w) => w.code === "RETROSPECTIVE_INPUTS_NOT_ORIGINALLY_PUBLISHED"));
+});
+
+test("incomplete 4H bars fail closed even with three numeric scores", () => {
+  const input = historicalInputs();
+  input.marketMeter.lights["4h"].lastBar.time = Date.parse("2026-10-29T12:00:00Z") / 1000;
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert.equal(p.tradePermissionShadow.state, "INSUFFICIENT_DATA");
+  assert(p.warnings.some((w) => w.code === "ES_4H_LAST_BAR_INCOMPLETE"));
+});
+
+test("missing and invalid 4H bar timestamp fail closed", () => {
+  const input = historicalInputs();
+  delete input.marketMeter.lights["4h"].lastBar;
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert(p.warnings.some((w) => w.code === "ES_4H_BAR_COMPLETION_UNVERIFIABLE"));
+});
+
+test("missing required historical publication timestamp fails closed", () => {
+  const input = historicalInputs();
+  delete input.marketMeter.lights["4h"].updated_at_utc;
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert(p.warnings.some((w) => w.code === "ES_4H_SOURCE_TIMESTAMP_UNVERIFIABLE"));
+});
+
+test("missing and inconsistent historical provenance fail closed", () => {
+  const input = historicalInputs();
+  input.provenance.fourHour = { kind: "ARCHIVED_PUBLISHED", originallyPublished: true };
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert(p.warnings.some((w) => w.code === "ES_4H_PROVENANCE_UNVERIFIABLE"));
+});
+
+test("EOD from current partial session is never used in 8AM replay", () => {
+  const input = historicalInputs();
+  input.reconstructedEod.completedSessionDate = "2026-10-29";
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert(p.warnings.some((w) => w.code === "RECONSTRUCTED_EOD_SESSION_NOT_COMPLETED_BY_ASOF"));
+});
+
+test("invalid historical asOf fails closed", () => {
+  const input = historicalInputs();
+  input.asOfUtc = "not-a-real-time";
+  const p = buildEngine25ConfirmationPacket(input);
+  assert.equal(p.tradePermissionShadow.score, null);
+  assert(p.warnings.some((w) => w.code === "HISTORICAL_ASOF_INVALID"));
 });
