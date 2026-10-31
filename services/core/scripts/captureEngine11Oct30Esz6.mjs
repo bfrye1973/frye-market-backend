@@ -8,7 +8,7 @@ const key=process.env.MASSIVE_API_KEY||process.env.POLYGON_API_KEY||process.env.
 if(!key)throw Error('MASSIVE_CREDENTIAL_NOT_CONFIGURED_FOR_PRIVATE_ACTIONS');
 const asOf='2026-10-31T00:00:00.000Z',from='2026-10-12T00:00:00.000Z';
 const output=process.env.ENGINE11_EXTENSION_OUTPUT||'/tmp/engine11-october-esz6';
-const resolutions=['5min','10min','1hour','4hour','1day','1week','1month'];
+const resolutions=['5min','10min','1hour','4hour','1session','1week','1month'];
 const start=Date.parse(from),end=Date.parse(asOf);
 const records=[],counts={};
 await mkdir(output,{recursive:true,mode:0o700});
