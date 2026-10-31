@@ -26,18 +26,20 @@ for(const item of manifest.records){
 const additions=ingestArchive({receipts:receiptBodies,from:manifest.from,asOf:manifest.asOf});
 const originalKeys=new Set(originalSource.observations.map(r=>[r.contractProposal,r.frame,r.timestampNs].join('|')));
 const newRows=additions.observations.filter(r=>r.reason===null&&!originalKeys.has([r.contractProposal,r.frame,r.timestampNs].join('|')));
-const distinct=new Map();
+// Preserve conflicting original provider observations. Engine11 buildDataset
+// rejects ambiguous same-start OHLC/session pairs as unavailable evidence;
+ // never arbitrarily select a bar.
+const distinct=new Map(),ambiguousStarts=new Set();
 for(const row of newRows){
  const k=[row.contractProposal,row.frame,row.timestampNs].join('|');
  const prior=distinct.get(k);
- if(prior){
-  const left=JSON.stringify(prior.raw),right=JSON.stringify(row.raw);
-  if(left!==right)throw Error('DISAGREEING_ESZ6_SAME_TIMESTAMP_'+row.frame);
- }else distinct.set(k,row);
+ if(prior && (JSON.stringify(prior.raw)!==JSON.stringify(row.raw) ||
+      prior.sourceSessionLabel!==row.sourceSessionLabel))ambiguousStarts.add(k);
+ else if(!prior)distinct.set(k,row);
 }
 if(!distinct.size)throw Error('NO_NEW_ESZ6_NATIVE_ROWS');
 const source={
- observations:[...originalSource.observations,...distinct.values()],
+ observations:[...originalSource.observations,...newRows],
  receipts:[...originalSource.receipts,...additions.receipts],
  queryWindows:[...originalSource.queryWindows,...additions.queryWindows],
  from:originalSource.from,asOf:manifest.asOf
@@ -84,6 +86,6 @@ const receiptSha=sha(Buffer.from(JSON.stringify(manifest.records)));
 const result={schema:'engine11.oct30.rebuild.proof.v1',researchOnly:true,executionPriceAuthority:false,
  originalArchiveUntouched:true,oldAsOf:originalSource.asOf,newAsOf:manifest.asOf,
  nativeReceiptCount:manifest.records.length,sourceReceiptManifestSha256:receiptSha,
- addedNativeObservationCount:distinct.size,sourceArchiveSha256,datasets:proof};
+ addedNativeObservationCount:newRows.length,ambiguousProviderStartCount:ambiguousStarts.size,sourceArchiveSha256,datasets:proof};
 await writeFile(path.join(outDir,'extension-validation.json'),JSON.stringify(result,null,2),{flag:'wx',mode:0o600});
-console.log('ENGINE11_OCT30_FULL_EXTENSION_PASS',JSON.stringify({native:distinct.size,datasets:proof.map(p=>({name:p.name,newRows:p.newRows,added:p.added}))}));
+console.log('ENGINE11_OCT30_FULL_EXTENSION_PASS',JSON.stringify({native:newRows.length,ambiguous:ambiguousStarts.size,datasets:proof.map(p=>({name:p.name,newRows:p.newRows,added:p.added}))}));
