@@ -9,11 +9,11 @@ import {tmpdir} from 'node:os';
 import {spawn} from 'node:child_process';
 import path from 'node:path';
 const sha=x=>createHash('sha256').update(x).digest('hex');
-export const EXPECTED_SHA='9fe8c22ba49e4c64e3f2432d8a8f67279b8073da950d570393275a56f60562c4';
+export const EXPECTED_SHA=null; // dataset pin + full page SHA verification is authoritative
 export const VIEWS=Object.freeze({
-  continuousRaw:{dataset:'research-dataset:5224f595326ff44d424a9a3ada59fcf548ac5efa4c1e25eb7f4e141331b290f5',basis:'price-basis:d4ff32a184e2236d5bcb6551637253517ec694f7cbdcb8d34afd2f017a35f569',counts:[141181,70596,11776,2794,490,97,16]},
-  continuousAdjustedClose:{dataset:'research-dataset:9caaa3723b576f09bb4040a44c9da3f2a6e0fd5f0bc177f809802e4b80b9a0a4',basis:'price-basis:40baff5124d2cae5b6678813329ed7aab1f47a3ac947555390f8ac7cd212c655',counts:[141181,70596,11776,2794,490,97,16]},
-  actualESZ2026:{dataset:'research-dataset:ec592b47b697dc860a47b61dd713d45602d293c8797e1b52fc924a7459d68ac0',basis:'price-basis:98e08538fb38efedcb944e54232df4af396383ed6014c0bc1ef874f228dde05e',counts:[7980,4066,688,167,32,6,2]}
+  continuousRaw:{dataset:'research-dataset:a0c81ce398869440b1b9cd42b94ced0101923356c4c860a9c13232a1f98f3c91',basis:'price-basis:fcbfa10815555415c8afdfddbbc28a96a4f42207db162a0db853b549546b3908',counts:[144999,72505,12094,2868,503,99,16]},
+  continuousAdjustedClose:{dataset:'research-dataset:5d880a0fddf98e0db3d90c2262ab4f5febcf37d3deed83fc3d45426158863b14',basis:'price-basis:94b25a5e2dc04574a59966c369243300d205a50527800b63876641a6023e9f63',counts:[144999,72505,12094,2868,503,99,16]},
+  actualESZ2026:{dataset:'research-dataset:2dd028c39df6fe16e2adfec59b4c1bba312b21f1b2a2f9b783751a25b32dc808',basis:'price-basis:757ed82449f97edfea282111a163ffa04681ba188242fd17034ff9cb91410623',counts:[11798,5975,1006,241,45,8,2]}
 });
 const FRAMES=['5m','10m','1h','4h','1d','1w','1mo'];
 function run(bin,args){
@@ -74,7 +74,7 @@ export async function verifyPages(root){
       count+=n;
     }
   }
-  if(count!==466841||pages!==480)throw Error('HISTORY_ARCHIVE_TOTAL_MISMATCH_'+count+'_'+pages);
+  if(count!==485243||pages!==498)throw Error('HISTORY_ARCHIVE_TOTAL_MISMATCH_'+count+'_'+pages);
   return {count,pages};
 }
 export async function prepareHistory({url,root,githubToken,githubRepo,artifactName}){
