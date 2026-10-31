@@ -1,0 +1,118 @@
+{
+  "ok": true,
+  "engine": "engine25.reconstructedEod.v1",
+  "mode": "SHADOW_ONLY",
+  "updated_at_utc": "2026-10-31T17:57:01.708827+00:00",
+  "completedSessionDate": "2026-10-30",
+  "score": 51.5,
+  "state": "MIXED",
+  "breadthScore": 57.8,
+  "momentumScore": 45.1,
+  "sectorCards": [
+    {
+      "sector": "Communication Services",
+      "breadth_pct": 42.74,
+      "momentum_pct": 38.89,
+      "nh": 53,
+      "nl": 71,
+      "up": 7,
+      "down": 11
+    },
+    {
+      "sector": "Consumer Discretionary",
+      "breadth_pct": 68.51,
+      "momentum_pct": 78.26,
+      "nh": 198,
+      "nl": 91,
+      "up": 36,
+      "down": 10
+    },
+    {
+      "sector": "Consumer Staples",
+      "breadth_pct": 42.52,
+      "momentum_pct": 21.43,
+      "nh": 54,
+      "nl": 73,
+      "up": 3,
+      "down": 11
+    },
+    {
+      "sector": "Energy",
+      "breadth_pct": 67.44,
+      "momentum_pct": 44.44,
+      "nh": 87,
+      "nl": 42,
+      "up": 4,
+      "down": 5
+    },
+    {
+      "sector": "Financials",
+      "breadth_pct": 69.34,
+      "momentum_pct": 56.0,
+      "nh": 328,
+      "nl": 145,
+      "up": 42,
+      "down": 33
+    },
+    {
+      "sector": "Healthcare",
+      "breadth_pct": 61.17,
+      "momentum_pct": 51.56,
+      "nh": 375,
+      "nl": 238,
+      "up": 33,
+      "down": 31
+    },
+    {
+      "sector": "Industrials",
+      "breadth_pct": 63.2,
+      "momentum_pct": 73.02,
+      "nh": 249,
+      "nl": 145,
+      "up": 46,
+      "down": 17
+    },
+    {
+      "sector": "Materials",
+      "breadth_pct": 38.22,
+      "momentum_pct": 43.75,
+      "nh": 60,
+      "nl": 97,
+      "up": 7,
+      "down": 9
+    },
+    {
+      "sector": "Real Estate",
+      "breadth_pct": 71.43,
+      "momentum_pct": 45.45,
+      "nh": 95,
+      "nl": 38,
+      "up": 5,
+      "down": 6
+    },
+    {
+      "sector": "Utilities",
+      "breadth_pct": 72.06,
+      "momentum_pct": 0.0,
+      "nh": 49,
+      "nl": 19,
+      "up": 0,
+      "down": 2
+    },
+    {
+      "sector": "tech",
+      "breadth_pct": 39.1,
+      "momentum_pct": 43.59,
+      "nh": 156,
+      "nl": 243,
+      "up": 17,
+      "down": 22
+    }
+  ],
+  "formula": {
+    "breadth": "10-session HIGH/LOW event with 2-session carry",
+    "momentum": "4-session close move vs +/-3x ADR20",
+    "adr": "20-session average daily HIGH-LOW, current completed day included"
+  },
+  "productionAuthority": false
+}
