@@ -104,55 +104,13 @@ jobs:
           PY
 
       - name: Build reconstructed EOD v1 shadow artifact
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BACKEND_BASE: https://frye-market-backend-1.onrender.com
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          from datetime import datetime, timezone
-
-          src=json.load(open("data/outlook_source_daily.json","r",encoding="utf-8"))
-          cards=src.get("shadowSectorCards") or []
-
-          def avg(xs):
-            xs=[float(x) for x in xs]
-            return sum(xs)/len(xs) if xs else 50.0
-
-          avg_breadth=avg([c.get("breadth_pct",50) for c in cards])
-          avg_momentum=avg([c.get("momentum_pct",50) for c in cards])
-          score=max(10.0,min(100.0,(avg_breadth+avg_momentum)/2.0))
-
-          if score >= 65:
-            state="CONSTRUCTIVE"
-          elif score >= 55:
-            state="CONSTRUCTIVE_MIXED"
-          elif score >= 45:
-            state="MIXED"
-          elif score >= 35:
-            state="WEAK"
-          else:
-            state="BEARISH"
-
-          out={
-            "ok": True,
-            "engine": "engine25.reconstructedEod.v1",
-            "mode": "SHADOW_ONLY",
-            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
-            "completedSessionDate": src.get("meta",{}).get("shadowCompletedSessionDate"),
-            "score": round(score,1),
-            "state": state,
-            "breadthScore": round(avg_breadth,1),
-            "momentumScore": round(avg_momentum,1),
-            "sectorCards": cards,
-            "formula": {
-              "breadth": "10-session HIGH/LOW event with 2-session carry",
-              "momentum": "4-session close move vs +/-3x ADR20",
-              "adr": "20-session average daily HIGH-LOW, current completed day included",
-            },
-            "productionAuthority": False,
-          }
-          json.dump(out,open("data/outlook_reconstructed_eod_shadow.json","w",encoding="utf-8"),indent=2)
-          print(json.dumps({k:out[k] for k in ("completedSessionDate","score","state","breadthScore","momentumScore")},indent=2))
-          PY
+          python -u scripts/build_engine25_reconstructed_eod_detail.py             --source data/outlook_source_daily.json             --out data/outlook_reconstructed_eod_shadow.json
 
       # 3) Build EOD payload -> data/outlook.json
       - name: Build EOD payload
