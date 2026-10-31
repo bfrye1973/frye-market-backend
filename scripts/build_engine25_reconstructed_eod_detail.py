@@ -73,8 +73,25 @@ def ma_read(symbol, bars, cutoff):
     }
 
 def batch_caps(symbols):
+    # Prefer direct FMP when the workflow has a key. Otherwise use the
+    # Render backend's cached cap-universe route so the key never leaves Render.
     if not FMP_KEY:
-        return {}, "FMP_API_KEY_MISSING"
+        try:
+            j=fetch_json(f"{BACKEND_BASE}/api/v1/engine25/cap-universe",timeout=90)
+            buckets=j.get("buckets") or {}
+            synthetic={}
+            for sym,bucket in buckets.items():
+                if bucket=="large":
+                    synthetic[sym]=LARGE_MIN
+                elif bucket=="mid":
+                    synthetic[sym]=MID_MIN
+                elif bucket=="small":
+                    synthetic[sym]=1
+            if synthetic:
+                return synthetic, None
+            return {}, j.get("error") or "CAP_UNIVERSE_EMPTY"
+        except Exception as e:
+            return {}, f"CAP_UNIVERSE_ROUTE_FAILED:{e}"
     caps={}
     errors=[]
     for i in range(0,len(symbols),100):
