@@ -1,0 +1,35 @@
+name: Engine11 ESZ6 October 30 source capture
+on:
+  push:
+    branches: [engine11-oct30-esz6-extension-20261031]
+    paths:
+      - 'services/core/scripts/captureEngine11Oct30Esz6.mjs'
+      - '.github/workflows/engine11-oct30-esz6-capture.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  immutable-esz6-capture:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Capture native ESZ6 history without price transformations
+        env:
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API: ${{ secrets.POLYGON_API }}
+          POLY_API_KEY: ${{ secrets.POLY_API_KEY }}
+          ENGINE11_EXTENSION_OUTPUT: /tmp/engine11-esz6-oct30
+        run: node services/core/scripts/captureEngine11Oct30Esz6.mjs
+      - name: Preserve exact source-body receipts privately
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-oct30-esz6-native-receipts
+          path: /tmp/engine11-esz6-oct30/
+          retention-days: 30
+          compression-level: 6
+          if-no-files-found: error
