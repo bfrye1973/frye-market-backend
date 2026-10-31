@@ -1,0 +1,81 @@
+name: engine25-reconstructed-eod-shadow-once
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/engine25-reconstructed-eod-shadow-once.yml"
+jobs:
+  build_shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      LIVE_BRANCH: data-live-eod
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build daily source with reconstructed EOD shadow
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_daily.py             --sectors-dir data/sectors             --days 90             --lookback-days 10             --out data/outlook_source_daily.json
+      - name: Build reconstructed EOD shadow artifact
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+          src=json.load(open("data/outlook_source_daily.json"))
+          cards=src.get("shadowSectorCards") or []
+          if len(cards)!=11:
+              raise SystemExit(f"expected 11 shadow cards, got {len(cards)}")
+          avg_b=sum(float(c.get("breadth_pct",50)) for c in cards)/len(cards)
+          avg_m=sum(float(c.get("momentum_pct",50)) for c in cards)/len(cards)
+          score=max(10.0,min(100.0,(avg_b+avg_m)/2.0))
+          state=("CONSTRUCTIVE" if score>=65 else
+                 "CONSTRUCTIVE_MIXED" if score>=55 else
+                 "MIXED" if score>=45 else
+                 "WEAK" if score>=35 else "BEARISH")
+          out={
+            "ok":True,
+            "engine":"engine25.reconstructedEod.v1",
+            "mode":"SHADOW_ONLY",
+            "updated_at_utc":datetime.now(timezone.utc).isoformat(),
+            "completedSessionDate":src.get("meta",{}).get("shadowCompletedSessionDate"),
+            "score":round(score,1),
+            "state":state,
+            "breadthScore":round(avg_b,1),
+            "momentumScore":round(avg_m,1),
+            "sectorCards":cards,
+            "formula":{
+              "breadth":"10-session HIGH/LOW event with 2-session carry",
+              "momentum":"4-session close move vs +/-3x ADR20",
+              "adr":"20-session average daily HIGH-LOW, current completed day included"
+            },
+            "productionAuthority":False
+          }
+          json.dump(out,open("/tmp/outlook_reconstructed_eod_shadow.json","w"),indent=2)
+          print(json.dumps({k:out[k] for k in ("completedSessionDate","score","state","breadthScore","momentumScore")},indent=2))
+          PY
+      - name: Publish shadow file without touching production EOD
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config user.name "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git fetch origin "${LIVE_BRANCH}"
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          mkdir -p data
+          cp -f /tmp/outlook_reconstructed_eod_shadow.json data/outlook_reconstructed_eod_shadow.json
+          git add data/outlook_reconstructed_eod_shadow.json
+          git commit -m "Reconstructed EOD shadow $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}"
