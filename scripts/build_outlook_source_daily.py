@@ -42,6 +42,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, Optional, Tuple
 
 from sector_volume import UP, DOWN, UNCHANGED, aggregate_sector_volume
@@ -119,6 +120,34 @@ def dstr(d: date) -> str:
     return d.strftime("%Y-%m-%d")
 
 
+def expected_completed_equity_date() -> date:
+    """Latest fully completed U.S. equity session date."""
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today = now_et.date()
+    wd = today.weekday()  # Mon=0
+
+    if wd < 5 and (now_et.hour > 16 or (now_et.hour == 16 and now_et.minute >= 0)):
+        return today
+
+    candidate = today - timedelta(days=1)
+    while candidate.weekday() >= 5:
+        candidate -= timedelta(days=1)
+    return candidate
+
+
+def trim_to_completed_session(bars: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cutoff = expected_completed_equity_date()
+    out = []
+    for b in bars:
+        try:
+            d = datetime.fromtimestamp(int(b["t"]) / 1000.0, UTC).date()
+        except Exception:
+            continue
+        if d <= cutoff:
+            out.append(b)
+    return out
+
+
 def fetch_1d_bars(ticker: str, days: int) -> List[Dict[str, Any]]:
     """
     Fetch 1-day bars for last `days` calendar days.
@@ -175,11 +204,7 @@ def discover_sectors(sectors_dir: str) -> Dict[str, List[str]]:
 
 def compute_daily_flags(bars: List[Dict[str, Any]], L: int) -> Tuple[int, int, int, int]:
     """
-    Bars are daily. Compute:
-      NH: C[-1] > max(C[-L:-1])
-      NL: C[-1] < min(C[-L:-1])
-      UP: C[-3] < C[-2] < C[-1]
-      DN: C[-3] > C[-2] > C[-1]
+    Production EOD definitions. Do not change here.
     """
     L = max(2, int(L))
     if not bars or len(bars) < max(L, 3):
@@ -199,21 +224,59 @@ def compute_daily_flags(bars: List[Dict[str, Any]], L: int) -> Tuple[int, int, i
     return nh, nl, up, dn
 
 
+def compute_reconstructed_eod_flags(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
+    """
+    Engine25 reconstructed EOD v1 shadow definitions:
+    - Breadth: 10-session high/low event using daily HIGH/LOW with 2-session carry.
+    - Momentum: current close minus close 4 sessions ago vs +/- 3 * ADR20.
+    - ADR20 = average daily (HIGH-LOW), current completed day included.
+    - Shadow only; production EOD definitions remain unchanged.
+    """
+    bars = trim_to_completed_session(bars)
+    if len(bars) < 22:
+        return 0, 0, 0, 0
+
+    nh = nl = 0
+    for idx in range(len(bars) - 2, len(bars)):
+        if idx < 10:
+            continue
+        prior = bars[idx - 10:idx]
+        cur = bars[idx]
+        if cur["h"] > max(x["h"] for x in prior):
+            nh = 1
+        if cur["l"] < min(x["l"] for x in prior):
+            nl = 1
+
+    idx = len(bars) - 1
+    move = float(bars[idx]["c"]) - float(bars[idx - 4]["c"])
+    sample = bars[idx - 19:idx + 1]
+    adr20 = sum(float(x["h"]) - float(x["l"]) for x in sample) / len(sample)
+
+    up = int(adr20 > 0 and move >= 3.0 * adr20)
+    dn = int(adr20 > 0 and move <= -3.0 * adr20)
+
+    return nh, nl, up, dn
+
+
 def process_symbol_daily(sym: str, days: int, L: int):
     try:
         bars = fetch_1d_bars(sym, days=days)
         if not bars:
-            return 0, 0, 0, 0, None
+            return 0, 0, 0, 0, 0, 0, 0, 0, None
         nh, nl, up, dn = compute_daily_flags(bars, L)
-        return nh, nl, up, dn, bars[-1].get("v")
+        sh_nh, sh_nl, sh_up, sh_dn = compute_reconstructed_eod_flags(bars)
+        completed = trim_to_completed_session(bars)
+        last_volume = completed[-1].get("v") if completed else bars[-1].get("v")
+        return nh, nl, up, dn, sh_nh, sh_nl, sh_up, sh_dn, last_volume
     except SystemExit:
         raise
     except Exception:
-        return 0, 0, 0, 0, None
+        return 0, 0, 0, 0, 0, 0, 0, 0, None
 
 
 def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> Dict[str, Any]:
     nh = nl = up = dn = 0
+    sh_nh = sh_nl = sh_up = sh_dn = 0
     volume_observations = []
     if not symbols:
         return {"sector": sector, "nh": 0, "nl": 0, "up": 0, "down": 0, **{"totalVolume":0.0,"advancingVolume":0.0,"decliningVolume":0.0,"unchangedVolume":0.0,"advancingVolumePct":None,"decliningVolumePct":None,"stocksScanned":0,"stocksWithVolume":0}}
@@ -222,14 +285,21 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
         futs = {ex.submit(process_symbol_daily, s, days, L): s for s in symbols}
         for fut in as_completed(futs):
             try:
-                a, b, c, d, volume = fut.result()
+                a, b, c, d, sa, sb, sc, sd, volume = fut.result()
                 nh += a; nl += b; up += c; dn += d
+                sh_nh += sa; sh_nl += sb; sh_up += sc; sh_dn += sd
                 classification = UP if c else (DOWN if d else UNCHANGED)
                 volume_observations.append({"classification": classification, "volume": volume})
             except Exception:
                 continue
 
-    return {"sector": sector, "nh": nh, "nl": nl, "up": up, "down": dn, **aggregate_sector_volume(volume_observations)}
+    return {
+        "sector": sector,
+        "nh": nh, "nl": nl, "up": up, "down": dn,
+        "shadow_nh": sh_nh, "shadow_nl": sh_nl,
+        "shadow_up": sh_up, "shadow_down": sh_dn,
+        **aggregate_sector_volume(volume_observations),
+    }
 
 
 def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict[str, Any]]:
@@ -237,6 +307,7 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
     print("[daily] discovered sectors:", ", ".join(sorted(sectors_map.keys())), flush=True)
 
     cards: List[Dict[str, Any]] = []
+    shadow_cards: List[Dict[str, Any]] = []
     for sector_name, syms in sorted(sectors_map.items()):
         print(f"[daily] sector {sector_name}: {len(syms)} symbols", flush=True)
         agg = process_sector_daily(sector_name, syms, days=days, L=L)
@@ -260,7 +331,21 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
             "down": dn,
             **{k: agg[k] for k in ("totalVolume","advancingVolume","decliningVolume","unchangedVolume","advancingVolumePct","decliningVolumePct","stocksScanned","stocksWithVolume")},
         })
-    return cards
+
+        sh_nh = int(agg["shadow_nh"]); sh_nl = int(agg["shadow_nl"])
+        sh_up = int(agg["shadow_up"]); sh_dn = int(agg["shadow_down"])
+        sh_bden = sh_nh + sh_nl
+        sh_mden = sh_up + sh_dn
+        shadow_cards.append({
+            "sector": sector_name,
+            "breadth_pct": round(100.0 * sh_nh / sh_bden, 2) if sh_bden > 0 else 50.0,
+            "momentum_pct": round(100.0 * sh_up / sh_mden, 2) if sh_mden > 0 else 50.0,
+            "nh": sh_nh,
+            "nl": sh_nl,
+            "up": sh_up,
+            "down": sh_dn,
+        })
+    return cards, shadow_cards
 
 
 def main() -> int:
@@ -275,20 +360,29 @@ def main() -> int:
         print("[daily] ERROR: no Polygon key set; emitting neutral sectors.", file=sys.stderr, flush=True)
         sectors_map = discover_sectors(args.sectors_dir)
         cards = []
+        shadow_cards = []
         for name in sorted(sectors_map.keys()):
-            cards.append({
+            neutral = {
                 "sector": name,
                 "breadth_pct": 50.0,
                 "momentum_pct": 50.0,
                 "nh": 0, "nl": 0, "up": 0, "down": 0
-            })
+            }
+            cards.append(dict(neutral))
+            shadow_cards.append(dict(neutral))
     else:
-        cards = compute_sector_cards_daily(args.sectors_dir, days=args.days, L=args.lookback_days)
+        cards, shadow_cards = compute_sector_cards_daily(args.sectors_dir, days=args.days, L=args.lookback_days)
+
+    if 'shadow_cards' not in locals():
+        shadow_cards = []
 
     out_obj: Dict[str, Any] = {
         "mode": "daily",
         "sectorCards": cards,
+        "shadowSectorCards": shadow_cards,
         "meta": {
+            "shadowFormula": "engine25.reconstructedEod.v1",
+            "shadowCompletedSessionDate": expected_completed_equity_date().isoformat(),
             "lookback_days": int(args.lookback_days),
             "ts_utc": now_utc_iso(),
             "source": "polygon/1d",
