@@ -1,4 +1,5 @@
 name: engine25-reconstructed-eod-shadow-once
+# trigger: breadth-state-refresh-2026-10-31
 # trigger: cap-universe-refresh-2026-10-31
 on:
   push:
