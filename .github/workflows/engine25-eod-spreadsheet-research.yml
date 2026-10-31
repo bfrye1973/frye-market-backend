@@ -30,3 +30,12 @@ jobs:
         with:
           name: engine25-eod-shadow-compare
           path: /tmp/engine25-eod-shadow-compare.json
+      - name: Score reconstructed EOD shadow
+        run: |
+          python -u scripts/score_engine25_eod_shadow.py \
+            /tmp/engine25-eod-shadow-compare.json \
+            /tmp/engine25-eod-shadow-score.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine25-eod-shadow-score
+          path: /tmp/engine25-eod-shadow-score.json
