@@ -4,6 +4,7 @@ on:
     branches: [engine11-oct30-esz6-extension-20261031]
     paths:
       - 'services/core/scripts/captureEngine11Oct30Esz6.mjs'
+      - 'services/core/scripts/buildEngine11Oct30Extension.mjs'
       - '.github/workflows/engine11-oct30-esz6-capture.yml'
   workflow_dispatch:
   pull_request:
@@ -35,6 +36,32 @@ jobs:
           POLY_API_KEY: ${{ secrets.POLY_API_KEY }}
           ENGINE11_EXTENSION_OUTPUT: /tmp/engine11-esz6-oct30
         run: node /tmp/engine11-oct30-source/services/core/scripts/captureEngine11Oct30Esz6.mjs
+      - name: Retrieve pinned October 13 and October 30 source archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/engine11-oct13 /tmp/engine11-oct30-receipts
+          gh api /repos/bfrye1973/frye-market-backend/actions/artifacts/11901549711/zip > /tmp/original-oct13.zip
+          echo 'e47f6ef694a36f3b022322b0ff855c8be38276f3510ac6b3ef19fc52a4d781f6  /tmp/original-oct13.zip' | sha256sum -c -
+          unzip -q /tmp/original-oct13.zip -d /tmp/engine11-oct13
+          # Use the current run's freshly captured exact-body native receipts
+          # rather than downloading from any public endpoint.
+          cp services/core/scripts/buildEngine11Oct30Extension.mjs /tmp/engine11-oct30-source-placeholder.mjs
+          mkdir -p /tmp/engine11-oct30-receipts
+          cp /tmp/engine11-esz6-oct30/*.json /tmp/engine11-oct30-receipts/
+      - name: Rebuild existing five datasets with old-candle invariants
+        run: |
+          cp /tmp/engine11-oct30-source-placeholder.mjs /tmp/engine11-oct30-source/services/core/scripts/buildEngine11Oct30Extension.mjs
+          node --max-old-space-size=5600 /tmp/engine11-oct30-source/services/core/scripts/buildEngine11Oct30Extension.mjs \
+            /tmp/engine11-oct13 /tmp/engine11-oct30-receipts /tmp/engine11-oct30-extension
+      - name: Archive accepted immutable October extension datasets privately
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-oct30-extended-datasets-shadow
+          path: /tmp/engine11-oct30-extension/
+          retention-days: 30
+          compression-level: 4
+          if-no-files-found: error
       - name: Preserve exact source-body receipts privately
         uses: actions/upload-artifact@v4
         with:
