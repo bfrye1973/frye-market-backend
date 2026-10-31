@@ -298,6 +298,7 @@ def run_sector(name,cfg):
       "bestMomentumWithin10DayWindow3ADR":momentum_within10[:5],
       "bestMomentumSwing10Day3ADR":momentum_swing10[:5],
       "bestMomentumFixedSpan3ADR":momentum_fixed[:10],
+      "fixedMomentumAll":[{"candidate":x["candidate"],"totalAbsError":x["totalAbsError"],"perDate":x["perDate"]} for x in momentum_fixed],
       "bestMomentumSingle10Day3ADR":momentum_single10[:10],
       "bestMomentumPercentADR":momentum_pct[:10],
       "bestMomentum5DayControl":momentum5_control[:3]
@@ -309,6 +310,16 @@ def main():
     for name,cfg in SECTORS.items():
         print(f"=== {name} ===",flush=True)
         out["results"][name]=run_sector(name,cfg)
+
+    aggregate={}
+    for name,res in out["results"].items():
+        for x in res.get("fixedMomentumAll",[]):
+            row=aggregate.setdefault(x["candidate"],{"candidate":x["candidate"],"totalAbsErrorAllSectors":0,"sectorErrors":{}})
+            row["totalAbsErrorAllSectors"] += x["totalAbsError"]
+            row["sectorErrors"][name]=x["totalAbsError"]
+    ranked=sorted(aggregate.values(),key=lambda x:(x["totalAbsErrorAllSectors"],x["candidate"]))
+    out["bestUniversalFixedSpan3ADR"]=ranked[:20]
+
     Path("/tmp/eod-research.json").write_text(json.dumps(out,indent=2)+"\n")
     print(json.dumps(out,indent=2))
 
