@@ -226,6 +226,23 @@ export function buildCurrentWavelength({
   };
   // October 28 owner working transition: Micro W4 DOWN and Submicro A DOWN.
   // Prior W3/W5 records remain unchanged, and no completion is inferred.
+  // October 31 owner black ABC working count; prior W4 model preserved.
+  const ownerMicroCDownOct31 = {
+    version:"engine22.microCDownOct31OwnerWorking.v1",
+    degree:"micro",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"C",
+    ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+    sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+    priorBEnding:{price:7820.00,localTime:"2026-10-28 13:00",
+      timezone:"America/Phoenix",status:"OWNER_MARKED_PIVOT"},
+    observedLowReference:{price:7558.25,date:"2026-10-30",
+      status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+    fibStatus:"PENDING_VERIFIED_MICRO_A_ANCHORS",levels:[],
+    previousModelVersion:"engine22.microW4DownOct28OwnerWorking.v1",
+    oldW4HistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+  };
   const ownerMicroW4Down = {
     version:"engine22.microW4DownOct28OwnerWorking.v1",
     degree:"micro",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
@@ -509,6 +526,7 @@ export function buildCurrentWavelength({
       ownerMicroBDown,
       ownerMicroCDown,
       ownerMicroW3Up,
+      ownerMicroCDownOct31,
       ownerMicroW4Down,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
@@ -524,6 +542,23 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // October 31 owner recount: add new C DOWN selection; preserve D UP history.
+      ownerSubminuteCDownOct31:{
+        version:"engine22.subminuteCDownOct31OwnerWorking.v1",
+        degree:"subminute",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+        priorBEnding:{price:7895.00,localDate:"2026-10-06",
+          status:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED"},
+        sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+          B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+          C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+        observedLowReference:{price:7558.25,date:"2026-10-30",
+          status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+        fibStatus:"PENDING_VERIFIED_A_ANCHORS",levels:[],
+        previousModelVersion:"engine22.subminuteDUpOwnerWorking.v1",
+        oldDUpHistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
       // October 27 owner-selected working proposal. Not a completed-pattern
       // confirmation, canonical count promotion, or autonomous transition.
       // Earlier C DOWN and legacy W3 models remain below without mutation.
