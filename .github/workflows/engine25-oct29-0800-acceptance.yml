@@ -1,0 +1,238 @@
+name: engine25-oct29-0800-acceptance
+
+on:
+  push:
+    branches:
+      - engine25-confirmation-packet-v1
+    paths:
+      - ".github/workflows/engine25-oct29-0800-acceptance.yml"
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ES_RESEARCH_CUTOFF: "2026-10-29T15:00:00+00:00"
+      ES_RESEARCH_CUTOFF_AZ: "2026-10-29T08:00:00-07:00"
+      ES_RESEARCH_CONTRACT: "ESZ6"
+      EOD_RESEARCH_SESSION: "2026-10-28"
+      EOD_RESEARCH_WORKERS: "8"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: engine25-confirmation-packet-v1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Reconstruct strict ES Master at 8 AM Arizona
+        env:
+          POLYGON_API_KEY: \${{ secrets.POLYGON_API_KEY }}
+          ES_RESEARCH_OUT: /tmp/es-master-0800-raw.json
+        run: |
+          set -euo pipefail
+          python -u scripts/research_engine25_es_master_cutoff.py
+
+      - name: Normalize ES Master into confirmation-packet input shape
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,datetime
+          src=json.load(open("/tmp/es-master-0800-raw.json"))
+          cutoff=src["cutoffUtc"]
+          lights={}
+          for tf,v in src["lights"].items():
+              last=v.get("lastBarUtc")
+              ts=int(datetime.datetime.fromisoformat(last).timestamp()) if last else None
+              lights[tf]={
+                "ok":True,
+                "tf":tf,
+                "score":v.get("score"),
+                "state":v.get("state"),
+                "reason":"|".join(v.get("reasons") or []),
+                "formula":"RETROSPECTIVE_PRODUCTION_EQUIVALENT",
+                "updated_at_utc":last or cutoff,
+                "lastBar":{"time":ts,"close":v.get("close")} if ts else None,
+                "metrics":{
+                  "above10":v.get("above10"),
+                  "above20":v.get("above20"),
+                  "above50":v.get("above50"),
+                  "smiState":v.get("smiState"),
+                  "smiPct":v.get("smiPct")
+                }
+              }
+          out={
+            "ok":True,
+            "version":"historical-production-equivalent",
+            "symbol":"ES",
+            "updated_at_utc":cutoff,
+            "lights":lights,
+            "master":{
+              "score":src["master"]["score"],
+              "state":src["master"]["state"],
+              "tone":"research",
+              "weights":src["master"]["weights"]
+            },
+            "provenance":{
+              "kind":"RETROSPECTIVE_RECONSTRUCTION",
+              "cutoffUtc":cutoff,
+              "contract":src.get("contract"),
+              "method":src.get("method")
+            }
+          }
+          json.dump(out,open("/tmp/es-master-0800.json","w"),indent=2)
+          print(json.dumps(out["master"],indent=2))
+          PY
+
+      - name: Reconstruct EOD from completed 10/28 equity session only
+        env:
+          POLYGON_API_KEY: \${{ secrets.POLYGON_API_KEY }}
+          EOD_RESEARCH_OUT: /tmp/eod-shadow-2026-10-28.json
+        run: |
+          set -euo pipefail
+          python -u scripts/research_engine25_eod_historical_cutoff.py
+
+      - name: Fetch archived hourly and 4H publications before 8 AM cutoff
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/72dee4fa10c071b298050bc6abc7cb45a88d70b7/data/outlook_hourly.json" -o /tmp/hourly-1407.json
+          curl -fsSL "https://raw.githubusercontent.com/bfrye1973/frye-market-backend/70fc08c71686bd7e0480512dd6e999b8dc92d23c/data/outlook_4h.json" -o /tmp/fourhour-1409.json
+          python - <<'PY'
+          import json
+          for p in ["/tmp/hourly-1407.json","/tmp/fourhour-1409.json"]:
+              j=json.load(open(p))
+              print(p, j.get("updated_at_utc") or j.get("generated_at_utc") or j.get("meta",{}).get("ts_utc"))
+          PY
+
+      - name: Build supplementary participation context without inventing 10m
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "fs";
+          import { buildEngine25BlendedParticipation } from "./services/core/logic/engine25/buildBlendedParticipation.js";
+          import { buildDistributionTimeframeObservation } from "./services/core/logic/engine25/buildDistributionPressureV2.js";
+
+          const hourly=JSON.parse(fs.readFileSync("/tmp/hourly-1407.json","utf8"));
+          const fourHour=JSON.parse(fs.readFileSync("/tmp/fourhour-1409.json","utf8"));
+          const eodReconstructed=JSON.parse(fs.readFileSync("/tmp/eod-shadow-2026-10-28.json","utf8"));
+          const asOf=Date.parse("2026-10-29T15:00:00.000Z");
+
+          // Reconstructed EOD sector cards carry the canonical breadth/momentum counts,
+          // but are retrospective/shadow-only.
+          const eodPayload={
+            updated_at_utc:eodReconstructed.updated_at_utc,
+            sectorCards:eodReconstructed.sectorCards
+          };
+
+          const blend=buildEngine25BlendedParticipation({
+            intraday:null,
+            hourly,
+            fourHour,
+            eod:eodPayload,
+            now:asOf
+          });
+
+          const hourlyCards=Array.isArray(hourly?.sectorCards)?hourly.sectorCards:[];
+          const av=hourlyCards.reduce((s,c)=>s+Number(c?.advancingVolume||0),0);
+          const dv=hourlyCards.reduce((s,c)=>s+Number(c?.decliningVolume||0),0);
+          const scanned=hourlyCards.reduce((s,c)=>s+Number(c?.stocksScanned||0),0);
+          const withVol=hourlyCards.reduce((s,c)=>s+Number(c?.stocksWithVolume||0),0);
+          const directional=av+dv;
+          const stockVolume={
+            historical1h:{
+              sourceTimestamp: hourly.updated_at_utc || hourly.generated_at_utc || hourly?.meta?.ts_utc || null,
+              advancingVolume:av,
+              decliningVolume:dv,
+              advancingVolumeShare:directional>0?av/directional:null,
+              decliningVolumeShare:directional>0?dv/directional:null,
+              stocksScanned:scanned,
+              stocksWithVolume:withVol,
+              coveragePct:scanned>0?100*withVol/scanned:null,
+              provenance:"ARCHIVED_PUBLISHED"
+            }
+          };
+
+          const dist4h=buildDistributionTimeframeObservation({
+            timeframe:"4h",
+            payload:fourHour,
+            now:asOf
+          });
+
+          const participation={
+            fastParticipation:null,
+            blendedParticipation:{
+              ...blend.blendedParticipation,
+              reasonCodes:[
+                ...(blend.blendedParticipation?.reasonCodes||[]),
+                "FAST_PARTICIPATION_ARCHIVE_UNAVAILABLE"
+              ]
+            },
+            sourceDiagnostics:blend.sourceDiagnostics,
+            freshness:{
+              state:"HISTORICAL_REPLAY",
+              asOfUtc:"2026-10-29T15:00:00.000Z",
+              fastParticipationArchiveAvailable:false
+            },
+            participation:{
+              stockVolume,
+              distributionPressure:{
+                schema:"engine25.distributionPressure.v2",
+                structural4h:dist4h,
+                provenance:"ARCHIVED_PUBLISHED"
+              }
+            }
+          };
+          fs.writeFileSync("/tmp/participation-0800.json",JSON.stringify(participation,null,2));
+          console.log(JSON.stringify({
+            blended:participation.blendedParticipation,
+            dist4h:participation.participation.distributionPressure.structural4h,
+            stockVolume:participation.participation.stockVolume
+          },null,2));
+          NODE
+
+      - name: Build no-lookahead confirmation packet
+        run: |
+          set -euo pipefail
+          node scripts/research_engine25_confirmation_oct29_replay.mjs \
+            --as-of 2026-10-29T15:00:00.000Z \
+            --market-meter /tmp/es-master-0800.json \
+            --eod-shadow /tmp/eod-shadow-2026-10-28.json \
+            --participation /tmp/participation-0800.json \
+            --out /tmp/engine25-confirmation-oct29-0800.json
+
+      - name: Verify acceptance invariants
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import fs from "fs";
+          const j=JSON.parse(fs.readFileSync("/tmp/engine25-confirmation-oct29-0800.json","utf8"));
+          const p=j.packet;
+          if(p.tradePermissionShadow.score==null) throw new Error("required 8AM score missing");
+          if(p.tradePermissionShadow.insufficientData) throw new Error("8AM packet unexpectedly insufficient");
+          if(p.sources.reconstructedEod.completedSessionDate!=="2026-10-28") throw new Error("EOD leaked beyond 10/28");
+          if(p.sources.esMaster.sourceTimestamp>"2026-10-29T15:00:00.000Z") throw new Error("ES Master lookahead");
+          if(p.sources.fourHour.sourceTimestamp>"2026-10-29T15:00:00.000Z") throw new Error("4H lookahead");
+          if(!p.warnings.some(w=>w.code==="FAST_PARTICIPATION_ARCHIVE_UNAVAILABLE")) throw new Error("missing explicit fast archive warning");
+          console.log(JSON.stringify({
+            score:p.tradePermissionShadow.score,
+            state:p.tradePermissionShadow.state,
+            esMaster:p.sources.esMaster.score,
+            fourHour:p.sources.fourHour.score,
+            eod:p.sources.reconstructedEod.score,
+            eodDate:p.sources.reconstructedEod.completedSessionDate,
+            warnings:p.warnings
+          },null,2));
+          NODE
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine25-oct29-0800-acceptance
+          path: |
+            /tmp/es-master-0800-raw.json
+            /tmp/es-master-0800.json
+            /tmp/eod-shadow-2026-10-28.json
+            /tmp/hourly-1407.json
+            /tmp/fourhour-1409.json
+            /tmp/participation-0800.json
+            /tmp/engine25-confirmation-oct29-0800.json
