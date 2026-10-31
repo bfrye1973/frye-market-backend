@@ -38,9 +38,19 @@ function readParticipation() {
 }
 
 router.get("/engine25/confirmation-packet", async (req, res) => {
+  // Historical asOf is served only by the offline archive-backed replay.
+  // Never fetch today's live data then relabel it as a past observation.
+  if (Object.prototype.hasOwnProperty.call(req.query, "asOf")) {
+    return res.status(400).json({
+      ok: false,
+      schema: "engine25.confirmationPacket.v1",
+      error: "HISTORICAL_ASOF_UNSUPPORTED_ON_LIVE_ENDPOINT",
+      detail: "Use the isolated archive-backed research replay for historical cutoffs.",
+    });
+  }
   try {
     const base = selfBaseUrl();
-    const asOfUtc = req.query.asOf ? new Date(String(req.query.asOf)).toISOString() : new Date().toISOString();
+    const asOfUtc = new Date().toISOString();
 
     const [marketMeter, reconstructedEod] = await Promise.all([
       fetchJson(base + "/api/v1/futures/market-meter?symbol=ES"),
