@@ -278,6 +278,7 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
     nh = nl = up = dn = 0
     sh_nh = sh_nl = sh_up = sh_dn = 0
     volume_observations = []
+    shadow_observations = []
     if not symbols:
         return {"sector": sector, "nh": 0, "nl": 0, "up": 0, "down": 0, **{"totalVolume":0.0,"advancingVolume":0.0,"decliningVolume":0.0,"unchangedVolume":0.0,"advancingVolumePct":None,"decliningVolumePct":None,"stocksScanned":0,"stocksWithVolume":0}}
 
@@ -288,6 +289,10 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
                 a, b, c, d, sa, sb, sc, sd, volume = fut.result()
                 nh += a; nl += b; up += c; dn += d
                 sh_nh += sa; sh_nl += sb; sh_up += sc; sh_dn += sd
+                shadow_observations.append({
+                    "symbol": futs[fut],
+                    "nh": sa, "nl": sb, "up": sc, "down": sd,
+                })
                 classification = UP if c else (DOWN if d else UNCHANGED)
                 volume_observations.append({"classification": classification, "volume": volume})
             except Exception:
@@ -298,6 +303,7 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
         "nh": nh, "nl": nl, "up": up, "down": dn,
         "shadow_nh": sh_nh, "shadow_nl": sh_nl,
         "shadow_up": sh_up, "shadow_down": sh_dn,
+        "shadowObservations": shadow_observations,
         **aggregate_sector_volume(volume_observations),
     }
 
@@ -308,6 +314,7 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
 
     cards: List[Dict[str, Any]] = []
     shadow_cards: List[Dict[str, Any]] = []
+    shadow_symbol_rows: List[Dict[str, Any]] = []
     for sector_name, syms in sorted(sectors_map.items()):
         print(f"[daily] sector {sector_name}: {len(syms)} symbols", flush=True)
         agg = process_sector_daily(sector_name, syms, days=days, L=L)
@@ -332,6 +339,7 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
             **{k: agg[k] for k in ("totalVolume","advancingVolume","decliningVolume","unchangedVolume","advancingVolumePct","decliningVolumePct","stocksScanned","stocksWithVolume")},
         })
 
+        shadow_symbol_rows.extend(agg.get("shadowObservations") or [])
         sh_nh = int(agg["shadow_nh"]); sh_nl = int(agg["shadow_nl"])
         sh_up = int(agg["shadow_up"]); sh_dn = int(agg["shadow_down"])
         sh_bden = sh_nh + sh_nl
@@ -345,7 +353,7 @@ def compute_sector_cards_daily(sectors_dir: str, days: int, L: int) -> List[Dict
             "up": sh_up,
             "down": sh_dn,
         })
-    return cards, shadow_cards
+    return cards, shadow_cards, shadow_symbol_rows
 
 
 def main() -> int:
@@ -361,6 +369,7 @@ def main() -> int:
         sectors_map = discover_sectors(args.sectors_dir)
         cards = []
         shadow_cards = []
+        shadow_symbol_rows = []
         for name in sorted(sectors_map.keys()):
             neutral = {
                 "sector": name,
@@ -371,15 +380,18 @@ def main() -> int:
             cards.append(dict(neutral))
             shadow_cards.append(dict(neutral))
     else:
-        cards, shadow_cards = compute_sector_cards_daily(args.sectors_dir, days=args.days, L=args.lookback_days)
+        cards, shadow_cards, shadow_symbol_rows = compute_sector_cards_daily(args.sectors_dir, days=args.days, L=args.lookback_days)
 
     if 'shadow_cards' not in locals():
         shadow_cards = []
+    if 'shadow_symbol_rows' not in locals():
+        shadow_symbol_rows = []
 
     out_obj: Dict[str, Any] = {
         "mode": "daily",
         "sectorCards": cards,
         "shadowSectorCards": shadow_cards,
+        "shadowSymbolRows": shadow_symbol_rows,
         "meta": {
             "shadowFormula": "engine25.reconstructedEod.v1",
             "shadowCompletedSessionDate": expected_completed_equity_date().isoformat(),
