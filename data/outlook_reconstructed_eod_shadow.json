@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-10-31T18:15:55.324102+00:00",
+  "updated_at_utc": "2026-10-31T18:20:48.187937+00:00",
   "completedSessionDate": "2026-10-30",
   "score": 51.5,
   "state": "MIXED",
@@ -174,51 +174,51 @@
       "momentum_pct": 56.02
     },
     "large": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0
+      "members": 909,
+      "nh": 402,
+      "nl": 182,
+      "up": 46,
+      "down": 33,
+      "breadth_pct": 68.84,
+      "momentum_pct": 58.23
     },
     "mid": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0
+      "members": 1114,
+      "nh": 438,
+      "nl": 198,
+      "up": 42,
+      "down": 24,
+      "breadth_pct": 68.87,
+      "momentum_pct": 63.64
     },
     "small": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0
+      "members": 3428,
+      "nh": 861,
+      "nl": 816,
+      "up": 111,
+      "down": 99,
+      "breadth_pct": 51.34,
+      "momentum_pct": 52.86
     },
     "unknown": {
-      "members": 5470,
-      "nh": 1704,
-      "nl": 1202,
-      "up": 200,
-      "down": 157,
-      "breadth_pct": 58.64,
-      "momentum_pct": 56.02
+      "members": 19,
+      "nh": 3,
+      "nl": 6,
+      "up": 1,
+      "down": 1,
+      "breadth_pct": 33.33,
+      "momentum_pct": 50.0
     },
     "thresholds": {
       "largeMin": 10000000000,
       "midMin": 2000000000,
       "smallMaxExclusive": 2000000000
     },
-    "classifiedMembers": 0,
-    "classificationCoveragePct": 0.0,
+    "classifiedMembers": 5451,
+    "classificationCoveragePct": 99.65,
     "marketCapSource": "FMP_BATCH_MARKET_CAP",
-    "marketCapAvailable": false,
-    "marketCapReason": "FMP_API_KEY_MISSING"
+    "marketCapAvailable": true,
+    "marketCapReason": null
   },
   "formula": {
     "breadth": "10-session HIGH/LOW event with 2-session carry",
