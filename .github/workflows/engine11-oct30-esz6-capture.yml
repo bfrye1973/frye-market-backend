@@ -6,6 +6,11 @@ on:
       - 'services/core/scripts/captureEngine11Oct30Esz6.mjs'
       - '.github/workflows/engine11-oct30-esz6-capture.yml'
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/scripts/captureEngine11Oct30Esz6.mjs'
+      - '.github/workflows/engine11-oct30-esz6-capture.yml'
 permissions:
   contents: read
 jobs:
