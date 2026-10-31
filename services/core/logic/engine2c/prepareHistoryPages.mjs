@@ -24,6 +24,22 @@ function run(bin,args){
     child.on('error',reject);child.on('close',n=>n===0?resolve():reject(new Error('PRIVATE_EXTRACT_FAILED: '+error)));
   });
 }
+async function githubArtifactURL({token,repository='bfrye1973/Frye-Dashboard',name='engine2c-windows-real-history-test'}){
+  if(!token)throw Error('ENGINE2C_GITHUB_TOKEN_REQUIRED');
+  const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+  const list=await fetch('https://api.github.com/repos/'+repository+'/actions/artifacts?per_page=100',{headers,signal:AbortSignal.timeout(25000)});
+  if(!list.ok)throw Error('ENGINE2C_GITHUB_ARTIFACT_LIST_'+list.status);
+  const body=await list.json();
+  const artifact=(body.artifacts||[]).filter(x=>x.name===name&&!x.expired).sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+  if(!artifact)throw Error('ENGINE2C_GITHUB_ARTIFACT_UNAVAILABLE');
+  const response=await fetch('https://api.github.com/repos/'+repository+'/actions/artifacts/'+artifact.id+'/zip',{
+    headers,redirect:'manual',signal:AbortSignal.timeout(25000)
+  });
+  if(![301,302,303,307,308].includes(response.status))throw Error('ENGINE2C_GITHUB_ARTIFACT_DOWNLOAD_'+response.status);
+  const address=response.headers.get('location');
+  if(!address||new URL(address).protocol!=='https:')throw Error('ENGINE2C_GITHUB_REDIRECT_INVALID');
+  return address;
+}
 async function download(url,dest){
   const parsed=new URL(url);
   if(parsed.protocol!=='https:')throw Error('PRIVATE_ARCHIVE_HTTPS_REQUIRED');
@@ -61,8 +77,8 @@ export async function verifyPages(root){
   if(count!==466841||pages!==480)throw Error('HISTORY_ARCHIVE_TOTAL_MISMATCH_'+count+'_'+pages);
   return {count,pages};
 }
-export async function prepareHistory({url,root}){
-  if(!url||!path.isAbsolute(root))throw Error('HISTORY_PRIVATE_SOURCE_NOT_CONFIGURED');
+export async function prepareHistory({url,root,githubToken,githubRepo,artifactName}){
+  if(!path.isAbsolute(root))throw Error('HISTORY_PRIVATE_ROOT_NOT_CONFIGURED');
   // Refuse accidental use of Replay or public web directories.
   if(root.startsWith('/var/data/replay')||root.includes('/public/')||root.includes('/build/'))throw Error('INVALID_HISTORY_STORAGE_LOCATION');
   const existing=path.join(root,'pages');
@@ -74,8 +90,11 @@ export async function prepareHistory({url,root}){
   const temporary=await mkdtemp(path.join(root,'.staging-'));
   try{
     const zip=path.join(temporary,'pages.zip');
-    await download(url,zip);
-    if(sha(await readFile(zip))!==EXPECTED_SHA)throw Error('HISTORY_PACKAGE_SHA256_MISMATCH');
+    const sourceURL=githubToken?await githubArtifactURL({token:githubToken,repository:githubRepo, name:artifactName}):url;
+    if(!sourceURL)throw Error('HISTORY_PRIVATE_SOURCE_NOT_CONFIGURED');
+    await download(sourceURL,zip);
+    // Page SHA-256 hashes, dataset/basis identity and every total are checked
+    // below. GitHub-generated ZIP envelope hashes can change between uploads.
     await run('unzip',['-q',zip,'pages/*','-d',temporary]);
     const source=path.join(temporary,'pages');
     const verified=await verifyPages(source);
@@ -85,7 +104,7 @@ export async function prepareHistory({url,root}){
   }finally{await rm(temporary,{recursive:true,force:true});}
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
-  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
+  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,githubToken:process.env.ENGINE2C_GITHUB_TOKEN,githubRepo:'bfrye1973/Frye-Dashboard',artifactName:process.env.ENGINE2C_HISTORY_ARTIFACT_NAME||'engine2c-windows-real-history-test',root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
     .then(v=>console.log('ENGINE2C_PRIVATE_HISTORY_READY',JSON.stringify({count:v.count,pages:v.pages})))
     .catch(e=>{console.error('ENGINE2C_HISTORY_PREP_FAILED',e.message);process.exitCode=1;});
 }
