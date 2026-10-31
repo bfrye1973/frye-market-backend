@@ -198,6 +198,30 @@ def flags(bars):
                         suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
                         out[f"mom10single_{name}_rawadr_{suffix}_3p0"]=(up,dn)
 
+    # ADR-percent family. Some spreadsheet/screener implementations define
+    # ADR as the average daily (high-low)/close percentage, then compare the
+    # multi-day percentage return against 3x ADR%. This preserves "3 ADR"
+    # while avoiding raw-dollar normalization drift.
+    for lookback in (10,14,20):
+        for include_event_day in (False,True):
+            for move_span in (5,10):
+                for persistence in range(1,11):
+                    up=0; dn=0
+                    start_idx=max(move_span,len(bars)-persistence)
+                    for idx in range(start_idx,len(bars)):
+                        base=bars[idx-move_span]["c"]
+                        if base <= 0: continue
+                        move_pct=(bars[idx]["c"]-base)/base
+                        src_end=idx+1 if include_event_day else idx
+                        sample=bars[:src_end][-lookback:]
+                        adr_pcts=[(x["h"]-x["l"])/x["c"] for x in sample if x["c"]>0 and x["h"]>=x["l"]]
+                        if not adr_pcts: continue
+                        adr_pct=sum(adr_pcts)/len(adr_pcts)
+                        if move_pct >= 3.0*adr_pct: up=1
+                        if move_pct <= -3.0*adr_pct: dn=1
+                    suffix=f"{lookback}d_"+("incl" if include_event_day else "prior")
+                    out[f"mompct_span{move_span}_roll{persistence}_adrpct_{suffix}_3p0"]=(up,dn)
+
     # Preserve the earlier broad 5-session search as a control only.
     for persistence in range(2,11):
         for lookback in (5,10,14,20):
@@ -264,6 +288,7 @@ def run_sector(name,cfg):
     momentum_swing10=rank(totals,cfg["targets"],["momswing10_"],2)
     momentum_fixed=rank(totals,cfg["targets"],["momfixed_"],2)
     momentum_single10=rank(totals,cfg["targets"],["mom10single_"],2)
+    momentum_pct=rank(totals,cfg["targets"],["mompct_"],2)
     momentum5_control=rank(totals,cfg["targets"],["mom5roll"],2)
     return {
       "symbols":len(syms),
@@ -274,6 +299,7 @@ def run_sector(name,cfg):
       "bestMomentumSwing10Day3ADR":momentum_swing10[:5],
       "bestMomentumFixedSpan3ADR":momentum_fixed[:10],
       "bestMomentumSingle10Day3ADR":momentum_single10[:10],
+      "bestMomentumPercentADR":momentum_pct[:10],
       "bestMomentum5DayControl":momentum5_control[:3]
     }
 
