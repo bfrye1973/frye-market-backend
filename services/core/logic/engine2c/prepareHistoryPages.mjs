@@ -108,7 +108,7 @@ export async function prepareHistory({url,root,githubToken,githubRepo,artifactNa
   }finally{await rm(temporary,{recursive:true,force:true});}
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
-  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,githubToken:process.env.ENGINE2C_GITHUB_TOKEN,githubRepo:'bfrye1973/Frye-Dashboard',artifactName:process.env.ENGINE2C_HISTORY_ARTIFACT_NAME||'engine2c-historical-pages-private',root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
+  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,githubToken:process.env.ENGINE2C_GITHUB_TOKEN||process.env.LIVE_GITHUB_TOKEN||process.env.GITHUB_TOKEN||process.env.GH_TOKEN,githubRepo:'bfrye1973/Frye-Dashboard',artifactName:process.env.ENGINE2C_HISTORY_ARTIFACT_NAME||'engine2c-historical-pages-private',root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
     .then(v=>console.log('ENGINE2C_PRIVATE_HISTORY_READY',JSON.stringify({count:v.count,pages:v.pages})))
     .catch(e=>{console.error('ENGINE2C_HISTORY_PREP_FAILED',e.message);process.exitCode=1;});
 }
