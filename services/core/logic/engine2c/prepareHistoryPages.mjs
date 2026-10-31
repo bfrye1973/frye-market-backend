@@ -24,7 +24,7 @@ function run(bin,args){
     child.on('error',reject);child.on('close',n=>n===0?resolve():reject(new Error('PRIVATE_EXTRACT_FAILED: '+error)));
   });
 }
-async function githubArtifactURL({token,repository='bfrye1973/Frye-Dashboard',name='engine2c-windows-real-history-test'}){
+async function githubArtifactURL({token,repository='bfrye1973/Frye-Dashboard',name='engine2c-historical-pages-private'}){
   if(!token)throw Error('ENGINE2C_GITHUB_TOKEN_REQUIRED');
   const headers={Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
   const list=await fetch('https://api.github.com/repos/'+repository+'/actions/artifacts?per_page=100',{headers,signal:AbortSignal.timeout(25000)});
@@ -95,16 +95,20 @@ export async function prepareHistory({url,root,githubToken,githubRepo,artifactNa
     await download(sourceURL,zip);
     // Page SHA-256 hashes, dataset/basis identity and every total are checked
     // below. GitHub-generated ZIP envelope hashes can change between uploads.
-    await run('unzip',['-q',zip,'pages/*','-d',temporary]);
-    const source=path.join(temporary,'pages');
+    await run('unzip',['-q',zip,'-d',temporary]);
+    const wrapped=path.join(temporary,'pages');
+    const source=(await stat(path.join(wrapped,'continuousRaw')).then(x=>x.isDirectory()).catch(()=>false))?wrapped:temporary;
     const verified=await verifyPages(source);
     try{await rm(existing,{recursive:true,force:true});}catch{}
-    await rename(source,existing);
+    if(source===temporary){
+      await mkdir(existing,{recursive:true,mode:0o700});
+      for(const folder of Object.keys(VIEWS))await rename(path.join(temporary,folder),path.join(existing,folder));
+    }else await rename(source,existing);
     return {...verified,root:existing,reused:false};
   }finally{await rm(temporary,{recursive:true,force:true});}
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
-  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,githubToken:process.env.ENGINE2C_GITHUB_TOKEN,githubRepo:'bfrye1973/Frye-Dashboard',artifactName:process.env.ENGINE2C_HISTORY_ARTIFACT_NAME||'engine2c-windows-real-history-test',root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
+  prepareHistory({url:process.env.ENGINE2C_HISTORY_BUNDLE_URL,githubToken:process.env.ENGINE2C_GITHUB_TOKEN,githubRepo:'bfrye1973/Frye-Dashboard',artifactName:process.env.ENGINE2C_HISTORY_ARTIFACT_NAME||'engine2c-historical-pages-private',root:process.env.ENGINE2C_PRIVATE_ROOT||'/opt/render/project/src/.engine2c-private'})
     .then(v=>console.log('ENGINE2C_PRIVATE_HISTORY_READY',JSON.stringify({count:v.count,pages:v.pages})))
     .catch(e=>{console.error('ENGINE2C_HISTORY_PREP_FAILED',e.message);process.exitCode=1;});
 }
