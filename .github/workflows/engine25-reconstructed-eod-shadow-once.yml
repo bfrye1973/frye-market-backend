@@ -26,43 +26,13 @@ jobs:
           mkdir -p data
           python -u scripts/build_outlook_source_daily.py             --sectors-dir data/sectors             --days 90             --lookback-days 10             --out data/outlook_source_daily.json
       - name: Build reconstructed EOD shadow artifact
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BACKEND_BASE: https://frye-market-backend-1.onrender.com
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import json
-          from datetime import datetime, timezone
-          src=json.load(open("data/outlook_source_daily.json"))
-          cards=src.get("shadowSectorCards") or []
-          if len(cards)!=11:
-              raise SystemExit(f"expected 11 shadow cards, got {len(cards)}")
-          avg_b=sum(float(c.get("breadth_pct",50)) for c in cards)/len(cards)
-          avg_m=sum(float(c.get("momentum_pct",50)) for c in cards)/len(cards)
-          score=max(10.0,min(100.0,(avg_b+avg_m)/2.0))
-          state=("CONSTRUCTIVE" if score>=65 else
-                 "CONSTRUCTIVE_MIXED" if score>=55 else
-                 "MIXED" if score>=45 else
-                 "WEAK" if score>=35 else "BEARISH")
-          out={
-            "ok":True,
-            "engine":"engine25.reconstructedEod.v1",
-            "mode":"SHADOW_ONLY",
-            "updated_at_utc":datetime.now(timezone.utc).isoformat(),
-            "completedSessionDate":src.get("meta",{}).get("shadowCompletedSessionDate"),
-            "score":round(score,1),
-            "state":state,
-            "breadthScore":round(avg_b,1),
-            "momentumScore":round(avg_m,1),
-            "sectorCards":cards,
-            "formula":{
-              "breadth":"10-session HIGH/LOW event with 2-session carry",
-              "momentum":"4-session close move vs +/-3x ADR20",
-              "adr":"20-session average daily HIGH-LOW, current completed day included"
-            },
-            "productionAuthority":False
-          }
-          json.dump(out,open("/tmp/outlook_reconstructed_eod_shadow.json","w"),indent=2)
-          print(json.dumps({k:out[k] for k in ("completedSessionDate","score","state","breadthScore","momentumScore")},indent=2))
-          PY
+          python -u scripts/build_engine25_reconstructed_eod_detail.py             --source data/outlook_source_daily.json             --out /tmp/outlook_reconstructed_eod_shadow.json
       - name: Publish shadow file without touching production EOD
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
