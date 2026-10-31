@@ -455,7 +455,7 @@ app.listen(PORT, HOST, () => {
   console.log(`[OK] core listening on :${PORT}`);
   console.log("- /api/health  (Render healthcheck)");
   console.log("- /healthz");
-  if(process.env.ENGINE2C_GITHUB_TOKEN || process.env.ENGINE2C_HISTORY_BUNDLE_URL){
+  if(process.env.ENGINE2C_GITHUB_TOKEN || process.env.LIVE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.ENGINE2C_HISTORY_BUNDLE_URL){
     // Background-only research page preparation: no impact on LIVE startup.
     const child=spawn("node",["./logic/engine2c/prepareHistoryPages.mjs"],{cwd:__dirname,env:process.env,stdio:["ignore","ignore","pipe"]});
     child.stderr.on("data",b=>console.error("[engine2c-history]",String(b).slice(0,500)));
