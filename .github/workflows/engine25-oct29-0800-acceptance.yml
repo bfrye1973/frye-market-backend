@@ -1,5 +1,5 @@
 name: engine25-oct29-0800-acceptance
-# rerun: massive-futures-credential
+# rerun: massive-futures-credential-c
 
 on:
   push:
@@ -29,7 +29,10 @@ jobs:
 
       - name: Reconstruct strict ES Master at 8 AM Arizona
         env:
-          POLYGON_API_KEY: \${{ secrets.POLYGON_API_KEY }}
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API: ${{ secrets.POLYGON_API }}
+          POLY_API_KEY: ${{ secrets.POLY_API_KEY }}
           ES_RESEARCH_OUT: /tmp/es-master-0800-raw.json
         run: |
           set -euo pipefail
