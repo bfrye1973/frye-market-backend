@@ -48,6 +48,8 @@ const M30_INTERNALS_PATH =
   process.env.LIVE_30M_INTERNALS_PATH || "data/outlook_30m_internals.json";
 const H4_PATH = process.env.LIVE_4H_PATH || "data/outlook_4h.json";
 const EOD_PATH = process.env.LIVE_EOD_PATH || "data/outlook.json";
+const EOD_SHADOW_PATH =
+  process.env.LIVE_EOD_SHADOW_PATH || "data/outlook_reconstructed_eod_shadow.json";
 const SANDBOX_PATH =
   process.env.LIVE_SANDBOX_PATH || "data/outlook_intraday.json";
 
@@ -437,6 +439,18 @@ liveRouter.get("/eod", async (req, res) => {
     routeName: "eod",
     branch: EOD_BRANCH,
     path: EOD_PATH,
+    req,
+    res,
+  });
+});
+
+// Reconstructed EOD v1 shadow — additive research feed only.
+liveRouter.get("/eod-shadow", async (req, res) => {
+  return serveLiveJsonWithLastGood({
+    key: "eod-shadow",
+    routeName: "eod-shadow",
+    branch: EOD_BRANCH,
+    path: EOD_SHADOW_PATH,
     req,
     res,
   });
