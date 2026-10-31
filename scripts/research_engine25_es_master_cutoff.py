@@ -3,7 +3,7 @@ import json, math, os, urllib.parse, urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-KEY=os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API")
+KEY=os.environ.get("MASSIVE_API_KEY") or os.environ.get("POLYGON_API_KEY") or os.environ.get("POLY_KEY") or os.environ.get("POLYGON_API")
 BASE="https://api.polygon.io"
 CONTRACT=os.environ.get("ES_RESEARCH_CONTRACT","ESZ6")
 CUTOFF=datetime.fromisoformat(os.environ.get("ES_RESEARCH_CUTOFF","2026-10-29T15:00:00+00:00"))
