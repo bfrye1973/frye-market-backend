@@ -112,9 +112,18 @@ export function buildEngine25ConfirmationPacket({
   const fourHourScore = finite(fourHour?.score);
   const eodScore = finite(reconstructedEod?.score);
 
+  const historical = mode === "HISTORICAL_REPLAY";
+  const validAsOfUtc = iso(asOfUtc);
   const masterSourceTimestamp = iso(marketMeter?.updated_at_utc);
-  const fourHourSourceTimestamp = sourceTimeFromLight(fourHour);
+  // In a historical replay, never treat an OHLC bar-start timestamp as a
+  // substitute for a source publication/observation timestamp.
+  const fourHourSourceTimestamp = historical
+    ? iso(fourHour?.updated_at_utc)
+    : sourceTimeFromLight(fourHour);
   const eodSourceTimestamp = iso(reconstructedEod?.updated_at_utc);
+  if (historical && !validAsOfUtc) {
+    warningPush(warnings, "HISTORICAL_ASOF_INVALID");
+  }
 
   const required = {
     esMaster: masterScore !== null,
@@ -132,19 +141,63 @@ export function buildEngine25ConfirmationPacket({
     RECONSTRUCTED_EOD: eodSourceTimestamp,
   };
   for (const [name, ts] of Object.entries(timestamps)) {
-    if (afterCutoff(ts, asOfUtc)) warningPush(warnings, name + "_AFTER_ASOF_CUTOFF", ts);
+    if (historical && !ts) {
+      warningPush(warnings, name + "_SOURCE_TIMESTAMP_UNVERIFIABLE");
+    } else if (afterCutoff(ts, asOfUtc)) {
+      warningPush(warnings, name + "_AFTER_ASOF_CUTOFF", ts);
+    }
   }
 
   const fourHourCompletion = completedBarStatus(fourHour, "4h", asOfUtc);
   if (fourHourCompletion.completed === false) {
     warningPush(warnings, "ES_4H_LAST_BAR_INCOMPLETE", fourHourCompletion.expectedEndUtc);
+  } else if (fourHourCompletion.completed === null) {
+    warningPush(warnings, "ES_4H_BAR_COMPLETION_UNVERIFIABLE");
+  }
+
+  // Historical data may legitimately be reconstructed today from pre-cutoff
+  // bars, but that is NOT evidence the warning was originally published.
+  // Unknown or inconsistent provenance must fail closed.
+  const historicalKinds = {
+    ES_MASTER: provenance.esMaster,
+    ES_4H: provenance.fourHour,
+    RECONSTRUCTED_EOD: provenance.reconstructedEod,
+  };
+  if (historical) {
+    for (const [name, p] of Object.entries(historicalKinds)) {
+      const published = p?.kind === "ARCHIVED_PUBLISHED" &&
+        p?.originallyPublished === true && p?.reconstructed === false &&
+        typeof p?.archiveReference === "string" && p.archiveReference.length > 0;
+      const retrospective = p?.kind === "RETROSPECTIVE_RECONSTRUCTION" &&
+        p?.originallyPublished === false && p?.reconstructed === true &&
+        typeof p?.archiveReference === "string" && p.archiveReference.length > 0;
+      if (!published && !retrospective) {
+        warningPush(warnings, name + "_PROVENANCE_UNVERIFIABLE");
+      }
+    }
+    const session = reconstructedEod?.completedSessionDate;
+    if (typeof session !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(session)) {
+      warningPush(warnings, "RECONSTRUCTED_EOD_SESSION_UNVERIFIABLE");
+    } else if (validAsOfUtc && session >= validAsOfUtc.slice(0, 10)) {
+      warningPush(warnings, "RECONSTRUCTED_EOD_SESSION_NOT_COMPLETED_BY_ASOF");
+    }
+    if (Object.values(historicalKinds).some((p) => p?.kind === "RETROSPECTIVE_RECONSTRUCTION")) {
+      warningPush(warnings, "RETROSPECTIVE_INPUTS_NOT_ORIGINALLY_PUBLISHED");
+    }
   }
 
   const allRequiredPresent = Object.values(required).every(Boolean);
-  const cutoffViolation = warnings.some((w) => w.code.endsWith("_AFTER_ASOF_CUTOFF"));
+  const blocking = warnings.some(({ code }) =>
+    code.endsWith("_AFTER_ASOF_CUTOFF") ||
+    code.endsWith("_SOURCE_TIMESTAMP_UNVERIFIABLE") ||
+    code.endsWith("_PROVENANCE_UNVERIFIABLE") ||
+    code === "HISTORICAL_ASOF_INVALID" ||
+    code === "ES_4H_LAST_BAR_INCOMPLETE" ||
+    code === "ES_4H_BAR_COMPLETION_UNVERIFIABLE" ||
+    code.startsWith("RECONSTRUCTED_EOD_SESSION_"));
 
   const score =
-    allRequiredPresent && !cutoffViolation
+    allRequiredPresent && !blocking
       ? masterScore * TRADE_PERMISSION_WEIGHTS.esMaster +
         fourHourScore * TRADE_PERMISSION_WEIGHTS.fourHour +
         eodScore * TRADE_PERMISSION_WEIGHTS.reconstructedEod
@@ -242,7 +295,12 @@ export function buildEngine25ConfirmationPacket({
       directionalBias: classification.directionalBias,
       weights: TRADE_PERMISSION_WEIGHTS,
       requiredInputs: required,
-      insufficientData: !allRequiredPresent || cutoffViolation,
+      insufficientData: !allRequiredPresent || blocking,
+      historicalDecisionAvailability: historical
+        ? Object.values(historicalKinds).every((p) => p?.kind === "ARCHIVED_PUBLISHED")
+          ? "ORIGINALLY_PUBLISHED_INPUTS"
+          : "RETROSPECTIVE_ESTIMATE_ONLY"
+        : "LIVE_ADVISORY",
       provisional: true,
     },
     warnings,
