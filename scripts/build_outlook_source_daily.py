@@ -224,54 +224,59 @@ def compute_daily_flags(bars: List[Dict[str, Any]], L: int) -> Tuple[int, int, i
     return nh, nl, up, dn
 
 
-def compute_reconstructed_eod_flags(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
-    """
-    Engine25 reconstructed EOD v1 shadow definitions:
-    - Breadth: 10-session high/low event using daily HIGH/LOW with 2-session carry.
-    - Momentum: current close minus close 4 sessions ago vs +/- 3 * ADR20.
-    - ADR20 = average daily (HIGH-LOW), current completed day included.
-    - Shadow only; production EOD definitions remain unchanged.
-    """
-    bars = trim_to_completed_session(bars)
-    if len(bars) < 22:
+def compute_reconstructed_eod_flags_at(bars: List[Dict[str, Any]], idx: int) -> Tuple[int, int, int, int]:
+    if idx < 21 or idx >= len(bars):
         return 0, 0, 0, 0
 
     nh = nl = 0
-    for idx in range(len(bars) - 2, len(bars)):
-        if idx < 10:
+    for event_idx in range(idx - 1, idx + 1):
+        if event_idx < 10:
             continue
-        prior = bars[idx - 10:idx]
-        cur = bars[idx]
+        prior = bars[event_idx - 10:event_idx]
+        cur = bars[event_idx]
         if cur["h"] > max(x["h"] for x in prior):
             nh = 1
         if cur["l"] < min(x["l"] for x in prior):
             nl = 1
 
-    idx = len(bars) - 1
     move = float(bars[idx]["c"]) - float(bars[idx - 4]["c"])
     sample = bars[idx - 19:idx + 1]
     adr20 = sum(float(x["h"]) - float(x["l"]) for x in sample) / len(sample)
-
     up = int(adr20 > 0 and move >= 3.0 * adr20)
     dn = int(adr20 > 0 and move <= -3.0 * adr20)
-
     return nh, nl, up, dn
+
+
+def compute_reconstructed_eod_flags(bars: List[Dict[str, Any]]) -> Tuple[int, int, int, int]:
+    """
+    Engine25 reconstructed EOD v1 shadow definitions.
+    Frozen formula; this wrapper evaluates the latest completed session.
+    """
+    bars = trim_to_completed_session(bars)
+    if len(bars) < 22:
+        return 0, 0, 0, 0
+    return compute_reconstructed_eod_flags_at(bars, len(bars) - 1)
 
 
 def process_symbol_daily(sym: str, days: int, L: int):
     try:
         bars = fetch_1d_bars(sym, days=days)
         if not bars:
-            return 0, 0, 0, 0, 0, 0, 0, 0, None
+            return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None
         nh, nl, up, dn = compute_daily_flags(bars, L)
-        sh_nh, sh_nl, sh_up, sh_dn = compute_reconstructed_eod_flags(bars)
         completed = trim_to_completed_session(bars)
+        if len(completed) >= 22:
+            sh_nh, sh_nl, sh_up, sh_dn = compute_reconstructed_eod_flags_at(completed, len(completed) - 1)
+            pr_nh, pr_nl, pr_up, pr_dn = compute_reconstructed_eod_flags_at(completed, len(completed) - 2)
+        else:
+            sh_nh = sh_nl = sh_up = sh_dn = 0
+            pr_nh = pr_nl = pr_up = pr_dn = 0
         last_volume = completed[-1].get("v") if completed else bars[-1].get("v")
-        return nh, nl, up, dn, sh_nh, sh_nl, sh_up, sh_dn, last_volume
+        return nh, nl, up, dn, sh_nh, sh_nl, sh_up, sh_dn, pr_nh, pr_nl, pr_up, pr_dn, last_volume
     except SystemExit:
         raise
     except Exception:
-        return 0, 0, 0, 0, 0, 0, 0, 0, None
+        return 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, None
 
 
 def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> Dict[str, Any]:
@@ -286,12 +291,13 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
         futs = {ex.submit(process_symbol_daily, s, days, L): s for s in symbols}
         for fut in as_completed(futs):
             try:
-                a, b, c, d, sa, sb, sc, sd, volume = fut.result()
+                a, b, c, d, sa, sb, sc, sd, pa, pb, pc, pd, volume = fut.result()
                 nh += a; nl += b; up += c; dn += d
                 sh_nh += sa; sh_nl += sb; sh_up += sc; sh_dn += sd
                 shadow_observations.append({
                     "symbol": futs[fut],
                     "nh": sa, "nl": sb, "up": sc, "down": sd,
+                    "prior_nh": pa, "prior_nl": pb, "prior_up": pc, "prior_down": pd,
                 })
                 classification = UP if c else (DOWN if d else UNCHANGED)
                 volume_observations.append({"classification": classification, "volume": volume})
