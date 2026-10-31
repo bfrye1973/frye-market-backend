@@ -1,5 +1,5 @@
 name: engine25-oct29-0800-acceptance
-# rerun: massive-futures-credential-c
+# review: no-lookahead-credential-and-coverage-gates
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
       ES_RESEARCH_CUTOFF_AZ: "2026-10-29T08:00:00-07:00"
       ES_RESEARCH_CONTRACT: "ESZ6"
       EOD_RESEARCH_SESSION: "2026-10-28"
-      EOD_RESEARCH_WORKERS: "8"
+      EOD_RESEARCH_WORKERS: "4"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -91,7 +91,7 @@ jobs:
 
       - name: Reconstruct EOD from completed 10/28 equity session only
         env:
-          POLYGON_API_KEY: \${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
           EOD_RESEARCH_OUT: /tmp/eod-shadow-2026-10-28.json
         run: |
           set -euo pipefail
@@ -214,6 +214,11 @@ jobs:
           const p=j.packet;
           if(p.tradePermissionShadow.score==null) throw new Error("required 8AM score missing");
           if(p.tradePermissionShadow.insufficientData) throw new Error("8AM packet unexpectedly insufficient");
+          if(p.tradePermissionShadow.historicalDecisionAvailability!=="RETROSPECTIVE_ESTIMATE_ONLY") throw new Error("retrospective decision-availability label missing");
+          if(j.replay.engine22HistoricalState!=="ENGINE22_HISTORICAL_STATE_NOT_VERIFIED") throw new Error("Engine22 historical state incorrectly asserted");
+          if(!p.warnings.some(w=>w.code==="RETROSPECTIVE_INPUTS_NOT_ORIGINALLY_PUBLISHED")) throw new Error("retrospective evidence warning missing");
+          if(p.sources.fourHour.completedBar.completed!==true) throw new Error("unverified 4H bar completion");
+          if(p.sources.reconstructedEod.provenance.originallyPublished) throw new Error("reconstructed EOD improperly marked published");
           if(p.sources.reconstructedEod.completedSessionDate!=="2026-10-28") throw new Error("EOD leaked beyond 10/28");
           if(p.sources.esMaster.sourceTimestamp>"2026-10-29T15:00:00.000Z") throw new Error("ES Master lookahead");
           if(p.sources.fourHour.sourceTimestamp>"2026-10-29T15:00:00.000Z") throw new Error("4H lookahead");
@@ -230,7 +235,9 @@ jobs:
           NODE
 
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
+          if-no-files-found: warn
           name: engine25-oct29-0800-acceptance
           path: |
             /tmp/es-master-0800-raw.json
