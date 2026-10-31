@@ -69,9 +69,16 @@ jobs:
                              "momentum_pct":round(m,2),"nh":nh,"nl":nl,"up":u,"down":d}
             cards=list(by.values())
 
-          # Preserve mode if present; enforce daily if missing
+          # Preserve mode if present; enforce daily if missing.
+          # Keep reconstructed EOD v1 shadow cards additive and isolated.
           mode=(j.get("mode") or "daily")
-          out={"mode":mode,"sectorCards":cards,"meta":(j.get("meta") or {})}
+          shadow_cards=j.get("shadowSectorCards") or []
+          out={
+            "mode":mode,
+            "sectorCards":cards,
+            "shadowSectorCards":shadow_cards,
+            "meta":(j.get("meta") or {}),
+          }
           json.dump(out,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
           print(f"[normalize] mode={mode} sectorCards={len(cards)}")
           PY
@@ -89,7 +96,62 @@ jobs:
             print(f"[sectors] INVALID mode={mode} (expected daily)"); sys.exit(2)
           if len(cards)!=11 or not all(k in cards[0] for k in need):
             print(f"[sectors] INVALID source: cards={len(cards)} need={need}"); sys.exit(2)
+          shadow=j.get("shadowSectorCards") or []
+          if len(shadow)!=11 or not all(k in shadow[0] for k in need):
+            print(f"[shadow] INVALID reconstructed EOD cards={len(shadow)} need={need}"); sys.exit(2)
           print(f"[sectors] OK mode={mode or 'daily'} cards=11 | {cards[0]['sector']}")
+          print(f"[shadow] OK reconstructed cards=11 | session={j.get('meta',{}).get('shadowCompletedSessionDate')}")
+          PY
+
+      - name: Build reconstructed EOD v1 shadow artifact
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from datetime import datetime, timezone
+
+          src=json.load(open("data/outlook_source_daily.json","r",encoding="utf-8"))
+          cards=src.get("shadowSectorCards") or []
+
+          def avg(xs):
+            xs=[float(x) for x in xs]
+            return sum(xs)/len(xs) if xs else 50.0
+
+          avg_breadth=avg([c.get("breadth_pct",50) for c in cards])
+          avg_momentum=avg([c.get("momentum_pct",50) for c in cards])
+          score=max(10.0,min(100.0,(avg_breadth+avg_momentum)/2.0))
+
+          if score >= 65:
+            state="CONSTRUCTIVE"
+          elif score >= 55:
+            state="CONSTRUCTIVE_MIXED"
+          elif score >= 45:
+            state="MIXED"
+          elif score >= 35:
+            state="WEAK"
+          else:
+            state="BEARISH"
+
+          out={
+            "ok": True,
+            "engine": "engine25.reconstructedEod.v1",
+            "mode": "SHADOW_ONLY",
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "completedSessionDate": src.get("meta",{}).get("shadowCompletedSessionDate"),
+            "score": round(score,1),
+            "state": state,
+            "breadthScore": round(avg_breadth,1),
+            "momentumScore": round(avg_momentum,1),
+            "sectorCards": cards,
+            "formula": {
+              "breadth": "10-session HIGH/LOW event with 2-session carry",
+              "momentum": "4-session close move vs +/-3x ADR20",
+              "adr": "20-session average daily HIGH-LOW, current completed day included",
+            },
+            "productionAuthority": False,
+          }
+          json.dump(out,open("data/outlook_reconstructed_eod_shadow.json","w",encoding="utf-8"),indent=2)
+          print(json.dumps({k:out[k] for k in ("completedSessionDate","score","state","breadthScore","momentumScore")},indent=2))
           PY
 
       # 3) Build EOD payload -> data/outlook.json
@@ -176,8 +238,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p /tmp/eod
-          cp -f data/outlook.json       /tmp/eod/outlook.json
-          cp -f data/heartbeat_eod.txt  /tmp/eod/heartbeat_eod.txt
+          cp -f data/outlook.json                         /tmp/eod/outlook.json
+          cp -f data/outlook_reconstructed_eod_shadow.json /tmp/eod/outlook_reconstructed_eod_shadow.json
+          cp -f data/heartbeat_eod.txt                    /tmp/eod/heartbeat_eod.txt
 
       - name: Prepare live branch
         env:
@@ -196,8 +259,9 @@ jobs:
           fi
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p data
-          cp -f /tmp/eod/outlook.json       data/outlook.json
-          cp -f /tmp/eod/heartbeat_eod.txt  data/heartbeat_eod.txt
+          cp -f /tmp/eod/outlook.json                         data/outlook.json
+          cp -f /tmp/eod/outlook_reconstructed_eod_shadow.json data/outlook_reconstructed_eod_shadow.json
+          cp -f /tmp/eod/heartbeat_eod.txt                    data/heartbeat_eod.txt
 
       - name: Commit and push live branch
         env:
