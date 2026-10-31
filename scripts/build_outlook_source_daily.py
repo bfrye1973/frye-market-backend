@@ -296,6 +296,7 @@ def process_sector_daily(sector: str, symbols: List[str], days: int, L: int) -> 
                 sh_nh += sa; sh_nl += sb; sh_up += sc; sh_dn += sd
                 shadow_observations.append({
                     "symbol": futs[fut],
+                    "sector": sector,
                     "nh": sa, "nl": sb, "up": sc, "down": sd,
                     "prior_nh": pa, "prior_nl": pb, "prior_up": pc, "prior_down": pd,
                 })
