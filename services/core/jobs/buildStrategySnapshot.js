@@ -10579,7 +10579,7 @@ if (String(symbol).toUpperCase()==="ES" && s.strategyId==="intraday_scalp@10m") 
     observedAt:Number.isFinite(evaluationTimeMs)?new Date(evaluationTimeMs).toISOString():new Date().toISOString(),
     sourceSnapshotId:result.snapshotId??null,
   });
-  const directory=process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR;
+  const directory=process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR || "/var/data/replay/engine22-wave-history";
   if (!directory) {
     result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"DURABLE_JOURNAL_NOT_CONFIGURED"};
   } else if (!observation.ok) {
