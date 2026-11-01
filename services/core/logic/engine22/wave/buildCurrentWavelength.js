@@ -226,6 +226,23 @@ export function buildCurrentWavelength({
   };
   // October 28 owner working transition: Micro W4 DOWN and Submicro A DOWN.
   // Prior W3/W5 records remain unchanged, and no completion is inferred.
+  // October 31 owner black ABC working count; prior W4 model preserved.
+  const ownerMicroCDownOct31 = {
+    version:"engine22.microCDownOct31OwnerWorking.v1",
+    degree:"micro",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"C",
+    ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+    sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+    priorBEnding:{price:7820.00,localTime:"2026-10-28 13:00",
+      timezone:"America/Phoenix",status:"OWNER_MARKED_PIVOT"},
+    observedLowReference:{price:7558.25,date:"2026-10-30",
+      status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+    fibStatus:"PENDING_VERIFIED_MICRO_A_ANCHORS",levels:[],
+    previousModelVersion:"engine22.microW4DownOct28OwnerWorking.v1",
+    oldW4HistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+  };
   const ownerMicroW4Down = {
     version:"engine22.microW4DownOct28OwnerWorking.v1",
     degree:"micro",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
@@ -509,6 +526,7 @@ export function buildCurrentWavelength({
       ownerMicroBDown,
       ownerMicroCDown,
       ownerMicroW3Up,
+      ownerMicroCDownOct31,
       ownerMicroW4Down,
       ownerMicroW3:{
         version:"engine22.microW3OwnerProjection.v1",
@@ -524,6 +542,26 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // October 31 owner recount: add new C DOWN selection; preserve D UP history.
+      ownerSubminuteCDownOct31:{
+        version:"engine22.subminuteCDownOct31OwnerWorking.v1",
+        degree:"subminute",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+        waveA:{startHigh:7901.00,startLocalTime:"2026-08-14 05:00",wickLow:7558.75,bodyReferenceLow:7617.50,endLocalTime:"2026-09-16 11:00",status:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED"},
+        priorBEnding:{price:7895.00,localDate:"2026-10-06",status:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED"},
+        sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+        observedLowReference:{price:7558.25,date:"2026-10-30",status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+        fibStatus:"DUAL_REFERENCE_OWNER_RESEARCH_NOT_CONFIRMED",
+        fibMethod:"B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        fibReferences:{
+          wick:{label:"WICK PRIMARY RESEARCH",aLength:342.25,levels:[{"key":"e618","label":"0.618","price":7683.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7552.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7459.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7341.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7210.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}]},
+          body:{label:"BODY ALTERNATIVE RESEARCH",aLength:283.50,levels:[{"key":"e618","label":"0.618","price":7719.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7611.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7534.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7436.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7328,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}]}
+        },
+        levels:[{"key":"e618","label":"0.618","price":7683.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7552.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7459.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7341.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7210.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}],
+        previousModelVersion:"engine22.subminuteDUpOwnerWorking.v1",
+        oldDUpHistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
       // October 27 owner-selected working proposal. Not a completed-pattern
       // confirmation, canonical count promotion, or autonomous transition.
       // Earlier C DOWN and legacy W3 models remain below without mutation.

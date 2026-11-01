@@ -207,6 +207,61 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
         touchEvidence:x.touchEvidence}]));
   }
+  // October 31 Subminute C DOWN dual Fibonacci methods.
+  // Only observe completed 10m ES candle lows after October 6 B end date.
+  // Retain method-specific touch history; a quote-only hit is labeled as such.
+  const newC=root.degrees?.subminute?.ownerSubminuteCDownOct31;
+  if(newC?.version==="engine22.subminuteCDownOct31OwnerWorking.v1" &&
+      newC.activeWave==="C" && newC.fibReferences){
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    // B-ending clock is not verified; exclude Oct 6 entirely to avoid false early touches.
+    const origin=Date.parse("2026-10-07T07:00:00Z");
+    const quote=finite(currentPrice);
+    const previousC=previousWavelength?.degrees?.subminute?.ownerSubminuteCDownOct31;
+    for(const method of ["wick","body"]){
+      const ref=newC.fibReferences[method];
+      if(!Array.isArray(ref?.levels))continue;
+      const id=JSON.stringify(["subminute","ownerSubminuteCDownOct31",newC.version,
+        method,newC.waveA?.startHigh,newC.waveA?.[method==="wick"?"wickLow":"bodyReferenceLow"],
+        newC.priorBEnding?.price,ref.levels.map(l=>[l.key,l.price])]);
+      const past=disk[id]||{};
+      const previousRef=previousC?.fibReferences?.[method];
+      const same=previousC?.version===newC.version &&
+        previousC?.waveA?.startHigh===newC.waveA?.startHigh &&
+        previousC?.waveA?.[method==="wick"?"wickLow":"bodyReferenceLow"]===
+          newC.waveA?.[method==="wick"?"wickLow":"bodyReferenceLow"] &&
+        previousC?.priorBEnding?.price===newC.priorBEnding?.price;
+      const observed=[];
+      if(now>=origin && quote!==null)observed.push({
+        low:quote,time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+      for(const b of Array.isArray(bars10m)?bars10m:[]){
+        const time=Number(b?.time),low=finite(b?.low);
+        if(!Number.isSafeInteger(time)||time<=0||low===null)continue;
+        if(time*1000<origin||time*1000+600000>now)continue;
+        observed.push({low,time:new Date(time*1000).toISOString(),
+          source:"ES_10M_COMPLETED_OHLC"});
+      }
+      ref.levels=ref.levels.map(level=>{
+        const prior=past[level.key]||(same?previousRef?.levels?.find(l=>
+          l.key===level.key&&l.price===level.price):null);
+        const kept=prior?.status==="TOUCHED"&&prior?.price===level.price;
+        const hit=kept?null:observed.find(o=>o.low<=level.price);
+        const proof=kept?(prior.touchEvidenceType||"PREVIOUS_SNAPSHOT"):(hit?.source||null);
+        return {...level,status:kept||hit?"TOUCHED":"WATCH",
+          touchEvidenceAvailable:Boolean(kept||hit),
+          touchEvidenceType:proof,touchedAt:kept?prior.touchedAt||null:hit?.time||null,
+          touchEvidence:kept?prior.touchEvidence||null:hit?
+            {verified:hit.source==="ES_10M_COMPLETED_OHLC",
+             evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?"COMPLETED_CANDLE":"SNAPSHOT_PRICE"}:null};
+      });
+      disk[id]=Object.fromEntries(ref.levels.filter(l=>l.status==="TOUCHED")
+        .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+          touchEvidenceAvailable:l.touchEvidenceAvailable,
+          touchEvidenceType:l.touchEvidenceType,
+          touchedAt:l.touchedAt,touchEvidence:l.touchEvidence}]));
+    }
+    newC.levels=newC.fibReferences.wick?.levels||[];
+  }
   // Subminute D UP retracements use an independent memory key from the
   // earlier Subminute C-down and Minute W2 levels. No old touch history reset.
   const subminuteD=root.degrees?.subminute?.ownerCurrentDUp;
