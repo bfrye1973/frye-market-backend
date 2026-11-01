@@ -2368,21 +2368,8 @@ export function buildEngine22WaveStrategy(input = {}) {
       barsByTf:context.barsByTf,
       evaluationTimeMs:context.evaluationTimeMs,
     }),
-    authorizedWorkingStructure: buildAuthorizedWorkingStructureV1({
-      currentWavelength: publishedCurrentWavelength,
-      degreeStates: publishedDegreeStates,
-      sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
-        currentWavelength: publishedCurrentWavelength,
-        degreeStates: publishedDegreeStates,
-        evaluationTimeMs: context.evaluationTimeMs,
-      }),
-      publicationTime: Number.isFinite(context.evaluationTimeMs) ? new Date(context.evaluationTimeMs).toISOString() : null,
-    }),
-    sevenDegreeInvalidations: buildSevenDegreeInvalidationsV1({
-      currentWavelength:publishedCurrentWavelength,
-      degreeStates:publishedDegreeStates,
-      evaluationTimeMs:context.evaluationTimeMs,
-    }),
+    authorizedWorkingStructure: chartAuthorized,
+    sevenDegreeInvalidations: chartInvalidations,
 
     // Engine 22 Micro V2 migration shadow. Additive/read-only only.
     // Engine 26 and automated trading must ignore this until Phase 9B acceptance.
