@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-01T23:12:26.753992+00:00",
+  "updated_at_utc": "2026-11-01T23:34:43.867121+00:00",
   "completedSessionDate": "2026-10-30",
   "score": 51.5,
   "state": "MIXED",
@@ -110,17 +110,94 @@
     }
   ],
   "sectorPrior": {
-    "Communication Services": null,
-    "Consumer Discretionary": null,
-    "Consumer Staples": null,
-    "Energy": null,
-    "Financials": null,
-    "Healthcare": null,
-    "Industrials": null,
-    "Materials": null,
-    "Real Estate": null,
-    "Utilities": null,
-    "tech": null
+    "Communication Services": {
+      "nh": 44,
+      "nl": 71,
+      "up": 6,
+      "down": 8,
+      "breadth_pct": 38.26,
+      "momentum_pct": 42.86
+    },
+    "Consumer Discretionary": {
+      "nh": 177,
+      "nl": 103,
+      "up": 35,
+      "down": 5,
+      "breadth_pct": 63.21,
+      "momentum_pct": 87.5
+    },
+    "Consumer Staples": {
+      "nh": 26,
+      "nl": 72,
+      "up": 2,
+      "down": 13,
+      "breadth_pct": 26.53,
+      "momentum_pct": 13.33
+    },
+    "Energy": {
+      "nh": 88,
+      "nl": 32,
+      "up": 5,
+      "down": 4,
+      "breadth_pct": 73.33,
+      "momentum_pct": 55.56
+    },
+    "Financials": {
+      "nh": 304,
+      "nl": 100,
+      "up": 44,
+      "down": 29,
+      "breadth_pct": 75.25,
+      "momentum_pct": 60.27
+    },
+    "Healthcare": {
+      "nh": 402,
+      "nl": 146,
+      "up": 44,
+      "down": 18,
+      "breadth_pct": 73.36,
+      "momentum_pct": 70.97
+    },
+    "Industrials": {
+      "nh": 251,
+      "nl": 106,
+      "up": 45,
+      "down": 12,
+      "breadth_pct": 70.31,
+      "momentum_pct": 78.95
+    },
+    "Materials": {
+      "nh": 55,
+      "nl": 35,
+      "up": 6,
+      "down": 9,
+      "breadth_pct": 61.11,
+      "momentum_pct": 40.0
+    },
+    "Real Estate": {
+      "nh": 77,
+      "nl": 51,
+      "up": 2,
+      "down": 4,
+      "breadth_pct": 60.16,
+      "momentum_pct": 33.33
+    },
+    "Utilities": {
+      "nh": 40,
+      "nl": 12,
+      "up": 2,
+      "down": 5,
+      "breadth_pct": 76.92,
+      "momentum_pct": 28.57
+    },
+    "tech": {
+      "nh": 196,
+      "nl": 131,
+      "up": 31,
+      "down": 22,
+      "breadth_pct": 59.94,
+      "momentum_pct": 58.49
+    }
   },
   "indicesVsMAs": {
     "ES": {
@@ -178,88 +255,88 @@
   },
   "capGroups": {
     "all": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 5470,
+      "nh": 1704,
+      "nl": 1202,
+      "up": 200,
+      "down": 157,
+      "breadth_pct": 58.64,
+      "momentum_pct": 56.02,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 1660,
+        "nl": 859,
+        "up": 222,
+        "down": 129,
+        "breadth_pct": 65.9,
+        "momentum_pct": 63.25
       }
     },
     "large": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 909,
+      "nh": 402,
+      "nl": 182,
+      "up": 46,
+      "down": 33,
+      "breadth_pct": 68.84,
+      "momentum_pct": 58.23,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 341,
+        "nl": 142,
+        "up": 60,
+        "down": 32,
+        "breadth_pct": 70.6,
+        "momentum_pct": 65.22
       }
     },
     "mid": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 1114,
+      "nh": 438,
+      "nl": 198,
+      "up": 42,
+      "down": 24,
+      "breadth_pct": 68.87,
+      "momentum_pct": 63.64,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 420,
+        "nl": 159,
+        "up": 44,
+        "down": 16,
+        "breadth_pct": 72.54,
+        "momentum_pct": 73.33
       }
     },
     "small": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 3428,
+      "nh": 861,
+      "nl": 816,
+      "up": 111,
+      "down": 99,
+      "breadth_pct": 51.34,
+      "momentum_pct": 52.86,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 897,
+        "nl": 553,
+        "up": 117,
+        "down": 77,
+        "breadth_pct": 61.86,
+        "momentum_pct": 60.31
       }
     },
     "unknown": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
+      "members": 19,
+      "nh": 3,
+      "nl": 6,
+      "up": 1,
+      "down": 1,
+      "breadth_pct": 33.33,
       "momentum_pct": 50.0,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 2,
+        "nl": 5,
+        "up": 1,
+        "down": 4,
+        "breadth_pct": 28.57,
+        "momentum_pct": 20.0
       }
     },
     "thresholds": {
@@ -267,8 +344,8 @@
       "midMin": 2000000000,
       "smallMaxExclusive": 2000000000
     },
-    "classifiedMembers": 0,
-    "classificationCoveragePct": 0.0,
+    "classifiedMembers": 5451,
+    "classificationCoveragePct": 99.65,
     "marketCapSource": "FMP_BATCH_MARKET_CAP",
     "marketCapAvailable": true,
     "marketCapReason": null
