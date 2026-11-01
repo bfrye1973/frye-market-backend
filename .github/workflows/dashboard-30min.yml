@@ -51,10 +51,12 @@ jobs:
             --out data/outlook_30m_internals.json
 
       - name: Validate canonical contract
+        id: validation
         run: |
           python - << 'PY'
           import json
           from datetime import datetime
+          import os
 
           p = "data/outlook_30m_internals.json"
           j = json.load(open(p, "r", encoding="utf-8"))
@@ -63,6 +65,23 @@ jobs:
           assert j["timeframe"] == "30m"
           assert len(j["sectorCards"]) == 11
           assert j["strongSectorCount"] + j["neutralSectorCount"] + j["weakSectorCount"] == 11
+          # A completed 30m bar is not available during every manual run.
+          # Do not publish or archive empty snapshots, but treat a genuine
+          # no-session run as a clean skip instead of a broken scanner.
+          if j["stocksScanned"] == 0 or j["stocksWithVolume"] == 0:
+              import os
+              from datetime import timezone
+              from zoneinfo import ZoneInfo
+              source_utc = datetime.fromisoformat(j["sourceTimestamp"].replace("Z", "+00:00"))
+              eastern = source_utc.astimezone(ZoneInfo("America/New_York"))
+              market_day = eastern.weekday() < 5
+              regular_session = (9, 30) <= (eastern.hour, eastern.minute) <= (16, 0)
+              if market_day and regular_session:
+                  raise AssertionError(f"No stock volume during regular session: source={source_utc}, scanned={j['stocksScanned']}, withVolume={j['stocksWithVolume']}")
+              print(f"No eligible completed 30m market observations: source={source_utc}; skipping publication")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("publish=false\\n")
+              raise SystemExit(0)
           assert j["stocksScanned"] > 0
           assert j["stocksWithVolume"] > 0
           assert j["advancingStocks"] is not None
@@ -75,14 +94,18 @@ jobs:
           generated = datetime.fromisoformat(j["generatedAt"].replace("Z", "+00:00"))
           assert generated >= source
           print("contract PASS", j["sourceTimestamp"], j["stocksScanned"], j["coveragePct"])
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("publish=true\\n")
           PY
 
       - name: Stage artifacts
+        if: steps.validation.outputs.publish == 'true'
         run: |
           mkdir -p /tmp/engine25-30m
           cp data/outlook_30m_internals.json /tmp/engine25-30m/outlook_30m_internals.json
 
       - name: Publish live branch
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           git config user.email "bot@users.noreply.github.com"
@@ -106,6 +129,7 @@ jobs:
           git push --force origin "$LIVE_BRANCH"
 
       - name: Build immutable archive record
+        if: steps.validation.outputs.publish == 'true'
         id: snapshot
         run: |
           set -euo pipefail
@@ -120,6 +144,7 @@ jobs:
           echo "source_ts=$SOURCE_TS" >> "$GITHUB_OUTPUT"
 
       - name: Checkout archive branch
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           if git ls-remote --exit-code --heads origin "$ARCHIVE_BRANCH" >/dev/null 2>&1; then
@@ -131,6 +156,7 @@ jobs:
           fi
 
       - name: Install immutable archive snapshot
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
@@ -149,6 +175,7 @@ jobs:
           fi
 
       - name: Enforce rolling 30-day retention
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           python /tmp/archive_engine25_30m.py prune \
@@ -156,6 +183,7 @@ jobs:
             --retention-days "$RETENTION_DAYS"
 
       - name: Validate staged archive
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           ARCH_PATH="${{ steps.snapshot.outputs.archive_rel }}"
@@ -176,6 +204,7 @@ jobs:
           PY
 
       - name: Commit archive and retention changes
+        if: steps.validation.outputs.publish == 'true'
         run: |
           set -euo pipefail
           git config user.email "bot@users.noreply.github.com"
