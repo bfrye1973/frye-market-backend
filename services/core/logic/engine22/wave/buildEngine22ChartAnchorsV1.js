@@ -126,6 +126,17 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
         levelsFromExistingEngine22:true,
         ownerAnchorModelReconciled:false
       }])),
+      modelDifferences:[
+        {degree:"micro",anchor:"A_HIGH",ownerPrice:7810.50,revision5Price:7810.00},
+        {degree:"micro",anchor:"A_LOW",ownerPrice:7660.00,revision5Price:7663.25},
+        {degree:"micro",anchor:"B_HIGH",ownerPrice:7819.50,revision5Price:7814.75},
+        {degree:"subminute",anchor:"A_HIGH",ownerPrice:7908.25,revision5Price:7901.00},
+        {degree:"subminute",anchor:"A_LOW",ownerPrice:7575.00,revision5WickLow:7558.75,revision5BodyLow:7617.50},
+        {degree:"subminute",anchor:"B_HIGH",ownerPrice:7895.50,revision5Price:7895.00},
+        {degree:"minute",anchor:"W1_START_LOW",ownerPrice:7412.50,revision5Price:7419.50},
+        {degree:"minute",anchor:"W1_END_HIGH",ownerPrice:7906.25,revision5Price:7908.75}
+      ],
+      modelDifferencesStatus:"OWNER_CHART_COORDINATES_NOT_PROMOTED_TO_REVISION5",
       displayAuthority:"OWNER_RESEARCH_ONLY",
       requiresSeparateResearchDisplayAuthorization:true,
       verifiedPriceBasis:false,noExecution:true
