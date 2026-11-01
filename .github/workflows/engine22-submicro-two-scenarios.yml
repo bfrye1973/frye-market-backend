@@ -1,0 +1,20 @@
+name: Engine22 Submicro Two Scenarios
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV1.js"
+      - "services/core/tests/engine22SubmicroComparisonNov1.test.js"
+      - ".github/workflows/engine22-submicro-two-scenarios.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --test services/core/tests/engine22SubmicroComparisonNov1.test.js
