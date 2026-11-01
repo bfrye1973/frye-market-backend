@@ -73,10 +73,12 @@ jobs:
           # Keep reconstructed EOD v1 shadow cards additive and isolated.
           mode=(j.get("mode") or "daily")
           shadow_cards=j.get("shadowSectorCards") or []
+          shadow_symbol_rows=j.get("shadowSymbolRows") or []
           out={
             "mode":mode,
             "sectorCards":cards,
             "shadowSectorCards":shadow_cards,
+            "shadowSymbolRows":shadow_symbol_rows,
             "meta":(j.get("meta") or {}),
           }
           json.dump(out,open(p,"w",encoding="utf-8"),ensure_ascii=False,indent=2)
