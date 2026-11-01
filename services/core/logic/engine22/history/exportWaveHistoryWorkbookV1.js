@@ -48,7 +48,7 @@ function flattenAnchors(value,path="",depth=0,out=[]){
   const p=path?path+"."+k:k;
   if(v&&typeof v==="object")flattenAnchors(v,p,depth+1,out);
   else if(typeof v==="number"&&Number.isFinite(v)&&/(?:low|high|price|origin|start|end|pivot)/i.test(k)&&!/(?:length|ratio|revision|timestamp)/i.test(k))
-   out.push({path:p,price:v});
+   out.push({path:p,price:v,eventTime:value[k+"LocalTime"]??value[k+"Time"]??value.localTime??(((k==="startHigh"||k==="w1High")&&value.startLocalTime)||null)??(((k==="low"||k==="wickLow"||k==="bodyReferenceLow")&&value.endLocalTime)||null)});
  }
  return out;
 }
@@ -80,7 +80,7 @@ export function buildWaveHistoryWorkbook({events}={}){
    if(!m)continue;
    const anchors=flattenAnchors(m);
    for(const a of anchors){
-    const row=[event.revision,degree,a.path,a.price,d.modelVersion,c.selectionRevision,c.publishedAt,event.observedAt,d.sourcePath,c.selectionApprovalReference];
+    const row=[event.revision,degree,a.path,a.price,a.eventTime,d.modelVersion,c.selectionRevision,c.publishedAt,event.observedAt,d.sourcePath,c.selectionApprovalReference];
     history.push(row);
     if(event===latest)current.push(row);
    }
@@ -97,7 +97,7 @@ export function buildWaveHistoryWorkbook({events}={}){
   }
   changes.push([event.revision,event.observedAt,c.publishedAt,c.selectionRevision,c.selectionApprovalReference,c.modelFingerprint,c.evidenceFingerprint,event.contentHash,event.previousEventHash,event.eventHash]);
  }
- const h=["Revision","Degree","Source Anchor Path","ES Price","Model Version","Selection Revision","Published At UTC","Journal Observed UTC","Model Source","Approval Reference"];
+ const h=["Revision","Degree","Source Anchor Path","ES Price","Pivot Time (Source)","Model Version","Selection Revision","Published At UTC","Journal Observed UTC","Model Source","Approval Reference"];
  const specs=[
   ["Current Anchors",h,current],
   ["Complete History",h,history],
