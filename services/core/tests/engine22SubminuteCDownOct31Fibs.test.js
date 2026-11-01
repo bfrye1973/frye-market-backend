@@ -56,3 +56,15 @@ test("candle before B end cannot record a false C down Fib touch",()=>{
   assert(m.fibReferences.wick.levels.every(l=>l.status==="WATCH"));
   assert(m.fibReferences.body.levels.every(l=>l.status==="WATCH"));
 });
+
+test("owner Oct30 chart low marks only reached levels, never verified candles",()=>{
+ const w=buildCurrentWavelength({symbol:"ES",currentPrice:7900});
+ const r=applyOwnerPriceTouchesV1({currentWavelength:w,currentPrice:7900,
+   evaluationTimeMs:Date.parse("2026-10-31T16:00:00Z"),bars10m:[]});
+ const c=r.degrees.subminute.ownerSubminuteCDownOct31;
+ assert.deepEqual(c.fibReferences.wick.levels.map(x=>x.status),["TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
+ assert.deepEqual(c.fibReferences.body.levels.map(x=>x.status),["TOUCHED","TOUCHED","WATCH","WATCH","WATCH"]);
+ assert.equal(c.fibReferences.body.levels[1].touchEvidenceType,"OWNER_CHART_OBSERVATION");
+ assert.equal(c.fibReferences.body.levels[1].touchEvidence.verified,false);
+ assert.equal(c.fibReferences.body.levels[1].touchedAt,null);
+});
