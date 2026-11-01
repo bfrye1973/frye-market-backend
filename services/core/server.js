@@ -1,3 +1,4 @@
+import engine22WaveHistoryRouter from "./routes/engine22WaveHistory.js";
 import engine27MicroAlignmentHistoryRouter from "./routes/engine27MicroAlignmentHistory.js";
 // services/core/server.js
 // Backend-1 (Core API) — Express entry (ESM)
@@ -160,6 +161,7 @@ app.get("/", (_req, res) => {
 app.get("/engine2c-private-history/page",makeEngine2cResearchRoute());
 
 // --- API routes ---
+app.use("/api/engine22/wave-history",engine22WaveHistoryRouter);
 app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter);
