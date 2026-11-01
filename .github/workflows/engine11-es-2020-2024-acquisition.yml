@@ -1,0 +1,38 @@
+name: Engine 11 original quarterly ES history 2020-2024 (isolated)
+on:
+  push:
+    branches: [engine11-2020-2024-raw-es-acquisition-v1]
+    paths:
+      - services/core/scripts/captureEngine11Historical2020to2024.mjs
+      - .github/workflows/engine11-es-2020-2024-acquisition.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        year: [2020, 2021, 2022, 2023, 2024]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check services/core/scripts/captureEngine11Historical2020to2024.mjs
+      - name: Acquire original Massive ES contract responses, no derived candles
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          ENGINE11_ACQUISITION_YEAR: ${{ matrix.year }}
+          ENGINE11_CAPTURE_OUTPUT: /tmp/engine11-es-2020-2024
+        run: node services/core/scripts/captureEngine11Historical2020to2024.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-original-es-raw-${{ matrix.year }}
+          path: /tmp/engine11-es-2020-2024/${{ matrix.year }}/*
+          if-no-files-found: warn
+          retention-days: 30
