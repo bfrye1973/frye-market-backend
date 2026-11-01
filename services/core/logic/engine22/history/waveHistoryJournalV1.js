@@ -52,9 +52,10 @@ export function appendWaveHistoryObservation({directory,observation}={}){
  let lockFd;
  try{lockFd=openSync(lock,"wx");}catch{throw Error("JOURNAL_WRITER_LOCK_UNAVAILABLE");}
  try{
-  const lines=existsSync(file)?readFileSync(file,"utf8").split("\n").filter(Boolean):[];
-  let last=null;
-  for(const line of lines){const event=JSON.parse(line);if(event?.schema!=="engine22.waveHistoryEvent.v1"||!event?.contentHash)throw Error("JOURNAL_CORRUPT");last=event;}
+  // Validate the complete existing hash chain before any append.
+  // A malformed/truncated last record must never be silently discarded.
+  const events=readWaveHistory({directory});
+  const last=events.at(-1)??null;
   if(last?.contentHash===observation.contentHash)return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
   const event={schema:"engine22.waveHistoryEvent.v1",revision:(last?.revision??0)+1,
    previousEventHash:last?.eventHash??null,observedAt:observation.observedAt,
@@ -69,7 +70,12 @@ export function readWaveHistory({directory}={}){
  if(!directory)return [];
  const file=join(directory,"wave-history.v1.jsonl");
  if(!existsSync(file))return [];
- const events=readFileSync(file,"utf8").split("\n").filter(Boolean).map(JSON.parse);
+ const raw=readFileSync(file,"utf8");
+ if(raw.length&&!raw.endsWith("\n"))throw Error("JOURNAL_INTERRUPTED_WRITE");
+ const lines=raw.split("\n").slice(0,-1);
+ if(lines.some(line=>!line.trim()))throw Error("JOURNAL_MALFORMED_RECORD");
+ let events;
+ try{events=lines.map(JSON.parse);}catch{throw Error("JOURNAL_MALFORMED_RECORD");}
  let previous=null;
  for(let i=0;i<events.length;i++){
   const e=events[i],{eventHash,...body}=e;
