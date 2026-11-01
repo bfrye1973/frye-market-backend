@@ -22,7 +22,7 @@ function windowBounds(code){
   const [letter,month]=code;
   // Every quarterly ticker is independently acquired with overlapping adjacent contracts.
   // December 2020 H2021 evidence is captured in the 2021 batch.
-  const from=letter==='H'?UTC(year-1,12):UTC(year,month-1);
+  const from=letter==='H'?UTC(year-1,12):UTC(year,month-3);
   const until=letter==='Z'?UTC(year+1,2):UTC(year,month+1);
   return [Math.max(from,UTC(2020,3)),Math.min(until,UTC(2024,11))];
 }
