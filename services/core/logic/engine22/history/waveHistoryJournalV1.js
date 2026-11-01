@@ -37,7 +37,8 @@ export function buildWaveHistoryObservation({strategy,observedAt,sourceSnapshotI
   selectionApprovalReference:authority.selectionApprovalReference??null,
   modelFingerprint:authority.modelFingerprint??null,
   evidenceFingerprint:authority.evidenceFingerprint??null,
-  publishedAt:authority.publishedAt??null,sourceSnapshotId,degreeOrder:DEGREE_ORDER,
+  publishedAt:authority.publishedAt??null,
+  ownerApprovedAt:authority.approvedAt??null,sourceSnapshotId,degreeOrder:DEGREE_ORDER,
   degrees,noExecution:true,historicalAsOfSupported:false};
  return {ok:true,content,contentHash:semanticHash(content),observedAt:timestamp};
 }
@@ -59,6 +60,7 @@ export function appendWaveHistoryObservation({directory,observation}={}){
   if(last?.contentHash===observation.contentHash)return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
   const event={schema:"engine22.waveHistoryEvent.v1",revision:(last?.revision??0)+1,
    previousEventHash:last?.eventHash??null,observedAt:observation.observedAt,
+   eventType:last?"WAVE_PUBLICATION_CHANGE":"INITIAL_OBSERVATION_NOT_HISTORICAL_RECONSTRUCTION",
    contentHash:observation.contentHash,content:observation.content};
   event.eventHash=digest(event);
   const fd=openSync(file,"a");
