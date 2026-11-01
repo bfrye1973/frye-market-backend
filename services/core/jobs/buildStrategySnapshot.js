@@ -1,3 +1,4 @@
+import {exportWaveHistoryWorkbook} from "../logic/engine22/history/exportWaveHistoryWorkbookV1.js";
 import {buildWaveHistoryObservation,appendWaveHistoryObservation} from "../logic/engine22/history/waveHistoryJournalV1.js";
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
@@ -10584,9 +10585,15 @@ if (String(symbol).toUpperCase()==="ES" && s.strategyId==="intraday_scalp@10m") 
   } else {
     try {
       const journal=appendWaveHistoryObservation({directory,observation});
+      let workbookStatus="UNCHANGED",workbookError=null;
+      if(journal.status==="APPENDED"){
+        try{exportWaveHistoryWorkbook({directory});workbookStatus="UPDATED";}
+        catch(error){workbookStatus="FAILED";workbookError=String(error?.message||error);console.error("[ENGINE22 WAVE XLSX EXPORT ERROR]",workbookError);}
+      }
       result.strategies[s.strategyId].engine22WaveHistory={
         available:true,schema:"engine22.waveHistoryObservation.v1",
         latestRevision:journal.revision,contentHash:journal.contentHash,
+        workbookStatus,workbookFile:"Frye_Elliott_Wave_History.xlsx",workbookError,
         latestObservation:observation.content,
         historicalAsOfSupported:false,noExecution:true,
       };
