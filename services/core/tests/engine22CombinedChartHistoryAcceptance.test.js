@@ -24,6 +24,15 @@ test("Engine22 selected model reaches chart and permanent Excel history without 
   assert.equal(chart.degrees.subminute.fibGroups.length,2);
   assert.equal(chart.modelFingerprint,authorizedWorkingStructure.modelFingerprint);
   assert.equal(chart.plotAllowed,false);
+  assert.equal(chart.ownerResearchChart.anchors.length,24);
+  assert.deepEqual(Object.keys(chart.ownerResearchChart.fibByDegree),["submicro","micro","subminute","minute","minor","intermediate","primary"]);
+  assert.equal(chart.ownerResearchChart.anchors.find(a=>a.id==="OWNER_MICRO_B_HIGH").price,7819.5);
+  assert.equal(chart.ownerResearchChart.anchors.find(a=>a.id==="OWNER_PRIMARY_W1_START_LOW").price,3200);
+  assert.equal(chart.ownerResearchChart.fibByDegree.subminute.fibGroups.length,2);
+  assert.equal(chart.ownerResearchChart.fibByDegree.submicro.scenarios.length,2);
+  assert.equal(chart.ownerResearchChart.verifiedPriceBasis,false);
+  assert.equal(chart.ownerResearchChart.requiresSeparateResearchDisplayAuthorization,true);
+  assert.equal(chart.degrees.micro.anchors.find(a=>a.anchorId==="B_HIGH").price,7814.75);
   const observation=buildWaveHistoryObservation({strategy,observedAt:"2026-10-31T20:05:00Z"});
   assert.equal(observation.ok,true);
   assert.equal(appendWaveHistoryObservation({directory,observation}).revision,1);
