@@ -52,7 +52,13 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
         if(ref) d.fibGroups.push(group(method.toUpperCase(),ref.levels,p+".fibReferences."+method+".levels"));
         else d.missingEvidence.push("MISSING_"+method.toUpperCase()+"_FIB_REFERENCE");
       }
-      d.missingEvidence.push("VERIFY_SUBMINUTE_ANCHOR_TIME_AND_PRICE_BASIS");
+      d.anchors=[
+        anchor("A_HIGH","A_HIGH",model.waveA?.startHigh,model.waveA?.startLocalTime,p+".waveA.startHigh"),
+        anchor("A_WICK_LOW","A_WICK_LOW",model.waveA?.wickLow,model.waveA?.endLocalTime,p+".waveA.wickLow"),
+        anchor("A_BODY_REFERENCE","A_BODY_REFERENCE",model.waveA?.bodyReferenceLow,model.waveA?.endLocalTime,p+".waveA.bodyReferenceLow","OWNER_BODY_REFERENCE"),
+        anchor("B_HIGH","B_HIGH",model.priorBEnding?.price,null,p+".priorBEnding.price"),
+      ];
+      d.missingEvidence.push("B_HIGH_TIME_UNVERIFIED","ANCHOR_PRICE_BASIS_UNVERIFIED");
     } else if (degree==="submicro") {
       d.fibGroups=[];
       for(const [id,key] of [["OPTION_1_ABC_C_DOWN","option1"],["OPTION_2_A_DOWN_B_UP_PENDING","option2"]]) {
@@ -76,8 +82,8 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
     } else if (degree==="minute") {
       const a=model.anchors || {},p=s.sourcePath+".anchors";
       d.anchors=[
-        anchor("W1_LOW","W1_LOW",a.w1Low,a.w1LowLocalTime,p+".w1Low"),
-        anchor("W1_HIGH","W1_HIGH",a.w1High,a.w1HighLocalTime,p+".w1High"),
+        anchor("W1_LOW","W1_LOW",a.w1Low,(a.w1LowLocalTime || a.w1LowTime),p+".w1Low"),
+        anchor("W1_HIGH","W1_HIGH",a.w1High,(a.w1HighLocalTime || a.w1HighTime),p+".w1High"),
         anchor("W2_END","W2_END",null,null,p+".w2End","NOT_CONFIRMED")
       ];
       d.missingEvidence.push("W2_END_NOT_CONFIRMED");
@@ -90,8 +96,8 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
   const available=DEGREE_ORDER.some(degree=>degrees[degree].available);
   const core={schema:"engine22.chartAnchors.v1",authority:"ENGINE22",mode:"READ_ONLY",
     available,reasonCodes:available?[]:["CURRENT_AUTHORIZED_STRUCTURE_UNAVAILABLE"],
-    selectionRevision:authorizedWorkingStructure?.selectionRevision??null,
-    selectionApprovalReference:authorizedWorkingStructure?.approvalReference??null,
+    selectionRevision:authorizedWorkingStructure?.publicationRevision??null,
+    selectionApprovalReference:authorizedWorkingStructure?.selectionApprovalReference??null,\n    modelFingerprint:authorizedWorkingStructure?.modelFingerprint??null,\n    evidenceFingerprint:authorizedWorkingStructure?.evidenceFingerprint??null,\n    publishedAtUtc:authorizedWorkingStructure?.publishedAt??null,
     symbol:currentWavelength?.symbol || "ES",contractId:null,priceBasis:"UNVERIFIED",
     chartCompatibility:"WITHHELD_PENDING_VERIFICATION",
     priceBasisIds:copy(metadata.priceBasisIds)||null,
