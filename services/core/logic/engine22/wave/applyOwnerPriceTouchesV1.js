@@ -246,13 +246,27 @@ export function applyOwnerPriceTouchesV1({
           l.key===level.key&&l.price===level.price):null);
         const kept=prior?.status==="TOUCHED"&&prior?.price===level.price;
         const hit=kept?null:observed.find(o=>o.low<=level.price);
-        const proof=kept?(prior.touchEvidenceType||"PREVIOUS_SNAPSHOT"):(hit?.source||null);
-        return {...level,status:kept||hit?"TOUCHED":"WATCH",
-          touchEvidenceAvailable:Boolean(kept||hit),
-          touchEvidenceType:proof,touchedAt:kept?prior.touchedAt||null:hit?.time||null,
+        // Owner supplied the chart's October 30 low of 7558.25. This is a
+        // date-only observation, NOT an authenticated ES candle or precise
+        // first-touch time. It may annotate only packets after that day.
+        const ownerLow=Number(newC.observedLowReference?.price);
+        const ownerDate=newC.observedLowReference?.date;
+        const ownerEligible=ownerDate==="2026-10-30" &&
+          now>=Date.parse("2026-10-31T07:00:00Z") &&
+          Number.isFinite(ownerLow) && ownerLow>0 &&
+          newC.observedLowReference?.status==="OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END";
+        const ownerTouch=!kept&&!hit&&ownerEligible&&ownerLow<=level.price;
+        const proof=kept?(prior.touchEvidenceType||"PREVIOUS_SNAPSHOT"):
+          hit?.source||(ownerTouch?"OWNER_CHART_OBSERVATION":null);
+        return {...level,status:kept||hit||ownerTouch?"TOUCHED":"WATCH",
+          touchEvidenceAvailable:Boolean(kept||hit||ownerTouch),
+          touchEvidenceType:proof,
+          touchedAt:kept?prior.touchedAt||null:hit?.time||null,
           touchEvidence:kept?prior.touchEvidence||null:hit?
             {verified:hit.source==="ES_10M_COMPLETED_OHLC",
-             evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?"COMPLETED_CANDLE":"SNAPSHOT_PRICE"}:null};
+             evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?"COMPLETED_CANDLE":"SNAPSHOT_PRICE"}:
+             ownerTouch?{verified:false,evidenceClass:"OWNER_CHART_OBSERVATION",
+               observedDate:"2026-10-30",precision:"DATE_ONLY"}:null};
       });
       disk[id]=Object.fromEntries(ref.levels.filter(l=>l.status==="TOUCHED")
         .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
