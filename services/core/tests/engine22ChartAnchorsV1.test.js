@@ -79,3 +79,24 @@ test("strategy wrapper reuses sibling authority and provides unavailable fallbac
  assert.match(code,/chartAnchors: buildEngine22ChartAnchorsV1\(\)/);
  assert.match(code,/const chartAnchors = buildEngine22ChartAnchorsV1/);
 });
+
+test("adapter preserves exact sibling publication identity and all source Fibonacci levels",()=>{
+ const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7558.25});
+ const ds={minor:{activeWave:"W5",direction:"UP"},intermediate:{activeWave:"W3",direction:"UP"},primary:{activeWave:"W5",direction:"UP"}};
+ const authorized=buildAuthorizedWorkingStructureV1({currentWavelength:cw,degreeStates:ds});
+ const p=buildEngine22ChartAnchorsV1({currentWavelength:cw,authorizedWorkingStructure:authorized,metadata:{degreeStates:ds}});
+ assert.equal(p.modelFingerprint,authorized.modelFingerprint);
+ assert.equal(p.evidenceFingerprint,authorized.evidenceFingerprint);
+ assert.equal(p.selectionApprovalReference,authorized.selectionApprovalReference);
+ assert.equal(p.selectionRevision,authorized.publicationRevision);
+ for(const degree of ["micro","minute","minor","intermediate","primary"]){
+   assert.deepEqual(p.degrees[degree].fibGroups[0].levels,authorized.degrees[degree].levels);
+ }
+ assert.deepEqual(p.degrees.subminute.fibGroups[0].levels,cw.degrees.subminute.ownerSubminuteCDownOct31.fibReferences.wick.levels);
+ assert.deepEqual(p.degrees.subminute.fibGroups[1].levels,cw.degrees.subminute.ownerSubminuteCDownOct31.fibReferences.body.levels);
+ assert.deepEqual(p.degrees.submicro.scenarios[0].fibGroups[0].levels,cw.degrees.submicro.submicroCompare.option1.levels);
+ assert.deepEqual(p.degrees.submicro.scenarios[1].fibGroups[0].levels,cw.degrees.submicro.submicroCompare.option2.levels);
+ assert.equal(p.degrees.micro.officialInvalidation,null);
+ assert.equal(p.degrees.subminute.officialInvalidation,null);
+ assert.equal(p.plotAllowed,false);
+});
