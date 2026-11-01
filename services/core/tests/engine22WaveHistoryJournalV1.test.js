@@ -1,3 +1,4 @@
+import {readFileSync} from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync,rmSync,readFileSync} from "node:fs";
@@ -45,4 +46,23 @@ test("records every changed publication, deduplicates identical state and verifi
 test("rejects missing authority and missing event time",()=>{
  assert.equal(buildWaveHistoryObservation({strategy:{},observedAt:"2026-10-31T20:05:00Z"}).ok,false);
  assert.equal(buildWaveHistoryObservation({strategy:fixture()}).reason,"OBSERVATION_TIME_REQUIRED");
+});
+
+test("actual strategy-card publication captures Engine22 automatically",()=>{
+ const source=readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
+ const publish=source.indexOf("result.strategies[s.strategyId] = {\n  ...strategy,\n  executionState,\n};");
+ const capture=source.indexOf("const wave=result.strategies[s.strategyId]?.engine22WaveStrategy;",publish);
+ assert.ok(publish>=0&&capture>publish);
+ assert.match(source.slice(capture,capture+1600),/appendWaveHistoryObservation/);
+ assert.match(source.slice(capture,capture+1600),/engine22WaveHistory/);
+});
+test("snapshot publication time alone does not create a duplicate history revision",()=>{
+ const directory=mkdtempSync(join(tmpdir(),"engine22-history-dedupe-"));
+ try{
+  const a=fixture(),b=structuredClone(a);
+  b.authorizedWorkingStructure.publishedAt="2026-10-31T20:10:00Z";
+  assert.equal(appendWaveHistoryObservation({directory,observation:buildWaveHistoryObservation({strategy:a,observedAt:"2026-10-31T20:05:00Z"})}).status,"APPENDED");
+  assert.equal(appendWaveHistoryObservation({directory,observation:buildWaveHistoryObservation({strategy:b,observedAt:"2026-10-31T20:10:00Z"})}).status,"UNCHANGED");
+  assert.equal(readWaveHistory({directory}).length,1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
 });
