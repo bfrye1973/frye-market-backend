@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCurrentWavelength } from "../logic/engine22/wave/buildCurrentWavelength.js";
@@ -69,4 +70,12 @@ test("selection version mismatch fails closed for affected degree",()=>{
  assert.equal(packet.degrees.micro.available,false);
  assert.ok(packet.degrees.micro.missingEvidence.includes("CURRENT_AUTHORIZED_MODEL_UNAVAILABLE"));
  assert.equal(packet.plotAllowed,false);
+});
+
+test("strategy wrapper reuses sibling authority and provides unavailable fallback",()=>{
+ const code=readFileSync(new URL("../logic/engine22/wave/buildEngine22WaveStrategy.js",import.meta.url),"utf8");
+ assert.match(code,/authorizedWorkingStructure: chartAuthorized/);
+ assert.match(code,/sevenDegreeInvalidations: chartInvalidations/);
+ assert.match(code,/chartAnchors: buildEngine22ChartAnchorsV1\(\)/);
+ assert.match(code,/const chartAnchors = buildEngine22ChartAnchorsV1/);
 });
