@@ -1,3 +1,4 @@
+import {execFileSync} from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync,rmSync,readFileSync} from "node:fs";
@@ -31,6 +32,8 @@ test("creates real XLSX package with current, history, changes, Fib and seven de
   assert.equal(second.revisions,2);
   assert.ok(second.bytes>first.bytes);
   assert.ok(readFileSync(second.path).includes(Buffer.from("xl/worksheets/sheet12.xml")));
+  const verified=execFileSync("python3",["-c",`import sys,zipfile,xml.etree.ElementTree as E\np=sys.argv[1]\nwith zipfile.ZipFile(p) as z:\n assert z.testzip() is None\n names=z.namelist()\n assert len([n for n in names if n.startswith("xl/worksheets/sheet")])==12\n for n in names:\n  if n.endswith(".xml") or n.endswith(".rels"): E.fromstring(z.read(n))\n print("VALID_XLSX_12_SHEETS")`,second.path],{encoding:"utf8"});
+  assert.match(verified,/VALID_XLSX_12_SHEETS/);
  }finally{rmSync(directory,{recursive:true,force:true});}
 });
 test("rejects nonverified input instead of creating false history",()=>{
