@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync,rmSync,readFileSync} from "node:fs";
+import {mkdtempSync,rmSync,readFileSync,writeFileSync,openSync,closeSync,mkdirSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
@@ -62,6 +62,51 @@ test("snapshot publication time alone does not create a duplicate history revisi
   b.authorizedWorkingStructure.publishedAt="2026-10-31T20:10:00Z";
   assert.equal(appendWaveHistoryObservation({directory,observation:buildWaveHistoryObservation({strategy:a,observedAt:"2026-10-31T20:05:00Z"})}).status,"APPENDED");
   assert.equal(appendWaveHistoryObservation({directory,observation:buildWaveHistoryObservation({strategy:b,observedAt:"2026-10-31T20:10:00Z"})}).status,"UNCHANGED");
+  assert.equal(readWaveHistory({directory}).length,1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+test("rejects corrupt earlier chain before appending",()=>{
+ const directory=mkdtempSync(join(tmpdir(),"engine22-history-corrupt-"));
+ try{
+  const observation=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
+  appendWaveHistoryObservation({directory,observation});
+  const file=join(directory,"wave-history.v1.jsonl");
+  const event=JSON.parse(readFileSync(file,"utf8").trim());
+  event.content.degrees.micro.sourceModel.priorBEnding.price=9999;
+  writeFileSync(file,JSON.stringify(event)+"\n");
+  assert.throws(()=>appendWaveHistoryObservation({directory,observation}),/JOURNAL_INTEGRITY_FAILURE/);
+  assert.equal(readFileSync(file,"utf8").trim().split("\n").length,1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+test("interrupted writes and malformed records fail closed",()=>{
+ for(const payload of ['{"schema":"unfinished"',"{not-json}\n"]){
+  const directory=mkdtempSync(join(tmpdir(),"engine22-history-interrupt-"));
+  try{
+   writeFileSync(join(directory,"wave-history.v1.jsonl"),payload);
+   const observation=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
+   assert.throws(()=>appendWaveHistoryObservation({directory,observation}),/JOURNAL_INTERRUPTED_WRITE|JOURNAL_MALFORMED_RECORD/);
+   assert.equal(readFileSync(join(directory,"wave-history.v1.jsonl"),"utf8"),payload);
+  }finally{rmSync(directory,{recursive:true,force:true});}
+ }
+});
+test("concurrent writer lock rejects second writer without modifying history",()=>{
+ const directory=mkdtempSync(join(tmpdir(),"engine22-history-lock-"));
+ try{
+  const fd=openSync(join(directory,".writer.lock"),"wx");
+  try{
+   const observation=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
+   assert.throws(()=>appendWaveHistoryObservation({directory,observation}),/JOURNAL_WRITER_LOCK_UNAVAILABLE/);
+   assert.equal(readWaveHistory({directory}).length,0);
+  }finally{closeSync(fd);}
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+test("history persists across independent reader invocations",()=>{
+ const directory=mkdtempSync(join(tmpdir(),"engine22-history-restart-"));
+ try{
+  const observation=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
+  appendWaveHistoryObservation({directory,observation});
+  assert.equal(readWaveHistory({directory})[0].contentHash,observation.contentHash);
   assert.equal(readWaveHistory({directory}).length,1);
  }finally{rmSync(directory,{recursive:true,force:true});}
 });
