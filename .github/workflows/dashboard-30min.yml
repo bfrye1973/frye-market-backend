@@ -61,10 +61,10 @@ jobs:
 
           assert j["schema"] == "engine25.marketInternals30m@1"
           assert j["timeframe"] == "30m"
-          assert len(j["sectorCards"]) == 11
+          assert len(j["sectorCards"]) == 11, f"expected 11 sectors, got {len(j.get('sectorCards', []))}"
           assert j["strongSectorCount"] + j["neutralSectorCount"] + j["weakSectorCount"] == 11
-          assert j["stocksScanned"] > 0
-          assert j["stocksWithVolume"] > 0
+          assert j["stocksScanned"] > 0, f"no stock observations; source={j.get('sourceTimestamp')} generated={j.get('generatedAt')} (market closed or no completed bars?)"
+          assert j["stocksWithVolume"] > 0, f"no valid stock volume; scanned={j.get('stocksScanned')} source={j.get('sourceTimestamp')}"
           assert j["advancingStocks"] is not None
           assert j["decliningStocks"] is not None
           assert j["newHighs"] is not None
