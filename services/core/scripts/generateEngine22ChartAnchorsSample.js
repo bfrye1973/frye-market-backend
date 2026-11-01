@@ -1,5 +1,4 @@
 import { writeFileSync, mkdirSync } from "node:fs";
-import { buildEngine22WaveStrategy } from "../logic/engine22/wave/buildEngine22WaveStrategy.js";
 import { buildCurrentWavelength } from "../logic/engine22/wave/buildCurrentWavelength.js";
 import { buildAuthorizedWorkingStructureV1 } from "../logic/engine22/wave/buildAuthorizedWorkingStructureV1.js";
 import { buildEngine22ChartAnchorsV1 } from "../logic/engine22/wave/buildEngine22ChartAnchorsV1.js";
@@ -15,18 +14,9 @@ mkdirSync("services/core/artifacts/engine22g",{recursive:true});
 writeFileSync("services/core/artifacts/engine22g/chart-anchors-generated.json",JSON.stringify(output,null,2)+"\n");
 console.log(JSON.stringify({schema:chartAnchors.schema,selectionRevision:chartAnchors.selectionRevision,degreeCount:Object.keys(chartAnchors.degrees).length,submicroScenarios:chartAnchors.degrees.submicro.scenarios.length,subminuteFibGroups:chartAnchors.degrees.subminute.fibGroups.length,plotAllowed:chartAnchors.plotAllowed}));
 
-const runtime=buildEngine22WaveStrategy({
-  symbol:"ES",marketType:"FUTURES",strategyId:"intraday_scalp@10m",tf:"10m",
-  currentPrice:7558.25,
-  engine2State:{subminute:{activeWave:"W3",direction:"UP",stage:"ACTIVE",
-    marks:{W1:{low:{price:7671.5,time:"2026-10-01"},high:{price:7805,time:"2026-10-02"},status:"CONFIRMED"}}}},
-});
-if (!runtime.chartAnchors) throw new Error("STRATEGY_CHART_ANCHORS_MISSING");
-if (runtime.chartAnchors.modelFingerprint !== runtime.authorizedWorkingStructure?.modelFingerprint)
-  throw new Error("STRATEGY_MODEL_FINGERPRINT_MISMATCH");
-if (runtime.chartAnchors.evidenceFingerprint !== runtime.authorizedWorkingStructure?.evidenceFingerprint)
-  throw new Error("STRATEGY_EVIDENCE_FINGERPRINT_MISMATCH");
-if (runtime.chartAnchors.plotAllowed !== false) throw new Error("PLOT_GATE_BROKEN");
-writeFileSync("services/core/artifacts/engine22g/chart-anchors-strategy-generated.json",
- JSON.stringify({strategies:{"intraday_scalp@10m":{engine22WaveStrategy:runtime}}},null,2)+"\\n");
-console.log("STRATEGY_WRAPPER_CHART_CONSISTENCY_OK");
+
+if(chartAnchors.modelFingerprint!==authorizedWorkingStructure.modelFingerprint) throw new Error("MODEL_FINGERPRINT_MISMATCH");
+if(chartAnchors.evidenceFingerprint!==authorizedWorkingStructure.evidenceFingerprint) throw new Error("EVIDENCE_FINGERPRINT_MISMATCH");
+if(chartAnchors.selectionRevision!==authorizedWorkingStructure.publicationRevision) throw new Error("SELECTION_REVISION_MISMATCH");
+if(chartAnchors.plotAllowed!==false) throw new Error("PRICE_BASIS_GATE_BROKEN");
+console.log("AUTHORITY_PUBLICATION_CONSISTENCY_OK");
