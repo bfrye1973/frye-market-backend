@@ -1,3 +1,8 @@
+import {verifyEngine22HistoryMount} from "../logic/engine22/history/verifyHistoryMountV1.js";
+import {existsSync,statSync} from "node:fs";
+import {join as joinWaveHistoryPath} from "node:path";
+import {exportWaveHistoryWorkbook} from "../logic/engine22/history/exportWaveHistoryWorkbookV1.js";
+import {buildWaveHistoryObservation,appendWaveHistoryObservation} from "../logic/engine22/history/waveHistoryJournalV1.js";
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
 //
@@ -10565,6 +10570,48 @@ result.strategies[s.strategyId] = {
   ...strategy,
   executionState,
 };
+
+// Development-only opt-in. Never blocks strategy snapshots or trading.
+// Persist on a durable mounted volume before enabling in any environment.
+if (String(symbol).toUpperCase()==="ES" && s.strategyId==="intraday_scalp@10m") {
+  const wave=result.strategies[s.strategyId]?.engine22WaveStrategy;
+  const observation=buildWaveHistoryObservation({
+    strategy:wave,
+    observedAt:Number.isFinite(evaluationTimeMs)?new Date(evaluationTimeMs).toISOString():new Date().toISOString(),
+    sourceSnapshotId:result.snapshotId??null,
+  });
+  const directory=process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR || "/var/data/replay/engine22-wave-history";
+  if (!directory) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"DURABLE_JOURNAL_NOT_CONFIGURED"};
+  } else if (!observation.ok) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:observation.reason};
+  } else if (!verifyEngine22HistoryMount({directory}).ok) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"ENGINE22_HISTORY_PERSISTENT_MOUNT_UNVERIFIED"};
+  } else {
+    try {
+      const journal=appendWaveHistoryObservation({directory,observation});
+      let workbookStatus="UNCHANGED",workbookError=null;
+      const workbookPath=joinWaveHistoryPath(directory,"Frye_Elliott_Wave_History.xlsx");
+      const journalPath=joinWaveHistoryPath(directory,"wave-history.v1.jsonl");
+      const workbookStale=!existsSync(workbookPath) ||
+        (existsSync(journalPath) && statSync(workbookPath).mtimeMs<statSync(journalPath).mtimeMs);
+      if(journal.status==="APPENDED" || workbookStale){
+        try{exportWaveHistoryWorkbook({directory});workbookStatus="UPDATED";}
+        catch(error){workbookStatus="FAILED";workbookError=String(error?.message||error);console.error("[ENGINE22 WAVE XLSX EXPORT ERROR]",workbookError);}
+      }
+      result.strategies[s.strategyId].engine22WaveHistory={
+        available:true,schema:"engine22.waveHistoryObservation.v1",
+        latestRevision:journal.revision,contentHash:journal.contentHash,
+        workbookStatus,workbookFile:"Frye_Elliott_Wave_History.xlsx",workbookError,
+        latestObservation:observation.content,
+        historicalAsOfSupported:false,noExecution:true,
+      };
+    } catch (error) {
+      console.error("[ENGINE22 WAVE HISTORY JOURNAL ERROR]",String(error?.message||error));
+      result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"JOURNAL_PERSISTENCE_FAILED"};
+    }
+  }
+}
 } catch (err) {
   
       result.strategies[s.strategyId] = {
