@@ -481,6 +481,7 @@ function buildIncompleteStrategy({
     ok: true,
     engine: "engine22.waveStrategy.v1",
     mode: "READ_ONLY",
+    chartAnchors: buildEngine22ChartAnchorsV1(),
     marketType,
     symbol,
     strategyId,
