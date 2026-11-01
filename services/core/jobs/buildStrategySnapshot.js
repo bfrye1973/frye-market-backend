@@ -1,3 +1,4 @@
+import {buildWaveHistoryObservation,appendWaveHistoryObservation} from "../logic/engine22/history/waveHistoryJournalV1.js";
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
 //
@@ -10565,6 +10566,36 @@ result.strategies[s.strategyId] = {
   ...strategy,
   executionState,
 };
+
+// Development-only opt-in. Never blocks strategy snapshots or trading.
+// Persist on a durable mounted volume before enabling in any environment.
+if (String(symbol).toUpperCase()==="ES" && s.strategyId==="intraday_scalp@10m") {
+  const wave=result.strategies[s.strategyId]?.engine22WaveStrategy;
+  const observation=buildWaveHistoryObservation({
+    strategy:wave,
+    observedAt:Number.isFinite(evaluationTimeMs)?new Date(evaluationTimeMs).toISOString():new Date().toISOString(),
+    sourceSnapshotId:result.snapshotId??null,
+  });
+  const directory=process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR;
+  if (!directory) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"DURABLE_JOURNAL_NOT_CONFIGURED"};
+  } else if (!observation.ok) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:observation.reason};
+  } else {
+    try {
+      const journal=appendWaveHistoryObservation({directory,observation});
+      result.strategies[s.strategyId].engine22WaveHistory={
+        available:true,schema:"engine22.waveHistoryObservation.v1",
+        latestRevision:journal.revision,contentHash:journal.contentHash,
+        latestObservation:observation.content,
+        historicalAsOfSupported:false,noExecution:true,
+      };
+    } catch (error) {
+      console.error("[ENGINE22 WAVE HISTORY JOURNAL ERROR]",String(error?.message||error));
+      result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"JOURNAL_PERSISTENCE_FAILED"};
+    }
+  }
+}
 } catch (err) {
   
       result.strategies[s.strategyId] = {
