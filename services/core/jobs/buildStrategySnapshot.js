@@ -1,3 +1,4 @@
+import {verifyEngine22HistoryMount} from "../logic/engine22/history/verifyHistoryMountV1.js";
 import {existsSync,statSync} from "node:fs";
 import {join as joinWaveHistoryPath} from "node:path";
 import {exportWaveHistoryWorkbook} from "../logic/engine22/history/exportWaveHistoryWorkbookV1.js";
@@ -10584,6 +10585,8 @@ if (String(symbol).toUpperCase()==="ES" && s.strategyId==="intraday_scalp@10m") 
     result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"DURABLE_JOURNAL_NOT_CONFIGURED"};
   } else if (!observation.ok) {
     result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:observation.reason};
+  } else if (!verifyEngine22HistoryMount({directory}).ok) {
+    result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"ENGINE22_HISTORY_PERSISTENT_MOUNT_UNVERIFIED"};
   } else {
     try {
       const journal=appendWaveHistoryObservation({directory,observation});
