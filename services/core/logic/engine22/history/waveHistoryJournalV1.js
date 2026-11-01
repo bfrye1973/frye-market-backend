@@ -5,6 +5,7 @@ import {join} from "node:path";
 const DEGREE_ORDER=["submicro","micro","subminute","minute","minor","intermediate","primary"];
 const digest=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const clone=x=>structuredClone(x);
+const semanticHash=content=>digest({...content,publishedAt:null,sourceSnapshotId:null});
 const cleanTime=x=>typeof x==="string"&&!Number.isNaN(Date.parse(x))?x:null;
 const validSource=x=>x?.schema==="engine22.authorizedWorkingStructure.v1"&&x?.mode==="READ_ONLY"&&x?.degrees&&typeof x.degrees==="object";
 const get=(root,path)=>typeof path==="string"&&/^(currentWavelength|degreeStates)\.[a-zA-Z0-9_.]+$/.test(path)
@@ -38,7 +39,7 @@ export function buildWaveHistoryObservation({strategy,observedAt,sourceSnapshotI
   evidenceFingerprint:authority.evidenceFingerprint??null,
   publishedAt:authority.publishedAt??null,sourceSnapshotId,degreeOrder:DEGREE_ORDER,
   degrees,noExecution:true,historicalAsOfSupported:false};
- return {ok:true,content,contentHash:digest(content),observedAt:timestamp};
+ return {ok:true,content,contentHash:semanticHash(content),observedAt:timestamp};
 }
 
 // Standalone append-only durable-file implementation. The caller MUST mount a persistent
@@ -72,7 +73,7 @@ export function readWaveHistory({directory}={}){
  let previous=null;
  for(let i=0;i<events.length;i++){
   const e=events[i],{eventHash,...body}=e;
-  if(e.schema!=="engine22.waveHistoryEvent.v1"||e.revision!==i+1||e.previousEventHash!==previous||digest(body)!==eventHash||digest(e.content)!==e.contentHash)
+  if(e.schema!=="engine22.waveHistoryEvent.v1"||e.revision!==i+1||e.previousEventHash!==previous||digest(body)!==eventHash||semanticHash(e.content)!==e.contentHash)
    throw Error("JOURNAL_INTEGRITY_FAILURE");
   previous=eventHash;
  }
