@@ -14,8 +14,8 @@ function fixture(){
 test("current approval manifest produces existing seven-degree published waves",()=>{
  const a=buildAuthorizedWorkingStructureV1(fixture());
  assert.equal(a.status,"COMPLETE_WORKING_SELECTION");
- assert.equal(a.publicationRevision,3);
- assert.equal(a.degrees.micro.activeWave,"W4");
+ assert.equal(a.publicationRevision,4);
+ assert.equal(a.degrees.micro.activeWave,"C");
  assert.equal(a.degrees.subminute.activeWave,"C");
 });
 test("new owner-approved model selection requires only manifest change, not consumer code",()=>{

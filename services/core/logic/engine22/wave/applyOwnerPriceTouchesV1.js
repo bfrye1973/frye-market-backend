@@ -207,6 +207,34 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
         touchEvidence:x.touchEvidence}]));
   }
+  // Micro C DOWN uses its own independent touch evidence.
+  const microOct31=root.degrees?.micro?.ownerMicroCDownOct31;
+  if(microOct31?.version==="engine22.microCDownOct31OwnerWorking.v1"&&Array.isArray(microOct31.levels)){
+    const id=JSON.stringify(["microCDownOct31",microOct31.version,microOct31.waveA,microOct31.priorBEnding]);
+    const previous=previousWavelength?.degrees?.micro?.ownerMicroCDownOct31;
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const cutoff=Date.parse("2026-10-29T07:00:00Z");
+    const observations=[];
+    if(now>=cutoff&&finite(currentPrice)!==null)observations.push({low:currentPrice,type:"ES_CURRENT_PRICE",time:new Date(now).toISOString()});
+    for(const b of bars10m||[]){
+      const t=Number(b?.time),low=finite(b?.low);
+      if(Number.isSafeInteger(t)&&t*1000>=cutoff&&t*1000+600000<=now&&low!==null)
+        observations.push({low,type:"ES_10M_COMPLETED_OHLC",time:new Date(t*1000).toISOString()});
+    }
+    const old=disk[id]||{};
+    microOct31.levels=microOct31.levels.map(level=>{
+      const earlier=old[level.key]||previous?.levels?.find(p=>p.key===level.key&&p.price===level.price);
+      const retained=earlier?.status==="TOUCHED";
+      const hit=observations.find(o=>o.low<=level.price);
+      const owner=now>=Date.parse("2026-10-31T07:00:00Z")&&microOct31.observedLowReference?.date==="2026-10-30"&&microOct31.observedLowReference.price<=level.price;
+      const source=retained?earlier.touchEvidenceType:hit?.type||(owner?"OWNER_CHART_OBSERVATION":null);
+      return {...level,status:retained||hit||owner?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(source),touchEvidenceType:source,
+        touchedAt:retained?earlier.touchedAt:hit?.time||null,
+        touchEvidence:{verified:source==="ES_10M_COMPLETED_OHLC",evidenceClass:source}};
+    });
+    disk[id]=Object.fromEntries(microOct31.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
+  }
   // October 31 Subminute C DOWN dual Fibonacci methods.
   // Only observe completed 10m ES candle lows after October 6 B end date.
   // Retain method-specific touch history; a quote-only hit is labeled as such.
