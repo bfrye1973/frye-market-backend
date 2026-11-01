@@ -1,3 +1,4 @@
+import ownerChartAnchors from "./ownerChartAnchors20261031.json" with {type:"json"};
 import { createHash } from "node:crypto";
 
 const DEGREE_ORDER = ["submicro", "micro", "subminute", "minute", "minor", "intermediate", "primary"];
@@ -108,6 +109,27 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
     symbol:currentWavelength?.symbol || "ES",contractId:null,priceBasis:"UNVERIFIED",
     chartCompatibility:"WITHHELD_PENDING_VERIFICATION",
     priceBasisIds:copy(metadata.priceBasisIds)||null,
-    degrees,historicalAsOfSupported:false,noExecution:true};
+    degrees,
+    ownerResearchChart:{
+      schema:"engine22.ownerResearchChart.v1",
+      authority:ownerChartAnchors.authority,
+      source:ownerChartAnchors.source,
+      timezone:ownerChartAnchors.timezone,
+      anchors:ownerChartAnchors.anchors.map(a=>({
+        ...a,marketEventTimeUtc:new Date(a.date+"T"+a.time+":00-07:00").toISOString(),
+        ownerSupplied:true,verifiedCandleMatch:false
+      })),
+      fibByDegree:Object.fromEntries(DEGREE_ORDER.map(degree=>[degree,{
+        sourceModelPath:degrees[degree]?.sourcePath??null,
+        fibGroups:copy(degrees[degree]?.fibGroups??[]),
+        scenarios:degree==="submicro"?copy(degrees[degree]?.scenarios?.map(s=>({scenarioId:s.scenarioId,fibGroups:s.fibGroups}))??[]):[],
+        levelsFromExistingEngine22:true,
+        ownerAnchorModelReconciled:false
+      }])),
+      displayAuthority:"OWNER_RESEARCH_ONLY",
+      requiresSeparateResearchDisplayAuthorization:true,
+      verifiedPriceBasis:false,noExecution:true
+    },
+    historicalAsOfSupported:false,noExecution:true};
   return {...core,chartContractFingerprint:hash(core)};
 }
