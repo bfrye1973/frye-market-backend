@@ -27,16 +27,18 @@ function readPath(root,path) {
   return path.split(".").reduce((v,k)=>v?.[k],root) ?? null;
 }
 export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorkingStructure,sevenDegreeInvalidations,metadata={}}={}) {
-  const selected=authorizedWorkingStructure?.degrees || {};
+  const authorityValid=authorizedWorkingStructure?.schema==="engine22.authorizedWorkingStructure.v1" && authorizedWorkingStructure?.mode==="READ_ONLY";
+  const selected=authorityValid ? authorizedWorkingStructure.degrees : {};
   const degrees={};
   for (const degree of DEGREE_ORDER) {
     const s=selected[degree], d=base(degree,s);
     const model=readPath({currentWavelength,degreeStates:metadata.degreeStates},s?.sourcePath);
-    if (!d.available || !model || (s.modelVersion && model.version !== s.modelVersion)) {
+    if (!d.available || !model || (s.modelVersion && model.version !== s.modelVersion) || (s.sourcePath && !s.sourcePath.endsWith("."+degree) && model.activeWave!==s.activeWave)) {
       d.available=false; d.missingEvidence.push("CURRENT_AUTHORIZED_MODEL_UNAVAILABLE");
       degrees[degree]=d; continue;
     }
     d.fibGroups.push(group("SELECTED",model.levels,s.sourcePath+".levels"));
+    if (degree==="micro" || degree==="subminute" || degree==="minute") d.reviewBoundary={price:degree==="micro"?model.priorBEnding?.price:degree==="subminute"?model.priorBEnding?.price:model.structuralReference,reviewOnly:true,sourcePath:degree==="minute"?s.sourcePath+".structuralReference":s.sourcePath+".priorBEnding.price"};
     if (degree==="micro") {
       const p=s.sourcePath;
       d.anchors=[
@@ -90,12 +92,14 @@ export function buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorking
     } else {
       d.missingEvidence.push("COMPLETE_HIGHER_DEGREE_PIVOT_SEQUENCE_UNAVAILABLE");
     }
+    if(d.scenarios.some(s=>s.missingEvidence.length)) d.missingEvidence.push("SCENARIO_ANCHOR_TIMESTAMPS_UNVERIFIED");
     if(d.anchors.some(a=>a.price!=null&&!a.marketEventTimeUtc)) d.missingEvidence.push("ANCHOR_EVENT_TIMESTAMPS_UNVERIFIED");
     degrees[degree]=d;
   }
   const available=DEGREE_ORDER.some(degree=>degrees[degree].available);
   const core={schema:"engine22.chartAnchors.v1",authority:"ENGINE22",mode:"READ_ONLY",
     available,reasonCodes:available?[]:["CURRENT_AUTHORIZED_STRUCTURE_UNAVAILABLE"],
+    plotAllowed:false,plotReasonCodes:["ANCHOR_PRICE_BASIS_UNVERIFIED"],
     selectionRevision:authorizedWorkingStructure?.publicationRevision??null,
     selectionApprovalReference:authorizedWorkingStructure?.selectionApprovalReference??null,
     modelFingerprint:authorizedWorkingStructure?.modelFingerprint??null,
