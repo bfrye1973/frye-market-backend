@@ -1,3 +1,4 @@
+import {execFileSync} from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {mkdtempSync,rmSync,readFileSync,writeFileSync,openSync,closeSync,mkdirSync} from "node:fs";
@@ -108,5 +109,17 @@ test("history persists across independent reader invocations",()=>{
   appendWaveHistoryObservation({directory,observation});
   assert.equal(readWaveHistory({directory})[0].contentHash,observation.contentHash);
   assert.equal(readWaveHistory({directory}).length,1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+test("journal survives a fresh Node process restart on the same mounted directory",()=>{
+ const directory=mkdtempSync(join(tmpdir(),"engine22-history-process-restart-"));
+ try{
+  const observation=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
+  appendWaveHistoryObservation({directory,observation});
+  const moduleUrl=new URL("../logic/engine22/history/waveHistoryJournalV1.js",import.meta.url).href;
+  const code=`import {readWaveHistory} from ${JSON.stringify(moduleUrl)};process.stdout.write(String(readWaveHistory({directory:process.argv[1]}).length));`;
+  const output=execFileSync(process.execPath,["--input-type=module","-e",code,directory],{encoding:"utf8"});
+  assert.equal(output,"1");
  }finally{rmSync(directory,{recursive:true,force:true});}
 });
