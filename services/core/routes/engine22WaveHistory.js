@@ -1,3 +1,4 @@
+import {verifyEngine22HistoryMount} from "../logic/engine22/history/verifyHistoryMountV1.js";
 import express from "express";
 import {createHash,timingSafeEqual} from "node:crypto";
 import {existsSync} from "node:fs";
@@ -19,7 +20,7 @@ function authorized(req){
 router.use((req,res,next)=>{
  res.set("Cache-Control","no-store");
  if(!authorized(req))return res.status(401).json({available:false,reason:"ENGINE22_HISTORY_UNAUTHORIZED"});
- if(!journalDirectory())return res.status(503).json({available:false,reason:"ENGINE22_HISTORY_STORAGE_NOT_CONFIGURED"});
+ if(!verifyEngine22HistoryMount({directory:journalDirectory()}).ok)return res.status(503).json({available:false,reason:"ENGINE22_HISTORY_PERSISTENT_MOUNT_UNVERIFIED"});
  next();
 });
 router.get("/",(req,res)=>{
