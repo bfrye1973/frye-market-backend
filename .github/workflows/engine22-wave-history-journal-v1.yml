@@ -5,6 +5,7 @@ on:
       - 'services/core/logic/engine22/history/**'
       - 'services/core/tests/engine22WaveHistoryJournalV1.test.js'
       - 'services/core/tests/engine22WaveHistoryWorkbookV1.test.js'
+      - 'services/core/tests/engine22WaveHistoryMountV1.test.js'
       - 'services/core/jobs/buildStrategySnapshot.js'
       - 'services/core/routes/engine22WaveHistory.js'
       - 'services/core/server.js'
@@ -22,7 +23,9 @@ jobs:
         run: |
           node --check services/core/logic/engine22/history/waveHistoryJournalV1.js
           node --check services/core/logic/engine22/history/exportWaveHistoryWorkbookV1.js
-          node --check services/core/tests/engine22WaveHistoryWorkbookV1.test.js
+          node --check services/core/logic/engine22/history/verifyHistoryMountV1.js
+          node --check services/core/tests/engine22WaveHistoryMountV1.test.js
+          node --check services/core/tests/engine22WaveHistoryWorkbookV1.test.js services/core/tests/engine22WaveHistoryMountV1.test.js
           node --check services/core/jobs/buildStrategySnapshot.js
           node --check services/core/routes/engine22WaveHistory.js
           node --check services/core/server.js
