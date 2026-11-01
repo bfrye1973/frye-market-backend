@@ -85,3 +85,13 @@ export function readWaveHistory({directory}={}){
  }
  return events;
 }
+
+export function pageWaveHistory({directory,afterRevision=0,limit=50}={}){
+ if(!Number.isSafeInteger(afterRevision)||afterRevision<0||!Number.isSafeInteger(limit)||limit<1||limit>100)
+  throw Error("INVALID_HISTORY_PAGINATION");
+ const events=readWaveHistory({directory});
+ const items=events.filter(e=>e.revision>afterRevision).slice(0,limit);
+ const nextRevision=items.at(-1)?.revision??afterRevision;
+ return {schema:"engine22.waveHistoryPage.v1",items,nextRevision,
+  hasMore:events.some(e=>e.revision>nextRevision),totalRevisions:events.length,readOnly:true};
+}
