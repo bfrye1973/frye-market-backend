@@ -34,7 +34,7 @@ test("new owner-approved model selection requires only manifest change, not cons
 test("unapproved model cannot hijack current selection",()=>{
  const f=fixture(); f.currentWavelength.degrees.micro.ownerMicroW4Up={version:"fake",activeWave:"W4"};
  const a=buildAuthorizedWorkingStructureV1(f);
- assert.equal(a.degrees.micro.activeWave,"W4");
+ assert.equal(a.degrees.micro.activeWave,"C");
 });
 test("missing approval source fails closed",()=>{
  const f=fixture(); const selection=structuredClone(ownerApprovedWorkingSelection);
