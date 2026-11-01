@@ -44,6 +44,7 @@ function flattenAnchors(value,path="",depth=0,out=[]){
  if(Array.isArray(value)){value.forEach((v,i)=>flattenAnchors(v,path+"["+i+"]",depth+1,out));return out;}
  if(typeof value!=="object")return out;
  for(const [k,v] of Object.entries(value)){
+  if(["levels","fibReferences","touchEvidence","invalidations","reviewBoundary","projectionMethod"].includes(k))continue;
   const p=path?path+"."+k:k;
   if(v&&typeof v==="object")flattenAnchors(v,p,depth+1,out);
   else if(typeof v==="number"&&Number.isFinite(v)&&/(?:low|high|price|origin|start|end|pivot)/i.test(k)&&!/(?:length|ratio|revision|timestamp)/i.test(k))
@@ -54,10 +55,26 @@ function flattenAnchors(value,path="",depth=0,out=[]){
 export function buildWaveHistoryWorkbook({events}={}){
  if(!Array.isArray(events))throw Error("VERIFIED_EVENTS_REQUIRED");
  const degreeNames=["submicro","micro","subminute","minute","minor","intermediate","primary"];
- const current=[],history=[],changes=[],fibs=[];
+ const current=[],history=[],changes=[],fibs=[],changeDetails=[];
  const latest=events.at(-1);
+ let previous=null;
  for(const event of events){
   const c=event.content;
+  // Record every changed primitive with its exact source path; no value is overwritten.
+  function flat(v,p="",out={},depth=0){
+   if(depth>12||v===undefined)return out;
+   if(v!==null&&typeof v==="object"){
+    for(const [key,val] of Object.entries(v))flat(val,p?p+"."+key:key,out,depth+1);
+   }else out[p]=v;
+   return out;
+  }
+  const before=previous?flat(previous.content.degrees):{},after=flat(c.degrees);
+  for(const key of new Set([...Object.keys(before),...Object.keys(after)])){
+   if(JSON.stringify(before[key])!==JSON.stringify(after[key]))
+    changeDetails.push([event.revision,key,previous?before[key]??null:null,after[key]??null,
+      event.observedAt,c.publishedAt,c.selectionApprovalReference]);
+  }
+  previous=event;
   for(const degree of degreeNames){
    const d=c.degrees?.[degree],m=d?.sourceModel;
    if(!m)continue;
@@ -85,6 +102,7 @@ export function buildWaveHistoryWorkbook({events}={}){
   ["Current Anchors",h,current],
   ["Complete History",h,history],
   ["Change Journal",["Revision","Observed UTC","Published UTC","Selection Revision","Approval Reference","Model Fingerprint","Evidence Fingerprint","Content Hash","Previous Event Hash","Event Hash"],changes],
+  ["Change Details",["Revision","Exact Field Path","Previous Value","New Value","Observed UTC","Published UTC","Approval Reference"],changeDetails],
   ["Fibonacci History",["Revision","Degree","Fib Source Path","Level Key","Ratio","ES Price","Status","Evidence Type","Model Version"],fibs],
   ...degreeNames.map(d=>[d[0].toUpperCase()+d.slice(1),h,history.filter(x=>x[1]===d)])
  ];
