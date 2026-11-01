@@ -42,6 +42,7 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildAuthorizedWorkingStructureV1 } from "./buildAuthorizedWorkingStructureV1.js";
+import { buildEngine22ChartAnchorsV1 } from "./buildEngine22ChartAnchorsV1.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildSevenDegreeInvalidationsV1 } from "./buildSevenDegreeInvalidationsV1.js";
@@ -2325,7 +2326,25 @@ export function buildEngine22WaveStrategy(input = {}) {
       })
     : null;
 
+  const chartInvalidations = buildSevenDegreeInvalidationsV1({
+    currentWavelength:publishedCurrentWavelength, degreeStates:publishedDegreeStates,
+    evaluationTimeMs:context.evaluationTimeMs,
+  });
+  const chartAuthorized = buildAuthorizedWorkingStructureV1({
+    currentWavelength:publishedCurrentWavelength, degreeStates:publishedDegreeStates,
+    sevenDegreeInvalidations:chartInvalidations,
+    publicationTime:Number.isFinite(context.evaluationTimeMs)
+      ? new Date(context.evaluationTimeMs).toISOString() : null,
+  });
+  const chartAnchors = buildEngine22ChartAnchorsV1({
+    currentWavelength:publishedCurrentWavelength,
+    authorizedWorkingStructure:chartAuthorized,
+    sevenDegreeInvalidations:chartInvalidations,
+    metadata:{degreeStates:publishedDegreeStates},
+  });
+
   return {
+    chartAnchors,
     engine22V3NodeEvidence,
     engine22V3Shadow,
     engine22V3Projection: engine22V3Shadow?.available === true
