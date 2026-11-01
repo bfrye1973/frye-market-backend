@@ -6,6 +6,7 @@ on:
       - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
       - 'services/core/tests/engine22ChartAnchorsV1.test.js'
       - '.github/workflows/engine22g-chart-anchors-v1.yml'
+      - 'services/core/scripts/generateEngine22ChartAnchorsSample.js'
   workflow_dispatch:
 jobs:
   chart-anchors:
@@ -22,3 +23,10 @@ jobs:
           node --check services/core/tests/engine22ChartAnchorsV1.test.js
       - name: Chart anchors regression
         run: node --test services/core/tests/engine22ChartAnchorsV1.test.js
+      - name: Generate reproducible chart payload
+        run: node services/core/scripts/generateEngine22ChartAnchorsSample.js
+      - name: Upload generated payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22g-chart-anchors-generated
+          path: services/core/artifacts/engine22g/chart-anchors-generated.json
