@@ -1,3 +1,4 @@
+import {applyOwnerPriceTouchesV1} from "../logic/engine22/wave/applyOwnerPriceTouchesV1.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCurrentWavelength } from "../logic/engine22/wave/buildCurrentWavelength.js";
@@ -24,4 +25,34 @@ test("Micro and Submicro selections remain unchanged in this Fibonacci edit",()=
  const w=buildCurrentWavelength({symbol:"ES",currentPrice:7558.25});
  assert.ok(w.degrees.micro.ownerMicroW4Down);
  assert.ok(w.degrees.submicro.ownerSubmicroADownInsideMicroW4);
+});
+
+test("completed ES bar marks both model methods independently without inventing a wave ending",()=>{
+  const current=buildCurrentWavelength({symbol:"ES",currentPrice:7900});
+  const before=applyOwnerPriceTouchesV1({currentWavelength:current,currentPrice:7900,
+    evaluationTimeMs:Date.parse("2026-10-08T14:00:00Z"),
+    bars10m:[]});
+  const clean=before.degrees.subminute.ownerSubminuteCDownOct31;
+  assert.equal(clean.fibReferences.wick.levels[0].status,"WATCH");
+  assert.equal(clean.fibReferences.body.levels[0].status,"WATCH");
+  const after=applyOwnerPriceTouchesV1({currentWavelength:current,currentPrice:7900,
+    evaluationTimeMs:Date.parse("2026-10-08T14:00:00Z"),
+    bars10m:[{time:Date.parse("2026-10-08T13:30:00Z")/1000,low:7600,high:7710}]});
+  const m=after.degrees.subminute.ownerSubminuteCDownOct31;
+  assert.equal(m.fibReferences.wick.levels[0].status,"TOUCHED");
+  assert.equal(m.fibReferences.body.levels[0].status,"TOUCHED");
+  assert.equal(m.fibReferences.wick.levels[1].status,"WATCH"); // 7552.75 not reached
+  assert.equal(m.fibReferences.body.levels[1].status,"TOUCHED"); // 7611.50 reached
+  assert.equal(m.fibReferences.body.levels[1].touchEvidence.verified,true);
+  assert.equal(m.sequence.C,"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED");
+});
+
+test("candle before B end cannot record a false C down Fib touch",()=>{
+  const current=buildCurrentWavelength({symbol:"ES",currentPrice:7895});
+  const result=applyOwnerPriceTouchesV1({currentWavelength:current,currentPrice:7895,
+    evaluationTimeMs:Date.parse("2026-10-07T14:00:00Z"),
+    bars10m:[{time:Date.parse("2026-10-06T14:00:00Z")/1000,low:7000,high:7900}]});
+  const m=result.degrees.subminute.ownerSubminuteCDownOct31;
+  assert(m.fibReferences.wick.levels.every(l=>l.status==="WATCH"));
+  assert(m.fibReferences.body.levels.every(l=>l.status==="WATCH"));
 });
