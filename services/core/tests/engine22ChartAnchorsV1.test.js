@@ -15,6 +15,12 @@ test("read-only chart adapter keeps revision 5 and seven degree slots",()=>{
  assert.equal(packet.chartCompatibility,"WITHHELD_PENDING_VERIFICATION");
  assert.equal(packet.historicalAsOfSupported,false);
  assert.equal(packet.noExecution,true);
+ assert.equal(packet.plotAllowed,false);
+ assert.equal(packet.degrees.micro.reviewBoundary.price,7814.75);
+ assert.equal(packet.degrees.subminute.reviewBoundary.price,7895);
+ assert.equal(packet.degrees.minute.reviewBoundary.price,7419.5);
+ assert.equal(packet.degrees.minute.anchors[0].marketEventTimeUtc,"2026-07-30T19:00:00.000Z");
+ assert.equal(packet.degrees.minute.anchors[1].marketEventTimeUtc,"2026-08-13T16:00:00.000Z");
  assert.equal(packet.degrees.submicro.scenarios.length,2);
  assert.equal(packet.degrees.subminute.fibGroups.length,2);
  assert.deepEqual(packet.degrees.subminute.fibGroups.map(g=>g.levels[0].price),[7683.5,7719.75]);
@@ -27,4 +33,12 @@ test("unavailable source never creates fabricated geometry",()=>{
  assert.equal(packet.available,false);
  assert.equal(packet.degrees.micro.available,false);
  assert.equal(packet.chartCompatibility,"WITHHELD_PENDING_VERIFICATION");
+ assert.equal(packet.plotAllowed,false);
+});
+
+test("rejects unauthenticated selection without plotting",()=>{
+ const currentWavelength=buildCurrentWavelength({symbol:"ES"});
+ const packet=buildEngine22ChartAnchorsV1({currentWavelength,authorizedWorkingStructure:{degrees:{micro:{available:true,sourcePath:"currentWavelength.degrees.micro.ownerMicroCDownOct31"}}}});
+ assert.equal(packet.available,false);
+ assert.equal(packet.degrees.micro.available,false);
 });
