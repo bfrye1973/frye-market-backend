@@ -42,3 +42,31 @@ test("rejects unauthenticated selection without plotting",()=>{
  assert.equal(packet.available,false);
  assert.equal(packet.degrees.micro.available,false);
 });
+
+test("Fib touch evidence is copied without upgrading owner observations",()=>{
+ const cw=buildCurrentWavelength({symbol:"ES",currentPrice:7558.25});
+ const d={minor:{activeWave:"W5",direction:"UP"},intermediate:{activeWave:"W3",direction:"UP"},primary:{activeWave:"W5",direction:"UP"}};
+ const observed=cw.degrees.submicro.submicroCompare.option1.levels[0];
+ assert.equal(observed.touchEvidenceType,"OWNER_CHART_OBSERVATION");
+ const selected=buildAuthorizedWorkingStructureV1({currentWavelength:cw,degreeStates:d});
+ const packet=buildEngine22ChartAnchorsV1({currentWavelength:cw,authorizedWorkingStructure:selected,metadata:{degreeStates:d}});
+ const copied=packet.degrees.submicro.scenarios[0].fibGroups[0].levels[0];
+ assert.equal(copied.touchEvidenceType,"OWNER_CHART_OBSERVATION");
+ assert.equal(copied.touchEvidence.verified,false);
+ assert.equal(packet.degrees.submicro.scenarios[1].fibGroups[0].levels[0].touchEvidenceType??null,null);
+ assert.equal(packet.degrees.submicro.scenarios[0].anchors[2].marketEventTimeUtc,null);
+ assert.equal(packet.degrees.subminute.anchors[3].marketEventTimeUtc,null);
+ assert.equal(packet.degrees.subminute.anchors[3].timestampStatus,"UNVERIFIED");
+ assert.equal(packet.degrees.subminute.officialInvalidation,null);
+});
+test("selection version mismatch fails closed for affected degree",()=>{
+ const cw=buildCurrentWavelength({symbol:"ES"});
+ const d={minor:{activeWave:"W5"},intermediate:{activeWave:"W3"},primary:{activeWave:"W5"}};
+ const selected=buildAuthorizedWorkingStructureV1({currentWavelength:cw,degreeStates:d});
+ const changed=structuredClone(cw);
+ changed.degrees.micro.ownerMicroCDownOct31.version="UNAPPROVED_VERSION";
+ const packet=buildEngine22ChartAnchorsV1({currentWavelength:changed,authorizedWorkingStructure:selected,metadata:{degreeStates:d}});
+ assert.equal(packet.degrees.micro.available,false);
+ assert.ok(packet.degrees.micro.missingEvidence.includes("CURRENT_AUTHORIZED_MODEL_UNAVAILABLE"));
+ assert.equal(packet.plotAllowed,false);
+});
