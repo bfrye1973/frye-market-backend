@@ -36,3 +36,11 @@ Engine 2D acceptance:
 7. On missing packet, unknown schema, or `available:false`, show explicit unavailable state and draw nothing.
 
 No merge or deployment is authorized by this draft.
+
+## Manager conditional-acceptance corrections
+
+- The strategy wrapper now publishes the exact same `chartAuthorized` and `chartInvalidations` objects used to construct `chartAnchors`; no second sibling publication build.
+- CI sample generator: `node services/core/scripts/generateEngine22ChartAnchorsSample.js`. Artifact: `engine22g-chart-anchors-generated`. This is a deterministic actual Engine 22 builder sample, NOT a captured deployed strategy snapshot.
+- The sample contains `strategies["intraday_scalp@10m"].engine22WaveStrategy.chartAnchors`, with seven degree slots, Submicro scenarios and Subminute wick/body groups.
+- To complete manager acceptance, retrieve an authenticated full runtime strategy snapshot and compare sibling fingerprints, invalidations, levels and the adapter field directly. A generator fixture is not a substitute for this end-to-end evidence.
+- All chart plotting remains withheld until independent Engine 11/2D anchor-to-price-basis verification.
