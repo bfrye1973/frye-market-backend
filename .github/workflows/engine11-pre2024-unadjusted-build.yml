@@ -4,6 +4,7 @@ on:
     branches: [engine11-2020-2024-raw-es-acquisition-v1]
     paths:
       - services/core/scripts/buildEngine11Pre2024Unadjusted.mjs
+      - services/core/scripts/verifyEngine11Pre2024Unadjusted.mjs
       - .github/workflows/engine11-pre2024-unadjusted-build.yml
   workflow_dispatch:
 permissions:
@@ -60,6 +61,10 @@ jobs:
         shell: bash
         run: |
           node services/core/scripts/buildEngine11Pre2024Unadjusted.mjs "${RUNNER_TEMP}/engine11-raw" "${RUNNER_TEMP}/audit/engine11-quarterly-rollover-report.json" "${RUNNER_TEMP}/engine11-pre2024"
+      - name: Validate archive hashes, candle ranges, counts and source preservation
+        shell: bash
+        run: |
+          node services/core/scripts/verifyEngine11Pre2024Unadjusted.mjs "${RUNNER_TEMP}/engine11-pre2024" "${RUNNER_TEMP}/engine11-pre2024/acceptance-report.json"
       - name: Upload private build evidence
         if: always()
         uses: actions/upload-artifact@v4
