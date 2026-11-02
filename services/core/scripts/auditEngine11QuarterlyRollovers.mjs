@@ -24,7 +24,12 @@ for(let year=2020;year<=2024;year++){
   const bytes=Buffer.from(saved.bodyBase64,'base64');
   const digest=hash(bytes);
   if(digest!==receipt.bodySha256||digest!==saved.bodySha256||receipt.ticker!==saved.ticker||receipt.frame!==saved.frame||receipt.rowCount!==saved.rowCount)throw Error('RECEIPT_HASH_OR_ID_MISMATCH_'+year+'_'+receipt.file);
-  const payload=JSON.parse(bytes.toString('utf8'));
+  // Massive serializes source nanosecond timestamps as JSON numbers. JavaScript
+  // Number cannot represent 19-digit nanoseconds exactly. Quote ONLY the raw
+  // window_start numeric tokens before parsing, leaving receipt bytes unchanged.
+  const sourceText=bytes.toString('utf8');
+  const losslessText=sourceText.replace(/("window_start"\s*:\s*)(\d{16,20})(?=\s*[,}])/g,'$1"$2"');
+  const payload=JSON.parse(losslessText);
   if(!Array.isArray(payload.results)||payload.results.length!==saved.rowCount)throw Error('RECEIPT_CONTENT_MISMATCH');
   const contract=contracts.find(x=>x.year===year&&x.ticker===saved.ticker);
   if(!contract)throw Error('CONTRACT_TICKER_UNRECOGNIZED_'+saved.ticker);
