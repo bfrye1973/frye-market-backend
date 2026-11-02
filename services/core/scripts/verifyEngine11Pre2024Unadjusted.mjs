@@ -20,7 +20,14 @@ try{
  if(m.basis?.segmentFromUtc!==report.targetFromUtc||m.basis?.segmentToExclusiveUtc!==report.targetToExclusiveUtc)fail('WRONG_WINDOW');
  if(m.existingPost2024ArchiveModified!==false||m.researchOnly!==true||m.rolloverApproved!==false||m.executionPriceAuthority!==false)fail('UNEXPECTED_RELEASE_FLAGS');
  if(m.transitions?.length!==19)fail('TRANSITION_COUNT',m.transitions?.length);
- if(m.ambiguousSourceGroups)fail('AMBIGUOUS_GROUPS',m.ambiguousSourceGroups);
+ // Quarantined source collisions are a required disclosure, not a reason to reject
+ // an isolated research preview. They MUST be excluded from plotted rows.
+ // Final source acceptance and LIVE chart promotion remain blocked pending review.
+ if(!Number.isSafeInteger(m.ambiguousSourceGroups)||m.ambiguousSourceGroups<0)fail('INVALID_AMBIGUITY_COUNT');
+ if(m.ambiguousSourceGroups!==m.excluded?.AMBIGUOUS_SAME_START&&(m.ambiguousSourceGroups!==0||m.excluded?.AMBIGUOUS_SAME_START))fail('QUARANTINE_COUNT_MISMATCH');
+ if(!Array.isArray(m.ambiguousSamples)||m.ambiguousSamples.length!==Math.min(40,m.ambiguousSourceGroups))fail('QUARANTINE_EVIDENCE_MISSING');
+ const quarantinedKeys=new Set((m.ambiguousSamples||[]).map(x=>x.key));
+ if(quarantinedKeys.size!==(m.ambiguousSamples||[]).length)fail('DUPLICATE_QUARANTINE_KEYS');
  if(m.sourceCounts&&Object.keys(m.sourceCounts).length!==5)fail('SOURCE_YEAR_COUNT');
  if(!/^research-dataset:[a-f0-9]{64}$/.test(m.datasetVersion)||!/^price-basis:[a-f0-9]{64}$/.test(m.priceBasisVersion))fail('INVALID_VERSION');
  for(const f of frames){
@@ -38,6 +45,7 @@ try{
    const ms=Date.parse(r.timestampUtc),p=r.prices;
    if(!Number.isFinite(ms)||ms<startMs||ms>=endMs||ms<prev)fail('OUT_OF_ORDER_OR_RANGE',f);
    if(seen.has(r.timestampUtc))fail('DUPLICATE_TIMESTAMP',f+' '+r.timestampUtc);
+   if(quarantinedKeys.has(f+'|'+r.timestampNs))fail('QUARANTINED_ROW_PUBLISHED',f+' '+r.timestampUtc);
    seen.add(r.timestampUtc);prev=ms;earliest=Math.min(earliest,ms);latest=Math.max(latest,ms);
    if(r.frame!==f||!/^ES[HMUZ]202[0-4]$/.test(r.sourceContract??'')||!['open','high','low','close'].every(k=>Number.isFinite(p?.[k]))||p.high<Math.max(p.open,p.close,p.low)||p.low>Math.min(p.open,p.close,p.high)||!Number.isFinite(r.volume)||r.volume<0||r.adjustment!==0||r.executionPriceAuthority!==false)fail('INVALID_RAW_CANDLE',f+' '+r.timestampUtc);
   }
@@ -52,11 +60,14 @@ try{
  report.rawReceiptCount=m.receiptsCount;
  report.excluded=m.excluded;
  report.ambiguousSourceGroups=m.ambiguousSourceGroups;
+ report.quarantinedSourceGroups=m.ambiguousSourceGroups;
+ report.productionReleaseBlocked=true;
+ report.productionBlockers=['UNAPPROVED_ROLLOVER_SELECTION','SOURCE_COLLISION_REVIEW','SOURCE_IDENTITY_AND_CALENDAR_ACCEPTANCE','POST2024_SEAM_INTEGRITY'];
  report.existingPost2024ArchiveModified=m.existingPost2024ArchiveModified;
  report.verifiedFrameCount=Object.keys(report.verifiedFrames).length;
  report.totalRows=Object.values(report.verifiedFrames).reduce((s,v)=>s+v.count,0);
 }catch(e){fail('VALIDATOR_EXCEPTION',e?.stack||e);}
-report.readiness=report.problems.length?'FAIL':'PASS_RESEARCH_SEGMENT_ONLY_NOT_PRODUCTION_APPROVED';
+report.readiness=report.problems.length?'FAIL':'PASS_ISOLATED_RESEARCH_WITH_QUARANTINE_NOT_PRODUCTION_APPROVED';
 await writeFile(outfile,JSON.stringify(report,null,2)+'\n');
 console.log('ENGINE11_PRE2024_ACCEPTANCE '+JSON.stringify({readiness:report.readiness,verifiedFrames:report.verifiedFrames,totalRows:report.totalRows,problems:report.problems.slice(0,15),datasetVersion:report.manifestDatasetVersion}));
 if(report.problems.length)process.exitCode=2;
