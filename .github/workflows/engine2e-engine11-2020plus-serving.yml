@@ -53,3 +53,38 @@ jobs:
           if(rows!==757479||pages!==762)throw Error('TOTALS_'+rows+'_'+pages);
           console.log('ENGINE2E_2020PLUS_ACCEPTANCE_PASS',JSON.stringify({rows,pages,datasetVersion:cat.datasetVersion,priceBasisVersion:cat.priceBasisVersion}));
           NODE
+
+      - name: Write immutable private-page verification summary
+        run: |
+          node --input-type=module <<'NODE'
+          import {readFile,writeFile} from 'node:fs/promises';
+          import {createHash} from 'node:crypto';
+          import path from 'node:path';
+          const dir=path.join(process.env.RUNNER_TEMP,'pages','continuousRaw2020plus');
+          const catalogPath=path.join(dir,'continuousRaw2020plus-catalog.json');
+          const catalogBytes=await readFile(catalogPath);
+          const catalog=JSON.parse(catalogBytes);
+          const summary={
+            schema:'engine11.private-history-pages.verification.v1',
+            sourceArtifactId:13158459519,
+            sourceArtifactName:'engine11-2020plus-continuous-unadjusted-research-only',
+            datasetVersion:catalog.datasetVersion,
+            priceBasisVersion:catalog.priceBasisVersion,
+            totalRows:757479,
+            pageCount:762,
+            catalogSha256:createHash('sha256').update(catalogBytes).digest('hex'),
+            researchOnly:true,
+            structuralEligible:false,
+            executionPriceAuthority:false
+          };
+          await writeFile(path.join(dir,'private-pages-verification.json'),JSON.stringify(summary,null,2));
+          console.log('ENGINE11_PRIVATE_PAGES_SUMMARY',JSON.stringify(summary));
+          NODE
+      - name: Upload ready-to-serve private page archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-2020plus-private-history-pages-v1
+          path: ${{ runner.temp }}/pages/continuousRaw2020plus/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
