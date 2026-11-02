@@ -1,0 +1,70 @@
+name: Engine11 pre-2024 unadjusted research segment (isolated)
+on:
+  push:
+    branches: [engine11-2020-2024-raw-es-acquisition-v1]
+    paths:
+      - services/core/scripts/buildEngine11Pre2024Unadjusted.mjs
+      - .github/workflows/engine11-pre2024-unadjusted-build.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check services/core/scripts/buildEngine11Pre2024Unadjusted.mjs
+      - name: Select archived complete raw acquisition and approved-to-study audit evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" > "${RUNNER_TEMP}/artifacts.json"
+          node --input-type=module -e '
+            import {readFileSync,appendFileSync} from "node:fs";
+            const all=JSON.parse(readFileSync(process.argv[1],"utf8")).artifacts||[];
+            const wanted=[2020,2021,2022,2023,2024].map(y=>"engine11-original-es-raw-"+y);
+            const batches=new Map();
+            for(const a of all)if(!a.expired&&wanted.includes(a.name)&&a.workflow_run?.id){
+              const map=batches.get(a.workflow_run.id)||new Map();map.set(a.name,a);batches.set(a.workflow_run.id,map);
+            }
+            const complete=[...batches.entries()].filter(([,v])=>wanted.every(n=>v.has(n))).sort((a,b)=>Math.max(...[...b[1].values()].map(x=>Date.parse(x.created_at)))-Math.max(...[...a[1].values()].map(x=>Date.parse(x.created_at))));
+            if(!complete.length)throw Error("NO_COMPLETE_RAW_SOURCE_BATCH");
+            const audit=all.filter(a=>a.name==="engine11-quarterly-rollover-audit-report"&&!a.expired).sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at))[0];
+            if(!audit)throw Error("NO_ROLLOVER_AUDIT_REPORT");
+            appendFileSync(process.env.GITHUB_ENV,"ENGINE11_RAW_RUN="+complete[0][0]+"\nENGINE11_AUDIT_ID="+audit.id+"\n");
+            console.log("SELECTED_RAW_RUN",complete[0][0],"AUDIT_ARTIFACT",audit.id);
+          ' "${RUNNER_TEMP}/artifacts.json"
+      - name: Download original receipts and audit report without Massive requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for year in 2020 2021 2022 2023 2024; do
+            mkdir -p "${RUNNER_TEMP}/engine11-raw/${year}"
+            gh run download "${ENGINE11_RAW_RUN}" --repo "${GITHUB_REPOSITORY}" --name "engine11-original-es-raw-${year}" --dir "${RUNNER_TEMP}/engine11-raw/${year}"
+            test -s "${RUNNER_TEMP}/engine11-raw/${year}/manifest.json"
+          done
+          mkdir -p "${RUNNER_TEMP}/audit"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ENGINE11_AUDIT_ID}/zip" > "${RUNNER_TEMP}/audit.zip"
+          unzip -q "${RUNNER_TEMP}/audit.zip" -d "${RUNNER_TEMP}/audit"
+          test -s "${RUNNER_TEMP}/audit/engine11-quarterly-rollover-report.json"
+      - name: Build immutable isolated pre-2024 research segment
+        shell: bash
+        run: |
+          node services/core/scripts/buildEngine11Pre2024Unadjusted.mjs "${RUNNER_TEMP}/engine11-raw" "${RUNNER_TEMP}/audit/engine11-quarterly-rollover-report.json" "${RUNNER_TEMP}/engine11-pre2024"
+      - name: Upload private build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-pre2024-unadjusted-research-segment
+          path: ${{ runner.temp }}/engine11-pre2024/*
+          if-no-files-found: warn
+          retention-days: 30
