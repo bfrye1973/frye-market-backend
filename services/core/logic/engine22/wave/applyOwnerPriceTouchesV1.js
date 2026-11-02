@@ -235,29 +235,51 @@ export function applyOwnerPriceTouchesV1({
     });
     disk[id]=Object.fromEntries(microOct31.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
   }
-  // Nov2 Submicro C-DOWN: only evidence after owner's Nov2 08:00 AZ B high.
+  // Nov 2 owner Submicro C: read *post-B* observations only.
+  // Persist the first genuine observed touch; no use of Friday's earlier low.
   const nov2=root.degrees?.submicro?.ownerSubmicroCDownNov2;
   if(nov2?.version==="engine22.submicroCDownNov2OwnerWorking.v1" && Array.isArray(nov2.levels)){
     const start=Date.parse("2026-11-02T15:00:00Z");
     const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
-    const id=JSON.stringify(["submicro","ownerSubmicroCDownNov2",nov2.version,nov2.waveA,nov2.waveB,nov2.levels.map(l=>[l.key,l.price])]);
+    const id=JSON.stringify(["submicro","ownerSubmicroCDownNov2",nov2.version,
+      nov2.waveA,nov2.waveB,nov2.levels.map(l=>[l.key,l.price])]);
     const past=disk[id]||{};
-    const obs=[];
-    if(now>=start && finite(currentPrice)!==null)obs.push({low:currentPrice,time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
-    for(const b of Array.isArray(bars10m)?bars10m:[]){
-      const t=Number(b?.time),low=finite(b?.low);
-      if(Number.isSafeInteger(t)&&t*1000>=start&&t*1000+600000<=now&&low!==null)
-        obs.push({low,time:new Date(t*1000).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
+    const observations=[];
+    const quote=finite(currentPrice);
+    const oldQuote=finite(previousWavelength?.currentPrice);
+    const oldModel=previousWavelength?.degrees?.submicro?.ownerSubmicroCDownNov2;
+    if(now>=start && quote!==null){
+      observations.push({low:quote,time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+      if(oldModel?.version===nov2.version && oldQuote!==null)
+        observations.push({low:Math.min(oldQuote,quote),time:new Date(now).toISOString(),
+          source:"ES_CONSECUTIVE_SNAPSHOT_RANGE"});
     }
-    nov2.levels=nov2.levels.map(l=>{
-      const prior=past[l.key]?.price===l.price?past[l.key]:null;
-      const hit=prior?null:obs.find(x=>x.low<=l.price);
-      const source=prior?.touchEvidenceType||hit?.source||null;
-      return {...l,status:source?"TOUCHED":"WATCH",touchEvidenceAvailable:Boolean(source),
-        touchEvidenceType:source,touchedAt:prior?.touchedAt||hit?.time||null,
-        touchEvidence:prior?.touchEvidence|| (hit?{verified:hit.source==="ES_10M_COMPLETED_OHLC",evidenceClass:hit.source}:null)};
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const raw=b?.time??b?.timestamp??b?.t;
+      const parsed=typeof raw==="string"&&!/^\\d+$/.test(raw)?Date.parse(raw):Number(raw);
+      const at=Number.isFinite(parsed)?(parsed<1e11?parsed*1000:parsed):NaN;
+      const low=finite(Number(b?.low??b?.l));
+      const high=finite(Number(b?.high??b?.h));
+      if(!Number.isFinite(at)||at<start||at+600000>now||low===null||
+        high===null||low>high)continue;
+      observations.push({low,time:new Date(at).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
+    }
+    nov2.levels=nov2.levels.map(level=>{
+      const prior=past[level.key]?.price===level.price?past[level.key]:
+        oldModel?.version===nov2.version?
+          oldModel.levels?.find(x=>x.key===level.key&&x.price===level.price&&x.status==="TOUCHED"):null;
+      const hit=prior?null:observations.find(o=>o.low<=level.price);
+      const proof=prior?.touchEvidenceType||hit?.source||null;
+      return {...level,status:proof?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(proof),touchEvidenceType:proof,
+        touchedAt:prior?.touchedAt||hit?.time||null,
+        touchEvidence:prior?.touchEvidence|| (hit?{
+          verified:hit.source==="ES_10M_COMPLETED_OHLC",
+          evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?"COMPLETED_CANDLE":"SNAPSHOT_PRICE"
+        }:null)};
     });
-    disk[id]=Object.fromEntries(nov2.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
+    disk[id]=Object.fromEntries(nov2.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,l]));
   }
   // October 31 Subminute C DOWN dual Fibonacci methods.
   // Only observe completed 10m ES candle lows after October 6 B end date.
