@@ -45,8 +45,8 @@ try{
    oldKeys.add(ts);oldLast=ts;oldFirst=Math.min(oldFirst,ts);
    if(r.adjustment!==0||!['open','high','low','close'].every(k=>Number.isFinite(r.prices?.[k])))throw Error('OLD_RAW_PRICE_INVALID_'+frame);
   }
-  let newerFirst=Infinity,newerLast=-Infinity,last=Infinity,count=0,prevCursor=null;
-  const newKeys=new Set(),sourceContractAtStart=new Set();
+  let newerFirst=Infinity,newerLast=-Infinity,last=Infinity,count=0,prevCursor=null,firstExistingRow=null;
+  const newKeys=new Set();
   for(const entry of group.pages){
    if(entry.requestCursor!==prevCursor||!/^[a-zA-Z0-9_-]+\.json$/.test(entry.name))throw Error('BAD_PAGE_CHAIN_'+frame);
    const bytes=await readFile(path.join(folder,entry.name));
@@ -59,17 +59,23 @@ try{
     if(oldKeys.has(ts)||newKeys.has(ts))throw Error('SEAM_OVERLAP_OR_DUPLICATE_'+frame);
     newKeys.add(ts);last=ts;count++;newerFirst=Math.min(newerFirst,ts);newerLast=Math.max(newerLast,ts);
     if(r.adjustment!==0||!['open','high','low','close'].every(k=>Number.isFinite(r.prices?.[k])))throw Error('EXISTING_RAW_PRICE_INVALID_'+frame);
-    if(ts===newerFirst)sourceContractAtStart.add(r.sourceContract);
+    if(ts===newerFirst)firstExistingRow=r;
    }
    prevCursor=entry.nextCursor;
   }
   if(count!==expected[i]||prevCursor!==null)throw Error('EXISTING_PAGINATION_INCOMPLETE_'+frame);
   if(!(oldLast<cutoff&&newerFirst>=cutoff&&oldLast<newerFirst))throw Error('HANDOFF_BOUNDARY_INVALID_'+frame);
+  // Our target cutoff is within the already selected December 2024 contract.
+  // Never splice a different physical contract at this historical boundary.
+  const lastOldRow=oldRows.at(-1);
+  if(lastOldRow?.sourceContract!=='ESZ2024'||firstExistingRow?.sourceContract!=='ESZ2024')
+   throw Error('CROSS_ARCHIVE_CONTRACT_MISMATCH_'+frame);
+  if(!lastOldRow?.prices||!firstExistingRow?.prices)throw Error('MISSING_HANDOFF_PRICES_'+frame);
   // This is source-date continuity, not certification of all exchange sessions.
   const seamGapMs=newerFirst-oldLast;
   const maximumExpectedMs=frame==='1mo'?62*86400000:frame==='1w'?14*86400000:frame==='1d'?7*86400000:frame==='4h'?5*86400000:4*86400000;
   if(seamGapMs>maximumExpectedMs)problem('SEAM_GAP_NEEDS_EXCHANGE_CALENDAR_REVIEW',{frame,oldLast:new Date(oldLast).toISOString(),existingFirst:new Date(newerFirst).toISOString(),gapHours:seamGapMs/3600000});
-  report.frames[frame]={oldCount:oldRows.length,existingCount:count,combinedCount:oldRows.length+count,oldFirstUtc:new Date(oldFirst).toISOString(),oldLastUtc:new Date(oldLast).toISOString(),existingFirstUtc:new Date(newerFirst).toISOString(),existingLastUtc:new Date(newerLast).toISOString(),seamHours:seamGapMs/3600000,oldFileSha256:sha(gz),existingCatalogDatasetVersion:catalog.datasetVersion,existingPageChainVerified:true,noDuplicateTimestamps:true,oldLastContract:oldRows.at(-1).sourceContract,existingFirstContract:null,exchangeCalendarCertified:false};
+  report.frames[frame]={oldCount:oldRows.length,existingCount:count,combinedCount:oldRows.length+count,oldFirstUtc:new Date(oldFirst).toISOString(),oldLastUtc:new Date(oldLast).toISOString(),existingFirstUtc:new Date(newerFirst).toISOString(),existingLastUtc:new Date(newerLast).toISOString(),seamHours:seamGapMs/3600000,oldFileSha256:sha(gz),existingCatalogDatasetVersion:catalog.datasetVersion,existingPageChainVerified:true,noDuplicateTimestamps:true,oldLastContract:oldRows.at(-1).sourceContract,existingFirstContract:firstExistingRow.sourceContract,oldLastClose:lastOldRow.prices.close,existingFirstOpen:firstExistingRow.prices.open,existingFirstClose:firstExistingRow.prices.close,handoffOpenGapPoints:Number((firstExistingRow.prices.open-lastOldRow.prices.close).toFixed(2)),exchangeCalendarCertified:false};
  }
  report.status=report.issues.length?'REVIEW_REQUIRED':'PASS_READ_ONLY_SEAM_RESEARCH_ONLY';
 }catch(e){problem('AUDIT_EXCEPTION',String(e?.stack||e));report.status='FAIL';}
