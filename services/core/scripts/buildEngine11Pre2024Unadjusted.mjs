@@ -7,7 +7,7 @@ import {gzipSync} from 'node:zlib';
 import path from 'node:path';
 const [rawRoot,auditFile,outDir]=process.argv.slice(2);
 if(!rawRoot||!auditFile||!outDir)throw Error('USAGE: RAW_ROOT AUDIT_JSON OUTPUT_DIR');
-const sha=b=>createHash('sha256').update(b).digest('hex');
+const sha=b=>createHash('sha256').update(typeof b==='string'||Buffer.isBuffer(b)?b:JSON.stringify(b)).digest('hex');
 const begin='2020-03-01T00:00:00.000Z', end='2024-10-12T00:00:00.000Z';
 const beginMs=Date.parse(begin), endMs=Date.parse(end);
 const frames={ '5min':'5m','10min':'10m','1hour':'1h','4hour':'4h','1session':'1d','1week':'1w','1month':'1mo'};
