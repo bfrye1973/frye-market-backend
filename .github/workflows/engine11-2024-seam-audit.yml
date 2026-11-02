@@ -4,6 +4,7 @@ on:
     branches: [engine11-2020-2024-raw-es-acquisition-v1]
     paths:
       - services/core/scripts/auditEngine11HistorySeam.mjs
+      - services/core/scripts/packageEngine11ContinuousUnadjusted2020plus.mjs
       - services/core/scripts/selectEngine11ExactHistoryArchive.mjs
       - .github/workflows/engine11-2024-seam-audit.yml
   workflow_dispatch:
@@ -60,6 +61,22 @@ jobs:
           set -euo pipefail
           if [ -d "${RUNNER_TEMP}/existing/pages/continuousRaw" ]; then root="${RUNNER_TEMP}/existing/pages"; else root="${RUNNER_TEMP}/existing"; fi
           node services/core/scripts/auditEngine11HistorySeam.mjs "${RUNNER_TEMP}/old" "${root}" "${RUNNER_TEMP}/engine11-seam-report.json"
+      - name: Package verified original candles as a separate research-only 2020+ artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${RUNNER_TEMP}/existing/pages/continuousRaw" ]; then root="${RUNNER_TEMP}/existing/pages"; else root="${RUNNER_TEMP}/existing"; fi
+          node --check services/core/scripts/packageEngine11ContinuousUnadjusted2020plus.mjs
+          node services/core/scripts/packageEngine11ContinuousUnadjusted2020plus.mjs "${RUNNER_TEMP}/old" "${root}" "${RUNNER_TEMP}/engine11-seam-report.json" "${RUNNER_TEMP}/engine11-combined"
+      - name: Upload seven-frame combined research artifact (not a live chart release)
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-2020plus-continuous-unadjusted-research-only
+          path: ${{ runner.temp }}/engine11-combined/
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
       - name: Preserve seam audit findings
         if: always()
         uses: actions/upload-artifact@v4
