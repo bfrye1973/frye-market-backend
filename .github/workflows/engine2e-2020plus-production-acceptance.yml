@@ -1,0 +1,23 @@
+name: Engine2E 2020plus production acceptance
+on:
+  push:
+    branches: [engine2e-2020plus-production-integration-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine2c/researchHistoricalServingV2.js
+          node --check services/core/logic/engine2c/prepareEngine11CombinedHistory.mjs
+          node --check services/core/server.js
+      - name: Serving tests
+        run: node --test services/core/tests/engine2c/researchHistoricalServingV2.test.mjs
