@@ -1,0 +1,76 @@
+name: Engine11 2024 seam verification (read only)
+on:
+  push:
+    branches: [engine11-2020-2024-raw-es-acquisition-v1]
+    paths:
+      - services/core/scripts/auditEngine11HistorySeam.mjs
+      - .github/workflows/engine11-2024-seam-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  seam:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: node --check services/core/scripts/auditEngine11HistorySeam.mjs
+      - name: Discover isolated build and pinned existing archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_ARCHIVE_TOKEN: ${{ secrets.ENGINE2C_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" > "${RUNNER_TEMP}/engine11-artifacts.json"
+          node --input-type=module -e '
+            import {readFileSync,appendFileSync} from "node:fs";
+            const a=(JSON.parse(readFileSync(process.argv[1],"utf8")).artifacts||[]).filter(x=>!x.expired&&x.name==="engine11-pre2024-unadjusted-research-segment").sort((x,y)=>Date.parse(y.created_at)-Date.parse(x.created_at));
+            if(!a.length)throw Error("OLD_SEGMENT_ARCHIVE_NOT_FOUND");
+            appendFileSync(process.env.GITHUB_ENV,"ENGINE11_OLD_ARTIFACT="+a[0].id+"\n");
+            console.log("OLD_SEGMENT_ARTIFACT",a[0].id);
+          ' "${RUNNER_TEMP}/engine11-artifacts.json"
+          # GitHub's normal workflow token is scoped to this repo. A separate,
+          # explicitly scoped read credential is needed only if frontend artifact is private.
+          if [ -n "${PRIVATE_ARCHIVE_TOKEN:-}" ]; then export GH_TOKEN="${PRIVATE_ARCHIVE_TOKEN}"; fi
+          gh api "repos/bfrye1973/Frye-Dashboard/actions/artifacts?per_page=100" > "${RUNNER_TEMP}/private-artifacts.json" || { echo "ENGINE11_NEEDS_READ_ACCESS_TO_EXISTING_ENGINE2C_ARTIFACT"; exit 3; }
+          node --input-type=module -e '
+            import {readFileSync,appendFileSync} from "node:fs";
+            const a=(JSON.parse(readFileSync(process.argv[1],"utf8")).artifacts||[]).filter(x=>x.name==="engine2c-historical-pages-private"&&!x.expired).sort((x,y)=>Date.parse(y.created_at)-Date.parse(x.created_at));
+            if(!a.length)throw Error("EXISTING_PRIVATE_HISTORY_ARCHIVE_NOT_FOUND");
+            appendFileSync(process.env.GITHUB_ENV,"ENGINE11_EXISTING_ARTIFACT="+a[0].id+"\n");
+            console.log("EXISTING_PRIVATE_HISTORY_ARTIFACT",a[0].id);
+          ' "${RUNNER_TEMP}/private-artifacts.json"
+      - name: Download two immutable archives, no Massive requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIVATE_ARCHIVE_TOKEN: ${{ secrets.ENGINE2C_GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/old" "${RUNNER_TEMP}/existing"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ENGINE11_OLD_ARTIFACT}/zip" > "${RUNNER_TEMP}/old.zip"
+          unzip -q "${RUNNER_TEMP}/old.zip" -d "${RUNNER_TEMP}/old"
+          test -s "${RUNNER_TEMP}/old/acceptance-report.json"
+          if [ -n "${PRIVATE_ARCHIVE_TOKEN:-}" ]; then export GH_TOKEN="${PRIVATE_ARCHIVE_TOKEN}"; fi
+          gh api "repos/bfrye1973/Frye-Dashboard/actions/artifacts/${ENGINE11_EXISTING_ARTIFACT}/zip" > "${RUNNER_TEMP}/existing.zip"
+          unzip -q "${RUNNER_TEMP}/existing.zip" -d "${RUNNER_TEMP}/existing"
+          test -s "${RUNNER_TEMP}/existing/continuousRaw/continuousRaw-catalog.json" || test -s "${RUNNER_TEMP}/existing/pages/continuousRaw/continuousRaw-catalog.json"
+      - name: Compare every frame, verify original page SHA and timestamps
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -d "${RUNNER_TEMP}/existing/pages/continuousRaw" ]; then root="${RUNNER_TEMP}/existing/pages"; else root="${RUNNER_TEMP}/existing"; fi
+          node services/core/scripts/auditEngine11HistorySeam.mjs "${RUNNER_TEMP}/old" "${root}" "${RUNNER_TEMP}/engine11-seam-report.json"
+      - name: Preserve seam audit findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-2024-seam-report
+          path: ${{ runner.temp }}/engine11-seam-report.json
+          if-no-files-found: warn
+          retention-days: 30
