@@ -4,6 +4,7 @@ on:
     branches: [engine11-2020-2024-raw-es-acquisition-v1]
     paths:
       - services/core/scripts/auditEngine11HistorySeam.mjs
+      - services/core/scripts/selectEngine11ExactHistoryArchive.mjs
       - .github/workflows/engine11-2024-seam-audit.yml
   workflow_dispatch:
 permissions:
@@ -37,14 +38,7 @@ jobs:
           # GitHub's normal workflow token is scoped to this repo. A separate,
           # explicitly scoped read credential is needed only if frontend artifact is private.
           if [ -n "${PRIVATE_ARCHIVE_TOKEN:-}" ]; then export GH_TOKEN="${PRIVATE_ARCHIVE_TOKEN}"; fi
-          gh api "repos/bfrye1973/Frye-Dashboard/actions/artifacts?per_page=100" > "${RUNNER_TEMP}/private-artifacts.json" || { echo "ENGINE11_NEEDS_READ_ACCESS_TO_EXISTING_ENGINE2C_ARTIFACT"; exit 3; }
-          node --input-type=module -e '
-            import {readFileSync,appendFileSync} from "node:fs";
-            const a=(JSON.parse(readFileSync(process.argv[1],"utf8")).artifacts||[]).filter(x=>x.name==="engine2c-historical-pages-private"&&!x.expired).sort((x,y)=>Date.parse(y.created_at)-Date.parse(x.created_at));
-            if(!a.length)throw Error("EXISTING_PRIVATE_HISTORY_ARCHIVE_NOT_FOUND");
-            appendFileSync(process.env.GITHUB_ENV,"ENGINE11_EXISTING_ARTIFACT="+a[0].id+"\n");
-            console.log("EXISTING_PRIVATE_HISTORY_ARTIFACT",a[0].id);
-          ' "${RUNNER_TEMP}/private-artifacts.json"
+          node services/core/scripts/selectEngine11ExactHistoryArchive.mjs
       - name: Download two immutable archives, no Massive requests
         env:
           GH_TOKEN: ${{ github.token }}
