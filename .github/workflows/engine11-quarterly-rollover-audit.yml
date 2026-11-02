@@ -1,0 +1,67 @@
+name: Engine11 quarterly ES rollover overlap audit (2020-2024)
+on:
+  push:
+    branches: [engine11-2020-2024-raw-es-acquisition-v1]
+    paths:
+      - services/core/scripts/auditEngine11QuarterlyRollovers.mjs
+      - .github/workflows/engine11-quarterly-rollover-audit.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validate audit script syntax
+        run: node --check services/core/scripts/auditEngine11QuarterlyRollovers.mjs
+      - name: Find the latest complete five-year source-artifact batch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" > "${RUNNER_TEMP}/engine11-artifacts.json"
+          node --input-type=module -e '
+            import {readFileSync,appendFileSync} from "node:fs";
+            const all=JSON.parse(readFileSync(process.argv[1],"utf8")).artifacts||[];
+            const desired=[2020,2021,2022,2023,2024].map(y=>"engine11-original-es-raw-"+y);
+            const byRun=new Map();
+            for(const a of all)if(!a.expired&&desired.includes(a.name)&&a.workflow_run?.id){
+              const run=a.workflow_run.id,group=byRun.get(run)||new Map();
+              if(!group.has(a.name))group.set(a.name,a);
+              byRun.set(run,group);
+            }
+            const candidates=[...byRun.entries()].filter(([,g])=>desired.every(x=>g.has(x))).sort((a,b)=>Math.max(...[...b[1].values()].map(x=>Date.parse(x.created_at)))-Math.max(...[...a[1].values()].map(x=>Date.parse(x.created_at))));
+            if(!candidates.length)throw Error("COMPLETE_FIVE_YEAR_ARCHIVE_BATCH_NOT_FOUND");
+            const [run,group]=candidates[0];
+            console.log("SOURCE_RUN",run,"ARTIFACTS",desired.map(x=>group.get(x).id));
+            appendFileSync(process.env.GITHUB_ENV,"SOURCE_RUN_ID="+run+"\n");
+          ' "${RUNNER_TEMP}/engine11-artifacts.json"
+      - name: Retrieve five original source artifacts without calling Massive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for year in 2020 2021 2022 2023 2024; do
+            mkdir -p "${RUNNER_TEMP}/engine11-raw/${year}"
+            gh run download "${SOURCE_RUN_ID}" --repo "${GITHUB_REPOSITORY}" --name "engine11-original-es-raw-${year}" --dir "${RUNNER_TEMP}/engine11-raw/${year}"
+            test -s "${RUNNER_TEMP}/engine11-raw/${year}/manifest.json"
+          done
+      - name: Verify all source receipts and compare each quarterly contract pair
+        shell: bash
+        run: |
+          node services/core/scripts/auditEngine11QuarterlyRollovers.mjs "${RUNNER_TEMP}/engine11-raw" "${RUNNER_TEMP}/engine11-quarterly-rollover-report.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine11-quarterly-rollover-audit-report
+          path: ${{ runner.temp }}/engine11-quarterly-rollover-report.json
+          if-no-files-found: warn
+          retention-days: 30
