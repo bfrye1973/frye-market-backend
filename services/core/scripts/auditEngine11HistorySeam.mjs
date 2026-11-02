@@ -21,7 +21,14 @@ try{
  if(!oldAccept.readiness?.startsWith('PASS_ISOLATED_RESEARCH')||oldAccept.problems?.length)throw Error('OLD_SEGMENT_NOT_VALIDATED');
  const folder=path.join(privateRoot,'continuousRaw');
  const catalog=JSON.parse(await readFile(path.join(folder,'continuousRaw-catalog.json'),'utf8'));
- if(catalog.datasetVersion!==dataset||catalog.priceBasisVersion!==basis||catalog.researchOnly!==true||catalog.structuralEligible!==false||catalog.executionPriceAuthority!==false)throw Error('PINNED_EXISTING_CATALOG_IDENTITY_CHANGED');
+ if(catalog.datasetVersion!==dataset||catalog.priceBasisVersion!==basis||catalog.researchOnly!==true||catalog.structuralEligible!==false||catalog.executionPriceAuthority!==false){
+  problem('PINNED_EXISTING_CATALOG_IDENTITY_CHANGED',{
+   actual:{view:catalog.view,datasetVersion:catalog.datasetVersion,priceBasisVersion:catalog.priceBasisVersion,researchOnly:catalog.researchOnly,structuralEligible:catalog.structuralEligible,executionPriceAuthority:catalog.executionPriceAuthority,frames:Object.fromEntries(frames.map(frame=>[frame,catalog.frames?.[frame]?.rows??null]))},
+   required:{view:'continuousRaw',datasetVersion:dataset,priceBasisVersion:basis,researchOnly:true,structuralEligible:false,executionPriceAuthority:false}
+  });
+  report.status='FAIL';
+  throw Error('PINNED_EXISTING_CATALOG_IDENTITY_CHANGED_DIAGNOSTICS_CAPTURED');
+ }
  for(let i=0;i<frames.length;i++){
   const frame=frames[i],oldEvidence=oldManifest.frameEvidence?.[frame],group=catalog.frames?.[frame];
   if(!oldEvidence||!group||group.rows!==expected[i])throw Error('FRAME_MANIFEST_INVALID_'+frame);
