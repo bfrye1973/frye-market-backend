@@ -1,0 +1,55 @@
+name: Engine2E Engine11 2020plus private serving acceptance
+on:
+  push:
+    branches: [engine2e-engine11-2020plus-private-serving-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - name: Syntax and serving unit tests
+        run: |
+          node --check services/core/logic/engine2c/buildEngine11CombinedPrivatePages.mjs
+          node --check services/core/logic/engine2c/prepareEngine11CombinedHistory.mjs
+          node --check services/core/logic/engine2c/researchHistoricalServingV2.js
+          node --test services/core/tests/engine2c/researchHistoricalServingV2.test.mjs
+      - name: Download exact verified Engine11 combined artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${GITHUB_REPOSITORY}/actions/artifacts/13158459519/zip > "$RUNNER_TEMP/combined.zip"
+          mkdir "$RUNNER_TEMP/combined"
+          unzip -q "$RUNNER_TEMP/combined.zip" -d "$RUNNER_TEMP/combined"
+      - name: Build and independently inspect all private pages
+        run: |
+          node services/core/logic/engine2c/buildEngine11CombinedPrivatePages.mjs "$RUNNER_TEMP/combined" "$RUNNER_TEMP/pages"
+          node --input-type=module <<'NODE'
+          import {readFile,readdir} from 'node:fs/promises';
+          import path from 'node:path';
+          const dir=path.join(process.env.RUNNER_TEMP,'pages','continuousRaw2020plus');
+          const cat=JSON.parse(await readFile(path.join(dir,'continuousRaw2020plus-catalog.json'),'utf8'));
+          const expected={ '5m':471044,'10m':235733,'1h':39364,'4h':9319,'1d':1645,'1w':321,'1mo':53 };
+          let rows=0,pages=0;
+          for(const [frame,n] of Object.entries(expected)){
+            const g=cat.frames[frame]; if(g.rows!==n)throw Error('COUNT_'+frame);
+            let cur=null,sum=0;
+            for(const d of g.pages){
+              if(d.requestCursor!==cur)throw Error('CURSOR_'+frame);
+              const p=JSON.parse(await readFile(path.join(dir,d.name),'utf8'));
+              if(p.rows.length!==d.rows||p.rows.length>1000)throw Error('PAGE_'+frame);
+              for(let i=1;i<p.rows.length;i++)if(Date.parse(p.rows[i].timestampUtc)>Date.parse(p.rows[i-1].timestampUtc))throw Error('ORDER_'+frame);
+              sum+=p.rows.length;pages++;cur=p.nextCursor;
+            }
+            if(sum!==n||cur!==null)throw Error('TERMINAL_'+frame);
+            rows+=sum;
+          }
+          if(rows!==757479||pages!==762)throw Error('TOTALS_'+rows+'_'+pages);
+          console.log('ENGINE2E_2020PLUS_ACCEPTANCE_PASS',JSON.stringify({rows,pages,datasetVersion:cat.datasetVersion,priceBasisVersion:cat.priceBasisVersion}));
+          NODE
