@@ -6,7 +6,11 @@ import {readFile,realpath} from 'node:fs/promises';
 import path from 'node:path';
 
 export const RESEARCH_VIEWS=Object.freeze({
-  UNADJUSTED:{folder:'continuousRaw',dataset:'research-dataset:a0c81ce398869440b1b9cd42b94ced0101923356c4c860a9c13232a1f98f3c91',basis:'price-basis:fcbfa10815555415c8afdfddbbc28a96a4f42207db162a0db853b549546b3908'},
+  UNADJUSTED:Object.freeze([
+    {folder:'continuousRaw',dataset:'research-dataset:a0c81ce398869440b1b9cd42b94ced0101923356c4c860a9c13232a1f98f3c91',basis:'price-basis:fcbfa10815555415c8afdfddbbc28a96a4f42207db162a0db853b549546b3908',rollback:true},
+    {folder:'continuousRaw2020plus',dataset:'research-dataset:2e555ba83cbf25466d3e8d157371cc423401f30a25ed35b33a95fca5f81aaae2',basis:'price-basis:04ec3639248269336f8df3626c6c9a3eb119ac18cbc39429addbbb2f24d22b15',research2020plus:true},
+  ]),
+
   ADJUSTED_RESEARCH:{folder:'continuousAdjustedClose',dataset:'research-dataset:5d880a0fddf98e0db3d90c2262ab4f5febcf37d3deed83fc3d45426158863b14',basis:'price-basis:94b25a5e2dc04574a59966c369243300d205a50527800b63876641a6023e9f63'},
   ACTUAL_CONTRACT:{folder:'actualESZ2026',dataset:'research-dataset:2dd028c39df6fe16e2adfec59b4c1bba312b21f1b2a2f9b783751a25b32dc808',basis:'price-basis:757ed82449f97edfea282111a163ffa04681ba188242fd17034ff9cb91410623'}
 });
@@ -30,8 +34,10 @@ export function createResearchHistoricalHandler({enabled=false,verifySession,aut
   if(!session||session.authenticated!==true||typeof session.subject!=='string'||!session.subject)return output(fail(401,'NOT_AUTHENTICATED'));
   let allowed=false;try{allowed=await authorizeViewer({subject:session.subject,context,session})===true;}catch{}
   if(!allowed)return output(fail(403,'RESEARCH_NOT_AUTHORIZED'));
-  const view=RESEARCH_VIEWS[query.view],frame=query.frame;
-  if(!view||!FRAMES.has(frame)||query.direction!=='DESC'||query.limit!=='1000'||query.datasetVersion!==view.dataset||query.priceBasisVersion!==view.basis||typeof query.cursor!=='undefined'&&typeof query.cursor!=='string')return output(fail(400,'INVALID_RESEARCH_CONTEXT'));
+  const candidates=RESEARCH_VIEWS[query.view],frame=query.frame;
+  const views=Array.isArray(candidates)?candidates:(candidates?[candidates]:[]);
+  const view=views.find(v=>query.datasetVersion===v.dataset&&query.priceBasisVersion===v.basis);
+  if(!view||!FRAMES.has(frame)||query.direction!=='DESC'||query.limit!=='1000'||typeof query.cursor!=='undefined'&&typeof query.cursor!=='string')return output(fail(400,'INVALID_RESEARCH_CONTEXT'));
   if(query.cursor&&query.cursor.length>2048)return output(fail(400,'INVALID_CURSOR'));
   const requestedCursor=query.cursor??null;
   try{
