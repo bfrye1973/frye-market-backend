@@ -20,3 +20,22 @@ test("No pre-B history can touch Nov2 C ladder, post-B quote can",()=>{
  const after=applyOwnerPriceTouchesV1({currentWavelength:w,currentPrice:7614,bars10m:[],evaluationTimeMs:Date.parse("2026-11-02T17:00:00Z")});
  assert.deepEqual(after.degrees.submicro.ownerSubmicroCDownNov2.levels.map(x=>x.status).slice(0,5),["TOUCHED","TOUCHED","TOUCHED","WATCH","WATCH"]);
 });
+
+test("post-B completed 10m timestamps in milliseconds or ISO mark levels green",()=>{
+ const w=buildCurrentWavelength({symbol:"ES",currentPrice:7700});
+ const time=Date.parse("2026-11-02T16:20:00Z");
+ const result=applyOwnerPriceTouchesV1({currentWavelength:w,currentPrice:7700,
+   evaluationTimeMs:Date.parse("2026-11-02T17:00:00Z"),
+   bars10m:[{time,low:7590,high:7635}]});
+ const v=result.degrees.submicro.ownerSubmicroCDownNov2.levels;
+ assert.deepEqual(v.slice(0,4).map(l=>l.status),["TOUCHED","TOUCHED","TOUCHED","TOUCHED"]);
+ assert.equal(v[4].status,"WATCH");
+ assert.equal(v[3].touchEvidence.verified,true);
+});
+test("pre-B candles cannot create Submicro C touches",()=>{
+ const w=buildCurrentWavelength({symbol:"ES",currentPrice:7700});
+ const result=applyOwnerPriceTouchesV1({currentWavelength:w,currentPrice:7700,
+ evaluationTimeMs:Date.parse("2026-11-02T17:00:00Z"),
+ bars10m:[{time:Date.parse("2026-10-30T15:00:00Z")/1000,low:7500,high:7700}]});
+ assert(result.degrees.submicro.ownerSubmicroCDownNov2.levels.every(l=>l.status==="WATCH"));
+});
