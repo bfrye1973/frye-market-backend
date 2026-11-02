@@ -17,8 +17,8 @@ test("Submicro alternatives preserve independent Fib ladders and other degrees",
   assert(w.degrees.micro.ownerMicroCDownOct31);
   assert(w.degrees.subminute.ownerSubminuteCDownOct31);
   const m=ownerApprovedWorkingSelection;
-  assert.equal(m.selectionRevision,5);
-  assert.equal(m.degrees.submicro.key,"submicroCompare");
+  assert.equal(m.selectionRevision,6);
+  assert.equal(m.degrees.submicro.key,"ownerSubmicroCDownNov2");
   assert.equal(m.degrees.micro.activeWave,"C");
   assert.equal(m.degrees.subminute.activeWave,"C");
   assert.equal(c.noExecution,true);
@@ -28,6 +28,6 @@ test("published selection accepts two scenarios without claiming completion",()=
   const degreeStates={minor:{activeWave:"W5",direction:"UP"},intermediate:{activeWave:"W3",direction:"UP"},primary:{activeWave:"W5",direction:"UP"}};
   const p=buildAuthorizedWorkingStructureV1({currentWavelength:w,degreeStates,publicationTime:"2026-10-31T23:00:00Z"});
   assert.equal(p.degrees.submicro.available,true);
-  assert.equal(p.degrees.submicro.activeWave,"ALTERNATIVES");
+  assert.equal(p.degrees.submicro.activeWave,"C");
   assert.equal(p.degrees.submicro.completionConfirmed,false);
 });
