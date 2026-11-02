@@ -271,6 +271,24 @@ export function buildCurrentWavelength({
     ownerWorkingOnly:true,noExecution:true,noPermissionCreated:true,
   };
   // Owner-approved comparative Submicro scenarios, advisory only.
+  // Nov 2 owner-approved Submicro ABC C-down update; prior alternatives remain preserved.
+  const ownerSubmicroCDownNov2 = {
+    version:"engine22.submicroCDownNov2OwnerWorking.v1",degree:"submicro",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"C",
+    ownerApprovalReference:"OWNER_20261102_SUBMICRO_C_DOWN",
+    waveA:{startHigh:7819.50,low:7664.50,status:"OWNER_MARKED_COMPLETE"},
+    waveB:{high:7692.00,localTime:"2026-11-02 08:00",timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE"},
+    waveC:{completionConfirmed:false,status:"DEVELOPING_CANDIDATE"},
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7692-(7819.5-7664.5)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true
+    })),
+    reviewBoundary:{price:7692.00,reviewOnly:true,officialInvalidation:false},
+    previousModelVersion:"engine22.submicroCompareNov1.v1",
+    historicalAlternativesPreserved:true,noExecution:true,noPermissionCreated:true
+  };
   const submicroCompare = {
     version:"engine22.submicroCompareNov1.v1",degree:"submicro",
     activeWave:"ALTERNATIVES",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
@@ -560,6 +578,7 @@ export function buildCurrentWavelength({
       ownerSubmicroADown,
       ownerSubmicroCDown,
       ownerSubmicroFiveUp,
+      ownerSubmicroCDownNov2,
       submicroCompare,
       ownerSubmicroADownInsideMicroW4,
       levels:submicroW2Levels,

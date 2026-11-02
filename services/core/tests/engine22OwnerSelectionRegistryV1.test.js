@@ -14,7 +14,7 @@ function fixture(){
 test("current approval manifest produces existing seven-degree published waves",()=>{
  const a=buildAuthorizedWorkingStructureV1(fixture());
  assert.equal(a.status,"COMPLETE_WORKING_SELECTION");
- assert.equal(a.publicationRevision,5);
+ assert.equal(a.publicationRevision,6);
  assert.equal(a.degrees.micro.activeWave,"C");
  assert.equal(a.degrees.subminute.activeWave,"C");
 });

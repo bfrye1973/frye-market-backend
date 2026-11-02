@@ -235,6 +235,30 @@ export function applyOwnerPriceTouchesV1({
     });
     disk[id]=Object.fromEntries(microOct31.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
   }
+  // Nov2 Submicro C-DOWN: only evidence after owner's Nov2 08:00 AZ B high.
+  const nov2=root.degrees?.submicro?.ownerSubmicroCDownNov2;
+  if(nov2?.version==="engine22.submicroCDownNov2OwnerWorking.v1" && Array.isArray(nov2.levels)){
+    const start=Date.parse("2026-11-02T15:00:00Z");
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const id=JSON.stringify(["submicro","ownerSubmicroCDownNov2",nov2.version,nov2.waveA,nov2.waveB,nov2.levels.map(l=>[l.key,l.price])]);
+    const past=disk[id]||{};
+    const obs=[];
+    if(now>=start && finite(currentPrice)!==null)obs.push({low:currentPrice,time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(b?.time),low=finite(b?.low);
+      if(Number.isSafeInteger(t)&&t*1000>=start&&t*1000+600000<=now&&low!==null)
+        obs.push({low,time:new Date(t*1000).toISOString(),source:"ES_10M_COMPLETED_OHLC"});
+    }
+    nov2.levels=nov2.levels.map(l=>{
+      const prior=past[l.key]?.price===l.price?past[l.key]:null;
+      const hit=prior?null:obs.find(x=>x.low<=l.price);
+      const source=prior?.touchEvidenceType||hit?.source||null;
+      return {...l,status:source?"TOUCHED":"WATCH",touchEvidenceAvailable:Boolean(source),
+        touchEvidenceType:source,touchedAt:prior?.touchedAt||hit?.time||null,
+        touchEvidence:prior?.touchEvidence|| (hit?{verified:hit.source==="ES_10M_COMPLETED_OHLC",evidenceClass:hit.source}:null)};
+    });
+    disk[id]=Object.fromEntries(nov2.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
+  }
   // October 31 Subminute C DOWN dual Fibonacci methods.
   // Only observe completed 10m ES candle lows after October 6 B end date.
   // Retain method-specific touch history; a quote-only hit is labeled as such.

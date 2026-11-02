@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {buildAuthorizedWorkingStructureV1} from "../logic/engine22/wave/buildAuthorizedWorkingStructureV1.js";
 const cfg={
-submicro:["submicroCompare","engine22.submicroCompareNov1.v1","ALTERNATIVES","DOWN","DEVELOPING_CANDIDATE","micro","C"],
+submicro:["ownerSubmicroCDownNov2","engine22.submicroCDownNov2OwnerWorking.v1","C","DOWN","DEVELOPING_CANDIDATE","micro","C"],
 micro:["ownerMicroCDownOct31","engine22.microCDownOct31OwnerWorking.v1","C","DOWN","DEVELOPING_CANDIDATE","subminute","C"],
 subminute:["ownerSubminuteCDownOct31","engine22.subminuteCDownOct31OwnerWorking.v1","C","DOWN","DEVELOPING_CANDIDATE","minute","W2"],
 minute:["ownerMinuteW2Retracement","engine22.minuteW2RetracementOwner.v1","W2","DOWN","DEVELOPING","minor",null]
