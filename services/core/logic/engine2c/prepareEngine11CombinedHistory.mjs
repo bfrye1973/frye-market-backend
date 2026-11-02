@@ -29,14 +29,17 @@ async function download(url,dest){
 }
 function run(bin,args){return new Promise((res,rej)=>{const p=spawn(bin,args,{stdio:["ignore","ignore","pipe"]});let e="";p.stderr.on("data",b=>e+=b.toString().slice(0,1500));p.on("error",rej);p.on("close",n=>n===0?res():rej(Error("ENGINE11_EXTRACT_FAILED "+e)));});}
 
-export async function prepareEngine11CombinedHistory({root,githubToken}={}){
+export async function prepareEngine11CombinedHistory({root,githubToken,artifactUrl}={}){
  if(!path.isAbsolute(root))throw Error("ENGINE11_PRIVATE_ROOT_NOT_CONFIGURED");
  const pagesRoot=path.join(root,"pages"),target=path.join(pagesRoot,"continuousRaw2020plus");
  try{if((await stat(path.join(target,"continuousRaw2020plus-catalog.json"))).isFile())return {root:pagesRoot,reused:true};}catch{}
  await mkdir(pagesRoot,{recursive:true,mode:0o700});
  const temp=await mkdtemp(path.join(tmpdir(),"engine11-2020plus-"));
  try{
-  const a=await artifactURL(githubToken),zip=path.join(temp,"combined.zip"),combined=path.join(temp,"combined"),built=path.join(temp,"built");
+  const a=artifactUrl
+    ? {url:artifactUrl,id:13158459519,digest:"sha256:23970f762925894907d790292d47dd5f1d537f9f3bf47aa4a7e541709fc926fb"}
+    : await artifactURL(githubToken);
+  const zip=path.join(temp,"combined.zip"),combined=path.join(temp,"combined"),built=path.join(temp,"built");
   await download(a.url,zip);await mkdir(combined);await run("unzip",["-q",zip,"-d",combined]);
   const result=await buildEngine11CombinedPrivatePages({combinedRoot:combined,outRoot:built});
   if(result.datasetVersion!=="research-dataset:2e555ba83cbf25466d3e8d157371cc423401f30a25ed35b33a95fca5f81aaae2"||
@@ -48,7 +51,7 @@ export async function prepareEngine11CombinedHistory({root,githubToken}={}){
 }
 
 if(process.argv[1]&&import.meta.url===new URL("file://"+process.argv[1]).href){
- prepareEngine11CombinedHistory({root:process.env.ENGINE2C_PRIVATE_ROOT||"/opt/render/project/src/.engine2c-private",githubToken:process.env.ENGINE2C_GITHUB_TOKEN||process.env.LIVE_GITHUB_TOKEN||process.env.GITHUB_TOKEN||process.env.GH_TOKEN})
+ prepareEngine11CombinedHistory({root:process.env.ENGINE2C_PRIVATE_ROOT||"/opt/render/project/src/.engine2c-private",githubToken:process.env.ENGINE2C_GITHUB_TOKEN||process.env.LIVE_GITHUB_TOKEN||process.env.GITHUB_TOKEN||process.env.GH_TOKEN,artifactUrl:process.env.ENGINE11_COMBINED_ARTIFACT_URL})
  .then(v=>console.log("ENGINE11_2020PLUS_PRIVATE_HISTORY_READY",JSON.stringify(v)))
  .catch(e=>{console.error("ENGINE11_2020PLUS_PRIVATE_HISTORY_FAILED",e.message);process.exitCode=1;});
 }
