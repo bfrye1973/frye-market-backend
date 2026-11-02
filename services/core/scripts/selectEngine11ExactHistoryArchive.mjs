@@ -5,7 +5,7 @@ import {writeFileSync,appendFileSync,mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 const repo=process.env.ENGINE11_PRIVATE_HISTORY_REPO||'bfrye1973/Frye-Dashboard';
-const name='engine2c-historical-pages-private';
+const names=['engine2c-oct30-private-history-pages','engine2c-historical-pages-private'];
 const expected={
  dataset:'research-dataset:a0c81ce398869440b1b9cd42b94ced0101923356c4c860a9c13232a1f98f3c91',
  basis:'price-basis:fcbfa10815555415c8afdfddbbc28a96a4f42207db162a0db853b549546b3908',
@@ -15,10 +15,10 @@ const frames=['5m','10m','1h','4h','1d','1w','1mo'];
 const artifacts=[];
 for(let page=1;page<=3;page++){
  const response=JSON.parse(execFileSync('gh',['api','repos/'+repo+'/actions/artifacts?per_page=100&page='+page],{encoding:'utf8',maxBuffer:8e6}));
- artifacts.push(...(response.artifacts||[]).filter(x=>x.name===name&&!x.expired));
+ artifacts.push(...(response.artifacts||[]).filter(x=>names.includes(x.name)&&!x.expired));
  if((response.artifacts||[]).length<100)break;
 }
-artifacts.sort((a,b)=>Date.parse(b.created_at)-Date.parse(a.created_at));
+artifacts.sort((a,b)=>names.indexOf(a.name)-names.indexOf(b.name)||Date.parse(b.created_at)-Date.parse(a.created_at));
 const tmp=mkdtempSync(path.join(tmpdir(),'engine11-pin-'));
 const diagnostics=[];
 let selected=null;
@@ -32,10 +32,10 @@ try{
    for(const loc of ['continuousRaw/continuousRaw-catalog.json','pages/continuousRaw/continuousRaw-catalog.json']){
     try{catalog=JSON.parse(execFileSync('unzip',['-p',zip,loc],{encoding:'utf8',maxBuffer:2e6,stdio:['ignore','pipe','ignore']}));break;}catch{}
    }
-   if(!catalog){diagnostics.push({artifact:a.id,status:'CATALOG_MISSING'});continue;}
+   if(!catalog){diagnostics.push({artifact:a.id,name:a.name,status:'CATALOG_MISSING'});continue;}
    const counts=frames.map(f=>catalog.frames?.[f]?.rows??null);
    const matched=catalog.view==='continuousRaw'&&catalog.datasetVersion===expected.dataset&&catalog.priceBasisVersion===expected.basis&&counts.every((n,i)=>n===expected.counts[i])&&catalog.researchOnly===true&&catalog.structuralEligible===false&&catalog.executionPriceAuthority===false;
-   diagnostics.push({artifact:a.id,status:matched?'EXACT_PIN_MATCH':'MISMATCH',datasetVersion:catalog.datasetVersion,priceBasisVersion:catalog.priceBasisVersion,counts});
+   diagnostics.push({artifact:a.id,name:a.name,status:matched?'EXACT_PIN_MATCH':'MISMATCH',datasetVersion:catalog.datasetVersion,priceBasisVersion:catalog.priceBasisVersion,counts});
    if(matched){selected=a.id;break;}
   }catch(e){diagnostics.push({artifact:a.id,status:'DOWNLOAD_OR_PARSE_ERROR',reason:String(e.message).slice(0,170)});}
  }
