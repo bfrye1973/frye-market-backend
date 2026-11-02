@@ -456,11 +456,19 @@ app.listen(PORT, HOST, () => {
   console.log("- /api/health  (Render healthcheck)");
   console.log("- /healthz");
   if(process.env.ENGINE2C_GITHUB_TOKEN || process.env.LIVE_GITHUB_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN || process.env.ENGINE2C_HISTORY_BUNDLE_URL){
-    // Background-only research page preparation: no impact on LIVE startup.
-    const child=spawn("node",["./logic/engine2c/prepareHistoryPages.mjs"],{cwd:__dirname,env:process.env,stdio:["ignore","ignore","pipe"]});
-    child.stderr.on("data",b=>console.error("[engine2c-history]",String(b).slice(0,500)));
-    child.on("close",code=>console.log("[engine2c-history] preparation exit",code));
-    child.on("error",error=>console.error("[engine2c-history] startup unavailable",error.message));
+    // Prepare the legacy rollback archive first, then the verified 2020+ archive.
+    // Both remain private and version-pinned; LIVE startup is never blocked.
+    const legacy=spawn("node",["./logic/engine2c/prepareHistoryPages.mjs"],{cwd:__dirname,env:process.env,stdio:["ignore","ignore","pipe"]});
+    legacy.stderr.on("data",b=>console.error("[engine2c-history-legacy]",String(b).slice(0,500)));
+    legacy.on("error",error=>console.error("[engine2c-history-legacy] startup unavailable",error.message));
+    legacy.on("close",code=>{
+      console.log("[engine2c-history-legacy] preparation exit",code);
+      const combined=spawn("node",["./logic/engine2c/prepareEngine11CombinedHistory.mjs"],{cwd:__dirname,env:process.env,stdio:["ignore","pipe","pipe"]});
+      combined.stdout.on("data",b=>console.log("[engine11-2020plus]",String(b).slice(0,1200)));
+      combined.stderr.on("data",b=>console.error("[engine11-2020plus]",String(b).slice(0,1200)));
+      combined.on("close",combinedCode=>console.log("[engine11-2020plus] preparation exit",combinedCode));
+      combined.on("error",error=>console.error("[engine11-2020plus] startup unavailable",error.message));
+    });
   }
   console.log("- /api/v1/ohlc");
   console.log("- /api/sectorcards-10m");
