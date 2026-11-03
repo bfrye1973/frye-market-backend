@@ -74,7 +74,7 @@ function store(filePath,models){
 }
 export function applyOwnerPriceTouchesV1({
   currentWavelength=null, previousWavelength=null, currentPrice=null,
-  bars10m=[], evaluationTimeMs=null, storePath=null,
+  bars10m=[], bars1d=[], evaluationTimeMs=null, storePath=null,
 }={}){
   if(!currentWavelength?.degrees)return currentWavelength;
   const root=structuredClone(currentWavelength);
@@ -280,6 +280,42 @@ export function applyOwnerPriceTouchesV1({
     });
     disk[id]=Object.fromEntries(nov2.levels.filter(l=>l.status==="TOUCHED")
       .map(l=>[l.key,l]));
+  }
+  // Minor W5 historical touches: only completed daily candles after the
+  // owner W4 origin, or a live ES quote. Persist evidence per anchor/target.
+  // This is display-only and never confirms W5 or permits execution.
+  const minor=root.degrees?.minor;
+  if(minor?.state==="MINOR_W5_ACTIVE_CANDIDATE" && Array.isArray(minor.levels)){
+    const start=Date.parse("2026-07-29T20:30:00Z");
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const id=JSON.stringify(["minor","W5",6417,6948.75,7398,
+      minor.levels.map(l=>[l.key,l.price])]);
+    const old=disk[id]||{};
+    const observed=[];
+    const quote=finite(currentPrice);
+    if(quote!==null&&now>=start)
+      observed.push({high:quote,time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE"});
+    for(const b of Array.isArray(bars1d)?bars1d:[]){
+      const raw=b?.time??b?.timestamp??b?.t;
+      const parsed=typeof raw==="string"&&!/^\\d+$/.test(raw)?Date.parse(raw):Number(raw);
+      const t=Number.isFinite(parsed)?(parsed<1e11?parsed*1000:parsed):NaN;
+      const high=finite(Number(b?.high??b?.h));
+      if(!Number.isFinite(t)||t<start||t+86400000>now||high===null)continue;
+      observed.push({high,time:new Date(t).toISOString(),source:"ES_1D_COMPLETED_OHLC"});
+    }
+    minor.levels=minor.levels.map(l=>{
+      const prior=old[l.key]?.price===l.price?old[l.key]:null;
+      const hit=prior?null:observed.find(o=>o.high>=l.price);
+      const source=prior?.touchEvidenceType||hit?.source||null;
+      return {...l,status:source?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(source),touchEvidenceType:source,
+        touchedAt:prior?.touchedAt||hit?.time||null,
+        touchEvidence:prior?.touchEvidence||(hit?{
+          verified:hit.source==="ES_1D_COMPLETED_OHLC",
+          evidenceClass:hit.source==="ES_1D_COMPLETED_OHLC"?"COMPLETED_CANDLE":"SNAPSHOT_PRICE"
+        }:null)};
+    });
+    disk[id]=Object.fromEntries(minor.levels.filter(l=>l.status==="TOUCHED").map(l=>[l.key,l]));
   }
   // October 31 Subminute C DOWN dual Fibonacci methods.
   // Only observe completed 10m ES candle lows after October 6 B end date.
