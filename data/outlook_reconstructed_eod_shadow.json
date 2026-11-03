@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-02T22:25:18.524292+00:00",
+  "updated_at_utc": "2026-11-03T00:01:06.146054+00:00",
   "completedSessionDate": "2026-11-02",
   "score": 53.3,
   "state": "MIXED",
@@ -175,11 +175,11 @@
       "momentum_pct": 43.75
     },
     "Real Estate": {
-      "nh": 95,
+      "nh": 94,
       "nl": 38,
       "up": 5,
       "down": 6,
-      "breadth_pct": 71.43,
+      "breadth_pct": 71.21,
       "momentum_pct": 45.45
     },
     "Utilities": {
@@ -191,11 +191,11 @@
       "momentum_pct": 0.0
     },
     "tech": {
-      "nh": 153,
+      "nh": 152,
       "nl": 242,
       "up": 17,
       "down": 21,
-      "breadth_pct": 38.73,
+      "breadth_pct": 38.58,
       "momentum_pct": 44.74
     }
   },
@@ -204,12 +204,12 @@
       "symbol": "ES",
       "available": true,
       "state": "RED",
-      "sessionDate": "2026-11-01",
-      "close": 7587.0,
-      "ma10": 7710.5,
-      "ma20": 7761.5375,
-      "ma10Prior": 7725.775,
-      "ma20Prior": 7773.6875,
+      "sessionDate": "2026-11-02",
+      "close": 7583.25,
+      "ma10": 7690.35,
+      "ma20": 7746.675,
+      "ma10Prior": 7710.5,
+      "ma20Prior": 7761.5375,
       "ma10Upsloping": false,
       "ma20Upsloping": false
     },
@@ -263,11 +263,11 @@
       "breadth_pct": 52.85,
       "momentum_pct": 60.25,
       "prior": {
-        "nh": 1694,
+        "nh": 1692,
         "nl": 1198,
         "up": 196,
         "down": 156,
-        "breadth_pct": 58.58,
+        "breadth_pct": 58.55,
         "momentum_pct": 55.68
       }
     },
@@ -314,11 +314,11 @@
       "breadth_pct": 41.3,
       "momentum_pct": 50.21,
       "prior": {
-        "nh": 852,
+        "nh": 850,
         "nl": 810,
         "up": 107,
         "down": 98,
-        "breadth_pct": 51.26,
+        "breadth_pct": 51.2,
         "momentum_pct": 52.2
       }
     },
