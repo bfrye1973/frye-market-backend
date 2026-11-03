@@ -1,0 +1,20 @@
+name: Engine22 Minor W5 Historical Fib Touches
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js"
+      - "services/core/logic/engine22/wave/buildEngine22WaveStrategy.js"
+      - "services/core/tests/engine22MinorW5FibTouchesNov2.test.js"
+      - ".github/workflows/engine22-minor-w5-fib-touches.yml"
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js
+      - run: node --test services/core/tests/engine22MinorW5FibTouchesNov2.test.js

@@ -1975,6 +1975,7 @@ export function buildEngine22WaveStrategy(input = {}) {
       previousWavelength:context.previousOwnerWavelength ?? null,
       currentPrice:context.currentPrice,
       bars10m:context.barsByTf?.["10m"] ?? [],
+      bars1d:context.barsByTf?.["1d"] ?? context.barsByTf?.["1D"] ?? [],
       evaluationTimeMs:context.evaluationTimeMs,
       storePath:context.ownerPriceTouchStorePath ?? null,
     });
