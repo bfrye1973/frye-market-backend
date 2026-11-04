@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-03T22:27:22.277889+00:00",
+  "updated_at_utc": "2026-11-04T00:23:31.524913+00:00",
   "completedSessionDate": "2026-11-03",
   "score": 49.1,
   "state": "MIXED",
@@ -47,10 +47,10 @@
     },
     {
       "sector": "Financials",
-      "breadth_pct": 73.17,
+      "breadth_pct": 73.33,
       "momentum_pct": 66.18,
       "nh": 330,
-      "nl": 121,
+      "nl": 120,
       "up": 45,
       "down": 23
     },
@@ -83,9 +83,9 @@
     },
     {
       "sector": "Real Estate",
-      "breadth_pct": 68.57,
+      "breadth_pct": 68.35,
       "momentum_pct": 57.89,
-      "nh": 96,
+      "nh": 95,
       "nl": 44,
       "up": 11,
       "down": 8
@@ -101,9 +101,9 @@
     },
     {
       "sector": "tech",
-      "breadth_pct": 35.04,
+      "breadth_pct": 34.87,
       "momentum_pct": 33.33,
-      "nh": 137,
+      "nh": 136,
       "nl": 254,
       "up": 22,
       "down": 44
@@ -152,10 +152,10 @@
     },
     "Healthcare": {
       "nh": 183,
-      "nl": 308,
+      "nl": 307,
       "up": 30,
       "down": 33,
-      "breadth_pct": 37.27,
+      "breadth_pct": 37.35,
       "momentum_pct": 47.62
     },
     "Industrials": {
@@ -204,12 +204,12 @@
       "symbol": "ES",
       "available": true,
       "state": "RED",
-      "sessionDate": "2026-11-02",
-      "close": 7609.25,
-      "ma10": 7692.95,
-      "ma20": 7747.975,
-      "ma10Prior": 7710.5,
-      "ma20Prior": 7761.5375,
+      "sessionDate": "2026-11-03",
+      "close": 7585.75,
+      "ma10": 7671.5,
+      "ma20": 7734.75,
+      "ma10Prior": 7692.95,
+      "ma20Prior": 7747.975,
       "ma10Upsloping": false,
       "ma20Upsloping": false
     },
@@ -256,18 +256,18 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 1468,
-      "nl": 1232,
+      "nh": 1466,
+      "nl": 1231,
       "up": 231,
       "down": 214,
-      "breadth_pct": 54.37,
+      "breadth_pct": 54.36,
       "momentum_pct": 51.91,
       "prior": {
         "nh": 1531,
-        "nl": 1372,
+        "nl": 1371,
         "up": 283,
         "down": 191,
-        "breadth_pct": 52.74,
+        "breadth_pct": 52.76,
         "momentum_pct": 59.7
       }
     },
@@ -307,18 +307,18 @@
     },
     "small": {
       "members": 3428,
-      "nh": 693,
-      "nl": 886,
+      "nh": 691,
+      "nl": 885,
       "up": 98,
       "down": 146,
-      "breadth_pct": 43.89,
+      "breadth_pct": 43.85,
       "momentum_pct": 40.16,
       "prior": {
         "nh": 682,
-        "nl": 971,
+        "nl": 970,
         "up": 113,
         "down": 116,
-        "breadth_pct": 41.26,
+        "breadth_pct": 41.28,
         "momentum_pct": 49.34
       }
     },
