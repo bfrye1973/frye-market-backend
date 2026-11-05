@@ -171,22 +171,46 @@ function buildCreditStressDetail(marketHealth, marketFeeds = null, macroFeeds = 
   const dailyEquities = marketFeeds?.quickRead?.marketTrend || {};
   const slowRates = bondInputs.officialSlowMacroContext || {};
   const latestFred = macroFeeds?.sources?.fred?.latest || {};
-  function fredObservation(key, current) {
-    const officialValue = safeNumber(current);
-    const observation = latestFred[key] || {};
-    // The slow-macro number is authoritative when Engine 29 rates is primary.
+  function usableObservation(candidate) {
+    const item = normalizeStressItem("_", "_", candidate);
+    return item.available;
+  }
+
+  function chooseEtfObservation(legacy, daily) {
+    // A structurally present but unusable legacy object must not hide real
+    // Polygon OHLC evidence. Preserve the legacy feed when it has a valid price.
+    return usableObservation(legacy)
+      ? legacy
+      : usableObservation(daily)
+        ? daily
+        : null;
+  }
+
+  function fredObservation(key, slowValue) {
+    const observation = latestFred[key];
+    const fredValue = safeNumber(observation?.value);
+    // A value and its observation date must come from the SAME FRED artifact.
+    if (fredValue !== null) {
+      return {
+        value: fredValue,
+        observationDate: observation?.date || null,
+      };
+    }
+
+    // Engine 29's official slow context preserves a value but not its date.
+    // Never attach another file's date to this value.
     return {
-      value: officialValue ?? safeNumber(observation.value),
-      observationDate: observation.date || null,
+      value: safeNumber(slowValue),
+      observationDate: null,
     };
   }
 
   const creditEtfItems = [
-    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG || dailyEtfs.HYG),
-    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK || dailyEtfs.JNK),
-    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD || dailyEtfs.LQD),
-    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE || dailyEtfs.KRE),
-    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM || dailyEquities.IWM),
+    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", chooseEtfObservation(creditInputs.HYG, dailyEtfs.HYG)),
+    normalizeStressItem("JNK", "Junk Bond ETF", chooseEtfObservation(creditInputs.JNK, dailyEtfs.JNK)),
+    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", chooseEtfObservation(creditInputs.LQD, dailyEtfs.LQD)),
+    normalizeStressItem("KRE", "Regional Bank ETF", chooseEtfObservation(creditInputs.KRE, dailyEtfs.KRE)),
+    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", chooseEtfObservation(creditInputs.IWM, dailyEquities.IWM)),
   ];
 
   const macroStressItems = [
