@@ -106,12 +106,11 @@ function normalizeStressItem(key, label, input) {
         : null)
   );
 
+  // Missing/failed provider observations must never be made available by
+  // placeholder momentum fields (including fabricated +0.00%).
   const available =
-    Number.isFinite(value) ||
-    Number.isFinite(close) ||
-    Number.isFinite(safeNumber(raw.pctChange5d)) ||
-    Number.isFinite(safeNumber(raw.pctChange20d)) ||
-    Number.isFinite(safeNumber(raw.pctChange50d));
+    raw.ok !== false &&
+    (Number.isFinite(value) || Number.isFinite(close));
 
   return {
     key,
@@ -127,10 +126,10 @@ function normalizeStressItem(key, label, input) {
     aboveEma20: typeof raw.aboveEma20 === "boolean" ? raw.aboveEma20 : null,
     aboveEma50: typeof raw.aboveEma50 === "boolean" ? raw.aboveEma50 : null,
     aboveEma200: typeof raw.aboveEma200 === "boolean" ? raw.aboveEma200 : null,
-    pctChange5d: safeNumber(raw.pctChange5d),
-    pctChange20d: safeNumber(raw.pctChange20d),
-    pctChange50d: safeNumber(raw.pctChange50d),
-    state: raw.state || raw.status || (available ? "WATCH" : "UNAVAILABLE"),
+    pctChange5d: available ? safeNumber(raw.pctChange5d) : null,
+    pctChange20d: available ? safeNumber(raw.pctChange20d) : null,
+    pctChange50d: available ? safeNumber(raw.pctChange50d) : null,
+    state: available ? (raw.state || raw.status || "WATCH") : "UNAVAILABLE",
     read:
       raw.read ||
       raw.interpretation ||
