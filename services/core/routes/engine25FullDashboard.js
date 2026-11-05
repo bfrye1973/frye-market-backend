@@ -81,6 +81,17 @@ function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+// Secondary detail sources may be refreshed independently. An incomplete
+// optional snapshot must not break the main Market X-Ray response.
+function readOptionalDetailJson(filePath) {
+  try {
+    return readJsonFile(filePath);
+  } catch (err) {
+    console.warn("[engine25FullDashboard] Optional detail artifact unavailable:", path.basename(filePath), err?.message);
+    return null;
+  }
+}
+
 function safeNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -912,8 +923,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const composite = readJsonFile(COMPOSITE_FILE);
     const zoneRead = readJsonFile(ZONE_READ_FILE);
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
-    const marketFeeds = readJsonFile(MARKET_FEEDS_FILE);
-    const macroFeeds = readJsonFile(MACRO_FEEDS_FILE);
+    const marketFeeds = readOptionalDetailJson(MARKET_FEEDS_FILE);
+    const macroFeeds = readOptionalDetailJson(MACRO_FEEDS_FILE);
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
