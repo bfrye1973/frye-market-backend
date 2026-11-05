@@ -32,6 +32,11 @@ const MARKET_HEALTH_FILE = path.join(
   "engine25-market-health.json"
 );
 
+// Display evidence only. These artifacts already feed the approved Engine 25
+// market-health calculation; reading them here never changes engine authority.
+const MARKET_FEEDS_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
+const MACRO_FEEDS_FILE = path.join(DATA_DIR, "engine25-data-test.json");
+
 const SECTOR_BREADTH_FILE = path.join(
   DATA_DIR,
   "engine25-sector-card-breadth-snapshots.json"
@@ -76,6 +81,17 @@ function readJsonFile(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
 
+// Secondary detail sources may be refreshed independently. An incomplete
+// optional snapshot must not break the main Market X-Ray response.
+function readOptionalDetailJson(filePath) {
+  try {
+    return readJsonFile(filePath);
+  } catch (err) {
+    console.warn("[engine25FullDashboard] Optional detail artifact unavailable:", path.basename(filePath), err?.message);
+    return null;
+  }
+}
+
 function safeNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -101,12 +117,11 @@ function normalizeStressItem(key, label, input) {
         : null)
   );
 
+  // Missing/failed provider observations must never be made available by
+  // placeholder momentum fields (including fabricated +0.00%).
   const available =
-    Number.isFinite(value) ||
-    Number.isFinite(close) ||
-    Number.isFinite(safeNumber(raw.pctChange5d)) ||
-    Number.isFinite(safeNumber(raw.pctChange20d)) ||
-    Number.isFinite(safeNumber(raw.pctChange50d));
+    raw.ok !== false &&
+    (Number.isFinite(value) || Number.isFinite(close));
 
   return {
     key,
@@ -117,15 +132,15 @@ function normalizeStressItem(key, label, input) {
     priorValue,
     change,
     observationDate:
-      raw.observationDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
+      raw.observationDate || raw.latestDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
     aboveEma10: typeof raw.aboveEma10 === "boolean" ? raw.aboveEma10 : null,
     aboveEma20: typeof raw.aboveEma20 === "boolean" ? raw.aboveEma20 : null,
     aboveEma50: typeof raw.aboveEma50 === "boolean" ? raw.aboveEma50 : null,
     aboveEma200: typeof raw.aboveEma200 === "boolean" ? raw.aboveEma200 : null,
-    pctChange5d: safeNumber(raw.pctChange5d),
-    pctChange20d: safeNumber(raw.pctChange20d),
-    pctChange50d: safeNumber(raw.pctChange50d),
-    state: raw.state || raw.status || (available ? "WATCH" : "UNAVAILABLE"),
+    pctChange5d: available ? safeNumber(raw.pctChange5d) : null,
+    pctChange20d: available ? safeNumber(raw.pctChange20d) : null,
+    pctChange50d: available ? safeNumber(raw.pctChange50d) : null,
+    state: available ? (raw.state || raw.status || "WATCH") : "UNAVAILABLE",
     read:
       raw.read ||
       raw.interpretation ||
@@ -135,7 +150,7 @@ function normalizeStressItem(key, label, input) {
   };
 }
 
-function buildCreditStressDetail(marketHealth) {
+function buildCreditStressDetail(marketHealth, marketFeeds = null, macroFeeds = null) {
   const components = marketHealth?.components || {};
 
   const creditFragility = components.creditFragility || {};
@@ -149,12 +164,50 @@ function buildCreditStressDetail(marketHealth) {
   const bondInputs = bondMarket.inputs || {};
   const liquidityInputs = liquidity.inputs || {};
 
+  // Engine 29 provides primary credit/rates SCORING. Its component inputs are
+  // structural states, not the daily ETF or FRED raw measurements used by this
+  // detail view. Restore those existing observations from their source files.
+  const dailyEtfs = marketFeeds?.quickRead?.creditFragility || {};
+  const dailyEquities = marketFeeds?.quickRead?.marketTrend || {};
+  const slowRates = bondInputs.officialSlowMacroContext || {};
+  const latestFred = macroFeeds?.sources?.fred?.latest || {};
+  function usableObservation(candidate) {
+    const item = normalizeStressItem("_", "_", candidate);
+    return item.available;
+  }
+
+  function chooseEtfObservation(legacy, daily) {
+    // A structurally present but unusable legacy object must not hide real
+    // Polygon OHLC evidence. Preserve the legacy feed when it has a valid price.
+    return usableObservation(legacy)
+      ? legacy
+      : usableObservation(daily)
+        ? daily
+        : null;
+  }
+
+  function fredObservation(key, slowValue) {
+    const officialValue = safeNumber(slowValue);
+    // Engine 29's official slow context has the value but no source date.
+    // Never borrow a possibly unrelated date from another refreshed artifact.
+    if (officialValue !== null) {
+      return { value: officialValue, observationDate: null };
+    }
+    // When the slow context is missing, use the FRED value AND date from the
+    // same observation object, keeping provenance intact.
+    const observation = latestFred[key];
+    return {
+      value: safeNumber(observation?.value),
+      observationDate: observation?.date || null,
+    };
+  }
+
   const creditEtfItems = [
-    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG),
-    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK),
-    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD),
-    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE),
-    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM),
+    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", chooseEtfObservation(creditInputs.HYG, dailyEtfs.HYG)),
+    normalizeStressItem("JNK", "Junk Bond ETF", chooseEtfObservation(creditInputs.JNK, dailyEtfs.JNK)),
+    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", chooseEtfObservation(creditInputs.LQD, dailyEtfs.LQD)),
+    normalizeStressItem("KRE", "Regional Bank ETF", chooseEtfObservation(creditInputs.KRE, dailyEtfs.KRE)),
+    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", chooseEtfObservation(creditInputs.IWM, dailyEquities.IWM)),
   ];
 
   const macroStressItems = [
@@ -179,22 +232,22 @@ function buildCreditStressDetail(marketHealth) {
     normalizeStressItem(
       "DGS10",
       "10-Year Treasury Rate",
-      bondInputs.tenYear
+      bondInputs.tenYear ?? fredObservation("DGS10", slowRates.DGS10)
     ),
     normalizeStressItem(
       "DGS2",
       "2-Year Treasury Rate",
-      bondInputs.twoYear
+      bondInputs.twoYear ?? fredObservation("DGS2", slowRates.DGS2)
     ),
     normalizeStressItem(
       "T10Y2Y",
       "10Y minus 2Y Yield Spread",
-      bondInputs.tenMinusTwo
+      bondInputs.tenMinusTwo ?? fredObservation("T10Y2Y", slowRates.T10Y2Y)
     ),
     normalizeStressItem(
       "T10Y3M",
       "10Y minus 3M Yield Spread",
-      bondInputs.tenMinusThreeMonth
+      bondInputs.tenMinusThreeMonth ?? fredObservation("T10Y3M", slowRates.T10Y3M)
     ),
     normalizeStressItem(
       "TLT",
@@ -891,6 +944,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const composite = readJsonFile(COMPOSITE_FILE);
     const zoneRead = readJsonFile(ZONE_READ_FILE);
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
+    const marketFeeds = readOptionalDetailJson(MARKET_FEEDS_FILE);
+    const macroFeeds = readOptionalDetailJson(MACRO_FEEDS_FILE);
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
@@ -914,7 +969,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
     const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
-    const creditStressDetail = buildCreditStressDetail(marketHealth);
+    const creditStressDetail = buildCreditStressDetail(marketHealth, marketFeeds, macroFeeds);
 
     const componentBreakdown = dailyCompositeAvailable
       ? buildComponentBreakdown(current)
