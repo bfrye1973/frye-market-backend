@@ -413,10 +413,18 @@ async function handle(req, res) {
 
     const files = validateFiles(requiredFiles);
     const compositeAfter = mode === "core" ? compositeSnapshot() : null;
+    const compositeFile = files.find(
+      (item) => item.file === "engine25-composite-overlay-6mo.json"
+    );
+    const compositeWasRegenerated =
+      Boolean(compositeFile) &&
+      new Date(compositeFile.modifiedAt).getTime() >= startedMs &&
+      compositeAfter?.modifiedAt === compositeFile.modifiedAt;
+
     if (mode === "core" && (!compositeAfter?.rows ||
-        (compositeAfter.score === null || !Number.isFinite(Number(compositeAfter.score))) ||
-        !files.find((item) => item.file === "engine25-composite-overlay-6mo.json" ||
-          new Date(item.modifiedAt).getTime() >= startedMs))) {
+        compositeAfter.score === null ||
+        !Number.isFinite(Number(compositeAfter.score)) ||
+        !compositeWasRegenerated)) {
       return res.status(500).json({
         ok: false, mode, error: "CORE_REFRESH_PRODUCTION_OUTPUT_NOT_VERIFIED",
         compositeBefore, compositeAfter, steps, files,
