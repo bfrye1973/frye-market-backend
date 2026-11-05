@@ -76,13 +76,13 @@ test("Credit ETF details read actual approved daily market feed without changing
   assert.equal(get(d,"creditEtfFragility","HYG").close,80);
   assert.equal(get(d,"creditEtfFragility","HYG").pctChange5d,-1.3);
 });
-test("Rates detail uses existing official FRED context with dates", () => {
+test("Rates detail preserves official slow FRED value without borrowing another artifact's date", () => {
   const d=buildCreditStressDetail(marketHealth,marketFeeds,macroFeeds);
   for(const [symbol,price] of Object.entries({DGS10:4.2,DGS2:3.6,T10Y2Y:0.6,T10Y3M:0.9})){
     const item=get(d,"ratesCurvePressure",symbol);
     assert.equal(item.available,true);
     assert.equal(item.value,price);
-    assert.equal(item.observationDate,"2026-11-04");
+    assert.equal(item.observationDate,null);
   }
   assert.equal(get(d,"ratesCurvePressure","TLT").close,82.02);
 });
@@ -115,4 +115,52 @@ test("Numeric legacy FRED fallback continues working", () => {
   const d=buildCreditStressDetail(mh,null,null);
   assert.equal(get(d,"ratesCurvePressure","DGS10").value,4.1);
   assert.equal(d.scores.bondMarket,61);
+});
+
+test("Truthy unusable legacy ETF objects cannot mask a valid Polygon observation", () => {
+  const mh = structuredClone(marketHealth);
+  mh.components.creditFragility.inputs = {
+    ...mh.components.creditFragility.inputs,
+    HYG: { ok: false, close: 999, pctChange5d: 0 },
+    JNK: { ok: true, close: null, pctChange5d: 0 },
+    LQD: { state: "UNAVAILABLE" },
+    KRE: { ok: false },
+    IWM: { structuralState: "FORMING" },
+  };
+  const d = buildCreditStressDetail(mh,marketFeeds,macroFeeds);
+  for(const [key,close] of Object.entries({HYG:80,JNK:94,LQD:108,KRE:56,IWM:230})){
+    assert.equal(get(d,"creditEtfFragility",key).close,close);
+    assert.equal(get(d,"creditEtfFragility",key).available,true);
+  }
+  assert.equal(d.scores.creditFragility,55);
+});
+test("Usable legacy price stays preferred to Polygon detail", () => {
+  const mh=structuredClone(marketHealth);
+  mh.components.creditFragility.inputs.HYG={ok:true,close:79,latestDate:"2026-11-03"};
+  const d=buildCreditStressDetail(mh,marketFeeds,macroFeeds);
+  assert.equal(get(d,"creditEtfFragility","HYG").close,79);
+  assert.equal(get(d,"creditEtfFragility","HYG").observationDate,"2026-11-03");
+});
+test("Mismatched FRED source dates never attach to official slow-context values", () => {
+  const mh=structuredClone(marketHealth);
+  mh.components.bondMarket.inputs.officialSlowMacroContext.DGS10=4.8;
+  const macro=structuredClone(macroFeeds);
+  macro.sources.fred.latest.DGS10={value:4.2,date:"2026-10-30"};
+  const d=buildCreditStressDetail(mh,marketFeeds,macro);
+  const item=get(d,"ratesCurvePressure","DGS10");
+  assert.equal(item.value,4.8);
+  assert.equal(item.observationDate,null);
+});
+test("FRED detail fallback keeps value and observation date from the same object", () => {
+  const mh=structuredClone(marketHealth);
+  mh.components.bondMarket.inputs.officialSlowMacroContext.DGS2=null;
+  const d=buildCreditStressDetail(mh,marketFeeds,macroFeeds);
+  const item=get(d,"ratesCurvePressure","DGS2");
+  assert.equal(item.value,3.6);
+  assert.equal(item.observationDate,"2026-11-04");
+});
+test("No FRED data leaves official value visible but undated", () => {
+  const d=buildCreditStressDetail(marketHealth,marketFeeds,null);
+  assert.equal(get(d,"ratesCurvePressure","DGS10").value,4.2);
+  assert.equal(get(d,"ratesCurvePressure","DGS10").observationDate,null);
 });
