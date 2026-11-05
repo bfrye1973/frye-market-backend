@@ -76,6 +76,8 @@ async function runAcceptance() {
       refreshHttp: req.status,
       refreshOk: job.ok ?? false,
       error: job.error || null,
+      failureStdoutTail: job.ok ? null : String(job.stdout || "").slice(-6500),
+      failureStderrTail: job.ok ? null : String(job.stderr || "").slice(-6500),
       jobSteps: job.steps || [],
       productionOutputVerified: job.productionOutputVerified ?? false,
       before,
