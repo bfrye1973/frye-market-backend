@@ -833,6 +833,7 @@ function buildFallbackHeadline({
 
   return {
     score: marketHealth?.score ?? null,
+    lastUpdatedAt: marketHealth?.updatedAt || marketHealth?.generatedAtUtc || null,
     state: marketHealth?.regime || "LIVE_MARKET_HEALTH_FALLBACK",
     label: marketHealth?.bias || marketHealth?.riskLevel || "Live market health fallback",
     color: scoreColor(marketHealth?.score),
@@ -930,6 +931,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const headline = dailyCompositeAvailable
       ? {
           score: current.engine25CompositeScore,
+          // Composite rebuild time, not time of API request or LIVE participation poll.
+          lastUpdatedAt: composite?.generatedAtUtc || composite?.finishedAt || null,
           state: current.overlayState,
           label: current.overlayLabel,
           color: current.overlayColor,
