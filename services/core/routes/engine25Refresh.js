@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { resolveSystemOperatingSession } from "../logic/engine25/buildParticipationArtifact.js";
@@ -41,6 +42,18 @@ const STEPS = [
     name: "engine25_context",
     job: "buildEngine25Context.js",
   },
+];
+
+// The Core cron must write on backend-1, never in its own container.
+const CORE_STEPS = [
+  { name: "engine25_historical_full_replay", job: "updateEngine25HistoricalReplayFull.js" },
+  { name: "engine25_composite_overlay_6mo", job: "buildEngine25CompositeOverlay6mo.js" },
+  { name: "engine25_es_zone_aware_read", job: "buildEngine25EsZoneAwareRead.js" },
+];
+const CORE_REQUIRED_FILES = [
+  "engine25-historical-replay-macro-distribution-breadth-6mo.json",
+  "engine25-composite-overlay-6mo.json",
+  "engine25-es-zone-aware-read.json",
 ];
 
 const REQUIRED_FILES = [
@@ -236,6 +249,23 @@ function validateFiles(filesToValidate = REQUIRED_FILES) {
   });
 }
 
+function compositeSnapshot() {
+  const filename = path.join(DATA_DIR, "engine25-composite-overlay-6mo.json");
+  if (!fs.existsSync(filename)) return null;
+  const bytes = fs.readFileSync(filename);
+  const data = JSON.parse(bytes.toString("utf8"));
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const last = rows.at(-1);
+  return {
+    sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+    modifiedAt: fs.statSync(filename).mtime.toISOString(),
+    rows: rows.length,
+    date: last?.date ?? null,
+    score: last?.engine25CompositeScore ?? null,
+    state: last?.overlayState ?? null,
+  };
+}
+
 async function handle(req, res) {
   const auth = checkToken(req);
   if (!auth.ok) {
@@ -246,6 +276,17 @@ async function handle(req, res) {
   }
 
   const mode = String(req.query.mode || "full").trim().toLowerCase();
+  // Core mode is POST-only and fails closed when the shared cron secret is absent.
+  if (mode === "core" && req.method !== "POST") {
+    return res.status(405).json({ ok: false, error: "CORE_REFRESH_REQUIRES_POST" });
+  }
+  if (mode === "core" && (!process.env.ENGINE_CRON_TOKEN ||
+      req.header("X-ENGINE-CRON-TOKEN") !== process.env.ENGINE_CRON_TOKEN)) {
+    return res.status(401).json({ ok: false, error: "CORE_REFRESH_UNAUTHORIZED" });
+  }
+  if (!["full", "live", "core"].includes(mode)) {
+    return res.status(400).json({ ok: false, error: "UNKNOWN_ENGINE25_REFRESH_MODE" });
+  }
   const requestStartedAt = nowIso();
   const requestStartedMs = Date.now();
   const systemOperatingSession =
@@ -267,7 +308,7 @@ async function handle(req, res) {
     });
   }
 
-  if (IS_RUNNING && mode === "full") {
+  if (IS_RUNNING && (mode === "full" || mode === "core")) {
     while (
       IS_RUNNING &&
       Date.now() - requestStartedMs < FULL_REFRESH_WAIT_MS
@@ -279,7 +320,7 @@ async function handle(req, res) {
       return res.status(503).json({
         ok: false,
         skipped: false,
-        reason: "ENGINE25_FULL_REFRESH_WAIT_TIMEOUT",
+        reason: "ENGINE25_REFRESH_WAIT_TIMEOUT",
         mode,
         startedAt: requestStartedAt,
         waitedMs: Date.now() - requestStartedMs,
@@ -302,6 +343,7 @@ async function handle(req, res) {
 
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
+    const compositeBefore = mode === "core" ? compositeSnapshot() : null;
     const missingLiveBootstrapFiles =
       mode === "live"
         ? LIVE_BOOTSTRAP_REQUIRED_FILES.filter(
@@ -314,9 +356,13 @@ async function handle(req, res) {
         ? [...STEPS, ...LIVE_STEPS]
         : mode === "live"
         ? LIVE_STEPS
+        : mode === "core"
+        ? CORE_STEPS
         : STEPS;
 
-    const requiredFiles = mode === "live" ? LIVE_REQUIRED_FILES : REQUIRED_FILES;
+    const requiredFiles =
+      mode === "live" ? LIVE_REQUIRED_FILES :
+      mode === "core" ? CORE_REQUIRED_FILES : REQUIRED_FILES;
     const steps = [];
     const warnings = [];
 
@@ -362,6 +408,16 @@ async function handle(req, res) {
     }
 
     const files = validateFiles(requiredFiles);
+    const compositeAfter = mode === "core" ? compositeSnapshot() : null;
+    if (mode === "core" && (!compositeAfter?.rows ||
+        !Number.isFinite(Number(compositeAfter.score)) ||
+        !files.find((item) => item.file === "engine25-composite-overlay-6mo.json" ||
+          new Date(item.modifiedAt).getTime() >= startedMs))) {
+      return res.status(500).json({
+        ok: false, mode, error: "CORE_REFRESH_PRODUCTION_OUTPUT_NOT_VERIFIED",
+        compositeBefore, compositeAfter, steps, files,
+      });
+    }
     const endedAt = nowIso();
 
     return res.json({
@@ -375,6 +431,12 @@ async function handle(req, res) {
       warnings,
       files,
       systemOperatingSession,
+      ...(mode === "core" ? {
+        compositeBefore,
+        compositeAfter,
+        changed: compositeBefore?.sha256 !== compositeAfter?.sha256,
+        productionOutputVerified: true,
+      } : {}),
     });
   } catch (err) {
     return res.status(500).json({
