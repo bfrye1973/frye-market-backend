@@ -324,7 +324,7 @@ async function handle(req, res) {
       return res.status(503).json({
         ok: false,
         skipped: false,
-        reason: "ENGINE25_REFRESH_WAIT_TIMEOUT",
+        reason: "ENGINE25_FULL_REFRESH_WAIT_TIMEOUT",
         mode,
         startedAt: requestStartedAt,
         waitedMs: Date.now() - requestStartedMs,
