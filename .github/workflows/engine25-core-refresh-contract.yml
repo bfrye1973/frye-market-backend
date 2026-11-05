@@ -1,0 +1,25 @@
+name: Engine25 Core Refresh Contract
+on:
+  pull_request:
+    paths:
+      - 'services/core/routes/engine25Refresh.js'
+      - 'services/core/jobs/buildEngine25CompositeOverlay6mo.js'
+      - 'services/core/tests/engine25CoreRefreshContract.test.js'
+  push:
+    branches:
+      - engine25-core-refresh-backend-trigger-20261105
+jobs:
+  engine25-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run isolated Engine25 regression tests
+        run: node --test services/core/tests/engine25CoreRefreshContract.test.js
+      - name: Check JavaScript syntax
+        run: |
+          node --check services/core/routes/engine25Refresh.js
+          node --check services/core/jobs/buildEngine25CompositeOverlay6mo.js

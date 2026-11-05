@@ -19,6 +19,21 @@ const OUTPUT_FILE = path.join(
   "engine25-composite-overlay-6mo.json"
 );
 
+// Atomic replacement prevents full-dashboard readers from seeing partial JSON.
+// Temporary file is placed in the same directory to guarantee same-filesystem rename.
+function writeAtomicJson(filePath, value) {
+  const tempFile = path.join(
+    path.dirname(filePath),
+    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`
+  );
+  try {
+    fs.writeFileSync(tempFile, JSON.stringify(value, null, 2), { flag: "wx" });
+    fs.renameSync(tempFile, filePath);
+  } finally {
+    if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+  }
+}
+
 const ENGINE_NAME = "engine25.compositeOverlay.v0.1";
 const MODEL_TYPE = "ENGINE25_COMPOSITE_MARKET_HEALTH_OVERLAY";
 
@@ -407,7 +422,7 @@ async function main() {
     output.finishedAt = output.generatedAtUtc;
 
     ensureDataDir();
-    fs.writeFileSync(OUTPUT_FILE, JSON.stringify(output, null, 2));
+    writeAtomicJson(OUTPUT_FILE, output);
 
     console.log("\n========================================");
     console.log("Engine 25 Composite Overlay Complete");
