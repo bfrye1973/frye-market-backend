@@ -76,8 +76,7 @@ async function runAcceptance() {
       refreshHttp: req.status,
       refreshOk: job.ok ?? false,
       error: job.error || null,
-      failureStdoutTail: job.ok ? null : String(job.stdout || "").slice(-6500),
-      failureStderrTail: job.ok ? null : String(job.stderr || "").slice(-6500),
+      // Do not expose internal job logs through the public preview status endpoint.
       jobSteps: job.steps || [],
       productionOutputVerified: job.productionOutputVerified ?? false,
       before,
@@ -93,6 +92,7 @@ async function runAcceptance() {
       },
       samePreviewInstanceMatches: matches,
     };
+    if (!job.ok) console.error("[engine25-acceptance] PRIVATE FAILURE STDERR", String(job.stderr || "").slice(-4500));
     console.log("[engine25-acceptance] RESULT", JSON.stringify(acceptance));
   } catch (err) {
     acceptance = {state:"ERROR", at:new Date().toISOString(), error:String(err)};
