@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-05T14:27:16.192224+00:00",
+  "updated_at_utc": "2026-11-05T17:44:11.546801+00:00",
   "completedSessionDate": "2026-11-04",
   "score": 60.7,
   "state": "CONSTRUCTIVE_MIXED",
@@ -203,14 +203,14 @@
     "ES": {
       "symbol": "ES",
       "available": true,
-      "state": "YELLOW",
+      "state": "RED",
       "sessionDate": "2026-11-04",
-      "close": 7715.0,
-      "ma10": 7687.5,
-      "ma20": 7736.8125,
+      "close": 7430.25,
+      "ma10": 7659.025,
+      "ma20": 7722.575,
       "ma10Prior": 7686.375,
       "ma20Prior": 7742.1875,
-      "ma10Upsloping": true,
+      "ma10Upsloping": false,
       "ma20Upsloping": false
     },
     "QQQ": {
