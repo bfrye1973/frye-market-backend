@@ -32,6 +32,11 @@ const MARKET_HEALTH_FILE = path.join(
   "engine25-market-health.json"
 );
 
+// Display evidence only. These artifacts already feed the approved Engine 25
+// market-health calculation; reading them here never changes engine authority.
+const MARKET_FEEDS_FILE = path.join(DATA_DIR, "engine25-market-feeds-test.json");
+const MACRO_FEEDS_FILE = path.join(DATA_DIR, "engine25-data-test.json");
+
 const SECTOR_BREADTH_FILE = path.join(
   DATA_DIR,
   "engine25-sector-card-breadth-snapshots.json"
@@ -117,7 +122,7 @@ function normalizeStressItem(key, label, input) {
     priorValue,
     change,
     observationDate:
-      raw.observationDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
+      raw.observationDate || raw.latestDate || raw.date || raw.updatedAt || raw.generatedAtUtc || null,
     aboveEma10: typeof raw.aboveEma10 === "boolean" ? raw.aboveEma10 : null,
     aboveEma20: typeof raw.aboveEma20 === "boolean" ? raw.aboveEma20 : null,
     aboveEma50: typeof raw.aboveEma50 === "boolean" ? raw.aboveEma50 : null,
@@ -135,7 +140,7 @@ function normalizeStressItem(key, label, input) {
   };
 }
 
-function buildCreditStressDetail(marketHealth) {
+function buildCreditStressDetail(marketHealth, marketFeeds = null, macroFeeds = null) {
   const components = marketHealth?.components || {};
 
   const creditFragility = components.creditFragility || {};
@@ -149,12 +154,29 @@ function buildCreditStressDetail(marketHealth) {
   const bondInputs = bondMarket.inputs || {};
   const liquidityInputs = liquidity.inputs || {};
 
+  // Engine 29 provides primary credit/rates SCORING. Its component inputs are
+  // structural states, not the daily ETF or FRED raw measurements used by this
+  // detail view. Restore those existing observations from their source files.
+  const dailyEtfs = marketFeeds?.quickRead?.creditFragility || {};
+  const dailyEquities = marketFeeds?.quickRead?.marketTrend || {};
+  const slowRates = bondInputs.officialSlowMacroContext || {};
+  const latestFred = macroFeeds?.sources?.fred?.latest || {};
+  function fredObservation(key, current) {
+    const officialValue = safeNumber(current);
+    const observation = latestFred[key] || {};
+    // The slow-macro number is authoritative when Engine 29 rates is primary.
+    return {
+      value: officialValue ?? safeNumber(observation.value),
+      observationDate: observation.date || null,
+    };
+  }
+
   const creditEtfItems = [
-    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG),
-    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK),
-    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD),
-    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE),
-    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM),
+    normalizeStressItem("HYG", "High Yield Corporate Bond ETF", creditInputs.HYG || dailyEtfs.HYG),
+    normalizeStressItem("JNK", "Junk Bond ETF", creditInputs.JNK || dailyEtfs.JNK),
+    normalizeStressItem("LQD", "Investment Grade Corporate Bond ETF", creditInputs.LQD || dailyEtfs.LQD),
+    normalizeStressItem("KRE", "Regional Bank ETF", creditInputs.KRE || dailyEtfs.KRE),
+    normalizeStressItem("IWM", "Small Caps / Risk Appetite Proxy", creditInputs.IWM || dailyEquities.IWM),
   ];
 
   const macroStressItems = [
@@ -179,22 +201,22 @@ function buildCreditStressDetail(marketHealth) {
     normalizeStressItem(
       "DGS10",
       "10-Year Treasury Rate",
-      bondInputs.tenYear
+      bondInputs.tenYear ?? fredObservation("DGS10", slowRates.DGS10)
     ),
     normalizeStressItem(
       "DGS2",
       "2-Year Treasury Rate",
-      bondInputs.twoYear
+      bondInputs.twoYear ?? fredObservation("DGS2", slowRates.DGS2)
     ),
     normalizeStressItem(
       "T10Y2Y",
       "10Y minus 2Y Yield Spread",
-      bondInputs.tenMinusTwo
+      bondInputs.tenMinusTwo ?? fredObservation("T10Y2Y", slowRates.T10Y2Y)
     ),
     normalizeStressItem(
       "T10Y3M",
       "10Y minus 3M Yield Spread",
-      bondInputs.tenMinusThreeMonth
+      bondInputs.tenMinusThreeMonth ?? fredObservation("T10Y3M", slowRates.T10Y3M)
     ),
     normalizeStressItem(
       "TLT",
@@ -891,6 +913,8 @@ router.get("/engine25/full-dashboard", (_req, res) => {
     const composite = readJsonFile(COMPOSITE_FILE);
     const zoneRead = readJsonFile(ZONE_READ_FILE);
     const marketHealth = readJsonFile(MARKET_HEALTH_FILE);
+    const marketFeeds = readJsonFile(MARKET_FEEDS_FILE);
+    const macroFeeds = readJsonFile(MACRO_FEEDS_FILE);
     const sectorBreadthRaw = readJsonFile(SECTOR_BREADTH_FILE);
     const zoneClassification = readJsonFile(ZONE_CLASSIFICATION_FILE);
     const engine25Context = readJsonFile(ENGINE25_CONTEXT_FILE);
@@ -914,7 +938,7 @@ router.get("/engine25/full-dashboard", (_req, res) => {
 
     const sectorBreadth = buildSectorBreadthSummary(sectorBreadthRaw);
     const zoneDecisionRead = buildZoneDecisionRead(zoneRead);
-    const creditStressDetail = buildCreditStressDetail(marketHealth);
+    const creditStressDetail = buildCreditStressDetail(marketHealth, marketFeeds, macroFeeds);
 
     const componentBreakdown = dailyCompositeAvailable
       ? buildComponentBreakdown(current)
