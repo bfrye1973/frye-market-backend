@@ -84,6 +84,33 @@ async function run() {
         fred[symbol] = null;
       }
     }
+    // Independently observe the newly deployed PRODUCTION full-dashboard
+    // without writing to production or exposing the full payload publicly.
+    let productionDetails = { reachable:false };
+    try {
+      const liveResponse = await fetch(
+        "https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard",
+        {signal:AbortSignal.timeout(20000)}
+      );
+      const live = await liveResponse.json();
+      const g = live?.creditStressDetail?.groups || {};
+      const items = (group, names) => Object.fromEntries(
+        (g[group]?.items || []).filter(x => names.includes(x.key)).map(x => [
+          x.key, { available:x.available, value:x.value, close:x.close, date:x.observationDate, status:x.state }
+        ])
+      );
+      productionDetails = {
+        reachable:liveResponse.ok && live.ok === true,
+        status:liveResponse.status,
+        error:live?.error || null,
+        etfs:items("creditEtfFragility", polygonSymbols),
+        rates:items("ratesCurvePressure", fredSymbols),
+        scores:live?.creditStressDetail?.scores || null
+      };
+    } catch (e) {
+      productionDetails = {reachable:false,error:String(e?.message || e).slice(0,140)};
+    }
+    console.log("[engine25-credit-acceptance] PRODUCTION_READ_ONLY",JSON.stringify(productionDetails));
     const raw = await fetch(
       "https://frye-market-backend-1.onrender.com/api/v1/engine25/market-health",
       {signal:AbortSignal.timeout(18000)}
