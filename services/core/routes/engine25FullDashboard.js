@@ -187,21 +187,18 @@ function buildCreditStressDetail(marketHealth, marketFeeds = null, macroFeeds = 
   }
 
   function fredObservation(key, slowValue) {
-    const observation = latestFred[key];
-    const fredValue = safeNumber(observation?.value);
-    // A value and its observation date must come from the SAME FRED artifact.
-    if (fredValue !== null) {
-      return {
-        value: fredValue,
-        observationDate: observation?.date || null,
-      };
+    const officialValue = safeNumber(slowValue);
+    // Engine 29's official slow context has the value but no source date.
+    // Never borrow a possibly unrelated date from another refreshed artifact.
+    if (officialValue !== null) {
+      return { value: officialValue, observationDate: null };
     }
-
-    // Engine 29's official slow context preserves a value but not its date.
-    // Never attach another file's date to this value.
+    // When the slow context is missing, use the FRED value AND date from the
+    // same observation object, keeping provenance intact.
+    const observation = latestFred[key];
     return {
-      value: safeNumber(slowValue),
-      observationDate: null,
+      value: safeNumber(observation?.value),
+      observationDate: observation?.date || null,
     };
   }
 
