@@ -308,7 +308,11 @@ async function handle(req, res) {
     });
   }
 
-  if (IS_RUNNING && (mode === "full" || mode === "core")) {
+  if (IS_RUNNING && mode === "core") {
+    return res.status(409).json({ ok: false, mode, error: "ENGINE25_REFRESH_ALREADY_RUNNING" });
+  }
+
+  if (IS_RUNNING && mode === "full") {
     while (
       IS_RUNNING &&
       Date.now() - requestStartedMs < FULL_REFRESH_WAIT_MS
@@ -410,7 +414,7 @@ async function handle(req, res) {
     const files = validateFiles(requiredFiles);
     const compositeAfter = mode === "core" ? compositeSnapshot() : null;
     if (mode === "core" && (!compositeAfter?.rows ||
-        !Number.isFinite(Number(compositeAfter.score)) ||
+        (compositeAfter.score === null || !Number.isFinite(Number(compositeAfter.score))) ||
         !files.find((item) => item.file === "engine25-composite-overlay-6mo.json" ||
           new Date(item.modifiedAt).getTime() >= startedMs))) {
       return res.status(500).json({
