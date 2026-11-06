@@ -650,6 +650,65 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // Minute C DOWN (major blue ABC) owner research. Separate touch journal
+  // from the older Minute W2 retracement and older larger-C scenario.
+  const minuteABC=root.degrees?.minute?.ownerMinuteAbcResearch;
+  if(minuteABC?.version==="engine22.minuteAbcDownNov5Research.v1" &&
+     minuteABC.selectionStatus==="RESEARCH_ONLY" && Array.isArray(minuteABC.levels)){
+    const start=Date.parse("2026-10-12T05:00:00Z"); // B high Oct 11 22:00 Arizona.
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const id=JSON.stringify(["minute","ownerMinuteAbcResearch",minuteABC.version,
+      minuteABC.anchors?.aHigh,minuteABC.anchors?.aLow,minuteABC.anchors?.bHigh,
+      minuteABC.levels.map(l=>[l.key,l.price])]);
+    const previous=previousWavelength?.degrees?.minute?.ownerMinuteAbcResearch;
+    const same=previous?.version===minuteABC.version &&
+      previous.anchors?.aHigh===minuteABC.anchors.aHigh &&
+      previous.anchors?.aLow===minuteABC.anchors.aLow &&
+      previous.anchors?.bHigh===minuteABC.anchors.bHigh;
+    const past=disk[id]||{};
+    const observations=[];
+    const current=finite(currentPrice),prior=same?finite(previousWavelength?.currentPrice):null;
+    if(now>=start && current!==null)
+      observations.push({low:prior===null?current:Math.min(current,prior),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",verified:false});
+    const candidateAt=Date.parse(minuteABC.anchors?.cCandidateAtUtc);
+    const ownerLow=finite(minuteABC.anchors?.cObservedCandidateLow);
+    if(ownerLow!==null && Number.isFinite(candidateAt) && now>=candidateAt &&
+       minuteABC.anchors?.cCandidateConfirmed===false)
+      observations.push({low:ownerLow,time:new Date(candidateAt).toISOString(),
+        source:"OWNER_CHART_OBSERVATION",verified:false});
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const time=Number(b?.time),high=finite(b?.high),low=finite(b?.low);
+      if(!Number.isSafeInteger(time)||time<=0||low===null||high===null||low>high)continue;
+      if(time*1000<start||time*1000+600000>now)continue;
+      observations.push({low,time:new Date(time*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC",verified:minuteABC.priceBasisReconciliation==="VERIFIED"});
+    }
+    const rank=s=>s==="ES_10M_COMPLETED_OHLC"?3:s==="ES_CURRENT_PRICE"?2:1;
+    minuteABC.levels=minuteABC.levels.map(l=>{
+      const old=past[l.key]||(same?previous.levels?.find(x=>x.key===l.key&&x.price===l.price):null);
+      const retained=old?.status==="TOUCHED"&&old.price===l.price;
+      const fresh=retained?null:observations.filter(o=>o.low<=l.price).sort((a,b)=>
+        rank(b.source)-rank(a.source))[0];
+      const source=retained?old.touchEvidenceType:fresh?.source;
+      const evidence=retained?old.touchEvidence:(fresh?{
+        verified:fresh.verified,
+        evidenceClass:fresh.source==="OWNER_CHART_OBSERVATION"?"OWNER_CHART_UNVERIFIED":
+          fresh.source==="ES_10M_COMPLETED_OHLC"?"COMPLETED_CANDLE_BASIS_PENDING":
+          "ES_SNAPSHOT_OBSERVATION",
+        modelPriceBasisVerified:minuteABC.priceBasisReconciliation==="VERIFIED",
+      }:null);
+      return {...l,status:retained||fresh?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(retained||fresh),
+        touchEvidenceType:source||null,
+        touchedAt:retained?old.touchedAt||null:fresh?.time||null,
+        touchEvidence:evidence||null};
+    });
+    disk[id]=Object.fromEntries(minuteABC.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
