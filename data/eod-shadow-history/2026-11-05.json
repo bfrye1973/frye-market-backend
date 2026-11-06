@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-06T02:15:29.924766+00:00",
+  "updated_at_utc": "2026-11-06T14:08:17.473490+00:00",
   "completedSessionDate": "2026-11-05",
   "score": 49.8,
   "state": "MIXED",
@@ -202,8 +202,16 @@
   "indicesVsMAs": {
     "ES": {
       "symbol": "ES",
-      "available": false,
-      "reason": "HTTP Error 502: Bad Gateway"
+      "available": true,
+      "state": "RED",
+      "sessionDate": "2026-11-05",
+      "close": 7389.25,
+      "ma10": 7622.975,
+      "ma20": 7694.875,
+      "ma10Prior": 7651.3,
+      "ma20Prior": 7718.7125,
+      "ma10Upsloping": false,
+      "ma20Upsloping": false
     },
     "QQQ": {
       "symbol": "QQQ",
@@ -264,71 +272,71 @@
       }
     },
     "large": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 898,
+      "nh": 496,
+      "nl": 242,
+      "up": 85,
+      "down": 114,
+      "breadth_pct": 67.21,
+      "momentum_pct": 42.71,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 451,
+        "nl": 191,
+        "up": 134,
+        "down": 76,
+        "breadth_pct": 70.25,
+        "momentum_pct": 63.81
       }
     },
     "mid": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 1098,
+      "nh": 557,
+      "nl": 323,
+      "up": 73,
+      "down": 112,
+      "breadth_pct": 63.3,
+      "momentum_pct": 39.46,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 528,
+        "nl": 244,
+        "up": 113,
+        "down": 63,
+        "breadth_pct": 68.39,
+        "momentum_pct": 64.2
       }
     },
     "small": {
-      "members": 0,
-      "nh": 0,
-      "nl": 0,
-      "up": 0,
-      "down": 0,
-      "breadth_pct": 50.0,
-      "momentum_pct": 50.0,
+      "members": 3455,
+      "nh": 880,
+      "nl": 1249,
+      "up": 107,
+      "down": 233,
+      "breadth_pct": 41.33,
+      "momentum_pct": 31.47,
       "prior": {
-        "nh": 0,
-        "nl": 0,
-        "up": 0,
-        "down": 0,
-        "breadth_pct": 50.0,
-        "momentum_pct": 50.0
+        "nh": 854,
+        "nl": 810,
+        "up": 143,
+        "down": 145,
+        "breadth_pct": 51.32,
+        "momentum_pct": 49.65
       }
     },
     "unknown": {
-      "members": 5470,
-      "nh": 1937,
-      "nl": 1821,
-      "up": 268,
-      "down": 464,
-      "breadth_pct": 51.54,
-      "momentum_pct": 36.61,
+      "members": 19,
+      "nh": 4,
+      "nl": 7,
+      "up": 3,
+      "down": 5,
+      "breadth_pct": 36.36,
+      "momentum_pct": 37.5,
       "prior": {
-        "nh": 1840,
-        "nl": 1252,
-        "up": 394,
-        "down": 286,
-        "breadth_pct": 59.51,
-        "momentum_pct": 57.94
+        "nh": 7,
+        "nl": 7,
+        "up": 4,
+        "down": 2,
+        "breadth_pct": 50.0,
+        "momentum_pct": 66.67
       }
     },
     "thresholds": {
@@ -336,11 +344,11 @@
       "midMin": 2000000000,
       "smallMaxExclusive": 2000000000
     },
-    "classifiedMembers": 0,
-    "classificationCoveragePct": 0.0,
+    "classifiedMembers": 5451,
+    "classificationCoveragePct": 99.65,
     "marketCapSource": "FMP_BATCH_MARKET_CAP",
-    "marketCapAvailable": false,
-    "marketCapReason": "CAP_UNIVERSE_ROUTE_FAILED:HTTP Error 502: Bad Gateway"
+    "marketCapAvailable": true,
+    "marketCapReason": null
   },
   "formula": {
     "breadth": "10-session HIGH/LOW event with 2-session carry",
