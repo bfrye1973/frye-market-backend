@@ -585,6 +585,71 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:x.touchEvidenceType,touchedAt:x.touchedAt,
         touchEvidence:x.touchEvidence}]));
   }
+  // Proposed Minor W2 retracement CARD evidence. Historical owner-chart observation
+  // is explicitly unverified; it must never confirm W2 or alter canonical Minor W5.
+  const minorW2=root.degrees?.minor?.ownerMinorW2Research;
+  if(minorW2?.version==="engine22.minorW2ResearchCardNov5.v1" &&
+     minorW2.selectionStatus==="RESEARCH_ONLY" &&
+     Array.isArray(minorW2.levels)){
+    const start=Date.parse("2026-08-14T10:00:00Z"); // Arizona 03:00 PDT/MST = UTC 10:00
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const identity=JSON.stringify(["minor","ownerMinorW2Research",minorW2.version,
+      minorW2.anchors?.w1Low,minorW2.anchors?.w1High,
+      minorW2.levels.map(l=>[l.key,l.price])]);
+    const priorModel=previousWavelength?.degrees?.minor?.ownerMinorW2Research;
+    const same=priorModel?.version===minorW2.version &&
+      priorModel?.anchors?.w1Low===minorW2.anchors.w1Low &&
+      priorModel?.anchors?.w1High===minorW2.anchors.w1High;
+    const retained=disk[identity]||{};
+    const observed=[];
+    const price=finite(currentPrice);
+    const previous=same?finite(previousWavelength?.currentPrice):null;
+    if(now>=start&&price!==null)
+      observed.push({low:previous===null?price:Math.min(price,previous),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",verified:false});
+    // The owner supplied an approximate Nov 5 low, corroborated by their ES chart.
+    // This supports a GREEN "OWNER CHART" observation, never a verified ES candle.
+    const ownerLow=finite(minorW2.anchors?.w2ObservedCandidateLow);
+    const ownerDay=minorW2.anchors?.w2CandidateDate;
+    if(ownerLow!==null && ownerDay==="2026-11-05" &&
+       minorW2.anchors?.w2CandidateApproximate===true &&
+       now>=Date.parse("2026-11-05T07:00:00Z"))
+      observed.push({low:ownerLow,time:null,source:"OWNER_CHART_OBSERVATION",
+        verified:false});
+    // Completed 10m OHLC is a stronger source when available, but cannot be
+    // called VERIFIED until the model's ES contract/price basis is reconciled.
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(bar?.time),lo=finite(bar?.low),hi=finite(bar?.high);
+      if(!Number.isSafeInteger(t)||t<=0||lo===null||hi===null||lo>hi)continue;
+      if(t*1000<start||t*1000+600000>now)continue;
+      observed.push({low:lo,time:new Date(t*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC",verified:minorW2.priceBasisReconciliation==="VERIFIED"});
+    }
+    const rank=x=>x==="ES_10M_COMPLETED_OHLC"?3:x==="ES_CURRENT_PRICE"?2:1;
+    minorW2.levels=minorW2.levels.map(level=>{
+      const prior=retained[level.key]||(same?priorModel.levels?.find(l=>
+        l.key===level.key&&l.price===level.price):null);
+      const keep=prior?.status==="TOUCHED"&&prior.price===level.price;
+      const hit=keep?null:observed.filter(x=>x.low<=level.price).sort((a,b)=>
+        rank(b.source)-rank(a.source))[0];
+      const source=keep?prior.touchEvidenceType:hit?.source;
+      const evidence=keep?prior.touchEvidence:(hit?{
+        verified:hit.verified,evidenceClass:hit.source==="OWNER_CHART_OBSERVATION"?
+          "OWNER_CHART_UNVERIFIED":hit.source==="ES_10M_COMPLETED_OHLC"?
+          "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+        modelPriceBasisVerified:minorW2.priceBasisReconciliation==="VERIFIED",
+      }:null);
+      return {...level,status:keep||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(keep||hit),
+        touchEvidenceType:source||null,
+        touchedAt:keep?prior.touchedAt||null:hit?.time||null,
+        touchEvidence:evidence||null};
+    });
+    disk[identity]=Object.fromEntries(minorW2.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
