@@ -829,6 +829,37 @@ export function buildCurrentWavelength({
       lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
     },
     minor: {
+      // Owner-approved CARD RESEARCH display, not a live count promotion.
+      // The current Minor W5 canonical data and touch history remain below.
+      ownerMinorW2Research:{
+        version:"engine22.minorW2ResearchCardNov5.v1",
+        degree:"minor",activeWave:"W2",direction:"DOWN",
+        stage:"DEVELOPING_RESEARCH",selectionStatus:"RESEARCH_ONLY",
+        parentDegree:"intermediate",parentWave:"W3",
+        anchors:{
+          w1Low:6485.00,w1LowLocalTime:"2026-04-30 17:00 AZ",
+          w1High:7901.75,w1HighLocalTime:"2026-08-14 03:00 AZ",
+          w2Start:7901.75,w2StartLocalTime:"2026-08-14 03:00 AZ",
+          w2ObservedCandidateLow:7325.00,w2CandidateDate:"2026-11-05",
+          w2CandidateLocalTime:null,w2CandidateApproximate:true,
+          provenance:"OWNER_MINOR_W1_W2_RESEARCH_20261105",
+        },
+        fibMethod:"W2_RETRACEMENT_FROM_W1_HIGH",
+        fibFormula:"w1High - (w1High - w1Low) * ratio",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),
+          ratio,price:Math.round((7901.75-(7901.75-6485.00)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"W2_RETRACEMENT",
+        })),
+        reviewReference:6485.00,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,
+        priorSelectedModel:"MINOR_W5_ACTIVE_CANDIDATE",
+        historicalMinorW5Preserved:true,
+        priceBasisReconciliation:"PENDING",noExecution:true,noPermissionCreated:true,
+      },
       // Owner-confirmed current W5 reference; strictly separate from order stops.
       ownerW5StructuralReference:{
         version:"engine22.minorW5StructuralReference.v1",
