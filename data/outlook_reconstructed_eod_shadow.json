@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-05T22:46:47.029212+00:00",
+  "updated_at_utc": "2026-11-06T00:45:39.426340+00:00",
   "completedSessionDate": "2026-11-05",
   "score": 49.8,
   "state": "MIXED",
@@ -29,10 +29,10 @@
     },
     {
       "sector": "Consumer Staples",
-      "breadth_pct": 63.58,
+      "breadth_pct": 63.74,
       "momentum_pct": 65.52,
-      "nh": 110,
-      "nl": 63,
+      "nh": 109,
+      "nl": 62,
       "up": 19,
       "down": 10
     },
@@ -56,10 +56,10 @@
     },
     {
       "sector": "Healthcare",
-      "breadth_pct": 45.33,
+      "breadth_pct": 45.31,
       "momentum_pct": 56.79,
-      "nh": 296,
-      "nl": 357,
+      "nh": 295,
+      "nl": 356,
       "up": 46,
       "down": 35
     },
@@ -204,12 +204,12 @@
       "symbol": "ES",
       "available": true,
       "state": "RED",
-      "sessionDate": "2026-11-04",
-      "close": 7353.0,
-      "ma10": 7651.3,
-      "ma20": 7718.7125,
-      "ma10Prior": 7686.375,
-      "ma20Prior": 7742.1875,
+      "sessionDate": "2026-11-05",
+      "close": 7396.75,
+      "ma10": 7623.725,
+      "ma20": 7695.25,
+      "ma10Prior": 7651.3,
+      "ma20Prior": 7718.7125,
       "ma10Upsloping": false,
       "ma20Upsloping": false
     },
@@ -256,8 +256,8 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 1939,
-      "nl": 1823,
+      "nh": 1937,
+      "nl": 1821,
       "up": 268,
       "down": 464,
       "breadth_pct": 51.54,
@@ -272,54 +272,54 @@
       }
     },
     "large": {
-      "members": 900,
+      "members": 898,
       "nh": 496,
-      "nl": 243,
+      "nl": 242,
       "up": 85,
-      "down": 115,
-      "breadth_pct": 67.12,
-      "momentum_pct": 42.5,
+      "down": 114,
+      "breadth_pct": 67.21,
+      "momentum_pct": 42.71,
       "prior": {
         "nh": 451,
-        "nl": 192,
+        "nl": 191,
         "up": 134,
-        "down": 77,
-        "breadth_pct": 70.14,
-        "momentum_pct": 63.51
+        "down": 76,
+        "breadth_pct": 70.25,
+        "momentum_pct": 63.81
       }
     },
     "mid": {
-      "members": 1096,
-      "nh": 556,
+      "members": 1098,
+      "nh": 557,
       "nl": 323,
-      "up": 72,
+      "up": 73,
       "down": 112,
-      "breadth_pct": 63.25,
-      "momentum_pct": 39.13,
+      "breadth_pct": 63.3,
+      "momentum_pct": 39.46,
       "prior": {
-        "nh": 527,
+        "nh": 528,
         "nl": 244,
-        "up": 112,
+        "up": 113,
         "down": 63,
-        "breadth_pct": 68.35,
-        "momentum_pct": 64.0
+        "breadth_pct": 68.39,
+        "momentum_pct": 64.2
       }
     },
     "small": {
       "members": 3455,
-      "nh": 883,
-      "nl": 1250,
-      "up": 108,
-      "down": 232,
-      "breadth_pct": 41.4,
-      "momentum_pct": 31.76,
+      "nh": 880,
+      "nl": 1249,
+      "up": 107,
+      "down": 233,
+      "breadth_pct": 41.33,
+      "momentum_pct": 31.47,
       "prior": {
-        "nh": 855,
-        "nl": 809,
-        "up": 144,
-        "down": 144,
-        "breadth_pct": 51.38,
-        "momentum_pct": 50.0
+        "nh": 854,
+        "nl": 810,
+        "up": 143,
+        "down": 145,
+        "breadth_pct": 51.32,
+        "momentum_pct": 49.65
       }
     },
     "unknown": {
