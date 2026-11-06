@@ -725,6 +725,39 @@ export function buildCurrentWavelength({
       // Oct 25 owner-confirmed Minute W1: July 30 12:00 AZ -> Aug 13 09:00 AZ.
       // W2 is still DOWN/DEVELOPING. This owner model supersedes the
       // historical Minute W3 projection for the CURRENT Minute card ONLY.
+      // Minute A-B-C inside the proposed Minor W2: CARD RESEARCH ONLY.
+      // Preserve the existing Minute W2 canonical count and previous C scenario.
+      ownerMinuteAbcResearch:{
+        version:"engine22.minuteAbcDownNov5Research.v1",
+        degree:"minute",activeWave:"C",direction:"DOWN",
+        stage:"DEVELOPING_CANDIDATE",selectionStatus:"RESEARCH_ONLY",
+        parentDegree:"minor",parentWave:"W2",
+        anchors:{
+          aHigh:7901.75,aHighLocalTime:"2026-08-14 07:00 AZ",
+          aLow:7575.25,aLowLocalTime:"2026-09-16 11:00 AZ",
+          bHigh:7890.25,bHighLocalTime:"2026-10-11 22:00 AZ",
+          cObservedCandidateLow:7322.25,cCandidateLocalTime:"2026-11-05 16:00 AZ",
+          cCandidateAtUtc:"2026-11-05T23:00:00Z",
+          cCandidateConfirmed:false,
+          timestampReconciliation:"MINOR_W1_END_2026_08_14_03_00_VS_MINUTE_A_HIGH_07_00",
+          provenance:"OWNER_HANDWRITTEN_MINUTE_ABC_20261105_B_DATE_CORRECTED_OCT11",
+        },
+        fibMethod:"C_PROJECTION_FROM_B_USING_A_LENGTH",
+        fibFormula:"bHigh - (aHigh - aLow) * ratio",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7890.25-(7901.75-7575.25)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"MINUTE_C_DOWN_EXTENSION",
+        })),
+        reviewReference:7890.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        completionConfirmed:false,
+        historicalMinuteW2Preserved:true,
+        priceBasisReconciliation:"PENDING",
+        noExecution:true,noPermissionCreated:true,
+      },
       ownerMinuteW2Retracement:{
         version:"engine22.minuteW2RetracementOwner.v1",
         degree:"minute",completedWave:"W1",completedWaveConfirmedByOwner:true,
