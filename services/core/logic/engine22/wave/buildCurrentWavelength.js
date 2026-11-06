@@ -609,6 +609,43 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // New November 5 owner-marked ABC is a research-only card overlay.
+      // Do not promote it into current seven-degree selection or overwrite
+      // the October 31 wick/body models and their historical touches.
+      ownerSubminuteNov5AbcResearch:{
+        version:"engine22.subminuteNov5AbcResearch.v1",
+        selectionStatus:"RESEARCH_ONLY",
+        degree:"subminute",activeWave:"C",direction:"DOWN",
+        stage:"DEVELOPING_CANDIDATE",parentDegree:"minute",parentWave:"C",
+        anchors:{
+          aHigh:7735.00,aHighLocalTime:"2026-11-05 05:00 AZ",
+          aLow:7420.00,aLowLocalTime:"2026-11-05 08:00 AZ",
+          aLowTimeReviewPending:true,
+          bHigh:7542.00,bHighLocalTime:"2026-11-05 08:20 AZ",
+          bHighAtUtc:"2026-11-05T15:20:00Z",
+          observedLowReference:7322.25,
+          observedLowAtUtc:"2026-11-05T23:00:00Z",
+          observedLowLocalTime:"2026-11-05 16:00 AZ",
+          observedLowSource:"OWNER_MINUTE_C_CHART_REFERENCE",
+          cCompletionConfirmed:false,
+          cLowAnchorApproved:false,
+          provenance:"OWNER_SUBMINUTE_HANDWRITTEN_20261105",
+        },
+        fibMethod:"C_DOWN_FROM_B_HIGH_BY_A_WAVE_LENGTH",
+        fibFormula:"bHigh - (aHigh - aLow) * ratio",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7542-(7735-7420)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMINUTE_C_DOWN_PROJECTION",
+        })),
+        reviewReference:7542.00,reviewOnly:true,officialInvalidation:null,
+        earlyWarning:null,completionConfirmed:false,
+        historicalSubminuteModelsPreserved:true,
+        priceBasisReconciliation:"PENDING",
+        noExecution:true,noPermissionCreated:true,
+      },
       // October 31 owner recount: add new C DOWN selection; preserve D UP history.
       ownerSubminuteCDownOct31:{
         version:"engine22.subminuteCDownOct31OwnerWorking.v1",

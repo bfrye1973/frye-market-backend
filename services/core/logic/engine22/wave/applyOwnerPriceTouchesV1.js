@@ -709,6 +709,71 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // November 5 Subminute ABC research-only price touches. Preserve the
+  // October 31 C-down dual Fibs and all other independent model memories.
+  const subNov5=root.degrees?.subminute?.ownerSubminuteNov5AbcResearch;
+  if(subNov5?.version==="engine22.subminuteNov5AbcResearch.v1" &&
+     subNov5.selectionStatus==="RESEARCH_ONLY" &&
+     Array.isArray(subNov5.levels)){
+    const start=Date.parse(subNov5.anchors?.bHighAtUtc);
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const id=JSON.stringify(["subminute","ownerSubminuteNov5AbcResearch",
+      subNov5.version,subNov5.anchors?.aHigh,subNov5.anchors?.aLow,
+      subNov5.anchors?.bHigh,subNov5.levels.map(l=>[l.key,l.price])]);
+    const priorModel=previousWavelength?.degrees?.subminute?.ownerSubminuteNov5AbcResearch;
+    const same=priorModel?.version===subNov5.version &&
+      priorModel?.anchors?.aHigh===subNov5.anchors.aHigh &&
+      priorModel?.anchors?.aLow===subNov5.anchors.aLow &&
+      priorModel?.anchors?.bHigh===subNov5.anchors.bHigh;
+    const past=disk[id]||{}, observations=[];
+    const quote=finite(currentPrice);
+    const oldQuote=same?finite(previousWavelength?.currentPrice):null;
+    if(Number.isFinite(start)&&now>=start&&quote!==null)
+      observations.push({low:oldQuote===null?quote:Math.min(quote,oldQuote),
+        time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",verified:false});
+    // This low was supplied for the larger Minute C chart, NOT certified as
+    // the final Subminute C pivot. It supports an owner-observed Fib touch
+    // only because its timestamp is later than the marked Subminute B high.
+    const low=finite(subNov5.anchors?.observedLowReference);
+    const lowAt=Date.parse(subNov5.anchors?.observedLowAtUtc);
+    if(low!==null&&Number.isFinite(lowAt)&&Number.isFinite(start)&&
+       lowAt>start&&now>=lowAt)
+      observations.push({low,time:new Date(lowAt).toISOString(),
+        source:"OWNER_CHART_OBSERVATION",verified:false});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(bar?.time),lo=finite(bar?.low),hi=finite(bar?.high);
+      if(!Number.isSafeInteger(t)||t<=0||lo===null||hi===null||lo>hi||
+         !Number.isFinite(start)||t*1000<start||t*1000+600000>now)continue;
+      observations.push({low:lo,time:new Date(t*1000).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC",
+        verified:subNov5.priceBasisReconciliation==="VERIFIED"});
+    }
+    const rank=x=>x==="ES_10M_COMPLETED_OHLC"?3:x==="ES_CURRENT_PRICE"?2:1;
+    subNov5.levels=subNov5.levels.map(l=>{
+      const previous=past[l.key]||(same?priorModel.levels?.find(x=>
+        x.key===l.key&&x.price===l.price):null);
+      const retained=previous?.status==="TOUCHED"&&previous.price===l.price;
+      const found=retained?null:observations.filter(x=>x.low<=l.price)
+        .sort((a,b)=>rank(b.source)-rank(a.source))[0];
+      const source=retained?previous.touchEvidenceType:found?.source;
+      const evidence=retained?previous.touchEvidence:found?{
+        verified:found.verified,
+        evidenceClass:found.source==="OWNER_CHART_OBSERVATION"?
+          "OWNER_CHART_UNVERIFIED":found.source==="ES_10M_COMPLETED_OHLC"?
+          "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+        modelPriceBasisVerified:subNov5.priceBasisReconciliation==="VERIFIED",
+      }:null;
+      return {...l,status:retained||found?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(retained||found),
+        touchEvidenceType:source||null,
+        touchedAt:retained?previous.touchedAt||null:found?.time||null,
+        touchEvidence:evidence||null};
+    });
+    disk[id]=Object.fromEntries(subNov5.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
