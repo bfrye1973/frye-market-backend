@@ -223,6 +223,31 @@ jobs:
           cp -f /tmp/eod/outlook_reconstructed_eod_shadow.json data/outlook_reconstructed_eod_shadow.json
           cp -f /tmp/eod/heartbeat_eod.txt                    data/heartbeat_eod.txt
 
+          # Preserve one immutable reconstructed EOD snapshot per completed session.
+          # The latest artifact remains authoritative for /live/eod-shadow; history is additive.
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          src=Path("/tmp/eod/outlook_reconstructed_eod_shadow.json")
+          j=json.loads(src.read_text(encoding="utf-8"))
+          session=str(j.get("completedSessionDate") or "").strip()
+          if not session:
+              raise SystemExit("missing completedSessionDate; refusing to archive shadow snapshot")
+          hist=Path("data/eod-shadow-history")
+          hist.mkdir(parents=True,exist_ok=True)
+          target=hist/f"{session}.json"
+          target.write_text(src.read_text(encoding="utf-8"),encoding="utf-8")
+          dates=sorted(
+              [p.stem for p in hist.glob("????-??-??.json")],
+              reverse=True
+          )
+          (hist/"index.json").write_text(
+              json.dumps({"ok":True,"dates":dates},indent=2)+"\n",
+              encoding="utf-8"
+          )
+          print(f"[eod-shadow-history] archived {session}; dates={len(dates)}")
+          PY
+
       - name: Commit and push live branch
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

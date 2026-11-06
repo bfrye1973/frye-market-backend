@@ -456,6 +456,35 @@ liveRouter.get("/eod-shadow", async (req, res) => {
   });
 });
 
+// Reconstructed EOD v1 shadow history index — additive research feed only.
+liveRouter.get("/eod-shadow-history", async (req, res) => {
+  return serveLiveJsonWithLastGood({
+    key: "eod-shadow-history",
+    routeName: "eod-shadow-history",
+    branch: EOD_BRANCH,
+    path: "data/eod-shadow-history/index.json",
+    req,
+    res,
+  });
+});
+
+// One immutable reconstructed EOD snapshot by completed session date.
+liveRouter.get("/eod-shadow-history/:date", async (req, res) => {
+  const date = String(req.params.date || "");
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(date)) {
+    setNoStore(res);
+    return res.status(400).json({ ok: false, error: "INVALID_SESSION_DATE" });
+  }
+  return serveLiveJsonWithLastGood({
+    key: `eod-shadow-history:${date}`,
+    routeName: "eod-shadow-history-date",
+    branch: EOD_BRANCH,
+    path: `data/eod-shadow-history/${date}.json`,
+    req,
+    res,
+  });
+});
+
 // 5-minute sandbox (LEAN) — trims big payloads
 // NOTE: Kept separate from last-good cache for now. This endpoint is optional/debug-style.
 liveRouter.get("/intraday-deltas", async (_req, res) => {
