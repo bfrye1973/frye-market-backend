@@ -27,3 +27,16 @@ No changes to strategy selections, trading, live engines, chart rendering, Rende
 
 ## Owner's long-term rule
 Engine 22 owns waves; permanent journal remembers them; Google Sheets organizes approved and research history; Engine 2 displays only verified chart-safe anchors and automatically catches up on revisions.
+
+## Isolated process-restart proof — November 8, 2026
+
+Render service `srv-d2ds5nodl3ps73b7i2og` was inspected **read-only** using connected Render: deploy branch `main`, auto-deploy enabled, one instance, and a 100 GB disk mounted at `/var/data/replay`. Owner-authorized Engine 22 proposed subfolder remains `/var/data/replay/engine22-wave-history` and must not touch Engine 12 replay records. The configuration establishes disk presence in the service settings; it is **not** an in-container mount verification, writable directory proof, or actual Render restart/redeploy.
+
+Added `engine22JournalProcessRestartV1.test.js` to the isolated branch and unified CI. It creates a temporary isolated history directory, writes a hash-linked observation + node event, starts separate brand-new Node.js processes to read it, retry idempotently, append a status revision, and page both revisions. Also checks that a corrupted original file blocks a subsequent process append without overwriting bytes.
+
+GitHub CI at head `bcaa01119325e96cab5e1afebe95b2c313573fa5`:
+- Engine22 unified wave history contract checks: **PASS**
+- Engine22 Wave History Journal V1: **PASS**
+- Engine22 Combined Chart History Acceptance: **PASS**
+
+**Remaining production-level gate:** run a separately authorized isolated persistent-mount test on Render with verified `/proc/self/mountinfo`, directory ownership/permissions, restart or redeploy followed by hash-chain replay, and single-writer assurance. Do **not** restart the live main service or set runtime flags until manager technical acceptance and owner release approval. The current draft PR remains stacked on #241, not rebased onto current production `main`. Notifications, permanent real-node reconciliation, authenticated Engine 2 visualization, and Google Sheets auto-sync are not yet live.
