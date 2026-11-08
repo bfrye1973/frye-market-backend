@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - proposed implementation contracts and replay requirements
 
 Date: 2026-11-08. **Design proposal only. No executable code changed, no tests authored/executed by this study, no production authorization.** Read [rule registry](RULE_REGISTRY_CH01_CH02.md) and [manager sheet](MANAGER_REVIEW_CH01_CH02.md). Missing source pages block comprehensive classifier approval. The book teaches analysis; the contracts and test designs here are our engineering proposals.
@@ -103,3 +105,7 @@ All R-01..R-28 are **SPECIFIED, NOT IMPLEMENTED, NOT EXECUTED, NOT MANAGER-APPRO
 ## 7. Acceptance and limitations
 
 The source-study deliverable can be reviewed now, but a comprehensive chapter gate cannot pass with source gaps. Pattern-rule approval requires source reconciliation and manager decisions. Implementation approval then requires deterministic unit tests, actual chronological historical replays with recorded cutoffs, failure cases, alternative scenarios and evidence of no historical mutation. Live integration separately requires measured performance/freshness/restart behavior and Engine 2 contract review. Nothing here establishes live prediction accuracy or authorizes merge/deploy.
+
+## Supplemental replay update -36 total specifications
+
+[SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), section6, adds R-29..R-36 and revises R-22,R-24,R-26. R-22 now resolves the author-chart twelve-contract silver exit while retaining conflicting prose quantities; it no longer expects an unaccounted remaining-two exit. R-24 can use recovered coffee reassessment/end figures without inferring missing pages. R-26 now blocks source completion only on Chapter2pp30-32; Chapter1 sourceREAD passes while manager gate remains pending. New tests cover distinct trigger types, nested E, same-direction alternatives, contracting boundary cases, hypothetical coffee outcomes, guideline-only slope warnings, silver source reconciliation and current completion gates. All36 remain SPECIFIED, NOT IMPLEMENTED, NOT EXECUTED, manager pending.
