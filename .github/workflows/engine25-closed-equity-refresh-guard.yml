@@ -1,0 +1,21 @@
+name: Engine25 Closed Equity Refresh Guard
+on:
+  pull_request:
+    paths:
+      - 'services/core/routes/engine25Refresh.js'
+      - 'services/core/logic/engine25/closedEquityRefreshScope.js'
+      - 'services/core/tests/engine25ClosedEquityRefresh.test.js'
+  push:
+    branches:
+      - engine25-closed-session-equity-refresh-20261108
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine25ClosedEquityRefresh.test.js
+      - run: node --check services/core/routes/engine25Refresh.js
