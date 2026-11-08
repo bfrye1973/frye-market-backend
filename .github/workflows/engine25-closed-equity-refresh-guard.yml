@@ -5,6 +5,12 @@ on:
       - 'services/core/routes/engine25Refresh.js'
       - 'services/core/logic/engine25/closedEquityRefreshScope.js'
       - 'services/core/tests/engine25ClosedEquityRefresh.test.js'
+      - 'services/core/tests/engine25BlendedParticipation.test.js'
+      - 'services/core/tests/engine25ParticipationSessionSplit.test.js'
+      - 'services/core/logic/engine25/buildBlendedParticipation.js'
+      - 'services/core/logic/engine25/buildParticipationArtifact.js'
+      - 'services/core/logic/engine25SectorHealth.js'
+      - 'scripts/make_eod.py'
   push:
     branches:
       - engine25-closed-session-equity-refresh-20261108
@@ -17,5 +23,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test services/core/tests/engine25ClosedEquityRefresh.test.js
+      - run: node --test services/core/tests/engine25ClosedEquityRefresh.test.js services/core/tests/engine25BlendedParticipation.test.js
+      - run: node services/core/tests/engine25ParticipationSessionSplit.test.js
+      - run: python -m py_compile scripts/make_eod.py
       - run: node --check services/core/routes/engine25Refresh.js
