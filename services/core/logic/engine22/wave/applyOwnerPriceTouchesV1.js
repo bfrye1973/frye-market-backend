@@ -774,6 +774,64 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // November 6 Micro W2 / Submicro ABC are two separate research models.
+  // Observe ONLY post-anchor downside prices. Earlier Submicro A low is not
+  // evidence that its later C projection was touched.
+  for(const [degree,modelKey,version,startField] of [
+    ["micro","ownerMicroW2Nov6Research","engine22.microW2Nov6Research.v1","w1HighAtUtc"],
+    ["submicro","ownerSubmicroNov6AbcResearch","engine22.submicroNov6AbcResearch.v1","bHighAtUtc"],
+  ]){
+    const model=root.degrees?.[degree]?.[modelKey];
+    if(model?.version!==version || model.selectionStatus!=="RESEARCH_ONLY" ||
+       !Array.isArray(model.levels))continue;
+    const start=Date.parse(model.anchors?.[startField]);
+    if(!Number.isFinite(start))continue;
+    const id=JSON.stringify([degree,modelKey,version,model.anchors,
+      model.levels.map(x=>[x.key,x.price])]);
+    const previous=previousWavelength?.degrees?.[degree]?.[modelKey];
+    const same=previous?.version===version &&
+      previous.anchors?.[startField]===model.anchors?.[startField] &&
+      previous.anchors?.w1Low===model.anchors?.w1Low &&
+      previous.anchors?.aHigh===model.anchors?.aHigh &&
+      previous.anchors?.aLow===model.anchors?.aLow;
+    const past=disk[id]||{},observed=[];
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const quote=finite(currentPrice);
+    const prior=same?finite(previousWavelength?.currentPrice):null;
+    if(now>=start && quote!==null)
+      observed.push({low:prior===null?quote:Math.min(quote,prior),
+        source:"ES_CURRENT_PRICE",time:new Date(now).toISOString(),verified:false});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(bar?.time),low=finite(bar?.low),high=finite(bar?.high);
+      if(!Number.isSafeInteger(t)||t<=0||low===null||high===null||low>high||
+         t*1000<start||t*1000+600000>now)continue;
+      observed.push({low,source:"ES_10M_COMPLETED_OHLC",
+        time:new Date(t*1000).toISOString(),
+        verified:model.priceBasisReconciliation==="VERIFIED"});
+    }
+    model.levels=model.levels.map(level=>{
+      const old=past[level.key]||(same?previous.levels?.find(x=>
+        x.key===level.key && x.price===level.price):null);
+      const keep=old?.status==="TOUCHED"&&old.price===level.price;
+      const hit=keep?null:observed.find(x=>x.low<=level.price);
+      const source=keep?old.touchEvidenceType:hit?.source;
+      const evidence=keep?old.touchEvidence:hit?{
+        verified:hit.verified,
+        evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?
+          "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+        modelPriceBasisVerified:model.priceBasisReconciliation==="VERIFIED",
+      }:null;
+      return {...level,status:keep||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(keep||hit),
+        touchEvidenceType:source||null,
+        touchedAt:keep?old.touchedAt||null:hit?.time||null,
+        touchEvidence:evidence||null};
+    });
+    disk[id]=Object.fromEntries(model.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
