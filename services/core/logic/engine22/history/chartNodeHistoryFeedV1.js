@@ -1,7 +1,6 @@
 // Safe Engine 22 -> Engine 2 history feed. It uses the same hash-verified journal
 // and immutable per-node event validation; never exposes an unapproved chart plot.
 import {pageWaveHistory,readWaveHistory} from "./waveHistoryJournalV1.js";
-import {replayNodeIdentityEvents} from "./nodeIdentityLedgerV1.js";
 
 const VERSION="engine22.chartNodeHistoryPage.v1";
 const requireCursor=(afterRevision,limit)=>{
