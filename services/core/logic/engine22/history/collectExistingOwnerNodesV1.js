@@ -13,7 +13,7 @@ function arizonaUtc(date,time){
  // America/Phoenix observes MST year-round; do not infer UNKNOWN coordinates.
  const utc=date+"T"+time+":00";
  const t=Date.parse(utc+"-07:00");
- return Number.isFinite(t)&&new Date(t-7*60*60*1000).toISOString().startsWith(date)?new Date(t).toISOString():new Date(t).toISOString();
+ return Number.isFinite(t)?new Date(t).toISOString():null;
 }
 export function collectExistingOwnerNodesV1({directory,publishedAt}={}){
  if(!directory||typeof publishedAt!=="string"||!Number.isFinite(Date.parse(publishedAt)))
