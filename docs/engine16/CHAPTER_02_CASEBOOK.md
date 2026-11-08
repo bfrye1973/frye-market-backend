@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - Chapter 2 detailed concepts and chart casebook
 
 Source: Gorman and Kennedy, *Visual Guide to Elliott Wave Trading*, Chapter 2, owner scans identified in [SOURCE_PAGE_INDEX.md](SOURCE_PAGE_INDEX.md). Reviewed 2026-11-08. **Draft extraction of available material, not a complete chapter.** Every supplied figure has a record below. Absent figures are explicitly listed, not reconstructed. All prices refer to historical examples, never current ES levels.
@@ -113,3 +115,7 @@ R-23 tests stopping the hypothetical setup while preserving still-valid structur
 ## Extraction outcome
 
 This casebook covers 38 supplied Chapter 2 figure numbers. Seven figures in the visible sequence are absent. None of the five cases is yet a fully timestamped executable replay fixture, and none independently validates probabilities. The failed coffee setup and unresolved TECH/AUD alternatives are first-class research evidence. Refer to the [rule registry](RULE_REGISTRY_CH01_CH02.md), [replay design](IMPLEMENTATION_REPLAY_CH01_CH02.md) and [manager decision sheet](MANAGER_REVIEW_CH01_CH02.md) before implementation.
+
+## Recovered figures and chapter conclusion
+
+[SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), sections3-4, supplies detailed records for Figs2.34-2.35,2.42-2.43 and2.46-2.51, and clearer pp.68-69. It supersedes the earlier missing-source statements for those pages and revises the silver quantity/outcome record: the recovered chart shows all12 sold at698, reconciling11300 under the historical example arithmetic, while earlier prose says10; retain that contradiction. Coffee is now followed through the second hypothetical setup1125/1094/1309, later1122stop, modeled1289exit and later weekly outcome. Chapter2 ends at75; only30-32 remain absent. There are48 supplied unique Chapter2 figures, not38 after this supplement.
