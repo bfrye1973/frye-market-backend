@@ -36,6 +36,33 @@ app.listen(port, "0.0.0.0", () => {
 const n = (v) => v === null || v === undefined || v === "" ? null :
   (Number.isFinite(Number(v)) ? Number(v) : null);
 async function run() {
+  // Read-only acceptance of the actual production participation artifact.
+  try {
+    const response = await fetch(
+      "https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard",
+      {signal:AbortSignal.timeout(18000)}
+    );
+    const live = await response.json();
+    const d = live?.sourceDiagnostics || live?.data?.sourceDiagnostics || {};
+    const freshness = live?.freshness || live?.data?.freshness || {};
+    const summary = {
+      http:response.status,
+      ok:live?.ok ?? null,
+      hasDiagnostics:Object.keys(d).length>0,
+      updatedAt:live?.participationArtifact?.generatedAt || live?.data?.participationArtifact?.generatedAt || null,
+      eodFreshness:freshness?.eod || null,
+      timeframes:Object.fromEntries(["10m","1h","4h","eod"].map(tf=>[tf,{
+        sourceTimestamp:d[tf]?.sourceTimestamp??null,
+        sourceSessionDate:d[tf]?.sourceSessionDate??null,
+        freshnessState:d[tf]?.freshnessState??null,
+        freshnessReason:d[tf]?.freshnessReason??null,
+        effectiveWeight:d[tf]?.effectiveWeight??null
+      }]))
+    };
+    console.log("[engine25-participation-production] RESULT",JSON.stringify(summary));
+  } catch(error) {
+    console.log("[engine25-participation-production] ERROR",String(error?.message||error).slice(0,200));
+  }
   const missing = ["POLYGON_API_KEY", "FRED_API_KEY"].filter(
     key => !process.env[key]
   );
