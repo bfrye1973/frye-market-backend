@@ -40,3 +40,16 @@ GitHub CI at head `bcaa01119325e96cab5e1afebe95b2c313573fa5`:
 - Engine22 Combined Chart History Acceptance: **PASS**
 
 **Remaining production-level gate:** run a separately authorized isolated persistent-mount test on Render with verified `/proc/self/mountinfo`, directory ownership/permissions, restart or redeploy followed by hash-chain replay, and single-writer assurance. Do **not** restart the live main service or set runtime flags until manager technical acceptance and owner release approval. The current draft PR remains stacked on #241, not rebased onto current production `main`. Notifications, permanent real-node reconciliation, authenticated Engine 2 visualization, and Google Sheets auto-sync are not yet live.
+
+## Engine 2 read-only node revision feed — isolated Nov 8 acceptance
+
+- `GET /api/engine22/wave-history/nodes?afterRevision=0&limit=50`
+  returns `engine22.chartNodeHistoryPage.v1`, ordered by the original immutable publication revision; includes zero or more node status/record events per publication and always advances the cursor even if no node was recorded.
+- `GET /api/engine22/wave-history/nodes/current`
+  returns `engine22.chartNodeCurrent.v1`, one latest known revision per immutable `nodeId` and `latestRevision`.
+- Both inherit the existing route's mandatory server-side bearer-token and verified persistent-mount checks. **No credentials may appear in the public Engine 2 browser bundle.**
+- The feed preserves research/approval status, supersession references, source/model identity, original market timestamp and publication timestamp, ES contract/price-basis metadata, and parent wave ID. **Every node is `plotAllowed:false`**, even if marked approved, until Engine 11 as-of chart basis acceptance is independently proven.
+- The feed does not invent node events from old observation-only journals, because those events were never recorded historically. Empty node records must be shown as missing history, not inferred.
+- CI suites passed at commit `1188113d3ddaaae9143954a34d4fcbb77b726e4e`: unified feed + history tests, Wave History Journal V1, and combined Chart History Acceptance.
+
+**Still required before any real Engine 2 rollout:** owner-approved node ingestion and historical approval evidence, correct chart as-of semantics, real production mount/redeploy proof, server-side authorization, current-main reconciliation and dedicated client reconnect tests. No Google Sheets connector or notifications were deployed; this is an isolated API implementation only.
