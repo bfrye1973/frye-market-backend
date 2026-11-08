@@ -38,6 +38,17 @@ const n = (v) => v === null || v === undefined || v === "" ? null :
 async function run() {
   // Read-only acceptance of the actual production participation artifact.
   try {
+    const eodResponse = await fetch(
+      "https://frye-market-backend-1.onrender.com/live/eod",
+      {signal:AbortSignal.timeout(18000)}
+    );
+    const eodRead = await eodResponse.json();
+    console.log("[engine25-participation-production] EOD_SOURCE",JSON.stringify({
+      http:eodResponse.status,
+      meta:eodRead?.meta || null,
+      updatedAt:eodRead?.updated_at_utc,
+      liveMeta:{source:eodRead?.liveMeta?.source,usingLastGood:eodRead?.liveMeta?.usingLastGood}
+    }));
     const response = await fetch(
       "https://frye-market-backend-1.onrender.com/api/v1/engine25/full-dashboard",
       {signal:AbortSignal.timeout(18000)}
