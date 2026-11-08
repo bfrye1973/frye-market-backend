@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - Chapters 1 and 2 source inventory
 
 Study date: 2026-11-08 (America/Phoenix). Reviewer: Engine 16 research assistant; independent manager review pending. Source: owner-supplied scans of Gorman and Kennedy, *Visual Guide to Elliott Wave Trading*. This index records what was actually visible, not presumed chapter coverage.
@@ -71,3 +73,7 @@ Unique substantially supplied printed coverage: 21-29, 33-55, 58-65, 68-69 (42 p
 | Chapter COMPLETE | **NO** | **NO** |
 
 Read next: [Chapter 1 study](CHAPTER_01_DETAILED_STUDY.md), [Chapter 2 casebook](CHAPTER_02_CASEBOOK.md), [rule registry](RULE_REGISTRY_CH01_CH02.md), [implementation/replay](IMPLEMENTATION_REPLAY_CH01_CH02.md), [manager decisions](MANAGER_REVIEW_CH01_CH02.md).
+
+## Current supplemental inventory
+
+Eight new PDF pages were visually inspected; one duplicates another, and pp.68-69 repeat earlier coverage. Source hash, eight-page mapping, all13 newly supplied figure records and updated gates are in [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md). Chapter1 coverage is15 unique printed pages (3-17). Chapter2 coverage is52 of55 printed pages (21-75, excluding30-32). Current unique figures:14 Chapter1 and48 Chapter2. Previous coverage tables remain the original-upload inventory, not current missing-source status.
