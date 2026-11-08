@@ -571,6 +571,34 @@ export function buildCurrentWavelength({
   };
   const degrees = {
     submicro:{
+      // Owner Nov 6 ABC within the proposed Micro W2 — research card only.
+      ownerSubmicroNov6AbcResearch:{
+        version:"engine22.submicroNov6AbcResearch.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"micro",parentWave:"W2",
+        anchors:{
+          aHigh:7469.75,aHighLocalTime:"2026-11-06 07:50 AZ",
+          aLow:7396.75,aLowLocalTime:"2026-11-06 10:50 AZ",
+          bHigh:7436.75,bHighLocalTime:"2026-11-06 12:30 AZ",
+          bHighAtUtc:"2026-11-06T19:30:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_SUBMICRO_NOV6_HANDWRITTEN_20261108",
+        },
+        fibMethod:"C_DOWN_B_MINUS_A_LENGTH_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7436.75-(7469.75-7396.75)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_C_DOWN_EXTENSION",
+        })),
+        reviewReference:7436.75,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        olderWorkingModelsPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
       degree:"submicro",activeWave:"W2",direction:"DOWN",
       state:"SUBMICRO_W2_DOWN_WATCH_OWNER_READ",
       ownerSubmicroW2, // archived owner model; touch memory must remain separate
@@ -586,6 +614,35 @@ export function buildCurrentWavelength({
       noExecution:true,
     },
     micro: {
+      // Owner Nov 5→6 Micro W1/W2 blue research scenario. Does not promote
+      // away from current Oct31 Micro C DOWN owner-selected count.
+      ownerMicroW2Nov6Research:{
+        version:"engine22.microW2Nov6Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        completedWave:"W1",completedWaveStatus:"COMPLETION_CANDIDATE",
+        activeWave:"W2",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"subminute",parentWave:"REVERSAL_CANDIDATE",
+        anchors:{
+          w1Low:7321.75,w1LowLocalTime:"2026-11-05 16:00 AZ",
+          w1High:7469.75,w1HighLocalTime:"2026-11-06 07:50 AZ",
+          w1HighAtUtc:"2026-11-06T14:50:00Z",
+          w2Low:null,w2LowLocalTime:null,w2CompletionConfirmed:false,
+          provenance:"OWNER_MICRO_W1_NOV5_LOW_NOV6_HIGH_20261108",
+        },
+        fibMethod:"W2_DOWN_RETRACEMENT_OF_W1",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7469.75-(7469.75-7321.75)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MICRO_W2_RETRACEMENT",
+        })),
+        structuralReference:7321.75,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,nextWave:"W3",
+        nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        olderWorkingModelsPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
       degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
       anchorProvenance: microSequence.anchorProvenance,
       microSequence,
