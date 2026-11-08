@@ -48,7 +48,7 @@ export function replayWaveHistory(events) {
     latest.set(e.waveId,e);
   }
   return {schema:"engine22.waveHistorySnapshot.v1",eventCount:ids.size,
-    cursor:ids.size,waves:[...latest.values()].map(structuredClone),
+    cursor:ids.size,waves:[...latest.values()].map(event => structuredClone(event)),
     fingerprint:digest([...ids.values()]),noExecution:true,noPermissionCreated:true};
 }
 export function chartNodeFromHistory(event) {
