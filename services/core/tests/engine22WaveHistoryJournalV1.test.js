@@ -14,15 +14,17 @@ function fixture(){
  const authorizedWorkingStructure=buildAuthorizedWorkingStructureV1({currentWavelength,degreeStates,publicationTime:"2026-10-31T20:00:00Z"});
  return {symbol:"ES",currentWavelength,degreeStates,authorizedWorkingStructure,sevenDegreeInvalidations:{degrees:{}}};
 }
-test("captures seven degrees and preserves both Submicro alternatives and Subminute Fib methods",()=>{
+test("captures all seven current owner-selected degrees without flattening their selected source models",()=>{
  const result=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
  assert.equal(result.ok,true);
  assert.equal(Object.keys(result.content.degrees).length,7);
  assert.equal(result.content.selectionRevision,6);
- assert.ok(result.content.degrees.submicro.sourceModel.option1);
- assert.ok(result.content.degrees.submicro.sourceModel.option2);
- assert.equal(result.content.degrees.subminute.sourceModel.fibReferences.wick.levels.length,5);
- assert.equal(result.content.degrees.subminute.sourceModel.fibReferences.body.levels.length,5);
+ for (const degree of ["submicro","micro","subminute","minute","minor","intermediate","primary"]) {
+  const data=result.content.degrees[degree];
+  assert.equal(data.available,true,degree+" source model available");
+  assert.ok(data.sourceModel && typeof data.sourceModel==="object");
+  assert.equal(data.sourceModel.version??data.modelVersion,data.modelVersion);
+ }
  assert.equal(result.content.noExecution,true);
 });
 test("records every changed publication, deduplicates identical state and verifies chain",()=>{
