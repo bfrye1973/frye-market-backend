@@ -1,0 +1,226 @@
+{
+  "schema": "engine22.ownerChartAnchors.v1",
+  "authority": "OWNER_SUPPLIED_CHART_COORDINATES",
+  "source": "OWNER_TABLE_2026_10_31",
+  "timezone": "America/Phoenix",
+  "status": "OWNER_APPROVED_FOR_RESEARCH_CHART",
+  "noExecution": true,
+  "anchors": [
+    {
+      "id": "OWNER_SUBMICRO_A_LOW",
+      "degree": "submicro",
+      "wave": "A_LOW",
+      "date": "2026-10-26",
+      "time": "01:00",
+      "price": 7660,
+      "sourceRow": 1
+    },
+    {
+      "id": "OWNER_SUBMICRO_A_HIGH",
+      "degree": "submicro",
+      "wave": "A_HIGH",
+      "date": "2026-10-21",
+      "time": "11:00",
+      "price": 7810.5,
+      "sourceRow": 2
+    },
+    {
+      "id": "OWNER_SUBMICRO_B_HIGH",
+      "degree": "submicro",
+      "wave": "B_HIGH",
+      "date": "2026-10-28",
+      "time": "13:00",
+      "price": 7819.5,
+      "sourceRow": 3
+    },
+    {
+      "id": "OWNER_MICRO_A_HIGH",
+      "degree": "micro",
+      "wave": "A_HIGH",
+      "date": "2026-10-21",
+      "time": "11:00",
+      "price": 7810.5,
+      "sourceRow": 4
+    },
+    {
+      "id": "OWNER_MICRO_A_LOW",
+      "degree": "micro",
+      "wave": "A_LOW",
+      "date": "2026-10-26",
+      "time": "01:00",
+      "price": 7660,
+      "sourceRow": 5
+    },
+    {
+      "id": "OWNER_MICRO_B_HIGH",
+      "degree": "micro",
+      "wave": "B_HIGH",
+      "date": "2026-10-28",
+      "time": "13:00",
+      "price": 7819.5,
+      "sourceRow": 6
+    },
+    {
+      "id": "OWNER_SUBMINUTE_A_HIGH",
+      "degree": "subminute",
+      "wave": "A_HIGH",
+      "date": "2026-08-13",
+      "time": "06:00",
+      "price": 7908.25,
+      "sourceRow": 7
+    },
+    {
+      "id": "OWNER_SUBMINUTE_A_LOW",
+      "degree": "subminute",
+      "wave": "A_LOW",
+      "date": "2026-09-16",
+      "time": "11:00",
+      "price": 7575,
+      "sourceRow": 8
+    },
+    {
+      "id": "OWNER_SUBMINUTE_B_HIGH",
+      "degree": "subminute",
+      "wave": "B_HIGH",
+      "date": "2026-10-06",
+      "time": "09:00",
+      "price": 7895.5,
+      "sourceRow": 9
+    },
+    {
+      "id": "OWNER_MINUTE_W1_START_LOW",
+      "degree": "minute",
+      "wave": "W1_START_LOW",
+      "date": "2026-07-30",
+      "time": "12:30",
+      "price": 7412.5,
+      "sourceRow": 10
+    },
+    {
+      "id": "OWNER_MINUTE_W1_END_HIGH",
+      "degree": "minute",
+      "wave": "W1_END_HIGH",
+      "date": "2026-08-13",
+      "time": "06:00",
+      "price": 7906.25,
+      "sourceRow": 11
+    },
+    {
+      "id": "OWNER_MINOR_W1_START_LOW",
+      "degree": "minor",
+      "wave": "W1_START_LOW",
+      "date": "2026-03-30",
+      "time": "17:00",
+      "price": 6417,
+      "sourceRow": 12
+    },
+    {
+      "id": "OWNER_MINOR_W1_END_HIGH",
+      "degree": "minor",
+      "wave": "W1_END_HIGH",
+      "date": "2026-04-10",
+      "time": "08:00",
+      "price": 6948.75,
+      "sourceRow": 13
+    },
+    {
+      "id": "OWNER_MINOR_W2_END_LOW",
+      "degree": "minor",
+      "wave": "W2_END_LOW",
+      "date": "2026-04-12",
+      "time": "15:00",
+      "price": 6829,
+      "sourceRow": 14
+    },
+    {
+      "id": "OWNER_MINOR_W3_END_HIGH",
+      "degree": "minor",
+      "wave": "W3_END_HIGH",
+      "date": "2026-06-02",
+      "time": "19:00",
+      "price": 7694.25,
+      "sourceRow": 15
+    },
+    {
+      "id": "OWNER_MINOR_W4_END_LOW",
+      "degree": "minor",
+      "wave": "W4_END_LOW",
+      "date": "2026-07-29",
+      "time": "13:30",
+      "price": 7398,
+      "sourceRow": 16
+    },
+    {
+      "id": "OWNER_INTERMEDIATE_W1_START_LOW",
+      "degree": "intermediate",
+      "wave": "W1_START_LOW",
+      "date": "2025-04-08",
+      "time": "07:00",
+      "price": 5188.5,
+      "sourceRow": 17
+    },
+    {
+      "id": "OWNER_INTERMEDIATE_W1_END_HIGH",
+      "degree": "intermediate",
+      "wave": "W1_END_HIGH",
+      "date": "2026-01-28",
+      "time": "10:00",
+      "price": 7151,
+      "sourceRow": 18
+    },
+    {
+      "id": "OWNER_INTERMEDIATE_W2_END_LOW",
+      "degree": "intermediate",
+      "wave": "W2_END_LOW",
+      "date": "2026-03-30",
+      "time": "03:00",
+      "price": 6407,
+      "sourceRow": 19
+    },
+    {
+      "id": "OWNER_PRIMARY_W1_START_LOW",
+      "degree": "primary",
+      "wave": "W1_START_LOW",
+      "date": "2020-04-02",
+      "time": "08:00",
+      "price": 3200,
+      "sourceRow": 20
+    },
+    {
+      "id": "OWNER_PRIMARY_W1_END_HIGH",
+      "degree": "primary",
+      "wave": "W1_END_HIGH",
+      "date": "2022-01-05",
+      "time": "10:00",
+      "price": 5620,
+      "sourceRow": 21
+    },
+    {
+      "id": "OWNER_PRIMARY_W2_END_LOW",
+      "degree": "primary",
+      "wave": "W2_END_LOW",
+      "date": "2022-10-12",
+      "time": "09:00",
+      "price": 4306,
+      "sourceRow": 22
+    },
+    {
+      "id": "OWNER_PRIMARY_W3_END_HIGH",
+      "degree": "primary",
+      "wave": "W3_END_HIGH",
+      "date": "2025-02-20",
+      "time": "09:00",
+      "price": 6487,
+      "sourceRow": 23
+    },
+    {
+      "id": "OWNER_PRIMARY_W4_END_LOW",
+      "degree": "primary",
+      "wave": "W4_END_LOW",
+      "date": "2025-04-09",
+      "time": "07:00",
+      "price": 5182,
+      "sourceRow": 24
+    }
+  ]
+}
