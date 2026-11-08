@@ -1,14 +1,14 @@
 {
   "schema": "engine25.marketInternals10mArchive@1",
   "timeframe": "10m",
-  "sourceTimestamp": "2026-10-08T08:23:58Z",
-  "generatedAt": "2026-10-08T08:23:58Z",
-  "archivedAt": "2026-10-08T08:24:19.445888Z",
+  "sourceTimestamp": "2026-11-08T07:01:53Z",
+  "generatedAt": "2026-11-08T07:01:53Z",
+  "archivedAt": "2026-11-08T07:02:11.389442Z",
   "freshnessState": "FRESH_AT_SOURCE",
   "completeCanonicalSet": true,
   "stocksScanned": 5470.0,
-  "stocksWithVolume": 929.0,
-  "coveragePct": 16.983546617915906,
+  "stocksWithVolume": 0.0,
+  "coveragePct": 0.0,
   "advancingStocks": 0.0,
   "decliningStocks": 0.0,
   "advancingBreadthPct": null,
@@ -21,7 +21,7 @@
   "netNewHighsLows": 0.0,
   "advancingVolume": 0.0,
   "decliningVolume": 0.0,
-  "unchangedVolume": 35825231.19494,
+  "unchangedVolume": 0.0,
   "advancingVolumeShare": null,
   "decliningVolumeShare": null,
   "volumeImbalance": null,
@@ -37,9 +37,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 5213183.694007,
+      "unchangedVolume": 0.0,
       "stocksScanned": 765.0,
-      "stocksWithVolume": 212.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Materials",
@@ -52,9 +52,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 174780.82207700002,
+      "unchangedVolume": 0.0,
       "stocksScanned": 274.0,
-      "stocksWithVolume": 63.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Health Care",
@@ -67,9 +67,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 1161784.647376,
+      "unchangedVolume": 0.0,
       "stocksScanned": 1116.0,
-      "stocksWithVolume": 201.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Communication Services",
@@ -82,9 +82,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 3165955.325073,
+      "unchangedVolume": 0.0,
       "stocksScanned": 270.0,
-      "stocksWithVolume": 40.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Real Estate",
@@ -97,9 +97,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 3161554.451078,
+      "unchangedVolume": 0.0,
       "stocksScanned": 264.0,
-      "stocksWithVolume": 26.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Energy",
@@ -112,9 +112,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 85243.098747,
+      "unchangedVolume": 0.0,
       "stocksScanned": 248.0,
-      "stocksWithVolume": 53.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Consumer Staples",
@@ -127,9 +127,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 745073.299872,
+      "unchangedVolume": 0.0,
       "stocksScanned": 246.0,
-      "stocksWithVolume": 40.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Consumer Discretionary",
@@ -142,9 +142,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 5040966.496060001,
+      "unchangedVolume": 0.0,
       "stocksScanned": 564.0,
-      "stocksWithVolume": 87.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Financials",
@@ -157,9 +157,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 199150.177487,
+      "unchangedVolume": 0.0,
       "stocksScanned": 934.0,
-      "stocksWithVolume": 73.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Utilities",
@@ -172,9 +172,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 20532.369532999997,
+      "unchangedVolume": 0.0,
       "stocksScanned": 107.0,
-      "stocksWithVolume": 11.0
+      "stocksWithVolume": 0.0
     },
     {
       "sector": "Industrials",
@@ -187,9 +187,9 @@
       "momentum_pct": 50.0,
       "advancingVolume": 0.0,
       "decliningVolume": 0.0,
-      "unchangedVolume": 16857006.81363,
+      "unchangedVolume": 0.0,
       "stocksScanned": 682.0,
-      "stocksWithVolume": 123.0
+      "stocksWithVolume": 0.0
     }
   ],
   "source": {
