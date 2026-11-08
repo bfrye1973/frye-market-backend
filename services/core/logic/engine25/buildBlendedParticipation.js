@@ -161,7 +161,7 @@ function buildTimeframeDiagnostic({ timeframe, payload, now }) {
     // The workflow can publish Sunday while the equity observation is Friday.
     // Prefer the explicit, independently verified completed session metadata.
     const sourceSessionDate =
-      /^\\d{4}-\\d{2}-\\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
+      /^\d{4}-\d{2}-\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
         ? payload.meta.completedSessionDate
         : timestampMarketDate(timestamp);
     const expectedSessionDate = expectedCompletedEquitySessionDate(now);
@@ -202,7 +202,7 @@ function buildTimeframeDiagnostic({ timeframe, payload, now }) {
     sourceTimestamp: timestamp,
     sourceSessionDate:
       timeframe === "eod"
-        ? (/^\\d{4}-\\d{2}-\\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
+        ? (/^\d{4}-\d{2}-\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
             ? payload.meta.completedSessionDate : timestampMarketDate(timestamp))
         : timestampDate(timestamp),
     ageMs,
