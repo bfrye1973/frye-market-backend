@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - manager review request for available Chapter 1-2 research
 
 Date: 2026-11-08. Request: review the source interpretations and proposed predicates below. **Not a request to mark either chapter COMPLETE, merge production, deploy, alter Engine 22, or approve trades.** Branch is isolated from the programming teammate. Owner remains final approval authority.
@@ -45,3 +47,9 @@ At audited PR #265 head fe8e6683ee8c334083539557e637cef3d54523d5, `abcCandidates
 ## Approval record template
 
 For each M-ID, record decision, rationale, source pages reviewed, approved rule IDs/predicate version, allowed scope, reviewer and date. Disapproval is recorded too. Code-function/test mapping remains PROPOSED/NOT IMPLEMENTED until actual programming and test evidence exist. Chapter completion requires all missing source pages and manager-review gates. Chapter3 remains blocked.
+
+## Superseding source/decision update
+
+Cancel earlier source requests1,2 except TECHpp30-32, and3: Chapter1pp12-13, silver56-57, coffee66-67 and69-75 have now been supplied and studied. Chapter2's ending is confirmed at75. Only printed30-32 remain needed. See [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md) for detailed extraction,14+48figure coverage and36 proposed checks. Chapter1 is ready for manager review of full source coverage, not automatic COMPLETE status.
+
+M-11 silver missing-exit issue is resolved by recovered charts, with prose/figure quantity conflict retained; CAT/AUD issues remain. M-12 no longer depends on missing coffee/end pages; formal grammar approval remains pending. M-15 adds distinct confirmation-event semantics; M-16 adds contracting E/C policy and nested-E validation, preserving usual nesting location as guideline. Neither new question has an answer yet. No runtime code authorization is requested by the source update.
