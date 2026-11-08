@@ -3,6 +3,7 @@ import {existsSync,statSync} from "node:fs";
 import {join as joinWaveHistoryPath} from "node:path";
 import {exportWaveHistoryWorkbook} from "../logic/engine22/history/exportWaveHistoryWorkbookV1.js";
 import {buildWaveHistoryObservation,appendWaveHistoryObservation} from "../logic/engine22/history/waveHistoryJournalV1.js";
+import {collectExistingOwnerNodesV1} from "../logic/engine22/history/collectExistingOwnerNodesV1.js";
 // services/core/jobs/buildStrategySnapshot.js
 // Stable snapshot builder (SPY only)
 //
@@ -10589,7 +10590,8 @@ if (process.env.ENGINE22_WAVE_HISTORY_ENABLED==="true" && String(symbol).toUpper
     result.strategies[s.strategyId].engine22WaveHistory={available:false,reason:"ENGINE22_HISTORY_PERSISTENT_MOUNT_UNVERIFIED"};
   } else {
     try {
-      const journal=appendWaveHistoryObservation({directory,observation});
+      const nodeEvents=collectExistingOwnerNodesV1({directory,publishedAt:observation.observedAt});
+      const journal=appendWaveHistoryObservation({directory,observation,nodeEvents});
       let workbookStatus="UNCHANGED",workbookError=null;
       const workbookPath=joinWaveHistoryPath(directory,"Frye_Elliott_Wave_History.xlsx");
       const journalPath=joinWaveHistoryPath(directory,"wave-history.v1.jsonl");
