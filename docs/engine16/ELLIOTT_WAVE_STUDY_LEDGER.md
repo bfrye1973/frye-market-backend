@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 > Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
 
 # Engine 16 — Elliott Wave Study Ledger
@@ -65,3 +67,7 @@ The original PARTIAL inventory and preliminary candidates above are retained as 
 - [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
 
 Source fingerprints and exact PDF-to-book-page mappings are in SOURCE_PAGE_INDEX.md. Stable earlier C1 rule IDs remain; C2-001..004 crosswalks appear in the new registry. Next work is missing-page acquisition, source reconciliation, manager decisions, then approved programming and actual replay evidence. Neither chapter is COMPLETE.
+
+## Supplemental study progress - current
+
+[SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md) records8 additional supplied PDF pages,13 new unique figures, closed Chapter1 source gap, silver quantity/outcome reconciliation and coffee conclusion. Total39 PDF pages/62figures/36 proposed replay checks. Chapter1: sourceREAD and draft extraction complete, manager review pending. Chapter2: only printed30-32/Figs2.9-2.11 missing; ending75verified. No chapter COMPLETE, no Chapter3, no implementation/test execution or production change. Earlier source/progress rows are historical and superseded by this update.
