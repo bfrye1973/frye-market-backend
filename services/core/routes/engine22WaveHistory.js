@@ -4,6 +4,7 @@ import {createHash,timingSafeEqual} from "node:crypto";
 import {existsSync} from "node:fs";
 import {join} from "node:path";
 import {pageWaveHistory} from "../logic/engine22/history/waveHistoryJournalV1.js";
+import {pageEngine22NodeHistory,latestEngine22NodeHistory} from "../logic/engine22/history/chartNodeHistoryFeedV1.js";
 
 const router=express.Router();
 const journalDirectory=()=>process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR || "/var/data/replay/engine22-wave-history";
@@ -32,6 +33,22 @@ router.get("/",(req,res)=>{
   if(String(error.message)==="INVALID_HISTORY_PAGINATION")return res.status(400).json({available:false,reason:"INVALID_HISTORY_PAGINATION"});
   console.error("[ENGINE22 HISTORY READ FAILED]",String(error.message));
   return res.status(503).json({available:false,reason:"ENGINE22_HISTORY_UNAVAILABLE_OR_CORRUPT"});
+ }
+});
+router.get("/nodes",(req,res)=>{
+ const afterRevision=Number(req.query.afterRevision??0),limit=Number(req.query.limit??50);
+ try{return res.json(pageEngine22NodeHistory({directory:journalDirectory(),afterRevision,limit}));}
+ catch(error){
+  if(String(error.message)==="INVALID_HISTORY_PAGINATION")return res.status(400).json({available:false,reason:"INVALID_HISTORY_PAGINATION"});
+  console.error("[ENGINE22 NODE HISTORY READ FAILED]",String(error.message));
+  return res.status(503).json({available:false,reason:"ENGINE22_NODE_HISTORY_UNAVAILABLE_OR_CORRUPT"});
+ }
+});
+router.get("/nodes/current",(req,res)=>{
+ try{return res.json(latestEngine22NodeHistory({directory:journalDirectory()}));}
+ catch(error){
+  console.error("[ENGINE22 CURRENT NODES READ FAILED]",String(error.message));
+  return res.status(503).json({available:false,reason:"ENGINE22_NODE_HISTORY_UNAVAILABLE_OR_CORRUPT"});
  }
 });
 router.get("/workbook",(req,res)=>{
