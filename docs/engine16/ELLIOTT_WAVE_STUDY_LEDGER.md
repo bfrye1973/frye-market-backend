@@ -1,3 +1,5 @@
+> Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
+
 # Engine 16 — Elliott Wave Study Ledger
 
 **Purpose:** Persistent training record for the replacement Engine 16 live ABC and Elliott Wave structural tracker. This is a *study ledger*, not authority to deploy or alter Engine 22 approved counts.
@@ -48,3 +50,18 @@ For each page/figure record:
 - Chapter 2 comprehensive study: NOT COMPLETE
 - Manager approval: NOT REQUESTED for extracted rules
 - Production authorization: NOT GRANTED
+
+## 2026-11-08 source-study update (supersedes earlier progress rows)
+
+All 8 Chapter 1 and 23 Chapter 2 supplied PDF pages have now been visually inspected, including duplicate and partial scans. The detailed records cover 11 supplied Chapter 1 and 38 supplied Chapter 2 figures. This does **not** establish complete printed-chapter coverage. Chapter 1 lacks printed pp.12-13. Chapter 2 lacks pp.30-32,56-57,66-67, has an incomplete p.69, and its ending is unverified. Chapter 3 remains blocked. Manager approval is pending; 28 replay checks are proposed specifications, not implemented or executed tests. No production code, Engine 22 counts, merge or deployment changed.
+
+The original PARTIAL inventory and preliminary candidates above are retained as a historical first-pass record. The current available-page extraction, corrections and approval queue are linked below. No scan or copied diagram is committed.
+
+- [Source page index](SOURCE_PAGE_INDEX.md)
+- [Chapter 1 detailed study](CHAPTER_01_DETAILED_STUDY.md)
+- [Chapter 2 chart casebook](CHAPTER_02_CASEBOOK.md)
+- [Rule registry](RULE_REGISTRY_CH01_CH02.md)
+- [Implementation and 28 replay specifications](IMPLEMENTATION_REPLAY_CH01_CH02.md)
+- [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
+
+Source fingerprints and exact PDF-to-book-page mappings are in SOURCE_PAGE_INDEX.md. Stable earlier C1 rule IDs remain; C2-001..004 crosswalks appear in the new registry. Next work is missing-page acquisition, source reconciliation, manager decisions, then approved programming and actual replay evidence. Neither chapter is COMPLETE.
