@@ -1,0 +1,31 @@
+name: Engine22 unified wave history contract checks
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/history/**'
+      - 'services/core/tests/engine22WaveHistoryV1.test.js'
+      - 'services/core/tests/engine22NodeIdentityLedgerV1.test.js'
+      - 'services/core/tests/engine22UnifiedAtomicJournalV1.test.js'
+      - 'services/core/tests/engine22JournalProcessRestartV1.test.js'
+      - 'services/core/tests/engine22ChartNodeHistoryFeedV1.test.js'
+      - 'services/core/tests/engine22OwnerSheetImportPreviewV1.test.js'
+      - 'services/core/routes/engine22WaveHistory.js'
+      - 'services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js'
+      - '.github/workflows/engine22-unified-history-acceptance.yml'
+  push:
+    branches: ['engine22-history-unified-acceptance-20261108']
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/history/waveHistoryV1.js
+      - run: node --check services/core/logic/engine22/history/waveHistoryNodeViewV1.js
+      - run: node --check services/core/logic/engine22/history/nodeIdentityLedgerV1.js
+      - run: node --check services/core/logic/engine22/history/chartNodeHistoryFeedV1.js
+      - run: node --check services/core/logic/engine22/history/previewOwnerSheetAnchorsV1.js
+      - run: node --check services/core/routes/engine22WaveHistory.js
+      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js services/core/tests/engine22NodeIdentityLedgerV1.test.js services/core/tests/engine22UnifiedAtomicJournalV1.test.js services/core/tests/engine22JournalProcessRestartV1.test.js services/core/tests/engine22ChartNodeHistoryFeedV1.test.js services/core/tests/engine22OwnerSheetImportPreviewV1.test.js
