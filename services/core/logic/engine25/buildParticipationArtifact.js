@@ -242,7 +242,10 @@ function buildIntradayFreshness({
 function buildEodFreshness({ sectorHealth, now }) {
   const source = sectorHealth?.sources?.eod || null;
   const sourceTimestamp = source?.updatedAt || null;
-  const sessionDate = sourceSessionDate(sourceTimestamp);
+  const explicitSessionDate = source?.completedSessionDate;
+  const sessionDate = /^\d{4}-\d{2}-\d{2}$/.test(String(explicitSessionDate || ""))
+    ? explicitSessionDate
+    : sourceSessionDate(sourceTimestamp);
   const expectedSessionDate = expectedCompletedEquitySessionDate(now);
 
   const sourceHealthy =

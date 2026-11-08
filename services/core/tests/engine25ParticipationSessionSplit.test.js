@@ -198,4 +198,31 @@ run("7 last-valid source timestamp is preserved while artifact generatedAt advan
   assert.equal(second.freshness.intraday.state, "LAST_VALID_EQUITY_READ");
 });
 
+run("8 Sunday EOD metadata recognizes Friday completed session even when published Sunday",()=>{
+  const now=Date.parse("2026-11-08T19:00:00Z");
+  const source=sectorHealth({sourceTimestamp:"2026-11-06T20:59:00Z"});
+  source.sources.eod.updatedAt="2026-11-08T18:39:56Z";
+  source.sources.eod.completedSessionDate="2026-11-06";
+  const artifact=buildEngine25ParticipationArtifact({sectorHealth:source,now});
+  assert.equal(artifact.freshness.eod.sessionDate,"2026-11-06");
+  assert.equal(artifact.freshness.eod.valid,true);
+  assert.equal(artifact.freshness.eod.expectedSessionDate,"2026-11-06");
+  assert.equal(artifact.freshness.equityScannerSession.active,false);
+  assert.equal(artifact.freshness.usableForTrapConfirmation,false);
+});
+run("9 Sunday publication without verified Friday session is not accepted",()=>{
+  const now=Date.parse("2026-11-08T19:00:00Z");
+  const source=sectorHealth({sourceTimestamp:"2026-11-06T20:59:00Z"});
+  source.sources.eod.updatedAt="2026-11-08T18:39:56Z";
+  const artifact=buildEngine25ParticipationArtifact({sectorHealth:source,now});
+  assert.equal(artifact.freshness.eod.valid,false);
+});
+run("10 Thursday EOD remains stale on Sunday regardless of publish timestamp",()=>{
+  const now=Date.parse("2026-11-08T19:00:00Z");
+  const source=sectorHealth({sourceTimestamp:"2026-11-06T20:59:00Z"});
+  source.sources.eod.updatedAt="2026-11-08T18:39:56Z";
+  source.sources.eod.completedSessionDate="2026-11-05";
+  const artifact=buildEngine25ParticipationArtifact({sectorHealth:source,now});
+  assert.equal(artifact.freshness.eod.valid,false);
+});
 console.log("engine25ParticipationSessionSplit.test.js PASS");

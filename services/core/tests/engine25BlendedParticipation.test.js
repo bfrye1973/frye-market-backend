@@ -321,3 +321,30 @@ test("today's exact divergence acceptance case resolves SHORT_TERM_DETERIORATION
   );
   assert.equal(out.blendedParticipation.state, "SHORT_TERM_DETERIORATION");
 });
+
+test("Sunday republish of Friday EOD is valid only with explicit completed-session metadata", () => {
+  const now = Date.parse("2026-11-08T19:00:00Z");
+  const friday = payload(all("WEAK"), "2026-11-08T18:39:56Z");
+  friday.meta = {completedSessionDate:"2026-11-06"};
+  const out = buildEngine25BlendedParticipation({eod:friday, now});
+  assert.equal(out.sourceDiagnostics.eod.sourceSessionDate,"2026-11-06");
+  assert.equal(out.sourceDiagnostics.eod.freshnessState,"FRESH");
+  assert.equal(out.sourceDiagnostics.eod.freshnessReason,"EXPECTED_COMPLETED_EQUITY_SESSION_PRESENT");
+  assert.equal(out.sourceDiagnostics.eod.effectiveWeight,0.15);
+});
+test("Sunday publish timestamp alone is not proof of Friday EOD session",()=>{
+  const now=Date.parse("2026-11-08T19:00:00Z");
+  const sunday=payload(all("STRONG"),"2026-11-08T18:39:56Z");
+  const out=buildEngine25BlendedParticipation({eod:sunday,now});
+  assert.equal(out.sourceDiagnostics.eod.freshnessState,"STALE");
+  assert.equal(out.sourceDiagnostics.eod.effectiveWeight,0);
+});
+test("Older Thursday session stays stale even with Sunday publish timestamp",()=>{
+  const now=Date.parse("2026-11-08T19:00:00Z");
+  const old=payload(all("STRONG"),"2026-11-08T18:39:56Z");
+  old.meta={completedSessionDate:"2026-11-05"};
+  const out=buildEngine25BlendedParticipation({eod:old,now});
+  assert.equal(out.sourceDiagnostics.eod.sourceSessionDate,"2026-11-05");
+  assert.equal(out.sourceDiagnostics.eod.freshnessState,"STALE");
+  assert.equal(out.sourceDiagnostics.eod.effectiveWeight,0);
+});

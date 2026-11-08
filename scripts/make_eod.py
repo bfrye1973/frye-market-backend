@@ -673,6 +673,13 @@ def main():
         "meta": {
             "source": "make_eod.py R16.2 fixed-psi + fixed-eod-floor",
             "tz": "America/Phoenix",
+            # The session belongs to the source and SPY completed daily bar,
+            # not to the time this workflow happens to publish on GitHub.
+            "completedSessionDate": (
+                last_bar_dt
+                if src.get("meta", {}).get("shadowCompletedSessionDate") == last_bar_dt
+                else None
+            ),
         }
     }
 

@@ -405,6 +405,7 @@ export async function buildEngine25SectorHealth() {
       eod: {
         ok: eodSummary.count > 0,
         url: EOD_URL,
+        completedSessionDate: eod?.meta?.completedSessionDate || null,
         updatedAt:
           eod?.updated_at_utc ||
           eod?.updated_at ||

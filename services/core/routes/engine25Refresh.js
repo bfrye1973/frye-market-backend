@@ -105,6 +105,13 @@ const LIVE_STEPS = [
   },
 ];
 
+// When ES is closed, re-publish equity participation context only.
+// Never run ES/macro/Engine29/permission steps in this mode.
+const CLOSED_EQUITY_STEPS = [
+  { name: "engine25_participation", job: "updateEngine25Participation.js", required: true },
+];
+const CLOSED_EQUITY_REQUIRED_FILES = ["engine25-participation.json"];
+
 const LIVE_REQUIRED_FILES = [
   "engine25-news-events.json",
   "engine25-intraday-macro.json",
@@ -292,21 +299,10 @@ async function handle(req, res) {
   const systemOperatingSession =
     mode === "live" ? resolveSystemOperatingSession(requestStartedMs) : null;
 
-  if (mode === "live" && systemOperatingSession?.operating !== true) {
-    return res.json({
-      ok: true,
-      skipped: true,
-      reason:
-        systemOperatingSession?.session === "MAINTENANCE"
-          ? "ES_GLOBEX_MAINTENANCE"
-          : "ES_GLOBEX_CLOSED",
-      mode,
-      systemOperatingSession,
-      startedAt: requestStartedAt,
-      endedAt: nowIso(),
-      elapsedMs: Date.now() - requestStartedMs,
-    });
-  }
+  // Closed ES is not a reason to freeze completed equity-session reads.
+  // Keep all ES LIVE steps gated; only refresh the standalone, read-only
+  // participation artifact using the canonical published timeframe feeds.
+  const closedEquitySync = mode === "live" && systemOperatingSession?.operating !== true;
 
   if (IS_RUNNING && mode === "core") {
     return res.status(409).json({ ok: false, mode, error: "ENGINE25_REFRESH_ALREADY_RUNNING" });
@@ -349,14 +345,16 @@ async function handle(req, res) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const compositeBefore = mode === "core" ? compositeSnapshot() : null;
     const missingLiveBootstrapFiles =
-      mode === "live"
+      mode === "live" && !closedEquitySync
         ? LIVE_BOOTSTRAP_REQUIRED_FILES.filter(
             (file) => !fs.existsSync(path.join(DATA_DIR, file))
           )
         : [];
 
     const selectedSteps =
-      mode === "live" && missingLiveBootstrapFiles.length
+      closedEquitySync
+        ? CLOSED_EQUITY_STEPS
+        : mode === "live" && missingLiveBootstrapFiles.length
         ? [...STEPS, ...LIVE_STEPS]
         : mode === "live"
         ? LIVE_STEPS
@@ -365,6 +363,7 @@ async function handle(req, res) {
         : STEPS;
 
     const requiredFiles =
+      closedEquitySync ? CLOSED_EQUITY_REQUIRED_FILES :
       mode === "live" ? LIVE_REQUIRED_FILES :
       mode === "core" ? CORE_REQUIRED_FILES : REQUIRED_FILES;
     const steps = [];
@@ -436,6 +435,8 @@ async function handle(req, res) {
       ok: true,
       engine: "engine25.refreshRoute.v1",
       mode,
+      closedEquitySync,
+      esLiveStepsSkipped: closedEquitySync,
       startedAt,
       endedAt,
       elapsedMs: Date.now() - startedMs,

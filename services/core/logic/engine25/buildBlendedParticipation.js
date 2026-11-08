@@ -158,7 +158,12 @@ function buildTimeframeDiagnostic({ timeframe, payload, now }) {
     freshnessState = "UNUSABLE_INCOMPLETE_CANONICAL_SECTORS";
     freshnessReason = groups?.reason || "INCOMPLETE_CANONICAL_SECTOR_CARDS";
   } else if (timeframe === "eod") {
-    const sourceSessionDate = timestampMarketDate(timestamp);
+    // The workflow can publish Sunday while the equity observation is Friday.
+    // Prefer the explicit, independently verified completed session metadata.
+    const sourceSessionDate =
+      /^\d{4}-\d{2}-\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
+        ? payload.meta.completedSessionDate
+        : timestampMarketDate(timestamp);
     const expectedSessionDate = expectedCompletedEquitySessionDate(now);
     const currentMarket = marketDate(now);
     const weekdayOpen = ["Mon", "Tue", "Wed", "Thu", "Fri"].includes(
@@ -196,7 +201,10 @@ function buildTimeframeDiagnostic({ timeframe, payload, now }) {
     timeframe,
     sourceTimestamp: timestamp,
     sourceSessionDate:
-      timeframe === "eod" ? timestampMarketDate(timestamp) : timestampDate(timestamp),
+      timeframe === "eod"
+        ? (/^\d{4}-\d{2}-\d{2}$/.test(String(payload?.meta?.completedSessionDate || ""))
+            ? payload.meta.completedSessionDate : timestampMarketDate(timestamp))
+        : timestampDate(timestamp),
     ageMs,
     freshnessState,
     freshnessReason,
