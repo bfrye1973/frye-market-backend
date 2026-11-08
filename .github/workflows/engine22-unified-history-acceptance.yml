@@ -1,0 +1,21 @@
+name: Engine22 unified wave history contract checks
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/history/**'
+      - 'services/core/tests/engine22WaveHistoryV1.test.js'
+      - 'services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js'
+      - '.github/workflows/engine22-unified-history-acceptance.yml'
+  push:
+    branches: ['engine22-history-unified-acceptance-20261108']
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/history/waveHistoryV1.js
+      - run: node --check services/core/logic/engine22/history/waveHistoryNodeViewV1.js
+      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js
