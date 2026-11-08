@@ -4,6 +4,7 @@ on:
     paths:
       - 'services/core/logic/engine22/history/**'
       - 'services/core/tests/engine22WaveHistoryV1.test.js'
+      - 'services/core/tests/engine22NodeIdentityLedgerV1.test.js'
       - 'services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js'
       - '.github/workflows/engine22-unified-history-acceptance.yml'
   push:
@@ -18,4 +19,5 @@ jobs:
           node-version: '24'
       - run: node --check services/core/logic/engine22/history/waveHistoryV1.js
       - run: node --check services/core/logic/engine22/history/waveHistoryNodeViewV1.js
-      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js
+      - run: node --check services/core/logic/engine22/history/nodeIdentityLedgerV1.js
+      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js services/core/tests/engine22NodeIdentityLedgerV1.test.js
