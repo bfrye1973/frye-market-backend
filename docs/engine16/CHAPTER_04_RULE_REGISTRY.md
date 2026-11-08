@@ -1,0 +1,28 @@
+# Engine 16 — Chapter 4 rule registry
+
+All entries await manager review. STRICT denotes a source structural condition, not authorization to implement it. GUIDELINE denotes a tendency; EXAMPLE records a historical choice; DESIGN denotes our proposed engineering treatment. Full numerical cases: [detailed study](CHAPTER_04_DETAILED_STUDY.md). Replay IDs: [implementation](CHAPTER_04_IMPLEMENTATION_REPLAY.md).
+
+| ID / class | Source | Prerequisites and proposed interpretation | Failure / limitation / scope |
+|---|---|---|---|
+| C4-ZIG-01 STRICT | 99,114; 4.15 | Zigzag A and C have five motive subdivisions, B three corrective subdivisions; assess inside one candidate/degree | Three outer pivots insufficient. Missing child evidence means UNVERIFIED, not confirmed orthodox zigzag. Motive subtype handling needs manager-approved conventions. |
+| C4-ALT-01 GUIDELINE | 99–103; 4.1–4.4 | Retain plausible alternatives even where their local direction agrees | Agreement does not select a unique parent role, count or probability. “Preferred” remains author judgment. |
+| C4-FIB-01 GUIDELINE | 100–103; 4.1–4.4 | Project measured leg length from a third anchor; keep ratio1/.618/1.618 attached to that hypothesis | No target guarantees completion. W→X→Y anchors differ from A→B→C. Unknown anchors block calculation. |
+| C4-OVL-01 GUIDELINE | 104; 4.5 | Fourth/second overlap weakens an ordinary impulse interpretation as described here | Does not automatically invalidate it; it is not the fourth/first rule. |
+| C4-OVL-02 STRICT | 104; 4.5 | In the ordinary impulse example, wave4 avoids wave1 price territory | Apply to correct candidate/degree/subtype; do not invent diagonal behavior from this passage. Exact equality tolerance needs manager decision. |
+| C4-EXT-01 GUIDELINE | 104–105; 4.5–4.6 | Small-degree fifth can extend while larger target remains distant | Distance to target does not prove extension or authorize entry. |
+| C4-PROT-01 EXAMPLE | 105,108; 4.6,4.9 | .786 or .618 recovery used to choose discretionary protection | Ratio stop is not automatically structural invalidation; author's strong expectations are not universal laws. |
+| C4-FILL-01 EXAMPLE | 105–109; 4.6–4.10 | Reported sequential quantities/prices and weighted average are retained exactly | Rounded display averages cannot replace fill events. Historical S&P units must not become MES sizing. |
+| C4-BUF-01 DESIGN | 108,119; 4.9,4.20 | Preserve actual stated stop and separately record author's admitted missing buffer | Never silently repair historical orders. Proposed buffer policy requires instrument tick metadata and manager approval. |
+| C4-EXIT-01 EXAMPLE | 109–111; 4.10–4.12 | Weekend/support exit before target; later target region observed | Closed trade cannot inherit later target fill or subsequent low. New shorts are a new episode. |
+| C4-REENTRY-01 DESIGN | 110–111,122; 4.11–4.12,4.23–4.24 | Link reentry to new evidence and predecessor episode, preserve reported aggregate loss | Exact fills absent: no invented order-level reconstruction. Psychological explanations are narrative only. |
+| C4-NEST-01 GUIDELINE | 112–117; 4.13–4.18 | Local downward zigzag within upward parent impulse; nested 1–2 structures support third-of-third hypothesis | Local direction differs from parent; apparent nested sequences do not guarantee strength or authorize competing Engine22 counts. |
+| C4-CHANNEL-01 GUIDELINE | 113–116; 4.14–4.17 | Compare Fibonacci target with channel boundary at a specified time | Boundary is time-dependent. Shared-anchor evidence is correlated; no automatic independent confidence multiplication. |
+| C4-BOND-01 DESIGN | 114,116–123; 4.15,4.17–4.24 | Preserve source quote string and integer thirty-second normalization for this case | Production metadata must verify tick regime. Reject ambiguous quote/anchor instead of treating ^02 as .02. |
+| C4-PLAN-01 DESIGN | 118–119; 4.19–4.20 | Author entered before selecting stop and admits haste; capture chronological plan completeness | Research output cannot interpret a fortunate decline as proof an unprotected entry process is valid. No execution authority added. |
+| C4-RISK-01 DESIGN | 107–108,118–120; 4.8–4.9,4.19–4.21 | Distinguish nominal stop distance, favorable locked distance, fees, slippage, gap and total quantity | “Zero risk” remains source wording, not a risk guarantee or infinite reward/risk score. |
+| C4-REVISE-01 DESIGN | 121–123; 4.22–4.24 | Version original and June retrospective wave/degree interpretations separately | Later double-zigzag labels cannot leak into February features or rewrite confirmed anchors. |
+| C4-OUTCOME-01 DESIGN | 109–111,120–123 | Preserve reported profit, derived arithmetic, multiplier assumption, cost unknown and confidence separately | Reported results are not independently audited fills or calibrated performance evidence. |
+| C4-SOURCE-01 DESIGN | Missing115/4.16; 119/4.20 | Record missing source and ambiguous lower retracement endpoint explicitly | No content synthesis for missing figure; suspicious 121-14 label must not silently become an observed120^14 pivot. |
+| C4-AUTH-01 DESIGN | Frye ownership boundary | Engine11 candles, Engine22 approved anchors/degrees, Engine16 research, Engine2 overlays | Study has no authority to place orders, size, publish competing counts, merge or deploy. |
+
+Cross-chapter reconciliation: C4-OVL-01/02 refine the meaning of overlap checks; never implement a generic “any overlap invalidates” filter. C4-ZIG-01 reinforces the Chapter2 warning that PR265's outer-swing ABC is not orthodox subdivision recognition. C4-REVISE-01 extends Chapter3 entity-scoped invalidation/history preservation. No earlier approved rule is silently overridden.
