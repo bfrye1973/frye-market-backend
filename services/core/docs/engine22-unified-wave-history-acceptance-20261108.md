@@ -53,3 +53,22 @@ GitHub CI at head `bcaa01119325e96cab5e1afebe95b2c313573fa5`:
 - CI suites passed at commit `1188113d3ddaaae9143954a34d4fcbb77b726e4e`: unified feed + history tests, Wave History Journal V1, and combined Chart History Acceptance.
 
 **Still required before any real Engine 2 rollout:** owner-approved node ingestion and historical approval evidence, correct chart as-of semantics, real production mount/redeploy proof, server-side authorization, current-main reconciliation and dedicated client reconnect tests. No Google Sheets connector or notifications were deployed; this is an isolated API implementation only.
+
+## Owner Google Sheets source import preview — November 8, 2026
+
+The connected Google Sheets workbook `1oLsBV4Hbzg-6jApd2k960XU_CTxmCQwAxFcot4yQKJc` was inspected directly, including Primary, Intermediate, Minor Original Archive, Minor W1-W2 Proposed, Minute ABC Proposed, Subminute ABC Proposed, Micro W1-W2 Proposed, Submicro ABC Proposed.
+
+An isolated 32-record **source snapshot** is committed at `history/fixtures/ownerSheetAnchorsNov8V1.json`. Each record keeps its original workbook ID, tab/sheet ID, actual row reference, degree, label, raw Arizona local date/time, raw ES price and owner-evidence text. This is a bounded reference fixture, **not an automatically connected production spreadsheet reader**, and it must be revalidated against the live workbook before any import/promotion.
+
+`previewOwnerSheetAnchorsV1.js` creates a safe read-only reconciliation feed without assigning a permanent `nodeId`, `countId`, publication timestamp, verified market timestamp, or Engine 11 price-basis ID. Every record remains `plotAllowed:false`.
+
+Unresolved source facts deliberately preserved:
+- Minor proposed W2 candidate 7325 has **unknown exact Arizona time** and is approximate.
+- Minute A high August 14 07:00 versus Minor W1 high August 14 03:00 is a **source timestamp mismatch**, not silently fixed.
+- Micro research W1 high 7469.75 has **UNKNOWN date in its current worksheet**, despite a separately reported November 6 observation; do not overwrite source provenance.
+- Subminute C, Micro W2 and Submicro C ending coordinates remain unconfirmed/unknown.
+- Owner source rows tagged historical unchanged do not independently provide Engine 22 owner-approval record or proof of price-basis compatibility; archive and proposed rows must not become current selections.
+
+CI branch head `303e046c0480bec336c8849a599ee398b0bf09ec`: unified history contract + owner-sheet import preview **PASS**, Wave History Journal **PASS**, Combined Chart History Acceptance **PASS**.
+
+**Remaining acceptance:** reconcile source row evidence against current engine models and real Engine 11 unadjusted contract data, assign actual permanent IDs from an approved publication (no retroactive approval), persist those events to single authoritative journal, authenticate Engine 2 consumer and implement optional Sheets synchronization. The new fixture is not a source of live trading decisions.
