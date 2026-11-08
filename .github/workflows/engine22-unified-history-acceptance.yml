@@ -9,6 +9,8 @@ on:
       - 'services/core/tests/engine22JournalProcessRestartV1.test.js'
       - 'services/core/tests/engine22ChartNodeHistoryFeedV1.test.js'
       - 'services/core/tests/engine22OwnerSheetImportPreviewV1.test.js'
+      - 'services/core/tests/engine22RealSourceNodePublicationV1.test.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
       - 'services/core/routes/engine22WaveHistory.js'
       - 'services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js'
       - '.github/workflows/engine22-unified-history-acceptance.yml'
@@ -27,5 +29,7 @@ jobs:
       - run: node --check services/core/logic/engine22/history/nodeIdentityLedgerV1.js
       - run: node --check services/core/logic/engine22/history/chartNodeHistoryFeedV1.js
       - run: node --check services/core/logic/engine22/history/previewOwnerSheetAnchorsV1.js
+      - run: node --check services/core/logic/engine22/history/collectExistingOwnerNodesV1.js
+      - run: node --check services/core/jobs/buildStrategySnapshot.js
       - run: node --check services/core/routes/engine22WaveHistory.js
-      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js services/core/tests/engine22NodeIdentityLedgerV1.test.js services/core/tests/engine22UnifiedAtomicJournalV1.test.js services/core/tests/engine22JournalProcessRestartV1.test.js services/core/tests/engine22ChartNodeHistoryFeedV1.test.js services/core/tests/engine22OwnerSheetImportPreviewV1.test.js
+      - run: node --test services/core/tests/engine22WaveHistoryV1.test.js services/core/tests/engine22UnifiedHistoryNodeViewV1.test.js services/core/tests/engine22NodeIdentityLedgerV1.test.js services/core/tests/engine22UnifiedAtomicJournalV1.test.js services/core/tests/engine22JournalProcessRestartV1.test.js services/core/tests/engine22ChartNodeHistoryFeedV1.test.js services/core/tests/engine22OwnerSheetImportPreviewV1.test.js services/core/tests/engine22RealSourceNodePublicationV1.test.js
