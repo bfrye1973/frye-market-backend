@@ -18,7 +18,7 @@ test("captures seven degrees and preserves both Submicro alternatives and Submin
  const result=buildWaveHistoryObservation({strategy:fixture(),observedAt:"2026-10-31T20:05:00Z"});
  assert.equal(result.ok,true);
  assert.equal(Object.keys(result.content.degrees).length,7);
- assert.equal(result.content.selectionRevision,5);
+ assert.equal(result.content.selectionRevision,6);
  assert.ok(result.content.degrees.submicro.sourceModel.option1);
  assert.ok(result.content.degrees.submicro.sourceModel.option2);
  assert.equal(result.content.degrees.subminute.sourceModel.fibReferences.wick.levels.length,5);
@@ -40,7 +40,7 @@ test("records every changed publication, deduplicates identical state and verifi
   assert.equal(events.length,2);
   assert.equal(events[0].content.degrees.micro.sourceModel.priorBEnding.price,7814.75);
   assert.equal(events[1].content.degrees.micro.sourceModel.priorBEnding.price,7819.5);
-  assert.equal(events[0].content.selectionRevision,5);
+  assert.equal(events[0].content.selectionRevision,6);
  }finally{rmSync(directory,{recursive:true,force:true});}
 });
 test("rejects missing authority and missing event time",()=>{
