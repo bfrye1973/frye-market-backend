@@ -1,11 +1,16 @@
 import {createHash} from "node:crypto";
 import {openSync,closeSync,readFileSync,writeSync,fsyncSync,mkdirSync,existsSync,unlinkSync} from "node:fs";
 import {join} from "node:path";
+import {replayNodeIdentityEvents} from "./nodeIdentityLedgerV1.js";
 
 const DEGREE_ORDER=["submicro","micro","subminute","minute","minor","intermediate","primary"];
 const digest=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const clone=x=>structuredClone(x);
 const semanticHash=content=>digest({...content,publishedAt:null,sourceSnapshotId:null});
+// Node events are included in the SAME immutable journal revision, not a second store.
+// Preserve the original hash for legacy publication-only records.
+const revisionHash=(content,nodeEvents=[])=>nodeEvents.length
+ ?digest({observationHash:semanticHash(content),nodeEvents}):semanticHash(content);
 const cleanTime=x=>typeof x==="string"&&!Number.isNaN(Date.parse(x))?x:null;
 const validSource=x=>x?.schema==="engine22.authorizedWorkingStructure.v1"&&x?.mode==="READ_ONLY"&&x?.degrees&&typeof x.degrees==="object";
 const get=(root,path)=>typeof path==="string"&&/^(currentWavelength|degreeStates)\.[a-zA-Z0-9_.]+$/.test(path)
@@ -46,7 +51,9 @@ export function buildWaveHistoryObservation({strategy,observedAt,sourceSnapshotI
 // Standalone append-only durable-file implementation. The caller MUST mount a persistent
 // volume and ensure a single writer per journal path; otherwise fail deployment acceptance.
 // Each revision is retained; repeated identical content is not duplicated.
-export function appendWaveHistoryObservation({directory,observation}={}){
+export function appendWaveHistoryObservation({directory,observation,nodeEvents=[]}={}){
+ if(!Array.isArray(nodeEvents))throw Error("INVALID_NODE_EVENT_BATCH");
+ const proposedNodeEvents=structuredClone(nodeEvents);
  if(!directory||observation?.ok!==true)throw Error("VALID_JOURNAL_DIRECTORY_AND_OBSERVATION_REQUIRED");
  mkdirSync(directory,{recursive:true});
  const lock=join(directory,".writer.lock"),file=join(directory,"wave-history.v1.jsonl");
@@ -57,11 +64,16 @@ export function appendWaveHistoryObservation({directory,observation}={}){
   // A malformed/truncated last record must never be silently discarded.
   const events=readWaveHistory({directory});
   const last=events.at(-1)??null;
-  if(last?.contentHash===observation.contentHash)return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
+  // Verify all prior node records plus the proposed batch BEFORE touching the journal file.
+  const priorNodes=events.flatMap(e=>e.nodeEvents??[]);
+  replayNodeIdentityEvents([...priorNodes,...proposedNodeEvents]);
+  const nextHash=revisionHash(observation.content,proposedNodeEvents);
+  if(last?.contentHash===nextHash)return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
   const event={schema:"engine22.waveHistoryEvent.v1",revision:(last?.revision??0)+1,
    previousEventHash:last?.eventHash??null,observedAt:observation.observedAt,
    eventType:last?"WAVE_PUBLICATION_CHANGE":"INITIAL_OBSERVATION_NOT_HISTORICAL_RECONSTRUCTION",
-   contentHash:observation.contentHash,content:observation.content};
+   contentHash:nextHash,content:observation.content};
+  if(proposedNodeEvents.length)event.nodeEvents=proposedNodeEvents;
   event.eventHash=digest(event);
   const fd=openSync(file,"a");
   try{writeSync(fd,JSON.stringify(event)+"\n");fsyncSync(fd);}finally{closeSync(fd);}
@@ -81,10 +93,12 @@ export function readWaveHistory({directory}={}){
  let previous=null;
  for(let i=0;i<events.length;i++){
   const e=events[i],{eventHash,...body}=e;
-  if(e.schema!=="engine22.waveHistoryEvent.v1"||e.revision!==i+1||e.previousEventHash!==previous||digest(body)!==eventHash||semanticHash(e.content)!==e.contentHash)
+  if(e.schema!=="engine22.waveHistoryEvent.v1"||e.revision!==i+1||e.previousEventHash!==previous||digest(body)!==eventHash||revisionHash(e.content,e.nodeEvents??[])!==e.contentHash)
    throw Error("JOURNAL_INTEGRITY_FAILURE");
   previous=eventHash;
  }
+ // Every read verifies node identity lineage as well as the journal hash chain.
+ replayNodeIdentityEvents(events.flatMap(e=>e.nodeEvents??[]));
  return events;
 }
 
