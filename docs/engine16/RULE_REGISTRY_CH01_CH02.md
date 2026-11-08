@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - traceable candidate rule registry, Chapters 1-2
 
 Date: 2026-11-08. Source inventory and reading limits: [SOURCE_PAGE_INDEX.md](SOURCE_PAGE_INDEX.md). **No entry has manager approval for production implementation.** A STRICT source statement is not the same as approved engine behavior. Fields below distinguish author's teaching (`BOOK`) from our engineering proposal (`DESIGN`). No outside Elliott convention is silently substituted for missing pages.
@@ -62,3 +64,7 @@ Let `s` be +1 for UP and -1 for DOWN. A measured magnitude is `L=abs(end-start)`
 | E16-EVID-01 | OPEN / source absent | FVG and ES/QQQ/VIX SMT are owner requirements, not rules verified from these two chapter scans | R-28; independent specification needed |
 
 Approval chain must be `source page/figure -> rule ID -> approved predicate version -> implementation function -> test fixture -> execution result -> manager decision`. The prototype functions are reviewed in [IMPLEMENTATION_REPLAY_CH01_CH02.md](IMPLEMENTATION_REPLAY_CH01_CH02.md); no production mapping is approved. Existing provisional C2-001..004 ledger IDs are retained as earlier umbrella entries: C2-001 maps to C2-ZZ-01, C2-002 to C2-FLAT-01/02, C2-003 to C2-ALT-01/C1-CONF-01, C2-004 to E16-TIME-01/E16-OUT-01.
+
+## Supplemental rule changes
+
+[SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), section5, is the current registry addendum. C1-ZZ-CONF-01 is now source-reviewed GUIDELINE rather than missing-source OPEN; quantitative policy still pending. Add C1-ZZ-CONF-02,C1-FLAT-CONF-01,C1-TRI-02,C2-FLAT-03,C2-TRI-01,C2-TRI-02,C2-ALT-02,C2-REV-01,C2-SILVER-EXEC-01 as specified there. General flat3-3-5 is now directly supported by p.67; full regular/running/expanded subtype predicates still need formal approval. Contracting E/C constraint and nesting-location guideline must stay distinct. No rule has been approved or implemented by this study.
