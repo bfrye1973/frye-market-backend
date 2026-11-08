@@ -5,6 +5,7 @@ import crypto from "crypto";
 import { fileURLToPath } from "url";
 import { spawn } from "child_process";
 import { resolveSystemOperatingSession } from "../logic/engine25/buildParticipationArtifact.js";
+import { isClosedEquityRefresh } from "../logic/engine25/closedEquityRefreshScope.js";
 
 const router = express.Router();
 
@@ -302,8 +303,7 @@ async function handle(req, res) {
   // Closed ES is not a reason to freeze completed equity-session reads.
   // Keep all ES LIVE steps gated; only refresh the standalone, read-only
   // participation artifact using the canonical published timeframe feeds.
-  const closedEquitySync =
-    mode === "live" && systemOperatingSession?.operating !== true;
+  const closedEquitySync = isClosedEquityRefresh({mode, systemOperatingSession});
 
   if (IS_RUNNING && mode === "core") {
     return res.status(409).json({ ok: false, mode, error: "ENGINE25_REFRESH_ALREADY_RUNNING" });
