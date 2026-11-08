@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 > Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
 
 # Engine 16 — Verified Chapter Study Notes (incremental; NOT COMPLETE)
@@ -64,3 +66,7 @@ The preceding notes remain an initial record, not the current comprehensive avai
 - [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
 
 All source-derived statements are separated from engineering proposals. Missing pages prevent completion of regular/running-flat, triangle/diagonal and combination specifications. Manager decisions and actual implementation/test evidence remain pending.
+
+## Supplemental verified findings - current
+
+New supplied pages and all new figure records are preserved in [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md). Chapter1's pp12-13 gap is closed; its zigzag/flat/triangle confirmation examples are extracted. Silver charts show12contracts exiting at698, resolving the prior missing-two exit and reconciling the reported11300 at the example's historical arithmetic; earlier narrative quantity10conflicts and remains attributed. Coffee source now includes reassessment and full conclusion throughp75, keeping the first failed setup and second hypothetical setup separate. Only Chapter2pp30-32 remain source-missing. Numerical/structural manager decisions and actual test implementation/execution are still pending.
