@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 # Engine 16 - Chapter 1 detailed study of supplied pages
 
 Source: Gorman and Kennedy, *Visual Guide to Elliott Wave Trading*, Chapter 1, printed pp.3-11, 14-17. Source inventory: [SOURCE_PAGE_INDEX.md](SOURCE_PAGE_INDEX.md). Study date 2026-11-08. **Incomplete chapter: printed pp.12-13 absent.** All explanations are paraphrases; software decisions are separately labeled proposals. This is research, not trading authorization or an independently validated performance claim.
@@ -71,3 +73,7 @@ Implementation proposal C1-PROC-01: unknown evidence, no recognizable pattern an
 ## Work still required
 
 Obtain pp.12-13 and review all missing figures and continuation text. Resolve the impulse boundary semantics and diagonal scope with the manager. Define as-of evidence, exact pivot segmentation and degree mapping through approved contracts. Implement and execute the tests only after rule approval. No chapter-complete status is justified yet; Chapter 3 remains blocked.
+
+## Recovered pp.12-13 and closed source gap
+
+C1-FIG-11,12,13 and their detailed lesson/implementation records are now documented in [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), section2. They distinguish internal(iv)ofC, B-extreme and five-through-B-then-correction zigzag evidence; family-qualified flat confirmation; and triangle D-extreme/E-protection guidance. Full chapter source coverage is established; precise boundary/confirmation policy and manager approval are still pending. The preceding 'work still required' source request for pp.12-13 is closed; no resubmission needed.
