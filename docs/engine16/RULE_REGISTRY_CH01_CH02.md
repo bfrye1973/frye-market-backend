@@ -1,3 +1,5 @@
+> **Chapter3 update,2026-11-08:** Owner explicitly authorized Chapter3 study. Its supplied-source research is finished; [CHAPTER_03_SOURCE_AND_HANDOFF.md](CHAPTER_03_SOURCE_AND_HANDOFF.md) is the current index. Earlier Chapter3 hold language below is historical. Chapter1-2 decisions and production authorization remain unchanged.
+
 > **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
 
 > **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
@@ -74,3 +76,9 @@ Approval chain must be `source page/figure -> rule ID -> approved predicate vers
 ## Owner-accepted source scope and finalized handoff
 
 On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.
+
+## Chapter3 qualification of triangle invalidation scope -2026-11-08
+
+New visible source Chapter3p91 explicitly distinguishes invalidating a proposed terminalE by passingC from invalidating the entire contracting/barrier triangle by passingA. C2-TRI-01 and R-32 must not be translated into unconditional whole-parent rejection on an E/C failure. A failed E-complete hypothesis can require resegmentation while its parent remains developing; prior as-of outputs remain immutable. Exact endpoint/equality/extreme semantics still need manager review.
+
+See C3-INV-01/02 and their scoped C3-R05/06 proposals in [CHAPTER_03_RULE_REGISTRY.md](CHAPTER_03_RULE_REGISTRY.md) and [CHAPTER_03_IMPLEMENTATION_REPLAY.md](CHAPTER_03_IMPLEMENTATION_REPLAY.md). This addendum reconciles research proposals only; no prior implementation or approved Engine22 count is modified.
