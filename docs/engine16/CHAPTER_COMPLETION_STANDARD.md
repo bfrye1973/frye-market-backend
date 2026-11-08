@@ -1,3 +1,5 @@
+> **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
+
 > **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
 
 > Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
@@ -63,3 +65,9 @@ Work location exception for this coordinated study: documentation is on the isol
 ## Supplemental gate application - current
 
 After [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), Chapter1's entire printedpp3-17 and Figs1.1-1.14 are available/read/extracted in draft; manager review still pending. Chapter2pp21-75 and Figs2.1-2.51 are now covered exceptpp30-32/Figs2.9-2.11. Thirty-six replay specifications exist as proposals, not implementation or execution results. Only that remaining TECH source request is active. Do not mark either chapter COMPLETE or proceed to Chapter3 before the remaining applicable gates pass.
+
+## Owner-accepted source scope and finalized handoff
+
+On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.
+
+This explicit owner scope decision overrides the requirement to obtain every page for delivery of this research assignment. It does not claim a passed manager-review gate or an executed replay. Record SOURCE_OMISSION_OWNER_ACCEPTED and RESEARCH_DELIVERABLE_FINISHED separately from end-to-end COMPLETE.
