@@ -1,3 +1,5 @@
+> Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
+
 # Engine 16 — Verified Chapter Study Notes (incremental; NOT COMPLETE)
 
 Source: Gorman & Kennedy, *Visual Guide to Elliott Wave Trading*. Notes refer to **printed book page numbers** where visible; PDF page numbers may differ. Only the cited pages/figures below were read closely for this initial record. Additional pages are queued in `CHAPTER_COMPLETION_STANDARD.md`.
@@ -40,3 +42,25 @@ Source: Gorman & Kennedy, *Visual Guide to Elliott Wave Trading*. Notes refer to
 
 ## Important distinction
 The source examples are a mixture of method, illustrative theory and trading choices. None of the above constitute owner-approved ES wave counts or fully validated implementation tests. Marking the chapters COMPLETE requires covering *all* scanned pages and case studies, not just these examples.
+
+## 2026-11-08 expanded source review and explicit corrections
+
+All 8 Chapter 1 and 23 Chapter 2 supplied PDF pages have now been visually inspected, including duplicate and partial scans. The detailed records cover 11 supplied Chapter 1 and 38 supplied Chapter 2 figures. This does **not** establish complete printed-chapter coverage. Chapter 1 lacks printed pp.12-13. Chapter 2 lacks pp.30-32,56-57,66-67, has an incomplete p.69, and its ending is unverified. Chapter 3 remains blocked. Manager approval is pending; 28 replay checks are proposed specifications, not implemented or executed tests. No production code, Engine 22 counts, merge or deployment changed.
+
+The preceding notes remain an initial record, not the current comprehensive available-page casebook. Correct the following before relying on them for code:
+
+1. TECH Fig 2.6/p.27 trigger is **69.28**, not 69.29. Fig 2.8 later revises it to 69.50; retain dated versions.
+2. Chapter 1 p.7 describes where wave 4 **ends** relative to wave 1 territory. The earlier blanket 'enters' wording is stronger than the supplied wording. Endpoint versus intrawave wick and equality policy require M-02 review; neither policy is approved here.
+3. Fig 1.4/p.6 illustrates **first-wave extension**, alongside the third/fifth extension illustrations. Do not omit it from the research taxonomy.
+4. TECH's internal expanded-flat rebound is inside a larger B/2 scenario. Its internal a-b-c must not be confused with larger A/1 -> B/2 -> projected C/3.
+5. A 5-3-5 or 3-3-5 pattern requires child structure evidence. Four outer pivots do not establish either subtype. The current abcCandidates filter excludes expanded-flat B overshoots and must remain unvalidated.
+6. CAT Fig 2.4's $3,750 'profit' annotation appears to be gross proceeds; net before costs from the shown option values is $2,890 (~336.05%). AUD Fig 2.22 reports .9354 exit while retaining a .9230 stop label; protection chronology is unresolved. Neither discrepancy should be silently converted into training truth.
+
+- [Source page index](SOURCE_PAGE_INDEX.md)
+- [Chapter 1 detailed study](CHAPTER_01_DETAILED_STUDY.md)
+- [Chapter 2 chart casebook](CHAPTER_02_CASEBOOK.md)
+- [Rule registry](RULE_REGISTRY_CH01_CH02.md)
+- [Implementation and 28 replay specifications](IMPLEMENTATION_REPLAY_CH01_CH02.md)
+- [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
+
+All source-derived statements are separated from engineering proposals. Missing pages prevent completion of regular/running-flat, triangle/diagonal and combination specifications. Manager decisions and actual implementation/test evidence remain pending.
