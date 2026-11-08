@@ -68,7 +68,7 @@ export function appendWaveHistoryObservation({directory,observation,nodeEvents=[
   const priorNodes=events.flatMap(e=>e.nodeEvents??[]);
   replayNodeIdentityEvents([...priorNodes,...proposedNodeEvents]);
   const nextHash=revisionHash(observation.content,proposedNodeEvents);
-  if(last?.contentHash===nextHash)return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
+  if(last && (last.contentHash===nextHash || (proposedNodeEvents.length===0 && semanticHash(last.content)===semanticHash(observation.content))))return {status:"UNCHANGED",revision:last.revision,contentHash:last.contentHash};
   const event={schema:"engine22.waveHistoryEvent.v1",revision:(last?.revision??0)+1,
    previousEventHash:last?.eventHash??null,observedAt:observation.observedAt,
    eventType:last?"WAVE_PUBLICATION_CHANGE":"INITIAL_OBSERVATION_NOT_HISTORICAL_RECONSTRUCTION",
