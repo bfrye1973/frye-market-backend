@@ -1,3 +1,5 @@
+> **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
+
 > **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
 
 # Engine 16 - proposed implementation contracts and replay requirements
@@ -109,3 +111,9 @@ The source-study deliverable can be reviewed now, but a comprehensive chapter ga
 ## Supplemental replay update -36 total specifications
 
 [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), section6, adds R-29..R-36 and revises R-22,R-24,R-26. R-22 now resolves the author-chart twelve-contract silver exit while retaining conflicting prose quantities; it no longer expects an unaccounted remaining-two exit. R-24 can use recovered coffee reassessment/end figures without inferring missing pages. R-26 now blocks source completion only on Chapter2pp30-32; Chapter1 sourceREAD passes while manager gate remains pending. New tests cover distinct trigger types, nested E, same-direction alternatives, contracting boundary cases, hypothetical coffee outcomes, guideline-only slope warnings, silver source reconciliation and current completion gates. All36 remain SPECIFIED, NOT IMPLEMENTED, NOT EXECUTED, manager pending.
+
+## Owner-accepted source scope and finalized handoff
+
+On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.
+
+R-26/R-36 current expected scope result: report the accepted omission, permit the available-source research handoff, and preserve the unread-page flag. Do not fail delivery solely on the waived pages or claim they were inspected. Manager/implementation gates remain independently enforced.
