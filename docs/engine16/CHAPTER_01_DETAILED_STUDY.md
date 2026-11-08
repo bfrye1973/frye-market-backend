@@ -1,3 +1,5 @@
+> **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
+
 > **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
 
 # Engine 16 - Chapter 1 detailed study of supplied pages
@@ -77,3 +79,7 @@ Obtain pp.12-13 and review all missing figures and continuation text. Resolve th
 ## Recovered pp.12-13 and closed source gap
 
 C1-FIG-11,12,13 and their detailed lesson/implementation records are now documented in [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), section2. They distinguish internal(iv)ofC, B-extreme and five-through-B-then-correction zigzag evidence; family-qualified flat confirmation; and triangle D-extreme/E-protection guidance. Full chapter source coverage is established; precise boundary/confirmation policy and manager approval are still pending. The preceding 'work still required' source request for pp.12-13 is closed; no resubmission needed.
+
+## Owner-accepted source scope and finalized handoff
+
+On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.
