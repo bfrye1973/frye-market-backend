@@ -1,3 +1,5 @@
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
 > Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
 
 # Engine 16 — Mandatory Chapter Completion Standard
@@ -57,3 +59,7 @@ The earlier unchecked PDF-page queue above describes the pre-study state. All su
 - [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
 
 Work location exception for this coordinated study: documentation is on the isolated research/engine16-ch01-ch02-source-study branch, based on programming branch commit fe8e6683ee8c334083539557e637cef3d54523d5. Review targets the programming research branch so main/production remain untouched. This does not supersede the no-merge/no-deploy gate.
+
+## Supplemental gate application - current
+
+After [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md), Chapter1's entire printedpp3-17 and Figs1.1-1.14 are available/read/extracted in draft; manager review still pending. Chapter2pp21-75 and Figs2.1-2.51 are now covered exceptpp30-32/Figs2.9-2.11. Thirty-six replay specifications exist as proposals, not implementation or execution results. Only that remaining TECH source request is active. Do not mark either chapter COMPLETE or proceed to Chapter3 before the remaining applicable gates pass.
