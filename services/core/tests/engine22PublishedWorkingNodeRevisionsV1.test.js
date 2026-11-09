@@ -4,6 +4,8 @@ import {mkdtempSync,rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {collectPublishedWorkingNodeEventsV1} from "../logic/engine22/history/collectPublishedWorkingNodeEventsV1.js";
+import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
+import {buildEngine22WorkingWaveNodesV1} from "../logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js";
 import {appendWaveHistoryObservation} from "../logic/engine22/history/waveHistoryJournalV1.js";
 import {pageEngine22NodeHistory} from "../logic/engine22/history/chartNodeHistoryFeedV1.js";
 
@@ -68,4 +70,37 @@ test("no Engine22 packet means no invented node events, malformed authority fail
  const invalid=packet();invalid.degrees.submicro.models[0].anchors[0].price=7449.1;
  assert.throws(()=>collectPublishedWorkingNodeEventsV1({directory,publishedAt,packet:invalid}),
    /EVENT_UNSAFE/);
+}));
+
+test("owner corrected Micro W2 history preserves 15:00 and publishes 16:00 in separate immutable records",()=>withDir(directory=>{
+ const source=buildCurrentWavelength({symbol:"ES",currentPrice:7540,microBars5m:[]});
+ const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:source,symbol:"ES"});
+ const live=packet.degrees.micro.nodes.find(n=>n.anchorField==="w2Low");
+ assert.equal(live.marketAtUtc,"2026-11-08T23:00:00.000Z");
+ assert.equal(live.price,7362);
+ assert.equal(packet.degrees.micro.nodes.some(n=>n.label.includes("superseded")),false);
+ const old=packet.degrees.micro.models.flatMap(m=>m.historicalAnchors??[]);
+ assert.equal(old.length,1);
+ assert.equal(old[0].marketAtUtc,"2026-11-08T22:00:00.000Z");
+ assert.equal(old[0].approvalStatus,"SUPERSEDED");
+ assert.equal(old[0].presentationAllowed,false);
+ const events=collectPublishedWorkingNodeEventsV1({directory,packet,publishedAt});
+ const oldEvent=events.find(e=>e.nodeId===old[0].nodeId);
+ const newEvent=events.find(e=>e.nodeId===live.nodeId);
+ assert.equal(oldEvent.marketAt,"2026-11-08T22:00:00.000Z");
+ assert.equal(oldEvent.approvalStatus,"SUPERSEDED");
+ assert.equal(oldEvent.lifecycle,"SUPERSEDED");
+ assert.equal(newEvent.marketAt,"2026-11-08T23:00:00.000Z");
+ assert.equal(newEvent.approvalStatus,"RESEARCH");
+ assert.ok(events.every(e=>e.noExecution===true));
+ const appended=appendWaveHistoryObservation({directory,observation,nodeEvents:events});
+ assert.equal(appended.status,"APPENDED");
+ assert.equal(collectPublishedWorkingNodeEventsV1({directory,packet,publishedAt}).length,0);
+ const page=pageEngine22NodeHistory({directory,afterRevision:0,limit:50});
+ const archived=page.records.find(n=>n.nodeId===old[0].nodeId);
+ const current=page.records.find(n=>n.nodeId===live.nodeId);
+ assert.equal(archived.marketAtUtc,"2026-11-08T22:00:00.000Z");
+ assert.equal(current.marketAtUtc,"2026-11-08T23:00:00.000Z");
+ assert.equal(archived.plotAllowed,false);
+ assert.equal(current.plotAllowed,false);
 }));
