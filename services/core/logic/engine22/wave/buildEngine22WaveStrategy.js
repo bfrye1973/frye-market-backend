@@ -42,6 +42,7 @@ import { resolveCurrentLifecycleState } from "./lifecycle/core/resolveCurrentLif
 import { buildDegreeStates } from "./buildDegreeStates.js";
 import { buildEngine22Display } from "./buildEngine22Display.js";
 import { buildAuthorizedWorkingStructureV1 } from "./buildAuthorizedWorkingStructureV1.js";
+import { buildEngine22WorkingWaveNodesV1 } from "./buildEngine22WorkingWaveNodesV1.js";
 import { buildCurrentWavelength } from "./buildCurrentWavelength.js";
 import { applyOwnerPriceTouchesV1 } from "./applyOwnerPriceTouchesV1.js";
 import { buildSevenDegreeInvalidationsV1 } from "./buildSevenDegreeInvalidationsV1.js";
@@ -2345,6 +2346,11 @@ export function buildEngine22WaveStrategy(input = {}) {
     degreeStates: publishedDegreeStates,
     engine22Display: publishedEngine22Display,
     currentWavelength: publishedCurrentWavelength,
+    // Read-only source-authoritative anchor packet for Engine2. No trading authority.
+    workingWaveNodes: buildEngine22WorkingWaveNodesV1({
+      currentWavelength:publishedCurrentWavelength,
+      symbol:context.symbol,
+    }),
     higherDegreeBearishProtection: buildHigherDegreeBearishProtectionV1({
       symbol:context.symbol,
       barsByTf:context.barsByTf,
