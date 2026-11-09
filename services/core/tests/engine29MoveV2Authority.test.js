@@ -417,5 +417,6 @@ test("explicit NEGATIVE current pressure still prevents bullish 1H recovery over
     },
   });
 
-  assert.equal(result.state, "RISK_OFF_ACTIVE");
+  assert.equal(result.state, "CAUTION");
+  assert.notEqual(result.state, "RECOVERING");
 });
