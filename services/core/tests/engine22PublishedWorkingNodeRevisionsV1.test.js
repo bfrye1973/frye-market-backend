@@ -104,3 +104,46 @@ test("owner corrected Micro W2 history preserves 15:00 and publishes 16:00 in se
  assert.equal(archived.plotAllowed,false);
  assert.equal(current.plotAllowed,false);
 }));
+
+test("real initial Micro W2 15:00 publication revises to 16:00 and journal replays both states",()=>withDir(directory=>{
+ const oldWave=buildCurrentWavelength({symbol:"ES",currentPrice:7525,microBars5m:[]});
+ const oldMicro=oldWave.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.anchors;
+ oldMicro.w2LowLocalTime="2026-11-08 15:00 AZ";
+ oldMicro.w2LowAtUtc="2026-11-08T22:00:00Z";
+ delete oldMicro.priorAnchorRevision;
+ const firstPacket=buildEngine22WorkingWaveNodesV1({currentWavelength:oldWave,symbol:"ES"});
+ const olderNode=firstPacket.degrees.micro.nodes.find(n=>n.anchorField==="w2Low");
+ assert.equal(olderNode.marketAtUtc,"2026-11-08T22:00:00.000Z");
+ const firstEvents=collectPublishedWorkingNodeEventsV1({directory,packet:firstPacket,publishedAt});
+ assert.equal(firstEvents.find(n=>n.nodeId===olderNode.nodeId).revision,1);
+ assert.equal(appendWaveHistoryObservation({directory,observation,nodeEvents:firstEvents}).status,"APPENDED");
+ const latestWave=buildCurrentWavelength({symbol:"ES",currentPrice:7525,microBars5m:[]});
+ const latestPacket=buildEngine22WorkingWaveNodesV1({currentWavelength:latestWave,symbol:"ES"});
+ assert.notEqual(firstPacket.fingerprint,latestPacket.fingerprint);
+ const correctedNode=latestPacket.degrees.micro.nodes.find(n=>n.anchorField==="w2Low");
+ assert.equal(correctedNode.nodeId,olderNode.nodeId,"stable node identity across owner correction");
+ assert.equal(correctedNode.marketAtUtc,"2026-11-08T23:00:00.000Z");
+ const nextEvents=collectPublishedWorkingNodeEventsV1({
+   directory,packet:latestPacket,publishedAt:"2026-11-09T18:00:00.000Z"
+ });
+ const revision=nextEvents.find(n=>n.nodeId===olderNode.nodeId);
+ assert.equal(revision.type,"NODE_REVISED");
+ assert.equal(revision.revision,2);
+ assert.equal(revision.marketAt,"2026-11-08T23:00:00.000Z");
+ assert.equal(revision.supersedesEventId,firstEvents.find(n=>n.nodeId===olderNode.nodeId).eventId);
+ const oldSource=nextEvents.find(n=>n.label==="W2 superseded source anchor");
+ assert.equal(oldSource.marketAt,"2026-11-08T22:00:00.000Z");
+ assert.equal(oldSource.approvalStatus,"SUPERSEDED");
+ appendWaveHistoryObservation({directory,
+   observation:{...observation,observedAt:"2026-11-09T18:00:00.000Z"},nodeEvents:nextEvents});
+ const full=pageEngine22NodeHistory({directory,afterRevision:0,limit:50});
+ const w2=full.records.filter(n=>n.nodeId===olderNode.nodeId);
+ assert.deepEqual(w2.map(n=>[n.sourceRevision,n.marketAtUtc]),[
+   [1,"2026-11-08T22:00:00.000Z"],
+   [2,"2026-11-08T23:00:00.000Z"]
+ ]);
+ const replay=pageEngine22NodeHistory({directory,afterRevision:1,limit:50});
+ assert.equal(replay.records.find(n=>n.nodeId===olderNode.nodeId).sourceRevision,2);
+ assert.equal(replay.records.find(n=>n.label==="W2 superseded source anchor").plotAllowed,false);
+ assert.ok(full.records.every(n=>n.plotAllowed===false),"no research promotion on replay");
+}));
