@@ -574,6 +574,32 @@ export function buildCurrentWavelength({
       // Nov 9 owner-supplied Submicro W1/W2 anchors in existing Google Sheet.
       // Research presentation only: do not replace owner-selected Submicro C,
       // assert W3 has begun, or rewrite the older ABC Fib/touch history.
+      // New black internal Submicro waves, separate from older blue-degree model.
+      ownerSubmicroW3Nov9InternalResearch:{
+        version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
+        parentDegree:"micro",parentWave:"W3_RESEARCH",
+        anchors:{
+          w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
+          w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
+          w2Low:7449.25,w2LowLocalTime:"2026-11-09 06:20 AZ",
+          w2LowAtUtc:"2026-11-09T13:20:00Z",w2CompletionConfirmed:false,w3StartConfirmed:false,
+          provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7449.25+(7476-7390.25)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7449.25,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       ownerSubmicroW3Nov9Research:{
         version:"engine22.submicroW3Nov9Research.v1",
         selectionStatus:"RESEARCH_ONLY",degree:"submicro",
@@ -651,6 +677,32 @@ export function buildCurrentWavelength({
     micro: {
       // Owner Nov 5→6 Micro W1/W2 blue research scenario. Does not promote
       // away from current Oct31 Micro C DOWN owner-selected count.
+      // Owner reclassified earlier blue W1/W2 from Submicro to Micro.
+      ownerMicroW3Nov9ReclassifiedResearch:{
+        version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
+        parentDegree:"subminute",parentWave:"W1_FORMING_RESEARCH",
+        anchors:{
+          w1Low:7324,w1LowLocalTime:"2026-11-05 15:20 AZ",w1High:7469,
+          w1HighLocalTime:"2026-11-06 07:40 AZ",w1Length:145,
+          w2Low:7362,w2LowLocalTime:"2026-11-08 15:00 AZ",
+          w2LowAtUtc:"2026-11-08T22:00:00Z",w2CompletionConfirmed:false,w3StartConfirmed:false,
+          provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7362+(7469-7324)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7362,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       ownerMicroW2Nov6Research:{
         version:"engine22.microW2Nov6Research.v1",
         selectionStatus:"RESEARCH_ONLY",degree:"micro",
