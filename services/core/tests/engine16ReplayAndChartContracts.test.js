@@ -33,7 +33,9 @@ test("Engine11 attested knowledge clock validates each candle without fabricatio
   assert.equal(data.bars[0].knownAt,clocks[0]);
   assert.equal(data.noHistoricalAvailabilityClaim,false);
   const replay=replayEngine11Research({input:data});
-  assert.equal(replay.historicallyVerified,true);
+  assert.equal(replay.historicallyVerified,false);
+  assert.equal(replay.inputAttested,true);
+  assert.equal(replay.sourceIntegrityStatus,"UNVERIFIED_BY_ENGINE16");
   assert.equal(replay.sourceFingerprint,"sha256:test-source");
   assert.throws(()=>input(raw,"ATTESTED_CLOCKS",{attestedKnownAt:clocks.slice(1)}),/ATTESTED_CLOCKS_MISSING/);
   assert.throws(()=>input(raw,"ATTESTED_CLOCKS",{attestedKnownAt:clocks.map(()=>raw[0].time)}),/ENGINE11_KNOWNAT_INVALID/);
