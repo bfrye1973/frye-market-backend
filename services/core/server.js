@@ -1,4 +1,4 @@
-import engine22WaveHistoryRouter from "./routes/engine22WaveHistory.js";
+import engine22WaveHistoryRouter,{nodeHistoryPreflight} from "./routes/engine22WaveHistory.js";
 import engine27MicroAlignmentHistoryRouter from "./routes/engine27MicroAlignmentHistory.js";
 // services/core/server.js
 // Backend-1 (Core API) — Express entry (ESM)
@@ -100,6 +100,11 @@ app.set("trust proxy", true);
 app.disable("x-powered-by");
 app.set("etag", false);
 app.use(express.json({ limit: "1mb" }));
+
+// Owner-only Engine22 node CORS preflights must run BEFORE the existing
+// project-wide generic CORS handler, which otherwise replies to all OPTIONS.
+app.options("/api/engine22/wave-history/nodes",nodeHistoryPreflight);
+app.options("/api/engine22/wave-history/nodes/current",nodeHistoryPreflight);
 
 // --- CORS ---
 app.use((req, res, next) => {
