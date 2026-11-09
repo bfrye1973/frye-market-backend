@@ -100,6 +100,7 @@ function endpointEvidence(bars, B, direction, tickSize, policy) {
 }
 export function computeAbcMilestone1({bars,asOf,symbol="ES",contract,priceBasis,
   timeframe="10m",tickSize=0.25,pivotStrength=1,engine22Snapshot=null,
+  engine22ResearchContext=null,
   completionPolicy={wickFraction:0.55,minWickTicks:2,requireLaterReversal:true},
   maxCandidateAgeBars=null}) {
   if(typeof priceBasis!=="string"||!priceBasis||typeof contract!=="string"||!contract)
@@ -122,7 +123,18 @@ export function computeAbcMilestone1({bars,asOf,symbol="ES",contract,priceBasis,
   const pivots=confirmedPivots(closed,{strength:pivotStrength})
     .map(p=>({...p,knownAt:closed.find(b=>b.time===p.confirmationTime)?.knownAt??null,
       observationTime:p.time,confirmationTime:p.confirmationTime}));
-  const parent=readOnlyEngine22Context(engine22Snapshot,asOf);
+  const fromResearch=engine22ResearchContext;
+  // The captured-current adapter is a verified read-only context, never retroactive Engine22 approval.
+  const capturedCurrent=fromResearch?.schema==="engine16.engine22CurrentRefs.v1" &&
+    fromResearch.status==="CURRENT_CONTEXT_ONLY" && fromResearch.readOnly===true &&
+    fromResearch.noExecution===true && iso(fromResearch.capturedAt) &&
+    Date.parse(fromResearch.capturedAt)<=Date.parse(asOf) &&
+    fromResearch.asOf===asOf && Array.isArray(fromResearch.degreeRefs);
+  const parent=capturedCurrent?{
+    status:"CURRENT_CONTEXT_ONLY",sourceSchema:fromResearch.sourceSchema,
+    revision:fromResearch.sourceRevision,degreeRefs:fromResearch.degreeRefs,
+    reason:"CAPTURED_CURRENT_ONLY_NOT_HISTORICAL_APPROVAL"
+  }:readOnlyEngine22Context(engine22Snapshot,asOf);
   const candidates=[];
   for(const {start,A,B,direction} of eligibleTrios(pivots)){
     if(Date.parse(B.knownAt)>Date.parse(asOf))continue;
