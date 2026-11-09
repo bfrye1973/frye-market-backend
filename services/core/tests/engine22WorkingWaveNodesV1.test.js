@@ -75,10 +75,13 @@ test("unknown, malformed or conflicting times never authorize a chart node",()=>
   assert.equal(arizonaMarketTimeUtc("2026-11-09 06:20 AZ"),"2026-11-09T13:20:00.000Z");
 });
 
-test("owner corrected Sheet W2 differs from current Engine22 Strategy; never silently substitute",()=>{
+test("corrected owner Micro W2 and superseded old time remain distinguishable",()=>{
   const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:source()});
   const recorded=packet.degrees.micro.nodes.find(n=>n.label==="W2 research anchor");
   assert.equal(recorded.marketAtUtc,"2026-11-08T23:00:00.000Z");
-  // Nov 9 owner sheet correction was 16:00 Arizona = 23:00Z.
-  assert.notEqual(recorded.marketAtUtc,"2026-11-08T23:00:00.000Z");
+  // The old 15:00 AZ / 22:00Z source remains explicitly superseded.
+  const prior=source().degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.anchors.priorAnchorRevision;
+  assert.equal(prior.w2LowAtUtc,"2026-11-08T22:00:00Z");
+  assert.notEqual(recorded.marketAtUtc,prior.w2LowAtUtc.replace("Z",".000Z"));
+
 });
