@@ -354,3 +354,68 @@ test("1H does not de-escalate CAUTION when upside parent lacks broad confirmatio
 
   assert.equal(result.state, "CAUTION");
 });
+
+
+test("1H recovery also clears sticky CAUTION when broad-confirmed upside parent has MIXED current pressure", () => {
+  const wrap = (state) => ({ tactical: { state } });
+  const groupBundle = {
+    groups: {
+      headlineIndex: wrap("FORMING"),
+      breadth: wrap("FORMING"),
+      leadership: wrap("HEALTHY"),
+      credit: wrap("HEALTHY"),
+      ratesDuration: wrap("HEALTHY"),
+      energyInflation: wrap("HEALTHY"),
+      volatility: wrap("HEALTHY"),
+      financialConditions: wrap("HEALTHY"),
+    },
+  };
+
+  const result = resolveEngine29TacticalState(groupBundle, {
+    moveCharacter: "UPSIDE_MOVE_ACTIVE",
+    direction: "UP",
+    oneHourContext: {
+      esOneHourStructureState: "WARNING",
+    },
+    underlyingPressure: {
+      state: "MIXED",
+    },
+    broadConfirmation: {
+      broadConfirmed: true,
+    },
+  });
+
+  assert.equal(result.state, "RECOVERING");
+});
+
+test("explicit NEGATIVE current pressure still prevents bullish 1H recovery override", () => {
+  const wrap = (state) => ({ tactical: { state } });
+  const groupBundle = {
+    groups: {
+      headlineIndex: wrap("FORMING"),
+      breadth: wrap("FORMING"),
+      leadership: wrap("HEALTHY"),
+      credit: wrap("HEALTHY"),
+      ratesDuration: wrap("HEALTHY"),
+      energyInflation: wrap("HEALTHY"),
+      volatility: wrap("HEALTHY"),
+      financialConditions: wrap("HEALTHY"),
+    },
+  };
+
+  const result = resolveEngine29TacticalState(groupBundle, {
+    moveCharacter: "UPSIDE_MOVE_ACTIVE",
+    direction: "UP",
+    oneHourContext: {
+      esOneHourStructureState: "WARNING",
+    },
+    underlyingPressure: {
+      state: "NEGATIVE",
+    },
+    broadConfirmation: {
+      broadConfirmed: true,
+    },
+  });
+
+  assert.equal(result.state, "RISK_OFF_ACTIVE");
+});
