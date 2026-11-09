@@ -686,8 +686,10 @@ export function buildCurrentWavelength({
         anchors:{
           w1Low:7324,w1LowLocalTime:"2026-11-05 15:20 AZ",w1High:7469,
           w1HighLocalTime:"2026-11-06 07:40 AZ",w1Length:145,
-          w2Low:7362,w2LowLocalTime:"2026-11-08 15:00 AZ",
-          w2LowAtUtc:"2026-11-08T22:00:00Z",w2CompletionConfirmed:false,w3StartConfirmed:false,
+          w2Low:7362,w2LowLocalTime:"2026-11-08 16:00 AZ",
+          w2LowAtUtc:"2026-11-08T23:00:00Z",
+          priorAnchorRevision:{w2Low:7362,w2LowLocalTime:"2026-11-08 15:00 AZ",w2LowAtUtc:"2026-11-08T22:00:00Z",status:"SUPERSEDED_BY_OWNER_20261109_CORRECTION"},
+          w2CompletionConfirmed:false,w3StartConfirmed:false,
           provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
         },
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
