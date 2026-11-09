@@ -98,7 +98,11 @@ export function resolveEngine29TacticalState(groupBundle, moveCharacter) {
       parentState === "UPSIDE_MOVE_ACTIVE" &&
       parentDirection === "UP" &&
       broadConfirmed === true &&
-      underlying === ENGINE29_UNDERLYING_PRESSURE.POSITIVE
+      [
+        ENGINE29_UNDERLYING_PRESSURE.POSITIVE,
+        ENGINE29_UNDERLYING_PRESSURE.MIXED,
+        ENGINE29_UNDERLYING_PRESSURE.NEUTRAL,
+      ].includes(underlying)
     )
   ) {
     state = ENGINE29_TACTICAL_STATES.RECOVERING;
