@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-08T18:39:53.565205+00:00",
+  "updated_at_utc": "2026-11-09T12:48:15.103160+00:00",
   "completedSessionDate": "2026-11-06",
   "score": 42.9,
   "state": "WEAK",
@@ -56,9 +56,9 @@
     },
     {
       "sector": "Healthcare",
-      "breadth_pct": 33.88,
+      "breadth_pct": 33.77,
       "momentum_pct": 55.17,
-      "nh": 206,
+      "nh": 205,
       "nl": 402,
       "up": 48,
       "down": 39
@@ -143,20 +143,20 @@
       "momentum_pct": 0.0
     },
     "Financials": {
-      "nh": 489,
-      "nl": 165,
-      "up": 45,
-      "down": 21,
-      "breadth_pct": 74.77,
-      "momentum_pct": 68.18
+      "nh": 488,
+      "nl": 164,
+      "up": 44,
+      "down": 20,
+      "breadth_pct": 74.85,
+      "momentum_pct": 68.75
     },
     "Healthcare": {
-      "nh": 293,
-      "nl": 357,
-      "up": 47,
+      "nh": 292,
+      "nl": 356,
+      "up": 46,
       "down": 34,
-      "breadth_pct": 45.08,
-      "momentum_pct": 58.02
+      "breadth_pct": 45.06,
+      "momentum_pct": 57.5
     },
     "Industrials": {
       "nh": 215,
@@ -256,19 +256,19 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 1403,
+      "nh": 1402,
       "nl": 2050,
       "up": 216,
       "down": 297,
-      "breadth_pct": 40.63,
+      "breadth_pct": 40.61,
       "momentum_pct": 42.11,
       "prior": {
-        "nh": 1932,
-        "nl": 1819,
-        "up": 263,
-        "down": 460,
+        "nh": 1930,
+        "nl": 1817,
+        "up": 261,
+        "down": 459,
         "breadth_pct": 51.51,
-        "momentum_pct": 36.38
+        "momentum_pct": 36.25
       }
     },
     "large": {
@@ -298,28 +298,28 @@
       "momentum_pct": 45.05,
       "prior": {
         "nh": 557,
-        "nl": 328,
+        "nl": 327,
         "up": 73,
         "down": 112,
-        "breadth_pct": 62.94,
+        "breadth_pct": 63.01,
         "momentum_pct": 39.46
       }
     },
     "small": {
       "members": 3448,
-      "nh": 592,
+      "nh": 591,
       "nl": 1389,
       "up": 123,
       "down": 164,
-      "breadth_pct": 29.88,
+      "breadth_pct": 29.85,
       "momentum_pct": 42.86,
       "prior": {
-        "nh": 879,
+        "nh": 877,
         "nl": 1239,
-        "up": 102,
+        "up": 100,
         "down": 228,
-        "breadth_pct": 41.5,
-        "momentum_pct": 30.91
+        "breadth_pct": 41.45,
+        "momentum_pct": 30.49
       }
     },
     "unknown": {
@@ -332,11 +332,11 @@
       "momentum_pct": 14.29,
       "prior": {
         "nh": 4,
-        "nl": 7,
+        "nl": 6,
         "up": 3,
-        "down": 5,
-        "breadth_pct": 36.36,
-        "momentum_pct": 37.5
+        "down": 4,
+        "breadth_pct": 40.0,
+        "momentum_pct": 42.86
       }
     },
     "thresholds": {
