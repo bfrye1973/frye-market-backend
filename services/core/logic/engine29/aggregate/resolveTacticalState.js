@@ -58,6 +58,16 @@ export function resolveEngine29TacticalState(groupBundle, moveCharacter) {
   const underlying =
     moveCharacter?.underlyingPressure?.state ?? null;
 
+  const parentState =
+    moveCharacter?.moveCharacter ?? null;
+
+  const parentDirection =
+    moveCharacter?.direction ?? null;
+
+  const broadConfirmed =
+    moveCharacter?.broadConfirmation?.broadConfirmed === true ||
+    moveCharacter?.character?.broadConfirmation?.confirmed === true;
+
   const reasonCodes = [];
   let state = ENGINE29_TACTICAL_STATES.NORMAL;
 
@@ -80,8 +90,16 @@ export function resolveEngine29TacticalState(groupBundle, moveCharacter) {
       ENGINE29_PHASE5_REASON_CODES.TACTICAL_RISK_OFF_ACTIVE
     );
   } else if (
-    es1hState === ENGINE29_SYMBOL_STATES.RECOVERING &&
-    confirmedGroups.length <= 1
+    (
+      es1hState === ENGINE29_SYMBOL_STATES.RECOVERING &&
+      confirmedGroups.length <= 1
+    ) ||
+    (
+      parentState === "UPSIDE_MOVE_ACTIVE" &&
+      parentDirection === "UP" &&
+      broadConfirmed === true &&
+      underlying === ENGINE29_UNDERLYING_PRESSURE.POSITIVE
+    )
   ) {
     state = ENGINE29_TACTICAL_STATES.RECOVERING;
     reasonCodes.push(
@@ -118,9 +136,9 @@ export function resolveEngine29TacticalState(groupBundle, moveCharacter) {
     esOneHourStructureState: es1hState,
     underlyingPressure: underlying,
 
-    // Context only; never used above to manufacture the 1H state.
-    parentMoveState: moveCharacter?.moveCharacter ?? null,
-    parentMoveDirection: moveCharacter?.direction ?? null,
+    parentMoveState: parentState,
+    parentMoveDirection: parentDirection,
+    broadConfirmation: broadConfirmed,
 
     reasonCodes,
   };
