@@ -34,6 +34,10 @@ export function resolveEngine29FastTacticalShift(moveCharacter) {
     moveCharacter?.esImpulse?.structureState ??
     null;
 
+  const broadConfirmed =
+    moveCharacter?.broadConfirmation?.broadConfirmed === true ||
+    moveCharacter?.character?.broadConfirmation?.confirmed === true;
+
   let state = ENGINE29_FAST_SHIFT_STATES.NEUTRAL;
   const reasonCodes = [];
 
@@ -41,7 +45,13 @@ export function resolveEngine29FastTacticalShift(moveCharacter) {
     parentState === ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE &&
     parentDirection === ENGINE29_MOVE_DIRECTIONS.DOWN
   ) {
-    if (underlying === ENGINE29_UNDERLYING_PRESSURE.NEGATIVE) {
+    if (
+      underlying === ENGINE29_UNDERLYING_PRESSURE.NEGATIVE ||
+      (
+        broadConfirmed === true &&
+        underlying !== ENGINE29_UNDERLYING_PRESSURE.POSITIVE
+      )
+    ) {
       state = ENGINE29_FAST_SHIFT_STATES.SELLING_PRESSURE_INCREASING;
       reasonCodes.push(
         ENGINE29_PHASE5_REASON_CODES.FAST_SHIFT_SELLING_PRESSURE
@@ -61,7 +71,13 @@ export function resolveEngine29FastTacticalShift(moveCharacter) {
     parentState === ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE &&
     parentDirection === ENGINE29_MOVE_DIRECTIONS.UP
   ) {
-    if (underlying === ENGINE29_UNDERLYING_PRESSURE.POSITIVE) {
+    if (
+      underlying === ENGINE29_UNDERLYING_PRESSURE.POSITIVE ||
+      (
+        broadConfirmed === true &&
+        underlying !== ENGINE29_UNDERLYING_PRESSURE.NEGATIVE
+      )
+    ) {
       state = ENGINE29_FAST_SHIFT_STATES.BUYING_PRESSURE_INCREASING;
       reasonCodes.push(
         ENGINE29_PHASE5_REASON_CODES.FAST_SHIFT_BUYING_PRESSURE
@@ -105,6 +121,7 @@ export function resolveEngine29FastTacticalShift(moveCharacter) {
     parentMoveState: parentState,
     parentMoveDirection: parentDirection,
     underlyingPressure: underlying,
+    broadConfirmation: broadConfirmed,
     reasonCodes: [...new Set(reasonCodes)],
   };
 }

@@ -456,3 +456,39 @@ test("stale 30m authority fails closed even when a parent was active", () => {
   assert.equal(parent.stale, true);
   assert.equal(parent.reason, "PARENT_FAILED_CLOSED_STALE_30M_AUTHORITY");
 });
+
+
+test("broad-confirmed upside parent with mixed pressure remains buying pressure increasing", () => {
+  const result = resolveEngine29FastTacticalShift({
+    moveCharacter: ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE,
+    direction: ENGINE29_MOVE_DIRECTIONS.UP,
+    underlyingPressure: { state: "MIXED" },
+    broadConfirmation: { broadConfirmed: true },
+  });
+
+  assert.equal(result.state, "BUYING_PRESSURE_INCREASING");
+  assert.equal(result.broadConfirmation, true);
+});
+
+test("broad-confirmed downside parent with mixed pressure remains selling pressure increasing", () => {
+  const result = resolveEngine29FastTacticalShift({
+    moveCharacter: ENGINE29_MOVE_CHARACTERS.DOWNSIDE_MOVE_ACTIVE,
+    direction: ENGINE29_MOVE_DIRECTIONS.DOWN,
+    underlyingPressure: { state: "MIXED" },
+    broadConfirmation: { broadConfirmed: true },
+  });
+
+  assert.equal(result.state, "SELLING_PRESSURE_INCREASING");
+  assert.equal(result.broadConfirmation, true);
+});
+
+test("opposing pressure still overrides broad-confirmed upside parent", () => {
+  const result = resolveEngine29FastTacticalShift({
+    moveCharacter: ENGINE29_MOVE_CHARACTERS.UPSIDE_MOVE_ACTIVE,
+    direction: ENGINE29_MOVE_DIRECTIONS.UP,
+    underlyingPressure: { state: "NEGATIVE" },
+    broadConfirmation: { broadConfirmed: true },
+  });
+
+  assert.equal(result.state, "STABILIZING");
+});
