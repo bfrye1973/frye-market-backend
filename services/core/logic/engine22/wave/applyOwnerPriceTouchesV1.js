@@ -887,6 +887,63 @@ export function applyOwnerPriceTouchesV1({
           touchEvidence:l.touchEvidence}]));
     }
   }
+  // Separate Nov 9 degree-corrected Micro (blue) and Submicro (black)
+  // research touch journals. Do not inherit earlier Submicro-blue touches.
+  for(const [degree,modelKey,version] of [
+    ["micro","ownerMicroW3Nov9ReclassifiedResearch","engine22.ownerMicroW3Nov9ReclassifiedResearch.v1"],
+    ["submicro","ownerSubmicroW3Nov9InternalResearch","engine22.ownerSubmicroW3Nov9InternalResearch.v1"],
+  ]){
+    const model=root.degrees?.[degree]?.[modelKey];
+    if(model?.version!==version||model.selectionStatus!=="RESEARCH_ONLY"||
+       !Array.isArray(model.levels))continue;
+    const start=Date.parse(model.anchors?.w2LowAtUtc);
+    if(!Number.isFinite(start))continue;
+    const id=JSON.stringify([degree,modelKey,version,model.anchors,
+      model.levels.map(l=>[l.key,l.price])]);
+    const priorModel=previousWavelength?.degrees?.[degree]?.[modelKey];
+    const same=priorModel?.version===version &&
+      priorModel.anchors?.w1Low===model.anchors.w1Low &&
+      priorModel.anchors?.w1High===model.anchors.w1High &&
+      priorModel.anchors?.w2Low===model.anchors.w2Low &&
+      priorModel.anchors?.w2LowAtUtc===model.anchors.w2LowAtUtc;
+    const touched=disk[id]||{},observed=[];
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const current=finite(currentPrice);
+    const previous=same?finite(previousWavelength?.currentPrice):null;
+    if(now>=start&&current!==null)observed.push({
+      high:previous===null?current:Math.max(current,previous),
+      source:"ES_CURRENT_PRICE",time:new Date(now).toISOString(),verified:false,
+    });
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const t=Number(bar?.time),lo=finite(bar?.low),hi=finite(bar?.high);
+      if(!Number.isSafeInteger(t)||t<=0||lo===null||hi===null||hi<lo||
+         t*1000<start||t*1000+600000>now)continue;
+      observed.push({high:hi,source:"ES_10M_COMPLETED_OHLC",
+        time:new Date(t*1000).toISOString(),
+        verified:model.priceBasisReconciliation==="VERIFIED"});
+    }
+    model.levels=model.levels.map(level=>{
+      const prior=touched[level.key]||(same?priorModel.levels?.find(l=>
+        l.key===level.key && l.price===level.price):null);
+      const keep=prior?.status==="TOUCHED"&&prior.price===level.price;
+      const hit=keep?null:observed.find(o=>o.high>=level.price);
+      const evidence=keep?prior.touchEvidence:hit?{
+        verified:hit.verified,
+        evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?
+          "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+        modelPriceBasisVerified:model.priceBasisReconciliation==="VERIFIED",
+      }:null;
+      return {...level,status:keep||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(keep||hit),
+        touchEvidenceType:keep?prior.touchEvidenceType:(hit?.source||null),
+        touchedAt:keep?(prior.touchedAt||null):(hit?.time||null),
+        touchEvidence:evidence||null};
+    });
+    disk[id]=Object.fromEntries(model.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   // Owner Nov 9 Minor W2-complete research W3 extensions. Use upward prices
   // only AFTER the owner W2 ending low; preserve old Minor W2 touches.
   const minorW3=root.degrees?.minor?.ownerMinorW3Nov9Research;
