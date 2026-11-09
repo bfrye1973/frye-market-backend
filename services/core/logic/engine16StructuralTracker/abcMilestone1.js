@@ -14,7 +14,7 @@ function normalizeBars(bars, asOf) {
     if (!bar || !iso(bar.time) || !iso(bar.closeAt) || !iso(bar.knownAt))
       throw new Error("BAR_CLOCKS_REQUIRED");
     const at = Date.parse(bar.time), closeAt = Date.parse(bar.closeAt), known = Date.parse(bar.knownAt);
-    if (at <= previousTime || known < previousKnown || closeAt < at || known < closeAt)
+    if (at <= previousTime || known < previousKnown || closeAt < at || known < at || (bar.closed === true && known < closeAt)
       throw new Error("BAR_CLOCK_ORDER_INVALID");
     previousTime = at; previousKnown = known;
     for (const field of ["open","high","low","close"])
@@ -53,7 +53,7 @@ export function readOnlyEngine22Context(snapshot, asOf) {
 }
 export function projectCFromB({start,A,B,direction,priceBasis,tickSize=0.25,modelVersion="research-c-from-b-v1"}) {
   if (!start || !A || !B || ![start.price,A.price,B.price].every(Number.isFinite) ||
-      typeof priceBasis !== "string" || !priceBasis || !(tickSize > 0) ||
+      typeof priceBasis !== "string" || !priceBasis || !Number.isFinite(tickSize) || !(tickSize > 0) ||
       !["UP","DOWN"].includes(direction)) throw new Error("INVALID_C_MODEL_INPUT");
   const sign = direction === "UP" ? 1 : -1, length = Math.abs(A.price-start.price);
   if (!(length > 0) || sign*(A.price-start.price) <= 0) throw new Error("A_DIRECTION_MISMATCH");
@@ -88,23 +88,31 @@ function endpointEvidence(bars, B, direction, tickSize, policy) {
   const sufficient=range>0 && wick/range>=policy.wickFraction && wick>=policy.minWickTicks*tickSize;
   // Wick evidence remains provisional. Closed-bar reversal is optional; never becomes an orthodox count.
   const later=after.filter(x=>Date.parse(x.knownAt)>Date.parse(extreme.knownAt) && x.closed===true);
-  const reversed=later.some(x=>direction==="UP"?x.close<extreme.close:x.close>extreme.close);
-  const qualifies=sufficient && (!policy.requireLaterReversal || reversed);
+  const reversalBar=later.find(x=>direction==="UP"?x.close<extreme.close:x.close>extreme.close);
+  const qualifies=sufficient && (!policy.requireLaterReversal || Boolean(reversalBar));
   return {extreme:{price,time:extreme.time,knownAt:extreme.knownAt,evidenceId:extreme.time+":C_EXTREME"},
-    endpoint:qualifies?{price,time:extreme.time,knownAt:later.length?
-      later[0].knownAt:extreme.knownAt,evidenceId:extreme.time+":WICK_REJECTION"}:null,
+    endpoint:qualifies?{price,time:extreme.time,
+      // Evidence becomes available only when the qualifying closed reversal is known.
+      knownAt:policy.requireLaterReversal ? reversalBar.knownAt : extreme.knownAt,
+      reversalEvidenceId:reversalBar ? reversalBar.time+":C_REVERSAL" : null,
+      evidenceId:extreme.time+":WICK_REJECTION"}:null,
     wickObserved:sufficient};
 }
 export function computeAbcMilestone1({bars,asOf,symbol="ES",contract,priceBasis,
   timeframe="10m",tickSize=0.25,pivotStrength=1,engine22Snapshot=null,
-  completionPolicy={wickFraction:0.55,minWickTicks:2,requireLaterReversal:true}}) {
+  completionPolicy={wickFraction:0.55,minWickTicks:2,requireLaterReversal:true},
+  maxCandidateAgeBars=null}) {
   if(typeof priceBasis!=="string"||!priceBasis||typeof contract!=="string"||!contract)
     throw new Error("CONTRACT_AND_PRICE_BASIS_REQUIRED");
-  if(!(tickSize>0)||!Number.isInteger(pivotStrength)||pivotStrength<1)
+  if(!Number.isFinite(tickSize)||!(tickSize>0)||!Number.isInteger(pivotStrength)||pivotStrength<1)
     throw new Error("INVALID_PIVOT_OPTIONS");
+  // Optional deterministic research display expiry, never a structural Elliott invalidation.
+  if(maxCandidateAgeBars!==null && (!Number.isSafeInteger(maxCandidateAgeBars)||maxCandidateAgeBars<0))
+    throw new Error("INVALID_CANDIDATE_AGE");
   const policy={wickFraction:0.55,minWickTicks:2,requireLaterReversal:true,...completionPolicy};
-  if(!(policy.wickFraction>=0&&policy.wickFraction<=1)||
-      !(policy.minWickTicks>=0)||typeof policy.requireLaterReversal!=="boolean")
+  if(!Number.isFinite(policy.wickFraction)||!(policy.wickFraction>=0&&policy.wickFraction<=1)||
+      !Number.isFinite(policy.minWickTicks)||!(policy.minWickTicks>=0)||
+      typeof policy.requireLaterReversal!=="boolean")
     throw new Error("INVALID_RESEARCH_POLICY");
   const visible=normalizeBars(bars,asOf);
   const closed=visible.filter(x=>x.closed===true);
@@ -118,6 +126,10 @@ export function computeAbcMilestone1({bars,asOf,symbol="ES",contract,priceBasis,
   const candidates=[];
   for(const {start,A,B,direction} of eligibleTrios(pivots)){
     if(Date.parse(B.knownAt)>Date.parse(asOf))continue;
+    // With the optional horizon, an old candidate leaves the *active display*.
+    // Replay emits RETIRED without rewriting its earlier observations.
+    const barsSinceB=closed.filter(x=>Date.parse(x.knownAt)>Date.parse(B.knownAt)).length;
+    if(maxCandidateAgeBars!==null && barsSinceB>maxCandidateAgeBars)continue;
     const id=["ABC",symbol,contract,timeframe,priceBasis,start.id,A.id,B.id].join("|");
     const evidence=endpointEvidence(visible,B,direction,tickSize,policy);
     const fib=projectCFromB({start,A,B,direction,priceBasis,tickSize});
@@ -163,6 +175,15 @@ export function replayAbcMilestone1(options) {
           state:candidate.state,snapshot:frozenCopy(candidate)});
         previous.set(candidate.candidateId,material);
       }
+    }
+    const active=new Set(snapshot.candidates.map(x=>x.candidateId));
+    for(const [candidateId,material] of previous) {
+      if(active.has(candidateId))continue;
+      events.push({eventId:candidateId+"|"+cutoff+"|"+events.length,
+        candidateId,knownAt:cutoff,reason:"RETIRED",
+        evidenceIds:[],state:"RETIRED",priorMaterial:material,
+        retirementScope:"RESEARCH_ACTIVE_DISPLAY_ONLY",snapshot:null});
+      previous.delete(candidateId);
     }
   }
   return {schema:"engine16.abcReplay.v1",snapshots,events,researchOnly:true,noExecution:true};
