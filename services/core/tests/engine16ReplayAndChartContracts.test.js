@@ -107,3 +107,24 @@ test("Engine2 timeline views only previous as-of events and projections, no late
   assert.ok(older.rows.every(x=>x.researchOnly===true));
   assert.throws(()=>buildEngine16ChartHistoryPack(replay,{index:100}),/ENGINE16_CHART_HISTORY_INVALID/);
 });
+
+test("Engine16 consumes only captured-current matching Engine22 refs; independent W3 scenario unchanged",()=>{
+  const b=input().bars;const asOf=b.at(-1).knownAt;
+  const capture="2026-11-09T00:20:00.000Z";
+  const node={nodeId:"micro-anchor-verified",degree:"micro",parentWaveId:"minor-2",
+    waveId:"micro-2",esPrice:100,marketAtUtc:"2026-11-09T00:10:00.000Z",
+    publishedAtUtc:"2026-11-09T00:15:00.000Z",contractSymbol:"ESZ26",
+    priceBasisId:"ES_PHYSICAL_UNADJUSTED",approvalStatus:"OWNER_APPROVED",lifecycle:"ACTIVE"};
+  const current=inspectEngine22CurrentNodes({
+    schema:"engine22.chartNodeCurrent.v1",readOnly:true,latestRevision:1,records:[node]
+  },{capturedAt:capture,asOf,contract:"ESZ26",priceBasis:"ES_PHYSICAL_UNADJUSTED"});
+  const snap=computeAbcMilestone1({...opts(b),engine22ResearchContext:current});
+  const w=snap.candidates.find(c=>c.scenarioType==="MICRO2_TO_W3_ALTERNATIVE");
+  assert.equal(snap.engine22Context.status,"CURRENT_CONTEXT_ONLY");
+  assert.deepEqual(w.authorizedEngine22Refs,["micro-anchor-verified"]);
+  assert.equal(w.interpretationStatus,"UNRESOLVED");
+  const old=computeAbcMilestone1({...opts(b),engine22ResearchContext:{...current,
+    capturedAt:"2026-11-10T00:00:00Z"}});
+  assert.equal(old.engine22Context.status,"UNKNOWN");
+  assert.deepEqual(old.candidates.find(c=>c.scenarioType==="MICRO2_TO_W3_ALTERNATIVE").authorizedEngine22Refs,[]);
+});
