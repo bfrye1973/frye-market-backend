@@ -65,12 +65,39 @@ function fromModel(root,rule){
       noExecution:true,
     }];
   });
+  // Preserve explicitly owner-corrected earlier source coordinates without
+  // exposing them as CURRENT Strategies/Engine2 chart nodes.
+  const prior=model.anchors.priorAnchorRevision;
+  const historicalAnchors=[];
+  if(prior&&prior.status==="SUPERSEDED_BY_OWNER_20261109_CORRECTION"&&
+     tick(prior.w2Low)){
+    const priorLocal=arizonaMarketTimeUtc(prior.w2LowLocalTime);
+    const priorUtc=prior.w2LowAtUtc;
+    const conflict=priorUtc!=null&&(!utc(priorUtc)||
+      (priorLocal!==null&&Date.parse(priorLocal)!==Date.parse(priorUtc)));
+    const marketAtUtc=conflict?null:(utc(priorUtc)?new Date(priorUtc).toISOString():priorLocal);
+    historicalAnchors.push({
+      nodeId:"node-"+sha([rule.degree,model.version,"w2Low","prior-owner-correction"]).slice(0,24),
+      waveId:"wave-"+sha([rule.degree,model.version]).slice(0,24),
+      countId:model.version,modelVersion:model.version,degree:rule.degree,
+      sourcePath:"currentWavelength.degrees."+rule.degree+"."+rule.key,
+      anchorField:"priorAnchorRevision.w2Low",
+      label:"W2 superseded source anchor",price:prior.w2Low,marketAtUtc,
+      ownerArizonaTime:prior.w2LowLocalTime??null,
+      sourceRevision:sha([prior.w2Low,marketAtUtc,prior.w2LowLocalTime??null,priorUtc??null]),
+      approvalStatus:"SUPERSEDED",lifecycle:"SUPERSEDED",
+      waveCompletionConfirmed:false,plotAllowed:false,presentationAllowed:false,
+      selectedForResearchDisplay:false,sourceTimestampConflict:conflict,
+      priceBasisStatus:model.priceBasisReconciliation??"UNVERIFIED",
+      noExecution:true,
+    });
+  }
   return {
     degree:rule.degree,modelVersion:model.version,sourcePath:
       "currentWavelength.degrees."+rule.degree+"."+rule.key,
     scenarioStatus:"RESEARCH_ONLY",selectedForResearchDisplay:rule.display,
-    modelFingerprint:sha(anchors.map(n=>[n.nodeId,n.sourceRevision])),
-    anchors,
+    modelFingerprint:sha([...historicalAnchors,...anchors].map(n=>[n.nodeId,n.sourceRevision])),
+    historicalAnchors,anchors,
   };
 }
 export function buildEngine22WorkingWaveNodesV1({currentWavelength,symbol="ES"}={}){
