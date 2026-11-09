@@ -753,6 +753,34 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     subminute: {
+      // Owner requested new W1-up forming research display; earlier C-down and D-up remain.
+      ownerSubminuteW1FormingNov9Research:{
+        version:"engine22.subminuteW1FormingNov9Research.v1",
+        degree:"subminute",selectionStatus:"RESEARCH_ONLY",
+        activeWave:"W1",direction:"UP",stage:"W1_UP_FORMING",
+        parentDegree:"minute",parentWave:"W1_FORMING_RESEARCH",
+        anchors:{
+          w1StartReference:7322.25,
+          w1StartReferenceLocalTime:"2026-11-05 16:00 AZ",
+          w1StartReferenceAtUtc:"2026-11-05T23:00:00Z",
+          w1StartIsProposedParentReference:true,
+          w1StartIndependentlyConfirmed:false,
+          w1EndingHigh:null,w1EndingLocalTime:null,
+          w2EndingLow:null,w2EndingLocalTime:null,
+          provenance:"OWNER_20261109_MINUTE_SUBMINUTE_W1_FORMING",
+        },
+        childDegree:"micro",childWaveSequence:"MICRO_W1_TO_W5_BUILDING",
+        w1CompletionConfirmed:false,nextWave:"W2",
+        nextWaveStarted:false,completionConfirmed:false,
+        microVsParentStartTimeReviewPending:true,
+        timestampConflictNote:"MICRO_BLUE_W1_LOW_2026_11_05_15_20_AZ_PRECEDES_PARENT_REFERENCE_16_00_AZ",
+        fibMethod:"PENDING_W1_AND_W2_ENDING_ANCHORS",
+        levels:[],reviewReference:7322.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       // New November 5 owner-marked ABC is a research-only card overlay.
       // Do not promote it into current seven-degree selection or overwrite
       // the October 31 wick/body models and their historical touches.
@@ -878,6 +906,34 @@ export function buildCurrentWavelength({
       alertEligibleEvents: ALERT_EVENTS,
     },
     minute: {
+      // Owner requested Minute W1-up forming inside Minor W3; older W2 / ABC retained.
+      ownerMinuteW1FormingNov9Research:{
+        version:"engine22.minuteW1FormingNov9Research.v1",
+        degree:"minute",selectionStatus:"RESEARCH_ONLY",
+        activeWave:"W1",direction:"UP",stage:"W1_UP_FORMING",
+        parentDegree:"minor",parentWave:"W3_OWNER_WORKING_RESEARCH",
+        anchors:{
+          w1StartReference:7322.25,
+          w1StartReferenceLocalTime:"2026-11-05 16:00 AZ",
+          w1StartReferenceAtUtc:"2026-11-05T23:00:00Z",
+          w1StartIsProposedParentReference:true,
+          w1StartIndependentlyConfirmed:false,
+          w1EndingHigh:null,w1EndingLocalTime:null,
+          w2EndingLow:null,w2EndingLocalTime:null,
+          provenance:"OWNER_20261109_MINUTE_SUBMINUTE_W1_FORMING",
+        },
+        childDegree:"subminute",childWaveSequence:"SUBMINUTE_W1_TO_W5_BUILDING",
+        w1CompletionConfirmed:false,nextWave:"W2",
+        nextWaveStarted:false,completionConfirmed:false,
+        microVsParentStartTimeReviewPending:true,
+        timestampConflictNote:"MICRO_BLUE_W1_LOW_2026_11_05_15_20_AZ_PRECEDES_PARENT_REFERENCE_16_00_AZ",
+        fibMethod:"PENDING_W1_AND_W2_ENDING_ANCHORS",
+        levels:[],reviewReference:7322.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       // Owner's current Oct 21 working hypothesis is Minute W2 developing,
       // with an INTERNAL contracting triangle candidate. It is NOT a
       // completed triangle, a formally confirmed recount, or trade authority.
