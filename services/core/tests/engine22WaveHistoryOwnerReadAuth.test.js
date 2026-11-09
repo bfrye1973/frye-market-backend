@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {authorizedOwnerNodeRead,nodeHistoryPreflight} from "../routes/engine22WaveHistory.js";
+import {authorizedOwnerNodeRead,nodeHistoryPreflight} from "../logic/engine22/history/nodeHistoryOwnerAccessV1.js";
 
 const KEY="this-is-a-test-owner-key-32-characters-long";
 const settings={ENGINE2C_HISTORY_ENABLED:"true",ENGINE2C_HISTORY_LICENSED:"true",
