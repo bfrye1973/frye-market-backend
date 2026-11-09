@@ -4,7 +4,7 @@
 // No network, Schwab, writes, watermarks, restarts or replay.
 import fs from "node:fs";
 import crypto from "node:crypto";
-import {buildRealPerformanceSections} from "../logic/journal/realPerformanceSections.js";
+import {buildRealPerformanceSections,realCampaignPerformanceGroup} from "../logic/journal/realPerformanceSections.js";
 import {REAL_ACCOUNT_REGISTRY} from "../logic/journal/realAccountClassification.js";
 
 const transactions=Object.freeze([
@@ -46,8 +46,12 @@ if(trades){
  const affected=new Map();
  const rows=[];
  for(const [id,account,effect] of transactions){
+  // Count only execution events. Engine 10 also writes a synthetic
+  // TRADE_CLOSED lifecycle marker referencing the same broker transaction.
+  // That marker has fillQuantity=0 and is NOT a second execution.
+  const executionTypes=new Set(["REAL_ENTRY_FILL","REAL_SCALE_IN_FILL","REAL_PARTIAL_EXIT","REAL_FINAL_EXIT"]);
   const matches=real.flatMap(trade=>(trade.events||[])
-   .filter(e=>String(e.brokerTransactionId||"")===id)
+   .filter(e=>executionTypes.has(S(e.eventType))&&String(e.brokerTransactionId||"")===id)
    .map(event=>({trade,event})));
   const located=matches.filter(x=>
    S(x.trade.brokerAccountLabel||x.trade.realBroker?.brokerAccountLabel)===account);
@@ -151,9 +155,11 @@ if(trades){
   };
   campaignChecks.push(snapshot);
  }
- const historical=real.filter(t=>["SWING","INTRADAY"].includes(S(t.performanceGroup)));
+ // Pre-cutover legacy campaigns may have no explicit performanceGroup.
+ // Use the same authoritative Engine 10 selector rather than raw field.
+ const historical=real.filter(t=>["SWING","INTRADAY"].includes(S(realCampaignPerformanceGroup(t))));
  const historicalInvalid=historical.filter(t=>{
-  const group=S(t.performanceGroup),acct=S(t.brokerAccountLabel||t.realBroker?.brokerAccountLabel);
+  const group=S(realCampaignPerformanceGroup(t)),acct=S(t.brokerAccountLabel||t.realBroker?.brokerAccountLabel);
   return (group==="SWING"&&acct!=="SCHWAB_0747")||
    (group==="INTRADAY"&&acct!=="SCHWAB_6380");
  });
