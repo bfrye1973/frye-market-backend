@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - engine29-move-v2-authority
+      - engine29-top-cards-live-fix
       - engine29-squeeze-v2-prod-sync
       - engine29-recent-impulse-context
       - engine29-bigger-picture-v2-engine25
