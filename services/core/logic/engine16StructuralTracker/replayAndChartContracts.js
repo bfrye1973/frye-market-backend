@@ -47,8 +47,9 @@ export function replayEngine11Research({input,pivotStrength=1,completionPolicy,m
     pivotStrength,completionPolicy,maxCandidateAgeBars});
   return {...replay,inputSource:input.source,sourceFingerprint:input.sourceFingerprint,
     evidenceClockAuthority:input.evidenceClockAuthority,
-    historicallyVerified:input.evidenceClockAuthority==="CALLER_ATTESTED" &&
-      Boolean(input.sourceFingerprint),
+    historicallyVerified:false,
+    inputAttested:input.evidenceClockAuthority==="CALLER_ATTESTED",
+    sourceIntegrityStatus:"UNVERIFIED_BY_ENGINE16",
     replayMode:input.mode};
 }
 // Read-only Engine22 journal view of observed selected degree models.
