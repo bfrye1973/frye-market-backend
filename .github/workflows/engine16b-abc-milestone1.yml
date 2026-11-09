@@ -1,0 +1,19 @@
+name: Engine16B ABC Milestone 1 isolated tests
+on:
+  push:
+    branches:
+      - research/engine16b-abc-milestone1
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run Engine 16 prototype and Milestone 1 Node tests
+        run: node --test tests/engine16StructuralTracker.test.js tests/engine16AbcMilestone1.test.js
