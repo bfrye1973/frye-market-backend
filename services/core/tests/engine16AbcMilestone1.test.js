@@ -95,3 +95,57 @@ test("no trade capabilities, outputs are research-only",()=>{
   assert.equal(s.noPermissionCreated,true);
   assert.equal("orders" in s,false);assert.equal("size" in s,false);
 });
+
+test("C? knownAt is first actually reversing successor, not preceding nonreversal",()=>{
+  const sequence=[...bars.slice(0,8),mk(8,[123,134,116,125]),mk(9,[125,133,119,121])];
+  const first=computeAbcMilestone1(base(sequence.slice(0,9)));
+  const second=computeAbcMilestone1(base(sequence));
+  const before=abc(first).find(c=>c.cExtreme?.time===bars[7].time);
+  const after=abc(second).find(c=>c.candidateId===before?.candidateId);
+  assert.ok(before && after);
+  assert.equal(before.state,"C_DEVELOPING");
+  assert.equal(after.state,"C_COMPLETION_CANDIDATE");
+  assert.equal(after.cEndpointProposal.time,bars[7].time);
+  assert.equal(after.cEndpointProposal.knownAt,sequence[9].knownAt);
+  assert.equal(after.cEndpointProposal.reversalEvidenceId,sequence[9].time+":C_REVERSAL");
+  assert.notEqual(after.cEndpointProposal.knownAt,sequence[8].knownAt);
+});
+test("forming candle contributes only provisional C price and wick before close",()=>{
+  const prior=computeAbcMilestone1(base(bars.slice(0,7)));
+  const forming={...bars[7],knownAt:new Date(Date.parse(bars[7].time)+30000).toISOString(),
+    closed:false};
+  const s=computeAbcMilestone1(base([...bars.slice(0,7),forming]));
+  const old=abc(prior)[0],next=abc(s).find(c=>c.candidateId===old.candidateId);
+  assert.ok(next);
+  assert.equal(next.cExtreme.price,forming.high);
+  assert.equal(next.cExtreme.knownAt,forming.knownAt);
+  assert.equal(next.state,"C_DEVELOPING");
+  assert.deepEqual(s.pivots,prior.pivots);
+  assert.ok(Date.parse(forming.knownAt)<Date.parse(forming.closeAt));
+  const exploratory=computeAbcMilestone1(base([...bars.slice(0,7),forming],{
+    completionPolicy:{requireLaterReversal:false}
+  }));
+  const q=abc(exploratory).find(c=>c.candidateId===old.candidateId);
+  assert.equal(q.state,"C_COMPLETION_CANDIDATE");
+  assert.equal(q.cEndpointProposal.knownAt,forming.knownAt);
+  assert.equal(q.childEvidence,"UNKNOWN");
+});
+test("closed candle cannot be known before its close; tick inputs must be finite",()=>{
+  const invalid={...bars[7],knownAt:new Date(Date.parse(bars[7].time)+30000).toISOString()};
+  assert.throws(()=>computeAbcMilestone1(base([...bars.slice(0,7),invalid])),/BAR_CLOCK_ORDER_INVALID/);
+  assert.throws(()=>computeAbcMilestone1(base(bars.slice(0,7),{tickSize:Infinity})),/INVALID_PIVOT_OPTIONS/);
+  assert.throws(()=>projectCFromB({start:{id:"0",price:100},A:{id:"A",price:110},
+    B:{id:"B",price:105},direction:"UP",priceBasis:"ES",tickSize:Infinity}),/INVALID_C_MODEL_INPUT/);
+});
+test("candidate aging emits RETIRED and preserves immutable older snapshots across restarts",()=>{
+  const opts={maxCandidateAgeBars:2};
+  const replay=replayAbcMilestone1(base(bars,opts));
+  const older=replayAbcMilestone1(base(bars.slice(0,7),opts));
+  assert.ok(older.snapshots.at(-1).candidates.some(x=>x.scenarioType==="ABC_B_TO_C"));
+  assert.ok(replay.events.some(e=>e.reason==="RETIRED" && e.state==="RETIRED"));
+  assert.deepEqual(replay.snapshots.slice(0,older.snapshots.length),older.snapshots);
+  assert.deepEqual(replay.events.slice(0,older.events.length),older.events);
+  assert.deepEqual(replay,replayAbcMilestone1(base(bars,opts)));
+  const retiredIds=new Set(replay.events.filter(e=>e.reason==="RETIRED").map(e=>e.candidateId));
+  assert.ok([...retiredIds].some(id=>!replay.snapshots.at(-1).candidates.some(c=>c.candidateId===id)));
+});
