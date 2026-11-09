@@ -34,6 +34,8 @@ test("actual Engine22 selected seven-degree publication feeds the existing Engin
 test("production Strategy snapshot integration supplies nodeEvents to journal, behind explicit release flag",()=>{
  const source=readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
  assert.match(source,/ENGINE22_WAVE_HISTORY_ENABLED==="true"/);
- assert.match(source,/const nodeEvents=collectExistingOwnerNodesV1\(/);
+ assert.match(source,/const originalSourceEvents=collectExistingOwnerNodesV1\\(/);
+ assert.match(source,/const publishedWorkingEvents=collectPublishedWorkingNodeEventsV1\\(/);
+ assert.match(source,/const nodeEvents=\\[\\.\\.\\.originalSourceEvents,\\.\\.\\.publishedWorkingEvents\\]/);
  assert.match(source,/appendWaveHistoryObservation\(\{directory,observation,nodeEvents\}\)/);
 });
