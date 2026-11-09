@@ -887,6 +887,59 @@ export function applyOwnerPriceTouchesV1({
           touchEvidence:l.touchEvidence}]));
     }
   }
+  // Owner Nov 9 Minor W2-complete research W3 extensions. Use upward prices
+  // only AFTER the owner W2 ending low; preserve old Minor W2 touches.
+  const minorW3=root.degrees?.minor?.ownerMinorW3Nov9Research;
+  if(minorW3?.version==="engine22.minorW3Nov9Research.v1" &&
+     minorW3.selectionStatus==="RESEARCH_ONLY" && Array.isArray(minorW3.levels)){
+    const start=Date.parse(minorW3.anchors?.w2EndingAtUtc);
+    if(Number.isFinite(start)){
+      const id=JSON.stringify(["minor","ownerMinorW3Nov9Research",
+        minorW3.version,minorW3.anchors,minorW3.levels.map(l=>[l.key,l.price])]);
+      const previous=previousWavelength?.degrees?.minor?.ownerMinorW3Nov9Research;
+      const same=previous?.version===minorW3.version &&
+        previous.anchors?.w1Low===minorW3.anchors.w1Low &&
+        previous.anchors?.w1High===minorW3.anchors.w1High &&
+        previous.anchors?.w2EndingLow===minorW3.anchors.w2EndingLow;
+      const past=disk[id]||{},observed=[];
+      const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+      const quote=finite(currentPrice);
+      const prevPrice=same?finite(previousWavelength?.currentPrice):null;
+      if(now>=start && quote!==null)
+        observed.push({high:prevPrice===null?quote:Math.max(quote,prevPrice),
+          source:"ES_CURRENT_PRICE",time:new Date(now).toISOString(),verified:false});
+      for(const bar of Array.isArray(bars10m)?bars10m:[]){
+        const t=Number(bar?.time),low=finite(bar?.low),high=finite(bar?.high);
+        if(!Number.isSafeInteger(t)||t<=0||low===null||high===null||low>high||
+           t*1000<start||t*1000+600000>now)continue;
+        observed.push({high,source:"ES_10M_COMPLETED_OHLC",
+          time:new Date(t*1000).toISOString(),
+          verified:minorW3.priceBasisReconciliation==="VERIFIED"});
+      }
+      minorW3.levels=minorW3.levels.map(level=>{
+        const old=past[level.key]||(same?previous.levels?.find(l=>
+          l.key===level.key && l.price===level.price):null);
+        const keep=old?.status==="TOUCHED"&&old.price===level.price;
+        const hit=keep?null:observed.find(o=>o.high>=level.price);
+        const source=keep?old.touchEvidenceType:hit?.source;
+        const evidence=keep?old.touchEvidence:hit?{
+          verified:hit.verified,
+          evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?
+            "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+          modelPriceBasisVerified:minorW3.priceBasisReconciliation==="VERIFIED",
+        }:null;
+        return {...level,status:keep||hit?"TOUCHED":"WATCH",
+          touchEvidenceAvailable:Boolean(keep||hit),
+          touchEvidenceType:source||null,
+          touchedAt:keep?old.touchedAt||null:hit?.time||null,
+          touchEvidence:evidence||null};
+      });
+      disk[id]=Object.fromEntries(minorW3.levels.filter(l=>l.status==="TOUCHED")
+        .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+          touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+          touchEvidence:l.touchEvidence}]));
+    }
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }

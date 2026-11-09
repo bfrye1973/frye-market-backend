@@ -991,6 +991,43 @@ export function buildCurrentWavelength({
       lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
     },
     minor: {
+      // Nov 9 owner-marked Minor W2 completion / W3 UP developing research count.
+      // Uses the Nov 5 16:00 AZ 7322.25 candidate low that the owner selected
+      // as the W2 ending anchor; candle contract basis remains unverified.
+      // Separate model keeps earlier W2 retracements and canonical Minor W5 intact.
+      ownerMinorW3Nov9Research:{
+        version:"engine22.minorW3Nov9Research.v1",degree:"minor",
+        selectionStatus:"RESEARCH_ONLY",activeWave:"W3",direction:"UP",
+        stage:"DEVELOPING_OWNER_WORKING_COUNT",
+        parentDegree:"intermediate",parentWave:"W3",
+        w2CompletionStatus:"OWNER_MARKED_COMPLETE",
+        w2CompletionConfirmedByOwner:true,
+        w3StartStatus:"OWNER_WORKING_W3_UP_DEVELOPING",
+        anchors:{
+          w1Low:6485.00,w1LowLocalTime:"2026-04-30 17:00 AZ",
+          w1High:7901.75,w1HighLocalTime:"2026-08-14 03:00 AZ",
+          w1Length:1416.75,
+          w2EndingLow:7322.25,w2EndingLocalTime:"2026-11-05 16:00 AZ",
+          w2EndingAtUtc:"2026-11-05T23:00:00Z",
+          ownerApprovalReference:"OWNER_MINOR_W2_COMPLETE_W3_UP_20261109",
+          originalApproximateW2Low:7325.00,
+          provenance:"OWNER_20261109_MINOR_W2_COMPLETE_WITH_NOV5_MINUTE_C_OBSERVED_PIVOT",
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7322.25+(7901.75-6485.00)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MINOR_W3_UP_EXTENSION",
+        })),
+        structuralReference:7322.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        canonicalMinorW5Unchanged:true,
+        olderW2RetracementLevelsPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       // Owner-approved CARD RESEARCH display, not a live count promotion.
       // The current Minor W5 canonical data and touch history remain below.
       ownerMinorW2Research:{
