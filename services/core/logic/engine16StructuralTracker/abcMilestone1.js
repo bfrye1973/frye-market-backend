@@ -14,7 +14,7 @@ function normalizeBars(bars, asOf) {
     if (!bar || !iso(bar.time) || !iso(bar.closeAt) || !iso(bar.knownAt))
       throw new Error("BAR_CLOCKS_REQUIRED");
     const at = Date.parse(bar.time), closeAt = Date.parse(bar.closeAt), known = Date.parse(bar.knownAt);
-    if (at <= previousTime || known < previousKnown || closeAt < at || known < at || (bar.closed === true && known < closeAt)
+    if (at <= previousTime || known < previousKnown || closeAt < at || known < at || (bar.closed === true && known < closeAt))
       throw new Error("BAR_CLOCK_ORDER_INVALID");
     previousTime = at; previousKnown = known;
     for (const field of ["open","high","low","close"])
