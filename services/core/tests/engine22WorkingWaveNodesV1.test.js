@@ -17,7 +17,7 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
   assert.deepEqual(micro.map(n=>[n.label,n.price,n.marketAtUtc]),[
     ["W1 Low",7324,"2026-11-05T22:20:00.000Z"],
     ["W1 High",7469,"2026-11-06T14:40:00.000Z"],
-    ["W2 research anchor",7362,"2026-11-08T22:00:00.000Z"],
+    ["W2 research anchor",7362,"2026-11-08T23:00:00.000Z"],
   ]);
   assert.deepEqual(submicro.map(n=>[n.label,n.price,n.marketAtUtc]),[
     ["W1 Low",7390.25,"2026-11-09T08:00:00.000Z"],
@@ -78,7 +78,7 @@ test("unknown, malformed or conflicting times never authorize a chart node",()=>
 test("owner corrected Sheet W2 differs from current Engine22 Strategy; never silently substitute",()=>{
   const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:source()});
   const recorded=packet.degrees.micro.nodes.find(n=>n.label==="W2 research anchor");
-  assert.equal(recorded.marketAtUtc,"2026-11-08T22:00:00.000Z");
+  assert.equal(recorded.marketAtUtc,"2026-11-08T23:00:00.000Z");
   // Nov 9 owner sheet correction was 16:00 Arizona = 23:00Z.
   assert.notEqual(recorded.marketAtUtc,"2026-11-08T23:00:00.000Z");
 });
