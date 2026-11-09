@@ -1,3 +1,4 @@
+import engine22WaveHistoryRouter,{nodeHistoryPreflight} from "./routes/engine22WaveHistory.js";
 import engine27MicroAlignmentHistoryRouter from "./routes/engine27MicroAlignmentHistory.js";
 // services/core/server.js
 // Backend-1 (Core API) — Express entry (ESM)
@@ -100,6 +101,10 @@ app.disable("x-powered-by");
 app.set("etag", false);
 app.use(express.json({ limit: "1mb" }));
 
+// Private Engine22 node preflight before generic CORS middleware.
+app.options("/api/engine22/wave-history/nodes",nodeHistoryPreflight);
+app.options("/api/engine22/wave-history/nodes/current",nodeHistoryPreflight);
+
 // --- CORS ---
 app.use((req, res, next) => {
   const origin = req.headers.origin;
@@ -160,6 +165,7 @@ app.get("/", (_req, res) => {
 app.get("/engine2c-private-history/page",makeEngine2cResearchRoute());
 
 // --- API routes ---
+app.use("/api/engine22/wave-history",engine22WaveHistoryRouter);
 app.use("/api/v1/ohlc", ohlcRouter);
 app.use("/api/v1/futures/ohlc", futuresOhlcRouter);
 app.use("/api/sectorcards-10m", sectorcards10mRouter);

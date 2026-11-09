@@ -1,0 +1,28 @@
+name: Engine22 Working Wave Node Snapshot
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WaveStrategy.js'
+      - 'services/core/tests/engine22WorkingWaveNodesV1.test.js'
+      - '.github/workflows/engine22-working-wave-nodes.yml'
+jobs:
+  verify-wave-node-snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js
+          node --check services/core/logic/engine22/wave/buildEngine22WaveStrategy.js
+      - name: Read-only Micro/Submicro anchor publication contract
+        run: node --test services/core/tests/engine22WorkingWaveNodesV1.test.js
+      - name: Existing Engine22 no-count-promotion regression
+        run: node --test services/core/tests/engine22MicroSubmicroRedegreeNov9.test.js services/core/tests/engine22SubmicroW3Nov9Research.test.js

@@ -20,7 +20,9 @@ test("Micro card new degree: formerly-blue W1/W2 exact owner anchors and fibs",(
  assert.deepEqual([m.anchors.w1Low,m.anchors.w1High,m.anchors.w2Low],[7324,7469,7362]);
  assert.equal(m.anchors.w1LowLocalTime,"2026-11-05 15:20 AZ");
  assert.equal(m.anchors.w1HighLocalTime,"2026-11-06 07:40 AZ");
- assert.equal(m.anchors.w2LowLocalTime,"2026-11-08 15:00 AZ");
+ assert.equal(m.anchors.w2LowLocalTime,"2026-11-08 16:00 AZ");
+ assert.equal(m.anchors.w2LowAtUtc,"2026-11-08T23:00:00Z");
+ assert.equal(m.anchors.priorAnchorRevision.w2LowLocalTime,"2026-11-08 15:00 AZ");
  assert.deepEqual(m.levels.map(l=>l.price),[7451.5,7507,7546.5,7596.5,7652,7741.5]);
  assert.equal(m.activeWave,"W3");
  assert.equal(m.completionConfirmed,false);
