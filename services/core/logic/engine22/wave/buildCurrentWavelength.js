@@ -571,6 +571,41 @@ export function buildCurrentWavelength({
   };
   const degrees = {
     submicro:{
+      // Nov 9 owner-supplied Submicro W1/W2 anchors in existing Google Sheet.
+      // Research presentation only: do not replace owner-selected Submicro C,
+      // assert W3 has begun, or rewrite the older ABC Fib/touch history.
+      ownerSubmicroW3Nov9Research:{
+        version:"engine22.submicroW3Nov9Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
+        parentDegree:"micro",parentWave:"W2_RESEARCH",
+        anchors:{
+          w1Low:7324.00,w1LowLocalTime:"2026-11-05 15:20 AZ",
+          w1LowAtUtc:"2026-11-05T22:20:00Z",
+          w1High:7469.00,w1HighLocalTime:"2026-11-06 07:40 AZ",
+          w1HighAtUtc:"2026-11-06T14:40:00Z",
+          w1Length:145.00,
+          w2Low:7362.00,w2LowLocalTime:"2026-11-08 15:00 AZ",
+          w2LowAtUtc:"2026-11-08T22:00:00Z",
+          w2CompletionConfirmed:false,w3StartConfirmed:false,
+          provenance:"OWNER_SUBMICRO_SHEET_W1_W2_20261109",
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7362+(7469-7324)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7324.00,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        historicalAbcModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
       // Owner Nov 6 ABC within the proposed Micro W2 — research card only.
       ownerSubmicroNov6AbcResearch:{
         version:"engine22.submicroNov6AbcResearch.v1",
