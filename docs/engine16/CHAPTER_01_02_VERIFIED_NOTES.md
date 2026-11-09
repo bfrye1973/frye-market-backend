@@ -1,3 +1,9 @@
+> **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
+
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
+> Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
+
 # Engine 16 — Verified Chapter Study Notes (incremental; NOT COMPLETE)
 
 Source: Gorman & Kennedy, *Visual Guide to Elliott Wave Trading*. Notes refer to **printed book page numbers** where visible; PDF page numbers may differ. Only the cited pages/figures below were read closely for this initial record. Additional pages are queued in `CHAPTER_COMPLETION_STANDARD.md`.
@@ -40,3 +46,33 @@ Source: Gorman & Kennedy, *Visual Guide to Elliott Wave Trading*. Notes refer to
 
 ## Important distinction
 The source examples are a mixture of method, illustrative theory and trading choices. None of the above constitute owner-approved ES wave counts or fully validated implementation tests. Marking the chapters COMPLETE requires covering *all* scanned pages and case studies, not just these examples.
+
+## 2026-11-08 expanded source review and explicit corrections
+
+All 8 Chapter 1 and 23 Chapter 2 supplied PDF pages have now been visually inspected, including duplicate and partial scans. The detailed records cover 11 supplied Chapter 1 and 38 supplied Chapter 2 figures. This does **not** establish complete printed-chapter coverage. Chapter 1 lacks printed pp.12-13. Chapter 2 lacks pp.30-32,56-57,66-67, has an incomplete p.69, and its ending is unverified. Chapter 3 remains blocked. Manager approval is pending; 28 replay checks are proposed specifications, not implemented or executed tests. No production code, Engine 22 counts, merge or deployment changed.
+
+The preceding notes remain an initial record, not the current comprehensive available-page casebook. Correct the following before relying on them for code:
+
+1. TECH Fig 2.6/p.27 trigger is **69.28**, not 69.29. Fig 2.8 later revises it to 69.50; retain dated versions.
+2. Chapter 1 p.7 describes where wave 4 **ends** relative to wave 1 territory. The earlier blanket 'enters' wording is stronger than the supplied wording. Endpoint versus intrawave wick and equality policy require M-02 review; neither policy is approved here.
+3. Fig 1.4/p.6 illustrates **first-wave extension**, alongside the third/fifth extension illustrations. Do not omit it from the research taxonomy.
+4. TECH's internal expanded-flat rebound is inside a larger B/2 scenario. Its internal a-b-c must not be confused with larger A/1 -> B/2 -> projected C/3.
+5. A 5-3-5 or 3-3-5 pattern requires child structure evidence. Four outer pivots do not establish either subtype. The current abcCandidates filter excludes expanded-flat B overshoots and must remain unvalidated.
+6. CAT Fig 2.4's $3,750 'profit' annotation appears to be gross proceeds; net before costs from the shown option values is $2,890 (~336.05%). AUD Fig 2.22 reports .9354 exit while retaining a .9230 stop label; protection chronology is unresolved. Neither discrepancy should be silently converted into training truth.
+
+- [Source page index](SOURCE_PAGE_INDEX.md)
+- [Chapter 1 detailed study](CHAPTER_01_DETAILED_STUDY.md)
+- [Chapter 2 chart casebook](CHAPTER_02_CASEBOOK.md)
+- [Rule registry](RULE_REGISTRY_CH01_CH02.md)
+- [Implementation and 28 replay specifications](IMPLEMENTATION_REPLAY_CH01_CH02.md)
+- [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
+
+All source-derived statements are separated from engineering proposals. Missing pages prevent completion of regular/running-flat, triangle/diagonal and combination specifications. Manager decisions and actual implementation/test evidence remain pending.
+
+## Supplemental verified findings - current
+
+New supplied pages and all new figure records are preserved in [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md). Chapter1's pp12-13 gap is closed; its zigzag/flat/triangle confirmation examples are extracted. Silver charts show12contracts exiting at698, resolving the prior missing-two exit and reconciling the reported11300 at the example's historical arithmetic; earlier narrative quantity10conflicts and remains attributed. Coffee source now includes reassessment and full conclusion throughp75, keeping the first failed setup and second hypothetical setup separate. Only Chapter2pp30-32 remain source-missing. Numerical/structural manager decisions and actual test implementation/execution are still pending.
+
+## Owner-accepted source scope and finalized handoff
+
+On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.

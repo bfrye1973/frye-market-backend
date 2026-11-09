@@ -1,3 +1,9 @@
+> **Final research status, owner decision 2026-11-08:** The Chapter 1-2 research deliverable is FINISHED and ready for manager review. The owner accepted omission of Chapter 2 pp.30-32/Figs2.9-2.11; those pages remain uninspected and are no longer an open source request. Do not request them again to finish this assignment. All 39 supplied PDF pages and 62 unique figures are reviewed; 36 replay specifications are documented, not implemented/executed. Manager predicate approval and production authorization remain separate. See [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) for the current scope, deliverable index and next handoff. Earlier incomplete/source-request statuses below are historical and superseded.
+
+> **Current source status after supplemental scan, 2026-11-08:** Chapter 1 printed pp.3-17 are fully supplied and visually reviewed. Chapter 2 now ends at p.75 and lacks only printed pp.30-32 (TECH Figs2.9-2.11). Combined review:39 PDF pages,62 unique figures,36 proposed replay specifications. Manager review remains pending; neither chapter is COMPLETE; Chapter3 stays blocked. Earlier missing-page references below describe the first scan set and are superseded by [SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md).
+
+> Current review status: see the 2026-11-08 update at the end of this document and SOURCE_PAGE_INDEX.md. Earlier progress notes below are retained as history; neither chapter is complete.
+
 # Engine 16 — Elliott Wave Study Ledger
 
 **Purpose:** Persistent training record for the replacement Engine 16 live ABC and Elliott Wave structural tracker. This is a *study ledger*, not authority to deploy or alter Engine 22 approved counts.
@@ -48,3 +54,26 @@ For each page/figure record:
 - Chapter 2 comprehensive study: NOT COMPLETE
 - Manager approval: NOT REQUESTED for extracted rules
 - Production authorization: NOT GRANTED
+
+## 2026-11-08 source-study update (supersedes earlier progress rows)
+
+All 8 Chapter 1 and 23 Chapter 2 supplied PDF pages have now been visually inspected, including duplicate and partial scans. The detailed records cover 11 supplied Chapter 1 and 38 supplied Chapter 2 figures. This does **not** establish complete printed-chapter coverage. Chapter 1 lacks printed pp.12-13. Chapter 2 lacks pp.30-32,56-57,66-67, has an incomplete p.69, and its ending is unverified. Chapter 3 remains blocked. Manager approval is pending; 28 replay checks are proposed specifications, not implemented or executed tests. No production code, Engine 22 counts, merge or deployment changed.
+
+The original PARTIAL inventory and preliminary candidates above are retained as a historical first-pass record. The current available-page extraction, corrections and approval queue are linked below. No scan or copied diagram is committed.
+
+- [Source page index](SOURCE_PAGE_INDEX.md)
+- [Chapter 1 detailed study](CHAPTER_01_DETAILED_STUDY.md)
+- [Chapter 2 chart casebook](CHAPTER_02_CASEBOOK.md)
+- [Rule registry](RULE_REGISTRY_CH01_CH02.md)
+- [Implementation and 28 replay specifications](IMPLEMENTATION_REPLAY_CH01_CH02.md)
+- [Manager review / missing sources](MANAGER_REVIEW_CH01_CH02.md)
+
+Source fingerprints and exact PDF-to-book-page mappings are in SOURCE_PAGE_INDEX.md. Stable earlier C1 rule IDs remain; C2-001..004 crosswalks appear in the new registry. Next work is missing-page acquisition, source reconciliation, manager decisions, then approved programming and actual replay evidence. Neither chapter is COMPLETE.
+
+## Supplemental study progress - current
+
+[SUPPLEMENTAL_SOURCE_REVIEW.md](SUPPLEMENTAL_SOURCE_REVIEW.md) records8 additional supplied PDF pages,13 new unique figures, closed Chapter1 source gap, silver quantity/outcome reconciliation and coffee conclusion. Total39 PDF pages/62figures/36 proposed replay checks. Chapter1: sourceREAD and draft extraction complete, manager review pending. Chapter2: only printed30-32/Figs2.9-2.11 missing; ending75verified. No chapter COMPLETE, no Chapter3, no implementation/test execution or production change. Earlier source/progress rows are historical and superseded by this update.
+
+## Owner-accepted source scope and finalized handoff
+
+On 2026-11-08 the owner closed the Chapter 2 pp.30-32 source request and directed completion using available material. Those pages and Figs2.9-2.11 remain unverified; do not fabricate their content or use them as fixtures. The available-source research deliverable is finished. [RESEARCH_HANDOFF_CH01_CH02.md](RESEARCH_HANDOFF_CH01_CH02.md) is the final index/status. Manager rule decisions and implemented/executed tests remain pending; no automatic Chapter3, merge or deployment authorization follows.
