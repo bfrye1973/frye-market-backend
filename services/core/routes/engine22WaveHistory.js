@@ -9,6 +9,44 @@ import {pageEngine22NodeHistory,latestEngine22NodeHistory} from "../logic/engine
 const router=express.Router();
 const journalDirectory=()=>process.env.ENGINE22_WAVE_HISTORY_DURABLE_DIR || "/var/data/replay/engine22-wave-history";
 const hash=x=>createHash("sha256").update(x).digest();
+const CHART_ORIGIN="https://frye-dashboard.onrender.com";
+const restrictedNodePaths=new Set(["/nodes","/nodes/current"]);
+// Production frontend is STATIC on Render. Reuse the existing Engine2C
+// licensed owner credential for READ ONLY node endpoints, never expose
+// ENGINE22_WAVE_HISTORY_READ_TOKEN in browser JavaScript.
+export function authorizedOwnerNodeRead(req, settings=process.env){
+ if(req.method!=="GET"||!restrictedNodePaths.has(req.path)||
+    settings.ENGINE2C_HISTORY_ENABLED!=="true"||
+    settings.ENGINE2C_HISTORY_LICENSED!=="true")return false;
+ const origin=req.get("origin");
+ if(origin&&origin!==CHART_ORIGIN)return false;
+ const expected=settings.ENGINE2C_HISTORY_OWNER_KEY;
+ const provided=req.get("x-engine2c-access");
+ if(typeof expected!=="string"||expected.length<32||
+    typeof provided!=="string"||provided.length<16||provided.length>2048)return false;
+ return timingSafeEqual(hash(provided),hash(expected));
+}
+function setRestrictedNodeCors(req,res){
+ const origin=req.get("origin");
+ res.set("Vary","Origin, Access-Control-Request-Headers");
+ res.removeHeader("Access-Control-Allow-Credentials");
+ if(origin===CHART_ORIGIN){
+  res.set("Access-Control-Allow-Origin",CHART_ORIGIN);
+  res.set("Access-Control-Allow-Headers","Accept, X-Engine2C-Access");
+  res.set("Access-Control-Allow-Methods","GET, OPTIONS");
+ }else{
+  res.removeHeader("Access-Control-Allow-Origin");
+  res.removeHeader("Access-Control-Allow-Headers");
+  res.removeHeader("Access-Control-Allow-Methods");
+ }
+}
+// The caller mounts OPTIONS before the preexisting broad server CORS handler.
+export function nodeHistoryPreflight(req,res){
+ setRestrictedNodeCors(req,res);
+ res.set("Cache-Control","no-store");
+ return res.status(204).end();
+}
+
 function authorized(req){
  const secret=process.env.ENGINE22_WAVE_HISTORY_READ_TOKEN;
  if(typeof secret!=="string"||secret.length<32)return false;
@@ -20,7 +58,10 @@ function authorized(req){
 }
 router.use((req,res,next)=>{
  res.set("Cache-Control","no-store");
- if(!authorized(req))return res.status(401).json({available:false,reason:"ENGINE22_HISTORY_UNAUTHORIZED"});
+ // Override generic application CORS on ONLY the private node routes.
+ if(restrictedNodePaths.has(req.path))setRestrictedNodeCors(req,res);
+ if(!authorized(req)&&!authorizedOwnerNodeRead(req))
+  return res.status(401).json({available:false,reason:"ENGINE22_HISTORY_UNAUTHORIZED"});
  if(!verifyEngine22HistoryMount({directory:journalDirectory()}).ok)return res.status(503).json({available:false,reason:"ENGINE22_HISTORY_PERSISTENT_MOUNT_UNVERIFIED"});
  next();
 });
