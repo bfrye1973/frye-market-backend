@@ -286,3 +286,71 @@ test("parent reversal emits PARENT_MOVE_CHANGE", () => {
   assert.ok(parentEvent);
   assert.equal(parentEvent.direction, "DOWN");
 });
+
+
+test("1H de-escalates sticky CAUTION to RECOVERING when upside parent is broadly confirmed and current pressure is positive", () => {
+  const wrap = (state) => ({ tactical: { state } });
+  const groupBundle = {
+    groups: {
+      headlineIndex: wrap("FORMING"),
+      breadth: wrap("FORMING"),
+      leadership: wrap("HEALTHY"),
+      credit: wrap("HEALTHY"),
+      ratesDuration: wrap("HEALTHY"),
+      energyInflation: wrap("HEALTHY"),
+      volatility: wrap("HEALTHY"),
+      financialConditions: wrap("HEALTHY"),
+    },
+  };
+
+  const result = resolveEngine29TacticalState(groupBundle, {
+    moveCharacter: "UPSIDE_MOVE_ACTIVE",
+    direction: "UP",
+    oneHourContext: {
+      esOneHourStructureState: "WARNING",
+    },
+    underlyingPressure: {
+      state: "POSITIVE",
+    },
+    broadConfirmation: {
+      broadConfirmed: true,
+    },
+  });
+
+  assert.equal(result.state, "RECOVERING");
+  assert.equal(result.parentMoveState, "UPSIDE_MOVE_ACTIVE");
+  assert.equal(result.parentMoveDirection, "UP");
+  assert.equal(result.broadConfirmation, true);
+});
+
+test("1H does not de-escalate CAUTION when upside parent lacks broad confirmation", () => {
+  const wrap = (state) => ({ tactical: { state } });
+  const groupBundle = {
+    groups: {
+      headlineIndex: wrap("FORMING"),
+      breadth: wrap("FORMING"),
+      leadership: wrap("HEALTHY"),
+      credit: wrap("HEALTHY"),
+      ratesDuration: wrap("HEALTHY"),
+      energyInflation: wrap("HEALTHY"),
+      volatility: wrap("HEALTHY"),
+      financialConditions: wrap("HEALTHY"),
+    },
+  };
+
+  const result = resolveEngine29TacticalState(groupBundle, {
+    moveCharacter: "UPSIDE_MOVE_ACTIVE",
+    direction: "UP",
+    oneHourContext: {
+      esOneHourStructureState: "WARNING",
+    },
+    underlyingPressure: {
+      state: "POSITIVE",
+    },
+    broadConfirmation: {
+      broadConfirmed: false,
+    },
+  });
+
+  assert.equal(result.state, "CAUTION");
+});
