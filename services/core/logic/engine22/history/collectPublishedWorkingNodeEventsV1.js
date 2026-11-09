@@ -31,11 +31,14 @@ export function collectPublishedWorkingNodeEventsV1({directory,packet,publishedA
       throw Error("ENGINE22_WORKING_NODES_DEGREE_MISMATCH");
     for(const model of section.models){
       if(model.degree!==degree||!Array.isArray(model.anchors)||
+         (model.historicalAnchors!==undefined&&!Array.isArray(model.historicalAnchors))||
          model.scenarioStatus!=="RESEARCH_ONLY") throw Error("ENGINE22_WORKING_NODES_MODEL_INVALID");
-      for(const node of model.anchors){
+      // Historical owner source corrections are retained in the same durable
+      // journal, but never included in the current-degree chart node array.
+      for(const node of [...(model.historicalAnchors??[]),...model.anchors]){
         if(node.degree!==degree||!node.nodeId||!node.sourceRevision||
            !node.sourcePath||!node.anchorField||!tick(node.price)||
-           node.approvalStatus!=="RESEARCH"||node.plotAllowed!==false||
+           !["RESEARCH","SUPERSEDED"].includes(node.approvalStatus)||node.plotAllowed!==false||
            node.noExecution!==true||node.waveCompletionConfirmed!==false)
           throw Error("ENGINE22_WORKING_NODES_EVENT_UNSAFE");
         if(visited.has(node.nodeId))throw Error("ENGINE22_WORKING_NODES_DUPLICATE_NODE");
@@ -54,7 +57,8 @@ export function collectPublishedWorkingNodeEventsV1({directory,packet,publishedA
           sourceFingerprint:node.sourceRevision,
           priceBasisId:"UNVERIFIED_ES_CONTINUOUS",contractSymbol:"ES",
           marketAt:node.marketAtUtc??null,publishedAt,
-          price:node.price,approvalStatus:"RESEARCH",lifecycle:"DEVELOPING",
+          price:node.price,approvalStatus:node.approvalStatus,
+          lifecycle:node.approvalStatus==="SUPERSEDED"?"SUPERSEDED":"DEVELOPING",
           revision:nextRevision,supersedesEventId:old?.eventId??null,
           supersedesNodeId:null,
           sourcePresentationOnly:true,originalMarketUtc:node.marketAtUtc??null,
