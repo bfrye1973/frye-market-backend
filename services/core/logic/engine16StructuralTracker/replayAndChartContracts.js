@@ -105,3 +105,33 @@ export function buildEngine16ChartHistoryPack(replay,{index}={}) {
       .map(e=>({eventId:e.eventId,candidateId:e.candidateId,knownAt:e.knownAt,
         reason:e.reason,state:e.state})),historicalView:true};
 }
+
+// Current Engine22 node snapshot is usable ONLY from its independently captured time forward.
+// Not a substitute for Engine22's unavailable historical-as-of count service.
+export function inspectEngine22CurrentNodes(snapshot,{capturedAt,asOf,contract,priceBasis}={}) {
+  const unknown=reason=>({schema:"engine16.engine22CurrentRefs.v1",status:"UNKNOWN",
+    reason,capturedAt:capturedAt??null,asOf:asOf??null,degreeRefs:[],
+    readOnly:true,noExecution:true});
+  if(snapshot?.schema!=="engine22.chartNodeCurrent.v1"||snapshot.readOnly!==true||
+    !Array.isArray(snapshot.records)||!iso(capturedAt)||!iso(asOf)||
+    !contract||!priceBasis)return unknown("SOURCE_CONTRACT_OR_CAPTURE_MISSING");
+  if(Date.parse(capturedAt)>Date.parse(asOf))return unknown("SOURCE_CAPTURE_AFTER_ASOF");
+  const records=snapshot.records.filter(n=>
+    n.approvalStatus==="OWNER_APPROVED" && n.lifecycle!=="SUPERSEDED" &&
+    n.lifecycle!=="RETIRED" && n.contractSymbol===contract && n.priceBasisId===priceBasis &&
+    iso(n.publishedAtUtc) && Date.parse(n.publishedAtUtc)<=Date.parse(capturedAt) &&
+    ["primary","intermediate","minor","minute","subminute","micro","submicro"].includes(n.degree) &&
+    typeof n.nodeId==="string" && n.nodeId.length>0 &&
+    Number.isFinite(n.esPrice) && iso(n.marketAtUtc));
+  return {schema:"engine16.engine22CurrentRefs.v1",
+    status:records.length?"CURRENT_CONTEXT_ONLY":"UNKNOWN",
+    reason:records.length?null:"NO_CAPTURED_APPROVED_MATCHING_NODES",
+    capturedAt,asOf,sourceSchema:snapshot.schema,sourceRevision:snapshot.latestRevision??null,
+    historicalAsOfSupported:false,degreeRefs:records.map(n=>({
+      nodeId:n.nodeId,degree:n.degree,parentWaveId:n.parentWaveId??null,
+      waveId:n.waveId??null,price:n.esPrice,marketAtUtc:n.marketAtUtc,
+      publishedAtUtc:n.publishedAtUtc,priceBasisId:n.priceBasisId,
+      contractSymbol:n.contractSymbol,sourceRevision:n.sourceRevision??null,
+      modelVersion:n.modelVersion??null,approvalStatus:n.approvalStatus
+    })),readOnly:true,noExecution:true};
+}
