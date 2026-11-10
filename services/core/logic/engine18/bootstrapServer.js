@@ -1,9 +1,26 @@
+import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
 // Engine 18 isolated Render bootstrap. No external data connections or execution.
 // The API key is injected only through Render's protected Environment settings.
 // No secret values are ever returned or logged here.
 import http from "node:http";
 const port = Number(process.env.PORT || 10000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error("ENGINE18_INVALID_PORT");
+let ironbeamDemoTest={status:"NOT_STARTED",readOnly:true};
+if(process.env.ENGINE18_IRONBEAM_DEMO_PROBE==="1") {
+  ironbeamDemoTest={status:"IN_PROGRESS",readOnly:true};
+  probeIronbeamV2Demo({
+    username:process.env.IRONBEAM_DEMO_USERNAME,
+    password:process.env.IRONBEAM_DEMO_PASSWORD,
+    apikey:process.env.IRONBEAM_DEMO_API_KEY
+  }).then(result=>{
+    ironbeamDemoTest={
+      status:result.connected?"AUTHENTICATED":"FAILED",
+      phase:result.phase,checks:result.checks||{},
+      liveEntitlementConfirmed:false,mboConfirmed:false,readOnly:true
+    };
+    console.log("Engine 18 Ironbeam demo probe completed:",ironbeamDemoTest.status,ironbeamDemoTest.phase);
+  }).catch(()=>{ironbeamDemoTest={status:"FAILED",phase:"INTERNAL",readOnly:true};});
+}
 const service = http.createServer((req,res) => {
   const pathname = new URL(req.url || "/", "http://localhost").pathname;
   res.setHeader("Cache-Control", "no-store");
@@ -21,6 +38,7 @@ const service = http.createServer((req,res) => {
     mode:"ISOLATED_BOOTSTRAP",
     tradingEnabled:false,
     liveMarketDataConnected:false,
+    ironbeamDemoTest,
     apiKeyConfigured:typeof process.env.DATABENTO_API_KEY==="string" &&
       process.env.DATABENTO_API_KEY.trim().length>0
   }));
