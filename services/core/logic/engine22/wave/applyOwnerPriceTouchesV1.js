@@ -418,8 +418,7 @@ export function applyOwnerPriceTouchesV1({
       const prior=historical[level.key] || (same?priorModel.levels?.find(l=>
         l.key===level.key&&l.price===level.price):null);
       const retained=prior?.status==="TOUCHED"&&prior?.price===level.price;
-      const hit=retained?null:observed.find(o=>
-        degree==="micro"?o.high>=level.price:o.low<=level.price);
+      const hit=retained?null:observed.find(o=>o.high>=level.price);
       return {...level,status:retained||hit?"TOUCHED":"WATCH",
         provisional:true,touchEvidenceAvailable:Boolean(retained||hit),
         touchEvidenceType:retained?prior.touchEvidenceType||"PREVIOUS_SNAPSHOT":hit?.source||null,
@@ -1050,7 +1049,8 @@ export function applyOwnerPriceTouchesV1({
       const prior=past[level.key]?.price===level.price?past[level.key]:
         same?old?.[field]?.find(x=>x.key===level.key&&x.price===level.price&&x.status==="TOUCHED"):null;
       const retained=prior?.status==="TOUCHED";
-      const hit=retained?null:observed.find(o=>o.high>=level.price);
+      const hit=retained?null:observed.find(o=>
+        degree==="micro"?o.high>=level.price:o.low<=level.price);
       const source=retained?prior.touchEvidenceType:(hit?.source||null);
       return {...level,status:retained||hit?"TOUCHED":"WATCH",
         provisional:true,touchEvidenceAvailable:Boolean(retained||hit),
