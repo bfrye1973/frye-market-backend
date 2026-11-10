@@ -17,7 +17,8 @@ function exactArizonaTime(raw){
   const date=new Date(m[1]+"T"+m[2]+":"+m[3]+":00-07:00");
   if(!Number.isFinite(date.getTime()))return null;
   // Check actual wall-clock roundtrip; invalid calendar dates cannot roll over.
-  if(date.toISOString().slice(0,10)!==new Date(Date.parse(m[1]+"T00:00:00Z")).toISOString().slice(0,10))return null;
+  const midnight=Date.parse(m[1]+"T00:00:00Z");
+  if(!Number.isFinite(midnight)||new Date(midnight).toISOString().slice(0,10)!==m[1])return null;
   return date.toISOString();
 }
 function parseSourceTime(raw){
