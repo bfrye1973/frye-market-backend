@@ -44,7 +44,10 @@ jobs:
             if(['primary','intermediate'].includes(degree)){
               console.log('SOURCE_DIAGNOSTIC',degree,'stateDegree',states?.[degree]?.degree,
                 'active',states?.[degree]?.active,'modelVersion',states?.[degree]?.version??'NONE',
-                'times',JSON.stringify(marks.map(([k,v])=>[k,String(v.time).slice(0,45)])));
+                'times',JSON.stringify(marks.map(([k,v])=>[k,String(v.time).slice(0,45)])),
+                'normalizedMarkKeys',JSON.stringify(Object.keys(states?.[degree]?.marks?.W1??{})),
+                'sourceMarkKeys',JSON.stringify(Object.keys(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1??{})),
+                'sourceTime',String(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.time??'NONE').slice(0,60));
             }
             console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'newValidNodes',proposedNodes.length,'timeTypes',JSON.stringify(seenTimeTypes),'status',section?.coverageStatus??'UNSPECIFIED');
           }
