@@ -13,7 +13,7 @@ export function startEngine18IronbeamLevel2Monitor({
 }={}){
  if(!username||!password||!apikey)throw Error("ENGINE18_DEMO_CREDENTIALS_REQUIRED");
  if(typeof WebSocketImpl!=="function")throw Error("ENGINE18_WEBSOCKET_NOT_AVAILABLE");
- const zoneReader=createEngine18Level2ZoneReader({symbol:SYMBOL,minObservations:3,
+ let zoneReader=createEngine18Level2ZoneReader({symbol:SYMBOL,minObservations:3,
    maxHistory:180,allowDelayedResearch:true});
  let stopped=false,ws=null,reconnectTimer=null,watchdog=null,generation=0;
  let lastMessageAt=0,backoff=initialRetryMs;
@@ -31,8 +31,12 @@ export function startEngine18IronbeamLevel2Monitor({
  const stopConnection=()=>{if(watchdog){clearInterval(watchdog);watchdog=null;}
    if(ws){try{ws.close();}catch{}ws=null;}stats.connected=false;};
  const schedule=(code)=>{
-   if(stopped)return;stats.state="RECONNECTING";stats.lastErrorCode=code;
-   stopConnection();stats.reconnects++;notify();
+   if(stopped||stats.state==="RECONNECTING")return;
+   ++generation; // Old close/error handlers cannot trigger another reconnect.
+   stats.state="RECONNECTING";stats.lastErrorCode=code;
+   stopConnection();
+   zoneReader=createEngine18Level2ZoneReader({symbol:SYMBOL,minObservations:3,maxHistory:180,allowDelayedResearch:true});
+   stats.reconnects++;notify();
    if(reconnectTimer)clearTimeout(reconnectTimer);
    reconnectTimer=setTimeout(()=>{reconnectTimer=null;connect();},backoff);
    backoff=Math.min(backoff*2,maxRetryMs);
