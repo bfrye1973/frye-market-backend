@@ -54,29 +54,10 @@ function makeModel({degree,modelVersion,sourcePath,selectionStatus,approvalRefer
     modelFingerprint:sha(anchors.map(n=>[n.nodeId,n.sourceRevision])),
     historicalAnchors:[],anchors};
 }
-// No Minute/Subminute node selection is authorized merely because a strategy
-// model includes research/Fibonacci anchor values. These degrees remain empty
-// until the Strategies card publishes explicit current chart-node evidence.
-const selectedModels=[];
-const read=(obj,path)=>path.split(".").reduce((v,key)=>v?.[key],obj);
-export function buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates}={}){
+// Minute and Subminute are intentionally empty. Do not turn displayed Fib or
+// scenario anchors into chart nodes without a new owner-authorized source.
+export function buildSelectedDegreeNodeModelsV1({degreeStates}={}){
   const models=[];
-  // Only the owner's actual current selection manifest may select models.
-  for(const rule of selectedModels){
-    const sel=ownerApprovedWorkingSelection.degrees?.[rule.degree];
-    const model=currentWavelength?.degrees?.[rule.degree]?.[sel?.key];
-    if(!sel?.key||!model||model.version!==sel.modelVersion||model.degree!==rule.degree)
-      continue;
-    const sourcePath="currentWavelength.degrees."+rule.degree+"."+sel.key;
-    const specs=rule.fields.map(([field,label,timeField])=>({
-      anchorField:field.replace(/\./g,"_"),sourceFieldPath:sourcePath+"."+field,
-      label,price:read(model,field),time:read(model,timeField)
-    }));
-    models.push(makeModel({degree:rule.degree,modelVersion:model.version,sourcePath,
-      selectionStatus:"OWNER_SELECTED_WORKING",
-      approvalReference:model.ownerApprovalReference??model.anchors?.provenance??ownerApprovedWorkingSelection.approvalReference,
-      specs}));
-  }
   // Higher degrees have canonical Engine22 degree-state selections. Only
   // source marks with a complete explicit timestamp pass validation.
   for(const degree of ["primary","intermediate","minor"]){
