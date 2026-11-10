@@ -8,6 +8,7 @@ import http from "node:http";
 const port = Number(process.env.PORT || 10000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error("ENGINE18_INVALID_PORT");
 let ironbeamLevel2Monitor=null;
+let lastMonitorLogAt=0;
 let ironbeamLevel2Status={state:"DISABLED",mode:"DEMO_RESEARCH",tradingEnabled:false};
 if(process.env.ENGINE18_IRONBEAM_LEVEL2_MONITOR==="1"){
  try{
@@ -15,7 +16,18 @@ if(process.env.ENGINE18_IRONBEAM_LEVEL2_MONITOR==="1"){
      username:process.env.IRONBEAM_DEMO_USERNAME,
      password:process.env.IRONBEAM_DEMO_PASSWORD,
      apikey:process.env.IRONBEAM_DEMO_API_KEY,
-     onStatus:s=>{ironbeamLevel2Status=s;}
+     onStatus:s=>{
+       ironbeamLevel2Status=s;
+       const now=Date.now();
+       if((s.frames?.d||0)>0 && now-lastMonitorLogAt>30000){
+         lastMonitorLogAt=now;
+         console.log("Engine 18 LEVEL2 MONITOR",JSON.stringify({state:s.state,
+           depthFrames:s.frames.d,tradeFrames:s.frames.tr,
+           zoneCount:s.zoneSummary?.zoneCount||0,
+           images:s.zoneSummary?.images||0,
+           reconnects:s.reconnects,displayOnly:true,level3:false}));
+       }
+     }
    });
    console.log("Engine 18 isolated demo Level 2 monitor started; no trading");
  }catch{
