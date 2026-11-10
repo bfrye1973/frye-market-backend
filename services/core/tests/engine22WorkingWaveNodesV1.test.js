@@ -28,7 +28,15 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));
   assert.ok([...micro,...submicro].every(n=>n.presentationAllowed===true));
   assert.equal(packet.degrees.primary.nodes.length,0);
-  assert.equal(packet.degrees.minute.nodes.length,0);
+  assert.deepEqual(packet.degrees.minute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
+    ["W1 Low",7419.5,"2026-07-30T19:00:00.000Z"],
+    ["W1 High",7908.75,"2026-08-13T16:00:00.000Z"],
+  ]);
+  assert.deepEqual(packet.degrees.subminute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
+    ["A starting high",7901,"2026-08-14T12:00:00.000Z"],
+    ["A ending wick low",7558.75,"2026-09-16T18:00:00.000Z"],
+  ]);
+  assert.ok(packet.degrees.minute.nodes.every(n=>n.ownerArizonaTime&&n.sourceFieldPath&&n.plotAllowed===false));
 });
 
 test("fingerprint remains unchanged on price/touch updates, changes on corrected anchor",()=>{
@@ -84,4 +92,32 @@ test("corrected owner Micro W2 and superseded old time remain distinguishable",(
   assert.equal(prior.w2LowAtUtc,"2026-11-08T22:00:00Z");
   assert.notEqual(recorded.marketAtUtc,prior.w2LowAtUtc.replace("Z",".000Z"));
 
+});
+
+
+test("higher canonical degree-state marks require exact source times, no invented anchors",()=>{
+ const wave=source();
+ const degrees={
+  primary:{degree:"primary",active:true,marks:{W1:{price:3200,time:"2020-04-02 08:00 AZ"},W2:{price:4306,time:"UNKNOWN"}}},
+  intermediate:{degree:"intermediate",active:true,marks:{W1:{price:5188.5,time:"2025-04-08T14:00:00Z"}}},
+  minor:{degree:"minor",active:true,marks:{W1:{price:6485,time:"2026-04-30 17:00 AZ"},W2:{price:7325,time:"UNKNOWN"}}}
+ };
+ const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:wave,degreeStates:degrees});
+ assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.label,n.marketAtUtc]),[["W1","2020-04-02T15:00:00.000Z"]]);
+ assert.equal(packet.degrees.intermediate.nodes.length,1);
+ assert.equal(packet.degrees.minor.nodes.length,1);
+ assert.equal(packet.degrees.minor.nodes.some(n=>n.label==="W2"),false);
+ assert.ok(packet.degrees.primary.nodes.every(n=>n.sourcePath==="degreeStates.primary"&&n.noExecution));
+});
+
+test("selected minute and subminute anchor corrections change fingerprint, not node IDs",()=>{
+ const wave=source();
+ const first=buildEngine22WorkingWaveNodesV1({currentWavelength:wave});
+ const revised=structuredClone(wave);
+ revised.degrees.minute.ownerMinuteW2Retracement.anchors.w1Low=7419.75;
+ const next=buildEngine22WorkingWaveNodesV1({currentWavelength:revised});
+ assert.notEqual(next.fingerprint,first.fingerprint);
+ assert.equal(next.degrees.minute.nodes[0].nodeId,first.degrees.minute.nodes[0].nodeId);
+ assert.notEqual(next.degrees.minute.nodes[0].sourceRevision,first.degrees.minute.nodes[0].sourceRevision);
+ assert.equal(first.degrees.minute.nodes[0].price,7419.5);
 });
