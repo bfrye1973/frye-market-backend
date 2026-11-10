@@ -1,3 +1,4 @@
+import {probeIronbeamV2DemoStream} from "./ironbeamV2DemoStreamProbe.js";
 import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
 // Engine 18 isolated Render bootstrap. No external data connections or execution.
 // The API key is injected only through Render's protected Environment settings.
@@ -5,6 +6,15 @@ import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
 import http from "node:http";
 const port = Number(process.env.PORT || 10000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error("ENGINE18_INVALID_PORT");
+let ironbeamDemoStreamTest={status:"NOT_STARTED",readOnly:true};
+if(process.env.ENGINE18_IRONBEAM_DEMO_PROBE==="1"){
+ ironbeamDemoStreamTest={status:"IN_PROGRESS",readOnly:true};
+ probeIronbeamV2DemoStream({username:process.env.IRONBEAM_DEMO_USERNAME,password:process.env.IRONBEAM_DEMO_PASSWORD,apikey:process.env.IRONBEAM_DEMO_API_KEY})
+ .then(result=>{
+  ironbeamDemoStreamTest={...result,status:result.marketDataObserved?"MARKET_DATA_OBSERVED":result.websocketOpened?"STREAM_OPEN_NO_MARKET_DATA":"FAILED"};
+  console.log("Engine 18 Ironbeam streaming probe:",JSON.stringify(ironbeamDemoStreamTest));
+ }).catch(()=>{ironbeamDemoStreamTest={status:"FAILED",reason:"PROBE_EXCEPTION",readOnly:true};console.log("Engine 18 Ironbeam streaming probe: PROBE_EXCEPTION");});
+}
 let ironbeamDemoTest={status:"NOT_STARTED",readOnly:true};
 if(process.env.ENGINE18_IRONBEAM_DEMO_PROBE==="1") {
   ironbeamDemoTest={status:"IN_PROGRESS",readOnly:true};
@@ -39,6 +49,7 @@ const service = http.createServer((req,res) => {
     tradingEnabled:false,
     liveMarketDataConnected:false,
     ironbeamDemoTest,
+    ironbeamDemoStreamTest,
     apiKeyConfigured:typeof process.env.DATABENTO_API_KEY==="string" &&
       process.env.DATABENTO_API_KEY.trim().length>0
   }));
