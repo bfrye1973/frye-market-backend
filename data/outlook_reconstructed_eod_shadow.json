@@ -2,12 +2,12 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-09T23:06:07.793554+00:00",
+  "updated_at_utc": "2026-11-10T00:49:05.152036+00:00",
   "completedSessionDate": "2026-11-09",
   "score": 52.5,
   "state": "MIXED",
   "breadthScore": 43.0,
-  "momentumScore": 62.1,
+  "momentumScore": 62.0,
   "sectorCards": [
     {
       "sector": "Communication Services",
@@ -48,19 +48,19 @@
     {
       "sector": "Financials",
       "breadth_pct": 38.24,
-      "momentum_pct": 71.43,
+      "momentum_pct": 71.01,
       "nh": 104,
       "nl": 168,
-      "up": 50,
+      "up": 49,
       "down": 20
     },
     {
       "sector": "Healthcare",
-      "breadth_pct": 46.34,
-      "momentum_pct": 66.36,
-      "nh": 228,
+      "breadth_pct": 46.23,
+      "momentum_pct": 66.04,
+      "nh": 227,
       "nl": 264,
-      "up": 71,
+      "up": 70,
       "down": 36
     },
     {
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-09",
-      "close": 7580.0,
-      "ma10": 7593.35,
-      "ma20": 7668.0,
+      "close": 7573.0,
+      "ma10": 7592.65,
+      "ma20": 7667.65,
       "ma10Prior": 7611.025,
       "ma20Prior": 7681.775,
       "ma10Upsloping": false,
@@ -256,12 +256,12 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 899,
+      "nh": 898,
       "nl": 1249,
-      "up": 336,
+      "up": 334,
       "down": 194,
-      "breadth_pct": 41.85,
-      "momentum_pct": 63.4,
+      "breadth_pct": 41.83,
+      "momentum_pct": 63.26,
       "prior": {
         "nh": 1393,
         "nl": 2043,
@@ -307,12 +307,12 @@
     },
     "small": {
       "members": 3426,
-      "nh": 528,
+      "nh": 527,
       "nl": 841,
-      "up": 171,
+      "up": 169,
       "down": 117,
-      "breadth_pct": 38.57,
-      "momentum_pct": 59.38,
+      "breadth_pct": 38.52,
+      "momentum_pct": 59.09,
       "prior": {
         "nh": 583,
         "nl": 1371,
