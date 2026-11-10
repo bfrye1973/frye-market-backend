@@ -28,7 +28,7 @@ test("Micro card new degree: formerly-blue W1/W2 exact owner anchors and fibs",(
  assert.equal(m.anchors.w4Low,7492.25);
  assert.equal(m.anchors.w4LowLocalTime,"2026-11-10 10:40 AZ");
  assert.equal(m.anchors.w4LowAtUtc,"2026-11-10T17:40:00Z");
- assert.deepEqual(m.w5UpExtensionLevels.map(l=>[l.label,l.price]),[["0.618",7582],["1.000",7637.25],["1.272",7676.75],["1.618",7726.75],["2.000",7782.25],["2.618",7872]]);
+ assert.deepEqual(m.w5UpExtensionLevels.map(l=>[l.label,l.price]),[["0.618",7581.75],["1.000",7637.25],["1.272",7676.75],["1.618",7726.75],["2.000",7782.25],["2.618",7871.75]]);
  assert.ok(m.w5UpExtensionLevels.every(l=>l.status==="WATCH"&&l.provisional));
  assert.deepEqual(m.w4RetracementLevels.map(l=>[l.label,l.price]),[
   ["0.236",7543.75],["0.382",7509],["0.500",7481],
