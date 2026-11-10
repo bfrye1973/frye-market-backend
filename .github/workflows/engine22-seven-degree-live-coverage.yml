@@ -1,0 +1,44 @@
+name: Engine22 Seven Degree LIVE Read-only Coverage
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js'
+      - 'services/core/tests/engine22WorkingWaveNodesV1.test.js'
+      - '.github/workflows/engine22-seven-degree-live-coverage.yml'
+permissions:
+  contents: read
+jobs:
+  published-card-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read-only published snapshot coverage (no node prices printed)
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const url='https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1';
+          const timeout=AbortSignal.timeout(15000);
+          let response;
+          try {response=await fetch(url,{signal:timeout,headers:{Accept:'application/json'}});}
+          catch(err){console.log('PROD_SNAPSHOT_FETCH_UNAVAILABLE',err.name);process.exitCode=1;process.exit();}
+          console.log('PROD_SNAPSHOT_HTTP',response.status);
+          if(!response.ok){console.log('PROD_SNAPSHOT_PUBLIC_ACCESS_UNAVAILABLE');process.exitCode=1;process.exit();}
+          const data=await response.json();
+          const wave=data?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
+          if(!wave){console.log('ENGINE22_STRATEGY_CARD_MISSING');process.exitCode=1;process.exit();}
+          const order=['primary','intermediate','minor','minute','subminute','micro','submicro'];
+          const packet=wave.workingWaveNodes;
+          const states=wave.degreeStates||{};
+          for(const degree of order){
+            const section=packet?.degrees?.[degree];
+            const nodes=section?.nodes??[];
+            const marks=Object.entries(states?.[degree]?.marks??{}).filter(([key,v])=>v&&typeof v==='object'&&v.price!=null&&v.time);
+            const valid=nodes.filter(n=>Number.isFinite(n.price)&&typeof n.marketAtUtc==='string'&&n.sourceRevision);
+            console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'status',section?.coverageStatus??'UNSPECIFIED');
+          }
+          console.log('BACKEND_PACKET_SCHEMA',packet?.schema??'MISSING');
+          // Counts are diagnostic; production is expected to have only 2 live
+          // degrees until backend PR merges. Do not require seven today.
+          NODE
