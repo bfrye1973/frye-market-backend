@@ -1,0 +1,23 @@
+name: Engine 18 Isolated Baseline Tests
+on:
+  push:
+    branches:
+      - engine18-liquidity-intelligence-foundation-20261109
+    paths:
+      - "services/core/logic/engine18/**"
+      - "services/core/tests/engine18*.test.js"
+      - ".github/workflows/engine18-isolated-baseline.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-engine18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Engine 18 research-only unit tests
+        run: node --test services/core/tests/engine18LiquidityBaseline.test.js services/core/tests/engine18Engine11Adapter.test.js
