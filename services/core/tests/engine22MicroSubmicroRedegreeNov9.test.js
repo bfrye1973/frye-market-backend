@@ -57,8 +57,14 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  assert.equal(m.anchors.cLowAtUtc,"2026-11-10T17:40:00Z");
  assert.equal(m.anchors.w1StartLow,7492.25);
  assert.equal(m.anchors.newW1High,null);
- assert.deepEqual(m.w1UpReferenceLevels.map(l=>[l.label,l.price]),[["0.618",7545.25],["1.000",7578],["1.272",7601.25],["1.618",7631],["2.000",7663.75],["2.618",7716.75]]);
- assert.ok(m.w1UpReferenceLevels.every(l=>l.status==="WATCH"&&l.provisional));
+ assert.equal(m.w1FibMethod,"PRIOR_CORRECTION_RETRACEMENT_FROM_C_LOW");
+ assert.deepEqual(m.w1PriorCorrectionRetracementLevels.map(l=>[l.label,l.price]),[
+  ["0.236",7517.75],["0.382",7533.50],["0.500",7546.25],
+  ["0.618",7558.75],["0.786",7577.00],["1.000",7600.00]
+ ]);
+ assert.ok(m.w1PriorCorrectionRetracementLevels.every(l=>l.status==="WATCH"&&l.provisional));
+ assert.ok(m.w1LegacyProxyLevels.every(l=>l.status==="SUPERSEDED_RESEARCH"));
+ assert.equal(m.anchors.newW1High,null,"No invented W1 end; these are prior-correction retracements only");
  assert.deepEqual(m.cDownExtensionLevels.map(l=>[l.label,l.price]),[
   ["0.618",7508.75],["1.000",7473.25],["1.272",7448],
   ["1.618",7416],["2.000",7380.5],["2.618",7323.25]
