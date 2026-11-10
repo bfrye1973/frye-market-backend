@@ -16,14 +16,16 @@ export function replayEngine18History({
   if (bars.length > 3000) throw Error("ENGINE18_REPLAY_MAX_3000_BARS");
   const signals = [];
   for (let i = lookback; i < bars.length; i++) {
-    const prefix = bars.slice(0, i + 1);
+    // Evaluate only the current closed bar plus its prior lookback: bounded CPU, same causal result.
+    const prefix = bars.slice(i - lookback, i + 1);
     const r = analyzeEngine18Candles({ bars: prefix, lookback, contractSymbol });
     // An earlier event in the snapshot must never masquerade as a new event.
     for (const e of r.events.filter(e => e.time === bars[i].time)) {
       const direction = e.direction.startsWith("UP_") ? 1 : -1;
       const following = bars.slice(i + 1, i + 1 + horizonBars);
       // Forward horizon must be complete. No censored example counted as success/failure.
-      const complete = following.length === horizonBars;
+      const complete = following.length === horizonBars &&
+        following.every((b, offset) => b.time === bars[i].time + (offset + 1) * timeframeSeconds);
       const futureClose = complete ? following.at(-1).close : null;
       const signedMove = complete ? direction * (futureClose - bars[i].close) : null;
       const target = minMoveTicks * 0.25;
@@ -33,6 +35,7 @@ export function replayEngine18History({
         type: e.type, liquidityLevel: e.level, direction: e.direction,
         eventClose: bars[i].close, evidence: e.evidence,
         evaluated: complete,
+        evaluationStatus: complete ? "COMPLETE" : following.length < horizonBars ? "RIGHT_CENSORED" : "SESSION_GAP",
         futureClose,
         signedMovePoints: signedMove,
         favorableAtHorizon: complete ? signedMove >= target : null,
