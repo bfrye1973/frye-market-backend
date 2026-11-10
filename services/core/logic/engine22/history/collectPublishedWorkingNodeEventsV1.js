@@ -53,7 +53,7 @@ export function collectPublishedWorkingNodeEventsV1({directory,packet,publishedA
           eventId,nodeId:node.nodeId,waveId:node.waveId,countId:node.countId,
           modelVersion:node.modelVersion,degree,parentWaveId:null,
           label:node.label,
-          sourceReference:node.sourcePath+".anchors."+node.anchorField,
+          sourceReference:node.sourceFieldPath??(node.sourcePath+".anchors."+node.anchorField),
           sourceFingerprint:node.sourceRevision,
           priceBasisId:"UNVERIFIED_ES_CONTINUOUS",contractSymbol:"ES",
           marketAt:node.marketAtUtc??null,publishedAt,
