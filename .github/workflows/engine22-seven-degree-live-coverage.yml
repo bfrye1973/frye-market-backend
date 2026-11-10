@@ -34,6 +34,16 @@ jobs:
           const packet=wave.workingWaveNodes;
           const states=wave.degreeStates||{};
           const proposed=buildSelectedDegreeNodeModelsV1({degreeStates:states});
+          const {readFileSync}=await import('node:fs');
+          const fixture=JSON.parse(readFileSync('./services/core/logic/engine22/history/fixtures/ownerSheetAnchorsNov8V1.json','utf8'));
+          for(const degree of ['primary','intermediate']){
+            const rows=fixture.tabs.filter(t=>t.title.toLowerCase()===degree).flatMap(t=>t.rows)
+              .filter(r=>r[3]&&r[4]&&r[5]!=null);
+            const marks=Object.values(states?.[degree]?.marks??{}).filter(m=>m&&m.price!=null&&m.time);
+            const matches=marks.filter(m=>rows.some(r=>r[3]===m.time&&Number(r[5])===m.price));
+            console.log('OWNER_HISTORY_CANDIDATES',degree,'cardMarks',marks.length,'exactPriceDateMatches',matches.length,'unmatched',marks.length-matches.length);
+          }
+
           for(const degree of order){
             const section=packet?.degrees?.[degree];
             const nodes=section?.nodes??[];
