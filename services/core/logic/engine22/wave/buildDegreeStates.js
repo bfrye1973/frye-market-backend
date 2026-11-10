@@ -498,6 +498,17 @@ function normalizeOneMark({
   const replaces = maturityInfo?.replaces || mark?.replaces || null;
 
   return {
+    // Preserve original W1 low/high coordinates for the Engine22 Strategy
+    // display and chart-node publisher. Normalized price remains unchanged
+    // for existing clients that read a single mark price.
+    ...(mark?.low && typeof mark.low==="object" ? {low:{
+      price:round2(mark.low.price??mark.low.p),
+      time:getMarkTime(mark.low)
+    }}:{}),
+    ...(mark?.high && typeof mark.high==="object" ? {high:{
+      price:round2(mark.high.price??mark.high.p),
+      time:getMarkTime(mark.high)
+    }}:{}),
     price: round2(
       maturityInfo?.price ??
         mark?.price ??
