@@ -5,7 +5,7 @@ import { replayEngine18History } from "../logic/engine18/replayEngine18History.j
 const start=1794240000,tf=300;
 const prices=[100,101,100,101,100,101,100,101,100,101,100,101];
 const bars=prices.map((p,i)=>({
-  time:start+i*tf,open:p,high:i===4?105:p+1,low:p-1,
+  time:start+i*tf,open:p,high:(i===4||i===11)?105:p+1,low:p-1,
   close:i===4?100:p,volume:10
 }));
 test("replay records only event-time data, then scores completed forward windows",()=>{
@@ -40,7 +40,9 @@ test("unclosed candle is not used in replay",()=>{
 });
 
 test("weekend or maintenance gaps cannot be scored as a continuous horizon",()=>{
- const gapBars=bars.map((b,i)=>i>=9?{...b,time:b.time+3600}:b);
+ const gapBars=bars.map((b,i)=>({ ...b,
+   high:i===8?108:b.high, close:i===8?100:b.close,
+   time:i>=9?b.time+3600:b.time }));
  const out=replayEngine18History({rows:gapBars,contractSymbol:"ESZ26",timeframeSeconds:tf,
    lookback:3,horizonBars:2,asOfUnixSec:start+(bars.length+12)*tf});
  assert.ok(out.signals.some(s=>s.evaluationStatus==="SESSION_GAP"));
