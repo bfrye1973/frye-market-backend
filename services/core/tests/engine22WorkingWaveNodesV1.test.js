@@ -99,7 +99,7 @@ test("higher canonical degree-state marks require exact source times, no invente
   minor:{degree:"minor",active:true,marks:{W1:{price:6485,time:"2026-04-30 17:00 AZ"},W2:{price:7325,time:"UNKNOWN"}}}
  };
  const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:wave,degreeStates:degrees});
- assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.label,n.marketAtUtc]),[["W1","2020-04-02T15:00:00.000Z"]]);
+ assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.label,n.marketAtUtc]),[["W1 HIGH","2020-04-02T15:00:00.000Z"]]);
  assert.equal(packet.degrees.intermediate.nodes.length,1);
  assert.equal(packet.degrees.minor.nodes.length,1);
  assert.equal(packet.degrees.minor.nodes.some(n=>n.label==="W2"),false);
