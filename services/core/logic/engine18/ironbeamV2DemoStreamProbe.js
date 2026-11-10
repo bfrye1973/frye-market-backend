@@ -1,3 +1,4 @@
+import {createEngine18Level2ZoneReader} from "./ironbeamV2Level2Zones.js";
 // One-shot, read-only Ironbeam v2 DEMO streaming acceptance check.
 // Never log/request/return credentials, JWT, stream ID, WSS URL or raw market packets.
 const HOST="https://demo.ironbeamapi.com";
@@ -7,11 +8,13 @@ export async function probeIronbeamV2DemoStream({
   username,password,apikey,fetchImpl=fetch,WebSocketImpl=globalThis.WebSocket,
   observationMs=14000
 }={}) {
+  const zoneReader=createEngine18Level2ZoneReader({minObservations:3,allowDelayedResearch:true});
   const result={provider:"IRONBEAM_V2_DEMO",symbol:SYMBOL,readOnly:true,noExecution:true,
     auth:false,streamCreated:false,websocketOpened:false,
     subscriptions:{quotes:null,depth:null,trades:null},
     frames:{quotes:0,depth:0,trades:0,pings:0,other:0},
-    marketDataObserved:false,liveEntitlementConfirmed:false,mboConfirmed:false,reason:null};
+    marketDataObserved:false,liveEntitlementConfirmed:false,mboConfirmed:false,reason:null,
+    depthParsing:{accepted:0,rejected:0,reasons:{}}};
   if(!username||!password||!apikey){result.reason="MISSING_CREDENTIALS";return result;}
   if(typeof WebSocketImpl!=="function"){result.reason="WEBSOCKET_UNAVAILABLE";return result;}
   if(!Number.isInteger(observationMs)||observationMs<1000||observationMs>30000)throw Error("ENGINE18_INVALID_PROBE_WINDOW");
@@ -56,6 +59,15 @@ export async function probeIronbeamV2DemoStream({
       for(const [k,v] of Object.entries({quotes:"q",depth:"d",trades:"tr",pings:"p"})) {
         if(payload?.[v]!=null)result.frames[k]++;
       }
+      if(payload?.d!=null){
+        const ingested=zoneReader.observe(payload);
+        if(ingested.accepted) result.depthParsing.accepted++;
+        else{
+          result.depthParsing.rejected++;
+          const reason=ingested.reason||"UNKNOWN";
+          result.depthParsing.reasons[reason]=(result.depthParsing.reasons[reason]||0)+1;
+        }
+      }
       if(!["q","d","tr","p"].some(k=>payload?.[k]!=null)) result.frames.other++;
     }catch{result.frames.other++;}
   });
@@ -66,6 +78,15 @@ export async function probeIronbeamV2DemoStream({
   await new Promise(resolve=>setTimeout(resolve,observationMs));
   result.marketDataObserved=(result.frames.quotes+result.frames.depth+result.frames.trades)>0;
   result.reason=result.marketDataObserved?null:"NO_MARKET_FRAMES_IN_OBSERVATION_WINDOW";
+  const zones=zoneReader.snapshot({feedTier:"UNVERIFIED"});
+  result.liquidityResearch={usable:zones.usable,reason:zones.reason,
+    images:zones.images,zoneCount:zones.zones.length,
+    // This is a protected diagnostic log, but do not publish raw market data
+    // on a public endpoint or label delayed demo levels as trading signals.
+    topZones:zones.zones.slice(0,5).map(z=>({side:z.side,price:z.price,
+      visibleContracts:z.visibleContracts,observedInImages:z.observedInImages})),
+    lastExchangeMs:zones.lastExchangeMs,ageMs:zones.ageMs,
+    displayOnly:true,level3:false};
   closed();
   return result;
 }
