@@ -3,6 +3,7 @@
 // no account/trading authority and no invented historic point-in-time approvals.
 // An append-only revision journal is a separate release gate (backend PR #266).
 import {createHash} from "node:crypto";
+import {buildSelectedDegreeNodeModelsV1} from "./buildSelectedDegreeNodeModelsV1.js";
 export const SCHEMA="engine22.workingWaveNodes.v1";
 export const DEGREE_ORDER=Object.freeze([
   "primary","intermediate","minor","minute","subminute","micro","submicro",
@@ -100,11 +101,12 @@ function fromModel(root,rule){
     historicalAnchors,anchors,
   };
 }
-export function buildEngine22WorkingWaveNodesV1({currentWavelength,symbol="ES"}={}){
+export function buildEngine22WorkingWaveNodesV1({currentWavelength,degreeStates,symbol="ES"}={}){
   if(symbol!=="ES"||currentWavelength?.symbol!=="ES")
     return {schema:SCHEMA,available:false,reason:"ES_ONLY",readOnly:true,
       historicalAsOfSupported:false,noExecution:true};
-  const models=REVIEW_SOURCES.map(r=>fromModel(currentWavelength,r)).filter(Boolean);
+  const models=[...REVIEW_SOURCES.map(r=>fromModel(currentWavelength,r)).filter(Boolean),
+    ...buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates})];
   const degrees=Object.fromEntries(DEGREE_ORDER.map(degree=>[
     degree,{
       degree,
@@ -112,6 +114,10 @@ export function buildEngine22WorkingWaveNodesV1({currentWavelength,symbol="ES"}=
       models:models.filter(m=>m.degree===degree),
       nodes:models.filter(m=>m.degree===degree&&m.selectedForResearchDisplay)
         .flatMap(m=>m.anchors),
+      nodeCount:models.filter(m=>m.degree===degree&&m.selectedForResearchDisplay)
+        .flatMap(m=>m.anchors).length,
+      coverageStatus:models.some(m=>m.degree===degree&&m.anchors.length)
+        ?"VALIDATED_RESEARCH_NODES":"NO_VALIDATED_CURRENT_NODES",
     }
   ]));
   const fingerprint=sha(models.map(m=>[m.sourcePath,m.modelFingerprint]));
