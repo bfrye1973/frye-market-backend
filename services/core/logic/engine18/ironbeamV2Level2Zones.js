@@ -113,7 +113,7 @@ export function createEngine18Level2ZoneReader({
   const all=[...lastBook.bids,...lastBook.asks];
   const sideMedian=side=>{
    const a=all.filter(x=>x.side===side).map(x=>x.size).sort((a,b)=>a-b);
-   return a.length?a[Math.floor(a.length/2)]:null;
+   return a.length?(a.length%2?a[(a.length-1)/2]:(a[a.length/2-1]+a[a.length/2])/2):null;
   };
   const medians={BID:sideMedian("BID"),ASK:sideMedian("ASK")};
   const qualifying=all.filter(l=>l.size>=Math.max(1,medians[l.side]*depthMultiplier));
