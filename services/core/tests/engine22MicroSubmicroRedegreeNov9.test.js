@@ -24,7 +24,12 @@ test("Micro card new degree: formerly-blue W1/W2 exact owner anchors and fibs",(
  assert.equal(m.anchors.w2LowAtUtc,"2026-11-08T23:00:00Z");
  assert.equal(m.anchors.priorAnchorRevision.w2LowLocalTime,"2026-11-08 15:00 AZ");
  assert.deepEqual(m.levels.map(l=>l.price),[7451.5,7507,7546.5,7596.5,7652,7741.5]);
- assert.equal(m.activeWave,"W4");
+ assert.equal(m.activeWave,"W5");
+ assert.equal(m.anchors.w4Low,7492.25);
+ assert.equal(m.anchors.w4LowLocalTime,"2026-11-10 10:40 AZ");
+ assert.equal(m.anchors.w4LowAtUtc,"2026-11-10T17:40:00Z");
+ assert.deepEqual(m.w5UpExtensionLevels.map(l=>[l.label,l.price]),[["0.618",7581.75],["1.000",7637.25],["1.272",7676.75],["1.618",7726.75],["2.000",7782.25],["2.618",7871.75]]);
+ assert.ok(m.w5UpExtensionLevels.every(l=>l.status==="WATCH"&&l.provisional));
  assert.deepEqual(m.w4RetracementLevels.map(l=>[l.label,l.price]),[
   ["0.236",7543.75],["0.382",7509],["0.500",7481],
   ["0.618",7453],["0.786",7413],["1.000",7362]
@@ -46,7 +51,14 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  assert.equal(m.anchors.w2LowLocalTime,"2026-11-09 06:20 AZ");
  assert.equal(m.anchors.w2LowAtUtc,"2026-11-09T13:20:00Z");
  assert.equal(m.anchors.w1Length,85.75);
- assert.equal(m.activeWave,"B");
+ assert.equal(m.activeWave,"W1");
+ assert.equal(m.anchors.cLow,7492.25);
+ assert.equal(m.anchors.cLowLocalTime,"2026-11-10 10:40 AZ");
+ assert.equal(m.anchors.cLowAtUtc,"2026-11-10T17:40:00Z");
+ assert.equal(m.anchors.w1StartLow,7492.25);
+ assert.equal(m.anchors.newW1High,null);
+ assert.deepEqual(m.w1UpReferenceLevels.map(l=>[l.label,l.price]),[["0.618",7545.25],["1.000",7578],["1.272",7601.25],["1.618",7631],["2.000",7663.75],["2.618",7716.75]]);
+ assert.ok(m.w1UpReferenceLevels.every(l=>l.status==="WATCH"&&l.provisional));
  assert.deepEqual(m.cDownExtensionLevels.map(l=>[l.label,l.price]),[
   ["0.618",7508.75],["1.000",7473.25],["1.272",7448],
   ["1.618",7416],["2.000",7380.5],["2.618",7323.25]

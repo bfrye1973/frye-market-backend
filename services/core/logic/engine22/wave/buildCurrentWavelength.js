@@ -578,8 +578,8 @@ export function buildCurrentWavelength({
       ownerSubmicroW3Nov9InternalResearch:{
         version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
-        activeWave:"B",direction:"UP",stage:"ABC_CORRECTION_DEVELOPING",
-        parentDegree:"micro",parentWave:"W4_RESEARCH",
+        activeWave:"W1",direction:"UP",stage:"W1_UP_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"micro",parentWave:"W5_RESEARCH",
         anchors:{
           w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
           w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
@@ -591,7 +591,14 @@ export function buildCurrentWavelength({
           aLowAtUtc:"2026-11-10T13:40:00Z",
           bHigh:7566.00,bHighLocalTime:"2026-11-10 08:00 AZ",
           bHighAtUtc:"2026-11-10T15:00:00Z",
-          abcStatus:"OWNER_MARKED_A_B_REFERENCES_C_UNCONFIRMED",
+          abcStatus:"OWNER_MARKED_ABC_C_COMPLETE",
+          cLow:7492.25,cLowLocalTime:"2026-11-10 10:40 AZ",
+          cLowAtUtc:"2026-11-10T17:40:00Z",
+          cCompletionStatus:"OWNER_MARKED_C_COMPLETE",
+          w1StartLow:7492.25,w1StartLocalTime:"2026-11-10 10:40 AZ",
+          w1StartAtUtc:"2026-11-10T17:40:00Z",
+          newW1High:null,newW1HighLocalTime:null,
+          newW1CompletionConfirmed:false,
           provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
         },
         // ABC C-down extensions from owner-supplied A high / A low / B high.
@@ -603,6 +610,16 @@ export function buildCurrentWavelength({
           status:"WATCH",provisional:true,touchEvidenceAvailable:false,
           levelType:"SUBMICRO_C_DOWN_EXTENSION_RESEARCH",
         })),
+        // Submicro W1 has a start low, but NO new W1 high. Research-only
+        // proxy projections use the PRIOR internal Submicro W1 span 85.75.
+        // These are not confirmed W1 extensions or execution signals.
+        w1UpReferenceLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+85.75*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W1_UP_PREVIOUS_W1_LENGTH_PROXY",
+        })),
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
         levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
           key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
@@ -612,7 +629,7 @@ export function buildCurrentWavelength({
           levelType:"SUBMICRO_W3_UP_EXTENSION",
         })),
         structuralReference:7449.25,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
-        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        nextWave:"W1",nextWaveStarted:false,completionConfirmed:false,
         priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
         noExecution:true,noPermissionCreated:true,
       },
@@ -697,7 +714,7 @@ export function buildCurrentWavelength({
       ownerMicroW3Nov9ReclassifiedResearch:{
         version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
-        activeWave:"W4",direction:"DOWN",stage:"W4_DEVELOPING_CANDIDATE",
+        activeWave:"W5",direction:"UP",stage:"W5_UP_DEVELOPING_OWNER_RESEARCH",
         parentDegree:"subminute",parentWave:"W1_FORMING_RESEARCH",
         anchors:{
           w1Low:7324,w1LowLocalTime:"2026-11-05 15:20 AZ",w1High:7469,
@@ -709,6 +726,10 @@ export function buildCurrentWavelength({
           w3High:7600.00,w3HighLocalTime:"2026-11-09 13:00 AZ",
           w3HighAtUtc:"2026-11-09T20:00:00Z",
           w3CompletionStatus:"OWNER_MARKED_W3_END_RESEARCH",
+          w4Low:7492.25,w4LowLocalTime:"2026-11-10 10:40 AZ",
+          w4LowAtUtc:"2026-11-10T17:40:00Z",
+          w4CompletionStatus:"OWNER_MARKED_W4_COMPLETE",
+          w5CompletionConfirmed:false,
           provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
         },
         // Micro W4 downside retracement of the owner-marked W2 low -> W3 high.
@@ -720,6 +741,15 @@ export function buildCurrentWavelength({
           status:"WATCH",provisional:true,touchEvidenceAvailable:false,
           levelType:"MICRO_W4_DOWN_RETRACEMENT_RESEARCH",
         })),
+        // W5 UP uses the original Micro W1 length (7469 - 7324 = 145)
+        // projected from the owner-marked W4 low; only WATCH, no touch claim.
+        w5UpExtensionLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+145*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MICRO_W5_UP_EXTENSION_RESEARCH",
+        })),
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
         levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
           key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
@@ -729,7 +759,7 @@ export function buildCurrentWavelength({
           levelType:"MICRO_W3_UP_EXTENSION",
         })),
         structuralReference:7362,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
-        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        nextWave:"W5",nextWaveStarted:false,completionConfirmed:false,
         priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
         noExecution:true,noPermissionCreated:true,
       },
