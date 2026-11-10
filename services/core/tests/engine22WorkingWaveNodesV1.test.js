@@ -28,15 +28,10 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));
   assert.ok([...micro,...submicro].every(n=>n.presentationAllowed===true));
   assert.equal(packet.degrees.primary.nodes.length,0);
-  assert.deepEqual(packet.degrees.minute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
-    ["W1 Low",7419.5,"2026-07-30T19:00:00.000Z"],
-    ["W1 High",7908.75,"2026-08-13T16:00:00.000Z"],
-  ]);
-  assert.deepEqual(packet.degrees.subminute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
-    ["A starting high",7901,"2026-08-14T12:00:00.000Z"],
-    ["A ending wick low",7558.75,"2026-09-16T18:00:00.000Z"],
-  ]);
-  assert.ok(packet.degrees.minute.nodes.every(n=>n.ownerArizonaTime&&n.sourceFieldPath&&n.plotAllowed===false));
+  assert.equal(packet.degrees.minute.nodes.length,0,
+    "Minute research/Fib references must not be converted into current chart nodes");
+  assert.equal(packet.degrees.subminute.nodes.length,0,
+    "Subminute research/Fib references must not be converted into current chart nodes");
 });
 
 test("fingerprint remains unchanged on price/touch updates, changes on corrected anchor",()=>{
@@ -110,14 +105,3 @@ test("higher canonical degree-state marks require exact source times, no invente
  assert.ok(packet.degrees.primary.nodes.every(n=>n.sourcePath==="degreeStates.primary"&&n.noExecution));
 });
 
-test("selected minute and subminute anchor corrections change fingerprint, not node IDs",()=>{
- const wave=source();
- const first=buildEngine22WorkingWaveNodesV1({currentWavelength:wave});
- const revised=structuredClone(wave);
- revised.degrees.minute.ownerMinuteW2Retracement.anchors.w1Low=7419.75;
- const next=buildEngine22WorkingWaveNodesV1({currentWavelength:revised});
- assert.notEqual(next.fingerprint,first.fingerprint);
- assert.equal(next.degrees.minute.nodes[0].nodeId,first.degrees.minute.nodes[0].nodeId);
- assert.notEqual(next.degrees.minute.nodes[0].sourceRevision,first.degrees.minute.nodes[0].sourceRevision);
- assert.equal(first.degrees.minute.nodes[0].price,7419.5);
-});
