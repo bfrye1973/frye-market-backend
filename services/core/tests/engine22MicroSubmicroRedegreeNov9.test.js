@@ -24,7 +24,10 @@ test("Micro card new degree: formerly-blue W1/W2 exact owner anchors and fibs",(
  assert.equal(m.anchors.w2LowAtUtc,"2026-11-08T23:00:00Z");
  assert.equal(m.anchors.priorAnchorRevision.w2LowLocalTime,"2026-11-08 15:00 AZ");
  assert.deepEqual(m.levels.map(l=>l.price),[7451.5,7507,7546.5,7596.5,7652,7741.5]);
- assert.equal(m.activeWave,"W3");
+ assert.equal(m.activeWave,"W4");
+ assert.equal(m.anchors.w3High,7600);
+ assert.equal(m.anchors.w3HighLocalTime,"2026-11-09 13:00 AZ");
+ assert.equal(m.anchors.w3HighAtUtc,"2026-11-09T20:00:00Z");
  assert.equal(m.completionConfirmed,false);
 });
 test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensions",()=>{
@@ -38,6 +41,13 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  assert.equal(m.anchors.w2LowLocalTime,"2026-11-09 06:20 AZ");
  assert.equal(m.anchors.w2LowAtUtc,"2026-11-09T13:20:00Z");
  assert.equal(m.anchors.w1Length,85.75);
+ assert.equal(m.activeWave,"B");
+ assert.equal(m.anchors.aHigh,7600);
+ assert.equal(m.anchors.aHighLocalTime,"2026-11-09 13:00 AZ");
+ assert.equal(m.anchors.aLow,7507.25);
+ assert.equal(m.anchors.aLowLocalTime,"2026-11-10 06:40 AZ");
+ assert.equal(m.anchors.bHigh,7566);
+ assert.equal(m.anchors.bHighLocalTime,"2026-11-10 08:00 AZ");
  assert.deepEqual(m.levels.map(l=>l.price),[7502.25,7535,7558.25,7588,7620.75,7673.75]);
  assert.equal(m.noExecution,true);
  assert.equal(m.nextWaveStarted,false);
