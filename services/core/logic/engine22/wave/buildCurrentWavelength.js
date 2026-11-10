@@ -594,6 +594,15 @@ export function buildCurrentWavelength({
           abcStatus:"OWNER_MARKED_A_B_REFERENCES_C_UNCONFIRMED",
           provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
         },
+        // ABC C-down extensions from owner-supplied A high / A low / B high.
+        // C ending low is UNKNOWN; projected levels are research WATCH only.
+        cDownExtensionLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7566-(7600-7507.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_C_DOWN_EXTENSION_RESEARCH",
+        })),
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
         levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
           key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
@@ -702,6 +711,15 @@ export function buildCurrentWavelength({
           w3CompletionStatus:"OWNER_MARKED_W3_END_RESEARCH",
           provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
         },
+        // Micro W4 downside retracement of the owner-marked W2 low -> W3 high.
+        // These are provisional WATCH prices, not trade triggers or touches.
+        w4RetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7600-(7600-7362)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MICRO_W4_DOWN_RETRACEMENT_RESEARCH",
+        })),
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
         levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
           key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
