@@ -106,21 +106,30 @@ test("higher canonical degree-state marks require exact source times, no invente
 });
 
 
-test("date-only higher degree marks are explicitly unavailable, never assigned a fake chart time",()=>{
-  const sourceWave=source();
+test("matching current Strategy-card price and date recovers exact Engine22 historical Arizona time",()=>{
   const packet=buildEngine22WorkingWaveNodesV1({
-    currentWavelength:sourceWave,
+    currentWavelength:source(),
     degreeStates:{
-      primary:{degree:"primary",active:true,marks:{W1:{price:5620,time:"2022-01-05"}}},
-      intermediate:{degree:"intermediate",active:true,marks:{W1:{price:7151,time:"2026-01-28"}}},
+      primary:{degree:"primary",active:true,marks:{
+        W1:{price:5620,time:"2022-01-05"},W2:{price:4306,time:"2022-10-12"}}},
+      intermediate:{degree:"intermediate",active:true,marks:{
+        W1:{price:7151,time:"2026-01-28"},W2:{price:6407,time:"2026-03-30"}}},
     },
   });
-  for(const d of ["primary","intermediate"]){
-    assert.equal(packet.degrees[d].nodeCount,0);
-    assert.equal(packet.degrees[d].available,false);
-    assert.equal(packet.degrees[d].dateOnlyMarkCount,1);
-    assert.equal(packet.degrees[d].coverageStatus,"EXACT_EVENT_TIME_MISSING");
-  }
-  assert.equal(packet.degrees.minute.coverageStatus,"NO_CURRENT_CHART_NODES_BY_OWNER");
-  assert.equal(packet.degrees.subminute.coverageStatus,"NO_CURRENT_CHART_NODES_BY_OWNER");
+  assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
+    [5620,"2022-01-05 10:00 AZ"],[4306,"2022-10-12 09:00 AZ"]]);
+  assert.deepEqual(packet.degrees.intermediate.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
+    [7151,"2026-01-28 10:00 AZ"],[6407,"2026-03-30 03:00 AZ"]]);
+  assert.equal(packet.degrees.minute.nodes.length,0);
+  assert.equal(packet.degrees.subminute.nodes.length,0);
+});
+
+test("unmatched date-only current card price is never assigned an archived time",()=>{
+  const packet=buildEngine22WorkingWaveNodesV1({
+    currentWavelength:source(),
+    degreeStates:{primary:{degree:"primary",active:true,marks:{
+      W1:{price:5620.25,time:"2022-01-05"}}}},
+  });
+  assert.equal(packet.degrees.primary.nodeCount,0);
+  assert.equal(packet.degrees.primary.coverageStatus,"EXACT_EVENT_TIME_MISSING");
 });
