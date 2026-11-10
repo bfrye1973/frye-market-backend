@@ -1,3 +1,4 @@
+import {ENGINE18_MONITOR_HTML} from "./monitorPage.js";
 import {startEngine18IronbeamLevel2Monitor} from "./ironbeamV2Level2Monitor.js";
 import {probeIronbeamV2DemoStream} from "./ironbeamV2DemoStreamProbe.js";
 import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
@@ -64,6 +65,11 @@ const service = http.createServer((req,res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+  if(req.method==="GET" && pathname==="/monitor"){
+    res.setHeader("Content-Type","text/html; charset=utf-8");
+    res.setHeader("Content-Security-Policy","default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
+    res.writeHead(200);res.end(ENGINE18_MONITOR_HTML);return;
+  }
   if (req.method !== "GET" || !["/health","/"].includes(pathname)) {
     res.writeHead(404);
     res.end(JSON.stringify({ok:false,error:"NOT_FOUND"}));
