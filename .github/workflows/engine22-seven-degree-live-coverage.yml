@@ -14,6 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
+      - uses: actions/checkout@v4
       - name: Read-only published snapshot coverage (no node prices printed)
         shell: bash
         run: |
@@ -26,19 +27,25 @@ jobs:
           console.log('PROD_SNAPSHOT_HTTP',response.status);
           if(!response.ok){console.log('PROD_SNAPSHOT_PUBLIC_ACCESS_UNAVAILABLE');process.exitCode=1;process.exit();}
           const data=await response.json();
+          const {buildSelectedDegreeNodeModelsV1}=await import('./services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js');
           const wave=data?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
           if(!wave){console.log('ENGINE22_STRATEGY_CARD_MISSING');process.exitCode=1;process.exit();}
           const order=['primary','intermediate','minor','minute','subminute','micro','submicro'];
           const packet=wave.workingWaveNodes;
           const states=wave.degreeStates||{};
+          const proposed=buildSelectedDegreeNodeModelsV1({degreeStates:states});
           for(const degree of order){
             const section=packet?.degrees?.[degree];
             const nodes=section?.nodes??[];
             const marks=Object.entries(states?.[degree]?.marks??{}).filter(([key,v])=>v&&typeof v==='object'&&v.price!=null&&v.time);
             const valid=nodes.filter(n=>Number.isFinite(n.price)&&typeof n.marketAtUtc==='string'&&n.sourceRevision);
-            console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'status',section?.coverageStatus??'UNSPECIFIED');
+            const proposedNodes=proposed.filter(m=>m.degree===degree).flatMap(m=>m.anchors);
+            const seenTimeTypes=marks.reduce((acc,[key,m])=>{const t=typeof m.time==='string'?(m.time.endsWith('Z')?'UTC':m.time.includes('-07:00')?'OFFSET':'LOCAL_OR_OTHER'):'NOT_STRING';acc[t]=(acc[t]||0)+1;return acc;},{});
+            console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'newValidNodes',proposedNodes.length,'timeTypes',JSON.stringify(seenTimeTypes),'status',section?.coverageStatus??'UNSPECIFIED');
           }
           console.log('BACKEND_PACKET_SCHEMA',packet?.schema??'MISSING');
+          if(['primary','intermediate','minor'].some(d=>!proposed.some(m=>m.degree===d&&m.anchors.length))){console.error('HIGHER_DEGREE_NODE_PUBLICATION_BLOCKED');process.exitCode=1;}
+          if(proposed.some(m=>['minute','subminute'].includes(m.degree)&&m.anchors.length)){console.error('FORBIDDEN_MINUTE_SUBMINUTE_NODES');process.exitCode=1;}
           // Counts are diagnostic; production is expected to have only 2 live
           // degrees until backend PR merges. Do not require seven today.
           NODE
