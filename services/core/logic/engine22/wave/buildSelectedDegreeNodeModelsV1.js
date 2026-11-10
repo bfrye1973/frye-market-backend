@@ -20,7 +20,7 @@ const historicalTimes=Object.freeze(Object.fromEntries(
       .map(row=>({date:row[3],time:row[4],price:Number(row[5])}))
   ])
 ));
-function approvedTimeForCardMark(degree,mark){
+export function approvedTimeForCardMark(degree,mark){
   if(typeof mark?.time!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(mark.time))return mark?.time;
   const matches=(historicalTimes[degree]??[]).filter(row=>
     row.date===mark.time && row.price===mark.price);
