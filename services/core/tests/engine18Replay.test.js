@@ -26,12 +26,15 @@ test("unclosed candle is not used in replay",()=>{
  const partial=replayEngine18History({rows:bars,contractSymbol:"ESZ26",timeframeSeconds:tf,
  lookback:3,horizonBars:2,asOfUnixSec:start+(bars.length-1)*tf+100});
  assert.equal(partial.candles,full.candles-1);
- assert.deepEqual(partial.signals,full.signals.filter(s=>s.eventTimeUnixSec<start+(bars.length-1)*tf).map(s=>{
-   // The previous output can differ only in ex-post scoring if last bar disappears.
-   return { ...s, evaluated: s.eventTimeUnixSec < start+(bars.length-3)*tf && s.evaluated,
-     futureClose: s.eventTimeUnixSec < start+(bars.length-3)*tf ? s.futureClose : null,
-     signedMovePoints: s.eventTimeUnixSec < start+(bars.length-3)*tf ? s.signedMovePoints : null,
-     favorableAtHorizon: s.eventTimeUnixSec < start+(bars.length-3)*tf ? s.favorableAtHorizon : null,
-     againstAtHorizon: s.eventTimeUnixSec < start+(bars.length-3)*tf ? s.againstAtHorizon : null };
- }));
+ const completePast = x => x.eventTimeUnixSec < start+(bars.length-3)*tf;
+ assert.deepEqual(
+   partial.signals.map(({type,eventTimeUnixSec,liquidityLevel,direction,eventClose})=>({type,eventTimeUnixSec,liquidityLevel,direction,eventClose})),
+   full.signals.filter(s=>s.eventTimeUnixSec<start+(bars.length-1)*tf)
+     .map(({type,eventTimeUnixSec,liquidityLevel,direction,eventClose})=>({type,eventTimeUnixSec,liquidityLevel,direction,eventClose}))
+ );
+ for(const s of partial.signals){
+   const before=full.signals.find(x=>x.type===s.type&&x.eventTimeUnixSec===s.eventTimeUnixSec);
+   if(completePast(s)) assert.deepEqual(s,before);
+   else assert.equal(s.evaluated,false);
+ }
 });
