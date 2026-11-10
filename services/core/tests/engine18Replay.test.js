@@ -38,3 +38,11 @@ test("unclosed candle is not used in replay",()=>{
    else assert.equal(s.evaluated,false);
  }
 });
+
+test("weekend or maintenance gaps cannot be scored as a continuous horizon",()=>{
+ const gapBars=bars.map((b,i)=>i>=9?{...b,time:b.time+3600}:b);
+ const out=replayEngine18History({rows:gapBars,contractSymbol:"ESZ26",timeframeSeconds:tf,
+   lookback:3,horizonBars:2,asOfUnixSec:start+(bars.length+12)*tf});
+ assert.ok(out.signals.some(s=>s.evaluationStatus==="SESSION_GAP"));
+ assert.ok(out.signals.filter(s=>s.evaluationStatus==="SESSION_GAP").every(s=>!s.evaluated));
+});
