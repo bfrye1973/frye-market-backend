@@ -25,4 +25,4 @@ jobs:
         with:
           node-version: "22"
       - name: Engine 18 research-only unit tests
-        run: node --test services/core/tests/engine18LiquidityBaseline.test.js services/core/tests/engine18Engine11Adapter.test.js services/core/tests/engine18Replay.test.js services/core/tests/engine18OrderBookResearch.test.js services/core/tests/engine18RithmicFeedContract.test.js services/core/tests/engine18VisibleLiquidityResearch.test.js
+        run: node --test services/core/tests/engine18LiquidityBaseline.test.js services/core/tests/engine18Engine11Adapter.test.js services/core/tests/engine18Replay.test.js services/core/tests/engine18OrderBookResearch.test.js services/core/tests/engine18RithmicFeedContract.test.js services/core/tests/engine18VisibleLiquidityResearch.test.js services/core/tests/engine18IronbeamV3ReadOnly.test.js
