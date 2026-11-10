@@ -34,6 +34,8 @@ export function analyzeEngine18Candles({ bars, symbol = "ES", contractSymbol, lo
   const levels = new Map();
   const events = [];
   for (let i = lookback; i < bars.length; i++) {
+    // Levels in a live snapshot must represent the latest as-of window, not obsolete past windows.
+    levels.clear();
     const prior = bars.slice(i - lookback, i);
     const now = bars[i];
     const highest = prior.reduce((best, b) => b.high > best.high ? b : best, prior[0]);
