@@ -17,52 +17,52 @@
       "activeWave": "W5",
       "stage": "ACTIVE",
       "currentRead": "PRIMARY_W5_ACTIVE_FROM_PRIMARY_W4_LOW",
-      "headline": "Primary W5 active from 5182",
+      "headline": "Primary W5 active from 4825",
       "action": "TRACK_PRIMARY_W5_EXTENSION_TARGETS",
       "marks": {
         "W1": {
           "low": {
-            "price": 3200,
-            "time": "2020-04-02"
+            "price": 2440,
+            "time": "2020-04-01 08:00 AZ"
           },
           "high": {
-            "price": 5620,
-            "time": "2022-01-05"
+            "price": 4806,
+            "time": "2022-01-04 10:00 AZ"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "PRIMARY_W1_LOW_3200_ON_2020_04_02",
-            "PRIMARY_W1_HIGH_5620_ON_2022_01_05",
-            "PRIMARY_W1_RANGE_2420"
+            "PRIMARY_W1_LOW_2440_ON_2020_04_01",
+            "PRIMARY_W1_HIGH_4806_ON_2022_01_04",
+            "PRIMARY_W1_RANGE_2366"
           ]
         },
         "W2": {
-          "price": 4306,
-          "time": "2022-10-12",
+          "price": 3504,
+          "time": "2022-10-13 09:00 AZ",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "PRIMARY_W2_COMPLETED_AT_4306"
+            "PRIMARY_W2_COMPLETED_AT_3504"
           ]
         },
         "W3": {
-          "price": 6487,
-          "time": "2025-02-20",
+          "price": 6157,
+          "time": "2025-02-19 09:00 AZ",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "PRIMARY_W3_COMPLETED_AT_6487"
+            "PRIMARY_W3_COMPLETED_AT_6157"
           ]
         },
         "W4": {
-          "price": 5182,
-          "time": "2025-04-09",
+          "price": 4825,
+          "time": "2025-04-07 07:00 AZ",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "PRIMARY_W4_COMPLETED_AT_5182",
-            "PRIMARY_W5_STARTED_FROM_5182"
+            "PRIMARY_W4_COMPLETED_AT_4825",
+            "PRIMARY_W5_STARTED_FROM_4825"
           ]
         },
         "W5": {
@@ -103,29 +103,29 @@
       "marks": {
         "W1": {
           "low": {
-            "price": 5188.5,
-            "time": "2025-04-08"
+            "price": 4877,
+            "time": "2025-04-09 07:00 AZ"
           },
           "high": {
-            "price": 7151,
-            "time": "2026-01-28"
+            "price": 7044,
+            "time": "2026-01-28 10:00 AZ"
           },
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "INTERMEDIATE_W1_LOW_5188_50_ON_2025_04_08",
-            "INTERMEDIATE_W1_HIGH_7151_ON_2026_01_28",
-            "INTERMEDIATE_W1_RANGE_1962_50"
+            "INTERMEDIATE_W1_LOW_4877_ON_2025_04_09",
+            "INTERMEDIATE_W1_HIGH_7044_ON_2026_01_28",
+            "INTERMEDIATE_W1_RANGE_2167"
           ]
         },
         "W2": {
-          "price": 6407,
-          "time": "2026-03-30",
+          "price": 6345,
+          "time": "2026-03-31 03:00 AZ",
           "status": "CONFIRMED",
           "confidence": "HIGH",
           "basis": [
-            "INTERMEDIATE_W2_COMPLETED_AT_6407",
-            "INTERMEDIATE_W3_STARTED_FROM_6407"
+            "INTERMEDIATE_W2_COMPLETED_AT_6345",
+            "INTERMEDIATE_W3_STARTED_FROM_6345"
           ]
         },
         "W3": {
