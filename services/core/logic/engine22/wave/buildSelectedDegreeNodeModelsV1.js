@@ -15,13 +15,13 @@ const historicalTimes=Object.freeze(Object.fromEntries(
     ownerHistory.tabs.filter(t=>t.title.toLowerCase()===degree)
       .flatMap(t=>t.rows).filter(row=>
         typeof row[3]==="string"&&typeof row[4]==="string"&&
-        /^([01]\\d|2[0-3]):[0-5]\\d$/.test(row[4])&&
+        /^([01]\d|2[0-3]):[0-5]\d$/.test(row[4])&&
         Number.isFinite(Number(row[5])))
       .map(row=>({date:row[3],time:row[4],price:Number(row[5])}))
   ])
 ));
 export function approvedTimeForCardMark(degree,mark){
-  if(typeof mark?.time!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(mark.time))return mark?.time;
+  if(typeof mark?.time!=="string"||!/^\d{4}-\d{2}-\d{2}$/.test(mark.time))return mark?.time;
   const matches=(historicalTimes[degree]??[]).filter(row=>
     row.date===mark.time && row.price===mark.price);
   // Two historical matches or conflicting price/time evidence fail closed.
