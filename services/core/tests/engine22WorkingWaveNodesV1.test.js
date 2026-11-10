@@ -1,3 +1,4 @@
+import {approvedTimeForCardMark} from "../logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
@@ -107,6 +108,7 @@ test("higher canonical degree-state marks require exact source times, no invente
 
 
 test("matching current Strategy-card price and date recovers exact Engine22 historical Arizona time",()=>{
+  assert.equal(approvedTimeForCardMark("primary",{price:5620,time:"2022-01-05"}),"2022-01-05 10:00 AZ");
   const packet=buildEngine22WorkingWaveNodesV1({
     currentWavelength:source(),
     degreeStates:{
