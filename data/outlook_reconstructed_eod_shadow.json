@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-10T04:00:50.711933+00:00",
+  "updated_at_utc": "2026-11-10T13:11:45.093137+00:00",
   "completedSessionDate": "2026-11-09",
   "score": 52.5,
   "state": "MIXED",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-09",
-      "close": 7574.0,
-      "ma10": 7592.75,
-      "ma20": 7667.7,
+      "close": 7573.5,
+      "ma10": 7592.7,
+      "ma20": 7667.675,
       "ma10Prior": 7611.025,
       "ma20Prior": 7681.775,
       "ma10Upsloping": false,
@@ -272,12 +272,12 @@
       }
     },
     "large": {
-      "members": 915,
-      "nh": 153,
+      "members": 914,
+      "nh": 152,
       "nl": 183,
       "up": 70,
       "down": 32,
-      "breadth_pct": 45.54,
+      "breadth_pct": 45.37,
       "momentum_pct": 68.63,
       "prior": {
         "nh": 407,
@@ -289,12 +289,12 @@
       }
     },
     "mid": {
-      "members": 1109,
-      "nh": 216,
+      "members": 1110,
+      "nh": 217,
       "nl": 218,
       "up": 94,
       "down": 42,
-      "breadth_pct": 49.77,
+      "breadth_pct": 49.89,
       "momentum_pct": 69.12,
       "prior": {
         "nh": 399,
@@ -306,7 +306,7 @@
       }
     },
     "small": {
-      "members": 3426,
+      "members": 3427,
       "nh": 527,
       "nl": 841,
       "up": 169,
@@ -323,7 +323,7 @@
       }
     },
     "unknown": {
-      "members": 20,
+      "members": 19,
       "nh": 2,
       "nl": 7,
       "up": 1,
@@ -344,8 +344,8 @@
       "midMin": 2000000000,
       "smallMaxExclusive": 2000000000
     },
-    "classifiedMembers": 5450,
-    "classificationCoveragePct": 99.63,
+    "classifiedMembers": 5451,
+    "classificationCoveragePct": 99.65,
     "marketCapSource": "FMP_BATCH_MARKET_CAP",
     "marketCapAvailable": true,
     "marketCapReason": null
