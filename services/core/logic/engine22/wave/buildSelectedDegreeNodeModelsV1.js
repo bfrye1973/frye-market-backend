@@ -54,16 +54,10 @@ function makeModel({degree,modelVersion,sourcePath,selectionStatus,approvalRefer
     modelFingerprint:sha(anchors.map(n=>[n.nodeId,n.sourceRevision])),
     historicalAnchors:[],anchors};
 }
-const selectedModels=[
-  {degree:"minute", fields:[
-    ["anchors.w1Low","W1 Low","anchors.w1LowLocalTime"],
-    ["anchors.w1High","W1 High","anchors.w1HighLocalTime"],
-  ]},
-  {degree:"subminute",fields:[
-    ["waveA.startHigh","A starting high","waveA.startLocalTime"],
-    ["waveA.wickLow","A ending wick low","waveA.endLocalTime"],
-  ]},
-];
+// No Minute/Subminute node selection is authorized merely because a strategy
+// model includes research/Fibonacci anchor values. These degrees remain empty
+// until the Strategies card publishes explicit current chart-node evidence.
+const selectedModels=[];
 const read=(obj,path)=>path.split(".").reduce((v,key)=>v?.[key],obj);
 export function buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates}={}){
   const models=[];
