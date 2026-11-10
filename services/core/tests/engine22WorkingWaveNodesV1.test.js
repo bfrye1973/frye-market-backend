@@ -30,6 +30,7 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     ["A ending low",7507.25,"2026-11-10T13:40:00.000Z"],
     ["B ending high",7566,"2026-11-10T15:00:00.000Z"],
     ["C ending low / W1 start",7492.25,"2026-11-10T17:40:00.000Z"],
+    ["W1 ending high",7560,"2026-11-10T21:50:00.000Z"],
   ]);
   assert.ok([...micro,...submicro].every(n=>n.plotAllowed===false &&
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));

@@ -32,7 +32,7 @@ export const REVIEW_SOURCES=Object.freeze([
 // These are observation labels, not a statement that a wave ended.
 const FIELD_LABELS=Object.freeze([
   ["w1Low","W1 Low"],["w1High","W1 High"],["w2Low","W2 research anchor"],
-  ["w3High","W3 ending high"],["w4Low","W4 ending low"],["aHigh","A starting high"],["aLow","A ending low"],["bHigh","B ending high"],["cLow","C ending low / W1 start"],
+  ["w3High","W3 ending high"],["w4Low","W4 ending low"],["aHigh","A starting high"],["aLow","A ending low"],["bHigh","B ending high"],["cLow","C ending low / W1 start"],["newW1High","W1 ending high"],
 ]);
 function fromModel(root,rule){
   const model=root?.degrees?.[rule.degree]?.[rule.key];
