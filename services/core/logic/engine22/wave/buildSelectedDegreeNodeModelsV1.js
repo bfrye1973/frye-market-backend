@@ -3,7 +3,30 @@
 // Unknown or ambiguous source timestamps/ES prices never become chart markers.
 import {createHash} from "node:crypto";
 import {ownerApprovedWorkingSelection} from "./ownerApprovedWorkingSelectionV1.js";
+import {readFileSync} from "node:fs";
 
+// One-time reconciliation of an existing Engine22 history record against a
+// CURRENT Strategy-card price AND date. Never override either value. No new
+// data feed or runtime spreadsheet request is introduced.
+const ownerHistory=JSON.parse(readFileSync(
+  new URL("../history/fixtures/ownerSheetAnchorsNov8V1.json",import.meta.url),"utf8"));
+const historicalTimes=Object.freeze(Object.fromEntries(
+  ["primary","intermediate"].map(degree=>[degree,
+    ownerHistory.tabs.filter(t=>t.title.toLowerCase()===degree)
+      .flatMap(t=>t.rows).filter(row=>
+        typeof row[3]==="string"&&typeof row[4]==="string"&&
+        /^([01]\\d|2[0-3]):[0-5]\\d$/.test(row[4])&&
+        Number.isFinite(Number(row[5])))
+      .map(row=>({date:row[3],time:row[4],price:Number(row[5])}))
+  ])
+));
+function approvedTimeForCardMark(degree,mark){
+  if(typeof mark?.time!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(mark.time))return mark?.time;
+  const matches=(historicalTimes[degree]??[]).filter(row=>
+    row.date===mark.time && row.price===mark.price);
+  // Two historical matches or conflicting price/time evidence fail closed.
+  return matches.length===1 ? matches[0].date+" "+matches[0].time+" AZ" : mark.time;
+}
 const sha=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const tick=x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&
   Math.abs(x*4-Math.round(x*4))<1e-8;
@@ -71,7 +94,7 @@ export function buildSelectedDegreeNodeModelsV1({degreeStates}={}){
       /^(?:W[1-5]|A|B|C|D|E)$/.test(key)&&mark&&!mark.superseded)
       .map(([key,mark])=>({
         anchorField:"marks_"+key,sourceFieldPath:sourcePath+".marks."+key,
-        label:key,price:mark.price,time:mark.time
+        label:key,price:mark.price,time:approvedTimeForCardMark(degree,mark)
       }));
     models.push(makeModel({degree,modelVersion,sourcePath,
       selectionStatus:"CANONICAL_DEGREE_STATE",
