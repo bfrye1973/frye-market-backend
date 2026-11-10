@@ -14,9 +14,9 @@ export function reconstructEngine18OrderBook({ events, contractSymbol, seeded = 
   for (const e of events) {
     if (!e || e.contractSymbol !== contractSymbol) throw Error("ENGINE18_BOOK_CONTRACT_MISMATCH");
     if (!Number.isSafeInteger(e.sequence) || e.sequence < 0 ||
-        !Number.isSafeInteger(e.eventTimeNs) || e.eventTimeNs < 0) throw Error("ENGINE18_BOOK_INVALID_CLOCK_OR_SEQUENCE");
+        typeof e.eventTimeNs !== "string" || !/^\\d{1,19}$/.test(e.eventTimeNs)) throw Error("ENGINE18_BOOK_INVALID_CLOCK_OR_SEQUENCE");
     if (prevSeq !== null && e.sequence <= prevSeq) throw Error("ENGINE18_BOOK_OUT_OF_ORDER");
-    if (lastEventTimeNs !== null && e.eventTimeNs < lastEventTimeNs) throw Error("ENGINE18_BOOK_OUT_OF_ORDER_TIME");
+    if (lastEventTimeNs !== null && BigInt(e.eventTimeNs) < BigInt(lastEventTimeNs)) throw Error("ENGINE18_BOOK_OUT_OF_ORDER_TIME");
     if (prevSeq !== null && e.sequence !== prevSeq + 1) gapDetected = true;
     prevSeq=e.sequence;lastEventTimeNs=e.eventTimeNs;
     const id=String(e.orderId || "");
