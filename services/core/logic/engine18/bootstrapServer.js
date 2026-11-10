@@ -18,7 +18,7 @@ if(process.env.ENGINE18_IRONBEAM_DEMO_PROBE==="1") {
       phase:result.phase,checks:result.checks||{},
       liveEntitlementConfirmed:false,mboConfirmed:false,readOnly:true
     };
-    console.log("Engine 18 Ironbeam demo probe completed:",ironbeamDemoTest.status,ironbeamDemoTest.phase);
+    console.log("Engine 18 Ironbeam demo probe completed:",JSON.stringify(ironbeamDemoTest));
   }).catch(()=>{ironbeamDemoTest={status:"FAILED",phase:"INTERNAL",readOnly:true};});
 }
 const service = http.createServer((req,res) => {
