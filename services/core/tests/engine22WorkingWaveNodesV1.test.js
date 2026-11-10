@@ -105,3 +105,22 @@ test("higher canonical degree-state marks require exact source times, no invente
  assert.ok(packet.degrees.primary.nodes.every(n=>n.sourcePath==="degreeStates.primary"&&n.noExecution));
 });
 
+
+test("date-only higher degree marks are explicitly unavailable, never assigned a fake chart time",()=>{
+  const sourceWave=source();
+  const packet=buildEngine22WorkingWaveNodesV1({
+    currentWavelength:sourceWave,
+    degreeStates:{
+      primary:{degree:"primary",active:true,marks:{W1:{price:5620,time:"2022-01-05"}}},
+      intermediate:{degree:"intermediate",active:true,marks:{W1:{price:7151,time:"2026-01-28"}}},
+    },
+  });
+  for(const d of ["primary","intermediate"]){
+    assert.equal(packet.degrees[d].nodeCount,0);
+    assert.equal(packet.degrees[d].available,false);
+    assert.equal(packet.degrees[d].dateOnlyMarkCount,1);
+    assert.equal(packet.degrees[d].coverageStatus,"EXACT_EVENT_TIME_MISSING");
+  }
+  assert.equal(packet.degrees.minute.coverageStatus,"NO_CURRENT_CHART_NODES_BY_OWNER");
+  assert.equal(packet.degrees.subminute.coverageStatus,"NO_CURRENT_CHART_NODES_BY_OWNER");
+});
