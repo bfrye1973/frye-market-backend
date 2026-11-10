@@ -1,0 +1,46 @@
+name: Engine22 LIVE Current-sheet Verification (read only)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/engine22-live-current-sheet-verify.yml'
+permissions:
+  contents: read
+jobs:
+  inspect-live-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Verify deployed Strategy-card values and the existing Engine2 node feed
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const url='https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1';
+          const expected={primary:{W1low:2440,W1high:4806,W2:3504,W3:6157,W4:4825},
+            intermediate:{W1low:4877,W1high:7044,W2:6345}};
+          let ok=false;
+          for(let attempt=1;attempt<=8;attempt++){
+            const res=await fetch(url,{headers:{Accept:'application/json'},signal:AbortSignal.timeout(15000)});
+            if(!res.ok)throw new Error('SNAPSHOT_HTTP_'+res.status);
+            const snap=await res.json();
+            const wave=snap?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
+            if(!wave)throw Error('ENGINE22_STRATEGY_MISSING');
+            const s=wave.degreeStates, n=wave.workingWaveNodes?.degrees;
+            const p=s?.primary?.marks, i=s?.intermediate?.marks;
+            const valuesValid=p?.W1?.low?.price===2440&&p?.W1?.high?.price===4806&&p?.W2?.price===3504&&p?.W3?.price===6157&&p?.W4?.price===4825&&
+              i?.W1?.low?.price===4877&&i?.W1?.high?.price===7044&&i?.W2?.price===6345;
+            const nodeValid=n?.primary?.nodes?.length===5&&n?.intermediate?.nodes?.length===3&&
+              n?.minute?.nodes?.length===0&&n?.subminute?.nodes?.length===0;
+            const azValid=n?.primary?.nodes?.every(x=>x.ownerArizonaTime&&x.marketAtUtc)&&
+              n?.intermediate?.nodes?.every(x=>x.ownerArizonaTime&&x.marketAtUtc);
+            console.log('LIVE_CHECK',attempt,'sheetValuesInStrategy',!!valuesValid,
+              'primaryNodes',n?.primary?.nodes?.length??-1,
+              'intermediateNodes',n?.intermediate?.nodes?.length??-1,
+              'AZtimes',!!azValid,'minute',n?.minute?.nodes?.length??-1,
+              'subminute',n?.subminute?.nodes?.length??-1);
+            if(valuesValid&&nodeValid&&azValid){ok=true;break;}
+            await new Promise(resolve=>setTimeout(resolve,8000));
+          }
+          if(!ok)throw Error('ENGINE22_CURRENT_SHEET_LIVE_SNAPSHOT_NOT_YET_MATCHED');
+          console.log('LIVE_ENGINE22_STRATEGY_AND_ENGINE2_NODE_PATH_VERIFIED');
+          NODE
