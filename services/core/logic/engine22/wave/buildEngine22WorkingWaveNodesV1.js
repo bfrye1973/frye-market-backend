@@ -113,7 +113,7 @@ export function buildEngine22WorkingWaveNodesV1({currentWavelength,degreeStates,
     const sourceMarks=degreeStates?.[degree]?.marks??{};
     const dateOnlyMarkCount=["primary","intermediate","minor"].includes(degree)
       ?Object.values(sourceMarks).filter(mark=>mark&&typeof mark==="object"&&
-          typeof mark.time==="string"&&/^\\d{4}-\\d{2}-\\d{2}$/.test(mark.time)&&
+          typeof mark.time==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(mark.time)&&
           typeof mark.price==="number").length:0;
     const coverageStatus=nodes.length
       ?"VALIDATED_RESEARCH_NODES"
