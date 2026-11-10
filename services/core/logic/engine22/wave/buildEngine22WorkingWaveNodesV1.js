@@ -107,19 +107,25 @@ export function buildEngine22WorkingWaveNodesV1({currentWavelength,degreeStates,
       historicalAsOfSupported:false,noExecution:true};
   const models=[...REVIEW_SOURCES.map(r=>fromModel(currentWavelength,r)).filter(Boolean),
     ...buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates})];
-  const degrees=Object.fromEntries(DEGREE_ORDER.map(degree=>[
-    degree,{
+  const degrees=Object.fromEntries(DEGREE_ORDER.map(degree=>{
+    const selected=models.filter(m=>m.degree===degree&&m.selectedForResearchDisplay);
+    const nodes=selected.flatMap(m=>m.anchors);
+    const sourceMarks=degreeStates?.[degree]?.marks??{};
+    const dateOnlyMarkCount=["primary","intermediate","minor"].includes(degree)
+      ?Object.values(sourceMarks).filter(mark=>mark&&typeof mark==="object"&&
+          typeof mark.time==="string"&&/^\\d{4}-\\d{2}-\\d{2}$/.test(mark.time)&&
+          typeof mark.price==="number").length:0;
+    const coverageStatus=nodes.length
+      ?"VALIDATED_RESEARCH_NODES"
+      :dateOnlyMarkCount?"EXACT_EVENT_TIME_MISSING"
+      :["minute","subminute"].includes(degree)?"NO_CURRENT_CHART_NODES_BY_OWNER":"NO_VALIDATED_CURRENT_NODES";
+    return [degree,{
       degree,
-      available:models.some(m=>m.degree===degree),
+      available:nodes.length>0,
       models:models.filter(m=>m.degree===degree),
-      nodes:models.filter(m=>m.degree===degree&&m.selectedForResearchDisplay)
-        .flatMap(m=>m.anchors),
-      nodeCount:models.filter(m=>m.degree===degree&&m.selectedForResearchDisplay)
-        .flatMap(m=>m.anchors).length,
-      coverageStatus:models.some(m=>m.degree===degree&&m.anchors.length)
-        ?"VALIDATED_RESEARCH_NODES":"NO_VALIDATED_CURRENT_NODES",
-    }
-  ]));
+      nodes,nodeCount:nodes.length,dateOnlyMarkCount,coverageStatus,
+    }];
+  }));
   const fingerprint=sha(models.map(m=>[m.sourcePath,m.modelFingerprint]));
   return {schema:SCHEMA,authority:"ENGINE22",available:true,symbol:"ES",
     readOnly:true,historyRevision:null,historyAvailable:false,
