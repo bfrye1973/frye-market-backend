@@ -8,11 +8,11 @@ const sha=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const tick=x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&
   Math.abs(x*4-Math.round(x*4))<1e-8;
 const isoUtc=x=>typeof x==="string"&&
-  /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$/.test(x)&&
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(x)&&
   Number.isFinite(Date.parse(x));
 function exactArizonaTime(raw){
   if(typeof raw!=="string")return null;
-  const m=/^(\\d{4}-\\d{2}-\\d{2}) ([01]\\d|2[0-3]):([0-5]\\d)(?: AZ)?$/.exec(raw);
+  const m=/^(\d{4}-\d{2}-\d{2}) ([01]\d|2[0-3]):([0-5]\d)(?: AZ)?$/.exec(raw);
   if(!m)return null;
   const date=new Date(m[1]+"T"+m[2]+":"+m[3]+":00-07:00");
   if(!Number.isFinite(date.getTime()))return null;
@@ -27,7 +27,7 @@ function parseSourceTime(raw){
   if(az)return {marketAtUtc:az,ownerArizonaTime:raw,sourceTimestampConflict:false};
   if(isoUtc(raw))return {marketAtUtc:new Date(raw).toISOString(),ownerArizonaTime:null,sourceTimestampConflict:false};
   // Offset timestamp is accepted only if the source explicitly carries -07:00.
-  if(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?-07:00$/.test(raw)&&Number.isFinite(Date.parse(raw)))
+  if(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?-07:00$/.test(raw)&&Number.isFinite(Date.parse(raw)))
     return {marketAtUtc:new Date(raw).toISOString(),ownerArizonaTime:raw,sourceTimestampConflict:false};
   return null;
 }
@@ -75,7 +75,7 @@ export function buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates}
       continue;
     const sourcePath="currentWavelength.degrees."+rule.degree+"."+sel.key;
     const specs=rule.fields.map(([field,label,timeField])=>({
-      anchorField:field.replace(/\\./g,"_"),sourceFieldPath:sourcePath+"."+field,
+      anchorField:field.replace(/\./g,"_"),sourceFieldPath:sourcePath+"."+field,
       label,price:read(model,field),time:read(model,timeField)
     }));
     models.push(makeModel({degree:rule.degree,modelVersion:model.version,sourcePath,
