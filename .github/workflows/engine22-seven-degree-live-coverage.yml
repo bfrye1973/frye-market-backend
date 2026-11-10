@@ -1,0 +1,73 @@
+name: Engine22 Seven Degree LIVE Read-only Coverage
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js'
+      - 'services/core/tests/engine22WorkingWaveNodesV1.test.js'
+      - '.github/workflows/engine22-seven-degree-live-coverage.yml'
+permissions:
+  contents: read
+jobs:
+  published-card-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read-only published snapshot coverage (no node prices printed)
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const url='https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1';
+          const timeout=AbortSignal.timeout(15000);
+          let response;
+          try {response=await fetch(url,{signal:timeout,headers:{Accept:'application/json'}});}
+          catch(err){console.log('PROD_SNAPSHOT_FETCH_UNAVAILABLE',err.name);process.exitCode=1;process.exit();}
+          console.log('PROD_SNAPSHOT_HTTP',response.status);
+          if(!response.ok){console.log('PROD_SNAPSHOT_PUBLIC_ACCESS_UNAVAILABLE');process.exitCode=1;process.exit();}
+          const data=await response.json();
+          const {buildSelectedDegreeNodeModelsV1}=await import('./services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js');
+          const wave=data?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
+          if(!wave){console.log('ENGINE22_STRATEGY_CARD_MISSING');process.exitCode=1;process.exit();}
+          const order=['primary','intermediate','minor','minute','subminute','micro','submicro'];
+          const packet=wave.workingWaveNodes;
+          const states=wave.degreeStates||{};
+          const proposed=buildSelectedDegreeNodeModelsV1({degreeStates:states});
+          const {readFileSync}=await import('node:fs');
+          const fixture=JSON.parse(readFileSync('./services/core/logic/engine22/history/fixtures/ownerSheetAnchorsNov8V1.json','utf8'));
+          for(const degree of ['primary','intermediate']){
+            const rows=fixture.tabs.filter(t=>t.title.toLowerCase()===degree).flatMap(t=>t.rows)
+              .filter(r=>r[3]&&r[4]&&r[5]!=null);
+            const marks=Object.values(states?.[degree]?.marks??{}).filter(m=>m&&m.price!=null&&m.time);
+            const matches=marks.filter(m=>rows.some(r=>r[3]===m.time&&Number(r[5])===m.price));
+            console.log('OWNER_HISTORY_CANDIDATES',degree,'cardMarks',marks.length,'exactPriceDateMatches',matches.length,'unmatched',marks.length-matches.length);
+          }
+
+          for(const degree of order){
+            const section=packet?.degrees?.[degree];
+            const nodes=section?.nodes??[];
+            const marks=Object.entries(states?.[degree]?.marks??{}).filter(([key,v])=>v&&typeof v==='object'&&v.price!=null&&v.time);
+            const valid=nodes.filter(n=>Number.isFinite(n.price)&&typeof n.marketAtUtc==='string'&&n.sourceRevision);
+            const proposedNodes=proposed.filter(m=>m.degree===degree).flatMap(m=>m.anchors);
+            const seenTimeTypes=marks.reduce((acc,[key,m])=>{const t=typeof m.time==='string'?(m.time.endsWith('Z')?'UTC':m.time.includes('-07:00')?'OFFSET':'LOCAL_OR_OTHER'):'NOT_STRING';acc[t]=(acc[t]||0)+1;return acc;},{});
+            if(['primary','intermediate'].includes(degree)){
+              console.log('SOURCE_DIAGNOSTIC',degree,'stateDegree',states?.[degree]?.degree,
+                'active',states?.[degree]?.active,'modelVersion',states?.[degree]?.version??'NONE',
+                'times',JSON.stringify(marks.map(([k,v])=>[k,String(v.time).slice(0,45)])),
+                'normalizedMarkKeys',JSON.stringify(Object.keys(states?.[degree]?.marks?.W1??{})),
+                'sourceMarkKeys',JSON.stringify(Object.keys(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1??{})),
+                'sourceTime',String(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.time??'NONE').slice(0,60),
+                'lowKeys',JSON.stringify(Object.keys(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.low??{})),
+                'highKeys',JSON.stringify(Object.keys(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.high??{})),
+                'lowTime',String(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.low?.time??'NONE').slice(0,60),
+                'highTime',String(wave?.waveFibState?.activeStructures?.[degree]?.marks?.W1?.high?.time??'NONE').slice(0,60));
+            }
+            console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'newValidNodes',proposedNodes.length,'timeTypes',JSON.stringify(seenTimeTypes),'status',section?.coverageStatus??'UNSPECIFIED');
+          }
+          console.log('BACKEND_PACKET_SCHEMA',packet?.schema??'MISSING');
+          if(['primary','intermediate','minor'].some(d=>!proposed.some(m=>m.degree===d&&m.anchors.length))){console.error('HIGHER_DEGREE_NODE_PUBLICATION_BLOCKED');process.exitCode=1;}
+          if(proposed.some(m=>['minute','subminute'].includes(m.degree)&&m.anchors.length)){console.error('FORBIDDEN_MINUTE_SUBMINUTE_NODES');process.exitCode=1;}
+          // Counts are diagnostic; production is expected to have only 2 live
+          // degrees until backend PR merges. Do not require seven today.
+          NODE

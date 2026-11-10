@@ -1,3 +1,4 @@
+import {approvedTimeForCardMark} from "../logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelength.js";
@@ -28,7 +29,10 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));
   assert.ok([...micro,...submicro].every(n=>n.presentationAllowed===true));
   assert.equal(packet.degrees.primary.nodes.length,0);
-  assert.equal(packet.degrees.minute.nodes.length,0);
+  assert.equal(packet.degrees.minute.nodes.length,0,
+    "Minute research/Fib references must not be converted into current chart nodes");
+  assert.equal(packet.degrees.subminute.nodes.length,0,
+    "Subminute research/Fib references must not be converted into current chart nodes");
 });
 
 test("fingerprint remains unchanged on price/touch updates, changes on corrected anchor",()=>{
@@ -84,4 +88,50 @@ test("corrected owner Micro W2 and superseded old time remain distinguishable",(
   assert.equal(prior.w2LowAtUtc,"2026-11-08T22:00:00Z");
   assert.notEqual(recorded.marketAtUtc,prior.w2LowAtUtc.replace("Z",".000Z"));
 
+});
+
+
+test("higher canonical degree-state marks require exact source times, no invented anchors",()=>{
+ const wave=source();
+ const degrees={
+  primary:{degree:"primary",active:true,marks:{W1:{price:3200,time:"2020-04-02 08:00 AZ"},W2:{price:4306,time:"UNKNOWN"}}},
+  intermediate:{degree:"intermediate",active:true,marks:{W1:{price:5188.5,time:"2025-04-08T14:00:00Z"}}},
+  minor:{degree:"minor",active:true,marks:{W1:{price:6485,time:"2026-04-30 17:00 AZ"},W2:{price:7325,time:"UNKNOWN"}}}
+ };
+ const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:wave,degreeStates:degrees});
+ assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.label,n.marketAtUtc]),[["W1","2020-04-02T15:00:00.000Z"]]);
+ assert.equal(packet.degrees.intermediate.nodes.length,1);
+ assert.equal(packet.degrees.minor.nodes.length,1);
+ assert.equal(packet.degrees.minor.nodes.some(n=>n.label==="W2"),false);
+ assert.ok(packet.degrees.primary.nodes.every(n=>n.sourcePath==="degreeStates.primary"&&n.noExecution));
+});
+
+
+test("matching current Strategy-card price and date recovers exact Engine22 historical Arizona time",()=>{
+  assert.equal(approvedTimeForCardMark("primary",{price:5620,time:"2022-01-05"}),"2022-01-05 10:00 AZ");
+  const packet=buildEngine22WorkingWaveNodesV1({
+    currentWavelength:source(),
+    degreeStates:{
+      primary:{degree:"primary",active:true,marks:{
+        W1:{price:5620,time:"2022-01-05"},W2:{price:4306,time:"2022-10-12"}}},
+      intermediate:{degree:"intermediate",active:true,marks:{
+        W1:{price:7151,time:"2026-01-28"},W2:{price:6407,time:"2026-03-30"}}},
+    },
+  });
+  assert.deepEqual(packet.degrees.primary.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
+    [5620,"2022-01-05 10:00 AZ"],[4306,"2022-10-12 09:00 AZ"]]);
+  assert.deepEqual(packet.degrees.intermediate.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
+    [7151,"2026-01-28 10:00 AZ"],[6407,"2026-03-30 03:00 AZ"]]);
+  assert.equal(packet.degrees.minute.nodes.length,0);
+  assert.equal(packet.degrees.subminute.nodes.length,0);
+});
+
+test("unmatched date-only current card price is never assigned an archived time",()=>{
+  const packet=buildEngine22WorkingWaveNodesV1({
+    currentWavelength:source(),
+    degreeStates:{primary:{degree:"primary",active:true,marks:{
+      W1:{price:5620.25,time:"2022-01-05"}}}},
+  });
+  assert.equal(packet.degrees.primary.nodeCount,0);
+  assert.equal(packet.degrees.primary.coverageStatus,"EXACT_EVENT_TIME_MISSING");
 });

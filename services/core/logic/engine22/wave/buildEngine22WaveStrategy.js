@@ -2349,6 +2349,7 @@ export function buildEngine22WaveStrategy(input = {}) {
     // Read-only source-authoritative anchor packet for Engine2. No trading authority.
     workingWaveNodes: buildEngine22WorkingWaveNodesV1({
       currentWavelength:publishedCurrentWavelength,
+      degreeStates:publishedDegreeStates,
       symbol:context.symbol,
     }),
     higherDegreeBearishProtection: buildHigherDegreeBearishProtectionV1({
