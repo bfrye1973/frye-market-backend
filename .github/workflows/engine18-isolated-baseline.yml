@@ -24,5 +24,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Engine 18 demo chart endpoint smoke test (no raw market data logged)
+        run: |
+          node --input-type=module - <<'NODE'
+          const url="https://frye-engine18-liquidity-research.onrender.com/api/engine18/liquidity-zones";
+          const okay=await fetch(url,{headers:{Origin:"https://frye-dashboard.onrender.com"}});
+          if(okay.status!==200)throw Error("E18 chart status "+okay.status);
+          const payload=await okay.json();
+          if(payload.schema!=="engine18.chartLiquidityDemo.v1"||
+             payload.level!==2||payload.executionEligible!==false||
+             payload.displayOnly!==true||!Array.isArray(payload.zones)||
+             payload.zones.length>8)throw Error("E18 chart contract violated");
+          const blocked=await fetch(url);
+          if(blocked.status!==403)throw Error("E18 demo public gate missing");
+          console.log("E18 demo chart contract PASS",
+            JSON.stringify({available:payload.available,
+              zones:payload.zones.length,unauthorizedBlocked:true}));
+          NODE
       - name: Engine 18 research-only unit tests
         run: node --test services/core/tests/engine18LiquidityBaseline.test.js services/core/tests/engine18Engine11Adapter.test.js services/core/tests/engine18Replay.test.js services/core/tests/engine18OrderBookResearch.test.js services/core/tests/engine18RithmicFeedContract.test.js services/core/tests/engine18VisibleLiquidityResearch.test.js services/core/tests/engine18IronbeamV3ReadOnly.test.js services/core/tests/engine18IronbeamV2DemoProbe.test.js services/core/tests/engine18IronbeamV2Level2Zones.test.js services/core/tests/engine18IronbeamV2Level2Monitor.test.js
