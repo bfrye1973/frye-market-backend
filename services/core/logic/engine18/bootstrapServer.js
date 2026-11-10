@@ -65,6 +65,41 @@ const service = http.createServer((req,res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+  if(pathname==="/api/engine18/liquidity-zones"){
+    // A demo-only owner dashboard experiment. No raw book or stream frames.
+    // Origin gating is NOT authentication; leave disabled until display rights
+    // and access protection are established. Browser clients fail closed.
+    const approvedOrigin="https://frye-dashboard.onrender.com";
+    const origin=req.headers.origin;
+    if(process.env.ENGINE18_DEMO_ZONE_DISPLAY!=="1" ||
+       origin!==approvedOrigin || req.method!=="GET"){
+      res.writeHead(403);res.end(JSON.stringify({ok:false,reason:"DISPLAY_NOT_AUTHORIZED"}));return;
+    }
+    res.setHeader("Access-Control-Allow-Origin",approvedOrigin);
+    res.setHeader("Vary","Origin");
+    const feed=ironbeamLevel2Status;
+    const research=ironbeamLevel2Monitor?.research?.();
+    const now=Date.now();
+    const fresh=feed?.connected && feed.state==="RECEIVING" &&
+      Number.isFinite(feed.lastFrameReceivedAt) &&
+      now-feed.lastFrameReceivedAt>=0 &&
+      now-feed.lastFrameReceivedAt<=10000 &&
+      research?.usable && Number.isFinite(research.lastExchangeMs) &&
+      now-research.lastExchangeMs>=0 &&
+      now-research.lastExchangeMs<=15000;
+    const zones=fresh?(research?.zones||[]).slice(0,8)
+      .map(z=>({side:z.side,price:z.price,visibleContracts:z.visibleContracts,
+        observedInImages:z.observedInImages,observationShare:z.observationShare})):[];
+    res.writeHead(200);res.end(JSON.stringify({
+      schema:"engine18.chartLiquidityDemo.v1",symbol:"XCME:ES.Z26",
+      available:!!fresh,mode:"DEMO_RESEARCH_ONLY",tier:"UNVERIFIED",
+      level:2,executionEligible:false,displayOnly:true,
+      source:"IRONBEAM_V2_AGGREGATED_DEPTH",
+      asOfUnixMs:research?.lastExchangeMs||null,
+      reason:fresh?null:"STALE_OR_UNVERIFIED_DEMO_DEPTH",
+      zones
+    }));return;
+  }
   if(req.method==="GET" && pathname==="/monitor"){
     res.setHeader("Content-Type","text/html; charset=utf-8");
     res.setHeader("Content-Security-Policy","default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'");
