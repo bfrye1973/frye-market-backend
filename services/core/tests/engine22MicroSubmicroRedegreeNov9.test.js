@@ -57,8 +57,14 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  assert.equal(m.anchors.cLowAtUtc,"2026-11-10T17:40:00Z");
  assert.equal(m.anchors.w1StartLow,7492.25);
  assert.equal(m.anchors.newW1High,null);
- assert.deepEqual(m.w1UpReferenceLevels.map(l=>[l.label,l.price]),[["0.618",7545.25],["1.000",7578],["1.272",7601.25],["1.618",7631],["2.000",7663.75],["2.618",7716.75]]);
- assert.ok(m.w1UpReferenceLevels.every(l=>l.status==="WATCH"&&l.provisional));
+ assert.equal(m.w1FibMethod,"PRIOR_CORRECTION_RETRACEMENT_FROM_C_LOW");
+ assert.deepEqual(m.w1PriorCorrectionRetracementLevels.map(l=>[l.label,l.price]),[
+  ["0.236",7517.75],["0.382",7533.50],["0.500",7546.25],
+  ["0.618",7558.75],["0.786",7577.00],["1.000",7600.00]
+ ]);
+ assert.ok(m.w1PriorCorrectionRetracementLevels.every(l=>l.status==="WATCH"&&l.provisional));
+ assert.ok(m.w1LegacyProxyLevels.every(l=>l.status==="SUPERSEDED_RESEARCH"));
+ assert.equal(m.anchors.newW1High,null,"No invented W1 end; these are prior-correction retracements only");
  assert.deepEqual(m.cDownExtensionLevels.map(l=>[l.label,l.price]),[
   ["0.618",7508.75],["1.000",7473.25],["1.272",7448],
   ["1.618",7416],["2.000",7380.5],["2.618",7323.25]
@@ -96,6 +102,34 @@ test("Post-W2 completed candle touches persist without importing old blue Submic
  assert.equal(b.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.levels[3].status,"TOUCHED");
  assert.equal(b.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.levels[3].touchEvidence.verified,false);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
+test("Micro W5 and Submicro W1 WATCH levels turn green only on post-origin ES touches",()=>{
+ const start=Date.parse("2026-11-10T17:40:00Z");
+ const early=priceRead(8000,{at:start-60000});
+ assert.ok(early.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.every(l=>l.status==="WATCH"));
+ assert.ok(early.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w1PriorCorrectionRetracementLevels.every(l=>l.status==="WATCH"));
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),"engine22-current-fib-touches-"));
+ try{
+  const storePath=path.join(dir,"touches.json");
+  const first=priceRead(7540,{at:start+60000,storePath});
+  const micro=first.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels;
+  const sub=first.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w1PriorCorrectionRetracementLevels;
+  assert(micro.every(l=>l.status==="WATCH"),"Micro W5 first target not hit");
+  assert.deepEqual(sub.map(l=>l.status),["TOUCHED","TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
+  assert.equal(sub[0].touchEvidenceType,"ES_CURRENT_PRICE");
+  const updated=priceRead(7638,{at:start+120000,storePath});
+  assert.deepEqual(updated.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.map(l=>l.status),
+   ["TOUCHED","TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
+  assert(updated.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w1PriorCorrectionRetracementLevels.every(l=>l.status==="TOUCHED"));
+  const follow=priceRead(7510,{at:start+180000,storePath});
+  assert.equal(follow.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels[0].status,"TOUCHED");
+  assert.equal(follow.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w1PriorCorrectionRetracementLevels[5].status,"TOUCHED");
+  // A candle whose start precedes the new W1 origin cannot retroactively
+  // turn the new levels green, even if its high crossed all targets.
+  const noEarly=priceRead(7495,{at:start+900000,
+   bars:[{time:Math.floor((start-600000)/1000),low:7492.25,high:9000}]});
+  assert(noEarly.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w1PriorCorrectionRetracementLevels.every(l=>l.status==="WATCH"));
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
 test("Old scenarios and canonical owner selection revision 6 untouched",()=>{
  const w=base(7540);

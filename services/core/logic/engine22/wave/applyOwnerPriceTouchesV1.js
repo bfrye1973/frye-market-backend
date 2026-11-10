@@ -997,6 +997,75 @@ export function applyOwnerPriceTouchesV1({
           touchEvidence:l.touchEvidence}]));
     }
   }
+  // LOCKED OWNER REQUEST (Nov 10): current Micro W5 and Submicro W1
+  // Fibonacci WATCH levels turn TOUCHED (green in Strategies) when ES reaches
+  // them AFTER the common W4/C low 2026-11-10 10:40 Arizona. The two models
+  // have independent durable touch histories; no older W3/C observations or
+  // pre-origin candles can make a new level green.
+  for(const [degree,modelKey,field,method] of [
+    ["micro","ownerMicroW3Nov9ReclassifiedResearch","w5UpExtensionLevels","MICRO_W5"],
+    ["submicro","ownerSubmicroW3Nov9InternalResearch","w1PriorCorrectionRetracementLevels","SUBMICRO_W1"],
+  ]){
+    const model=root.degrees?.[degree]?.[modelKey];
+    if(model?.selectionStatus!=="RESEARCH_ONLY"||!Array.isArray(model?.[field]))continue;
+    const start=Date.parse(degree==="micro"
+      ?model.anchors?.w4LowAtUtc:model.anchors?.cLowAtUtc);
+    if(!Number.isFinite(start)||!model[field].length)continue;
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const id=JSON.stringify([degree,method,model.version,
+      degree==="micro"?model.anchors?.w4Low:model.anchors?.cLow,
+      degree==="micro"?model.anchors?.w4LowAtUtc:model.anchors?.cLowAtUtc,
+      model[field].map(l=>[l.key,l.price])]);
+    const old=previousWavelength?.degrees?.[degree]?.[modelKey];
+    const same=old?.version===model.version &&
+      old.anchors?.[degree==="micro"?"w4Low":"cLow"]===
+        model.anchors?.[degree==="micro"?"w4Low":"cLow"] &&
+      old.anchors?.[degree==="micro"?"w4LowAtUtc":"cLowAtUtc"]===
+        model.anchors?.[degree==="micro"?"w4LowAtUtc":"cLowAtUtc"];
+    const observed=[];
+    const quote=finite(currentPrice);
+    const previous=same?finite(previousWavelength?.currentPrice):null;
+    if(now>=start&&quote!==null)observed.push({
+      high:previous===null?quote:Math.max(quote,previous),
+      time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",verified:false,
+    });
+    // Only completely closed 10m candles with starts at/after the new
+    // owner's low, not historical candles from the prior correction.
+    for(const b of Array.isArray(bars10m)?bars10m:[]){
+      const raw=b?.time??b?.timestamp??b?.t;
+      const parsed=typeof raw==="string"&&!/^\d+$/.test(raw)?Date.parse(raw):Number(raw);
+      const t=Number.isFinite(parsed)?(parsed<1e11?parsed*1000:parsed):NaN;
+      const low=finite(Number(b?.low??b?.l));
+      const high=finite(Number(b?.high??b?.h));
+      if(!Number.isFinite(t)||t<start||t+600000>now||
+         low===null||high===null||high<low)continue;
+      observed.push({high,time:new Date(t).toISOString(),
+        source:"ES_10M_COMPLETED_OHLC",
+        verified:model.priceBasisReconciliation==="VERIFIED"});
+    }
+    const past=disk[id]||{};
+    model[field]=model[field].map(level=>{
+      const prior=past[level.key]?.price===level.price?past[level.key]:
+        same?old?.[field]?.find(x=>x.key===level.key&&x.price===level.price&&x.status==="TOUCHED"):null;
+      const retained=prior?.status==="TOUCHED";
+      const hit=retained?null:observed.find(o=>o.high>=level.price);
+      const source=retained?prior.touchEvidenceType:(hit?.source||null);
+      return {...level,status:retained||hit?"TOUCHED":"WATCH",
+        provisional:true,touchEvidenceAvailable:Boolean(retained||hit),
+        touchEvidenceType:source||null,
+        touchedAt:retained?prior.touchedAt||null:(hit?.time||null),
+        touchEvidence:retained?prior.touchEvidence||null:hit?{
+          verified:hit.verified,
+          evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"
+            ?"COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+          modelPriceBasisVerified:model.priceBasisReconciliation==="VERIFIED",
+        }:null};
+    });
+    disk[id]=Object.fromEntries(model[field].filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }

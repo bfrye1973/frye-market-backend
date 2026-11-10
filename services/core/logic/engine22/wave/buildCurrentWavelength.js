@@ -610,15 +610,29 @@ export function buildCurrentWavelength({
           status:"WATCH",provisional:true,touchEvidenceAvailable:false,
           levelType:"SUBMICRO_C_DOWN_EXTENSION_RESEARCH",
         })),
-        // Submicro W1 has a start low, but NO new W1 high. Research-only
-        // proxy projections use the PRIOR internal Submicro W1 span 85.75.
-        // These are not confirmed W1 extensions or execution signals.
-        w1UpReferenceLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+        // LOCKED ENGINE22 WAVE FIB METHOD (owner review 2026-11-10):
+        // A forming Submicro W1 has only an origin, NOT a verified W1 high.
+        // Its CURRENT watch levels are retracements UP from the preceding
+        // completed correction's high 7600 to low 7492.25. Never project a
+        // new W1 from an older unrelated W1 length. ES rounds to 0.25.
+        // When W1 high is owner-confirmed, switch to W2 retracements of W1;
+        // only after W2 low exists project W3 from W2 using W1 length.
+        w1FibMethod:"PRIOR_CORRECTION_RETRACEMENT_FROM_C_LOW",
+        w1PriorCorrectionRetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+(7600-7492.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W1_PRIOR_CORRECTION_RETRACEMENT_REFERENCE",
+        })),
+        // Retain prior 85.75-point proxy for history/audit only.
+        // Never display it as the current Submicro W1 projection.
+        w1LegacyProxyLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
           key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
           label:ratio.toFixed(3),ratio,
           price:Math.round((7492.25+85.75*ratio)*4)/4,
-          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
-          levelType:"SUBMICRO_W1_UP_PREVIOUS_W1_LENGTH_PROXY",
+          status:"SUPERSEDED_RESEARCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W1_UP_PREVIOUS_W1_LENGTH_PROXY_ARCHIVED",
         })),
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
         levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
