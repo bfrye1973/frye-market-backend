@@ -41,6 +41,11 @@ jobs:
             const valid=nodes.filter(n=>Number.isFinite(n.price)&&typeof n.marketAtUtc==='string'&&n.sourceRevision);
             const proposedNodes=proposed.filter(m=>m.degree===degree).flatMap(m=>m.anchors);
             const seenTimeTypes=marks.reduce((acc,[key,m])=>{const t=typeof m.time==='string'?(m.time.endsWith('Z')?'UTC':m.time.includes('-07:00')?'OFFSET':'LOCAL_OR_OTHER'):'NOT_STRING';acc[t]=(acc[t]||0)+1;return acc;},{});
+            if(['primary','intermediate'].includes(degree)){
+              console.log('SOURCE_DIAGNOSTIC',degree,'stateDegree',states?.[degree]?.degree,
+                'active',states?.[degree]?.active,'modelVersion',states?.[degree]?.version??'NONE',
+                'times',JSON.stringify(marks.map(([k,v])=>[k,String(v.time).slice(0,45)])));
+            }
             console.log('DEGREE',degree,'currentNodes',nodes.length,'validTimestampNodes',valid.length,'cardTimedMarks',marks.length,'newValidNodes',proposedNodes.length,'timeTypes',JSON.stringify(seenTimeTypes),'status',section?.coverageStatus??'UNSPECIFIED');
           }
           console.log('BACKEND_PACKET_SCHEMA',packet?.schema??'MISSING');
