@@ -92,10 +92,20 @@ export function buildSelectedDegreeNodeModelsV1({degreeStates}={}){
       ?state.version:"engine22.degreeStates."+degree+".v1";
     const specs=Object.entries(state.marks??{}).filter(([key,mark])=>
       /^(?:W[1-5]|A|B|C|D|E)$/.test(key)&&mark&&!mark.superseded)
-      .map(([key,mark])=>({
-        anchorField:"marks_"+key,sourceFieldPath:sourcePath+".marks."+key,
-        label:key,price:mark.price,time:approvedTimeForCardMark(degree,mark)
-      }));
+      .flatMap(([key,mark])=>{
+        // W1 carries two legitimate endpoints. Keep the existing W1 high
+        // node identity stable, adding its exact low as an independent node.
+        const low=key==="W1"&&mark.low&&typeof mark.low==="object"
+          ?[{anchorField:"marks_W1_low",sourceFieldPath:sourcePath+".marks.W1.low",
+              label:"W1 LOW",price:mark.low.price,
+              time:approvedTimeForCardMark(degree,mark.low)}]:[];
+        const high={anchorField:"marks_"+key,
+          sourceFieldPath:sourcePath+".marks."+key,
+          label:key==="W1"?"W1 HIGH":key,
+          price:mark.price,
+          time:approvedTimeForCardMark(degree,mark.high??mark)};
+        return [...low,high];
+      });
     models.push(makeModel({degree,modelVersion,sourcePath,
       selectionStatus:"CANONICAL_DEGREE_STATE",
       approvalReference:ownerApprovedWorkingSelection.approvalReference,specs}));
