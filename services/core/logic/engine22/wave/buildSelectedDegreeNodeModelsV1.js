@@ -1,0 +1,105 @@
+// Engine22: read-only current owner-selection / degree-state chart node adapter.
+// This is an extension of workingWaveNodes.v1, NOT a second data source.
+// Unknown or ambiguous source timestamps/ES prices never become chart markers.
+import {createHash} from "node:crypto";
+import {ownerApprovedWorkingSelection} from "./ownerApprovedWorkingSelectionV1.js";
+
+const sha=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
+const tick=x=>typeof x==="number"&&Number.isFinite(x)&&x>0&&
+  Math.abs(x*4-Math.round(x*4))<1e-8;
+const isoUtc=x=>typeof x==="string"&&
+  /^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$/.test(x)&&
+  Number.isFinite(Date.parse(x));
+function exactArizonaTime(raw){
+  if(typeof raw!=="string")return null;
+  const m=/^(\\d{4}-\\d{2}-\\d{2}) ([01]\\d|2[0-3]):([0-5]\\d)(?: AZ)?$/.exec(raw);
+  if(!m)return null;
+  const date=new Date(m[1]+"T"+m[2]+":"+m[3]+":00-07:00");
+  if(!Number.isFinite(date.getTime()))return null;
+  // Check actual wall-clock roundtrip; invalid calendar dates cannot roll over.
+  if(date.toISOString().slice(0,10)!==new Date(Date.parse(m[1]+"T00:00:00Z")).toISOString().slice(0,10))return null;
+  return date.toISOString();
+}
+function parseSourceTime(raw){
+  if(typeof raw!=="string")return null;
+  const az=exactArizonaTime(raw);
+  if(az)return {marketAtUtc:az,ownerArizonaTime:raw,sourceTimestampConflict:false};
+  if(isoUtc(raw))return {marketAtUtc:new Date(raw).toISOString(),ownerArizonaTime:null,sourceTimestampConflict:false};
+  // Offset timestamp is accepted only if the source explicitly carries -07:00.
+  if(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?-07:00$/.test(raw)&&Number.isFinite(Date.parse(raw)))
+    return {marketAtUtc:new Date(raw).toISOString(),ownerArizonaTime:raw,sourceTimestampConflict:false};
+  return null;
+}
+function makeNode({degree,modelVersion,sourcePath,sourceFieldPath,anchorField,label,price,time,approvalReference,selectionStatus}){
+  if(!tick(price))return null;
+  const parsed=parseSourceTime(time);
+  if(!parsed)return null;
+  const nodeId="node-"+sha([degree,modelVersion,anchorField]).slice(0,24);
+  const sourceRevision=sha([sourcePath,sourceFieldPath,price,time,parsed.marketAtUtc,approvalReference??null]);
+  return {nodeId,waveId:"wave-"+sha([degree,modelVersion]).slice(0,24),
+    countId:modelVersion,modelVersion,degree,sourcePath,sourceFieldPath,anchorField,
+    label,price,marketAtUtc:parsed.marketAtUtc,ownerArizonaTime:parsed.ownerArizonaTime,
+    sourceRevision,approvalStatus:"RESEARCH",selectionStatus,
+    ownerApprovalReference:approvalReference??null,
+    lifecycle:"DEVELOPING",waveCompletionConfirmed:false,plotAllowed:false,
+    presentationAllowed:true,selectedForResearchDisplay:true,
+    sourceTimestampConflict:false,priceBasisStatus:"PENDING",
+    noExecution:true};
+}
+function makeModel({degree,modelVersion,sourcePath,selectionStatus,approvalReference,specs}){
+  const anchors=specs.map(s=>makeNode({...s,degree,modelVersion,sourcePath,selectionStatus,approvalReference})).filter(Boolean);
+  return {degree,modelVersion,sourcePath,scenarioStatus:"RESEARCH_ONLY",
+    sourceSelectionStatus:selectionStatus,selectedForResearchDisplay:true,
+    modelFingerprint:sha(anchors.map(n=>[n.nodeId,n.sourceRevision])),
+    historicalAnchors:[],anchors};
+}
+const selectedModels=[
+  {degree:"minute", fields:[
+    ["anchors.w1Low","W1 Low","anchors.w1LowLocalTime"],
+    ["anchors.w1High","W1 High","anchors.w1HighLocalTime"],
+  ]},
+  {degree:"subminute",fields:[
+    ["waveA.startHigh","A starting high","waveA.startLocalTime"],
+    ["waveA.wickLow","A ending wick low","waveA.endLocalTime"],
+  ]},
+];
+const read=(obj,path)=>path.split(".").reduce((v,key)=>v?.[key],obj);
+export function buildSelectedDegreeNodeModelsV1({currentWavelength,degreeStates}={}){
+  const models=[];
+  // Only the owner's actual current selection manifest may select models.
+  for(const rule of selectedModels){
+    const sel=ownerApprovedWorkingSelection.degrees?.[rule.degree];
+    const model=currentWavelength?.degrees?.[rule.degree]?.[sel?.key];
+    if(!sel?.key||!model||model.version!==sel.modelVersion||model.degree!==rule.degree)
+      continue;
+    const sourcePath="currentWavelength.degrees."+rule.degree+"."+sel.key;
+    const specs=rule.fields.map(([field,label,timeField])=>({
+      anchorField:field.replace(/\\./g,"_"),sourceFieldPath:sourcePath+"."+field,
+      label,price:read(model,field),time:read(model,timeField)
+    }));
+    models.push(makeModel({degree:rule.degree,modelVersion:model.version,sourcePath,
+      selectionStatus:"OWNER_SELECTED_WORKING",
+      approvalReference:model.ownerApprovalReference??model.anchors?.provenance??ownerApprovedWorkingSelection.approvalReference,
+      specs}));
+  }
+  // Higher degrees have canonical Engine22 degree-state selections. Only
+  // source marks with a complete explicit timestamp pass validation.
+  for(const degree of ["primary","intermediate","minor"]){
+    const sel=ownerApprovedWorkingSelection.degrees?.[degree];
+    const state=degreeStates?.[degree];
+    if(sel?.source!=="degreeStates"||!state||state.degree!==degree||state.active!==true)continue;
+    const sourcePath="degreeStates."+degree;
+    const modelVersion=typeof state.version==="string"&&state.version
+      ?state.version:"engine22.degreeStates."+degree+".v1";
+    const specs=Object.entries(state.marks??{}).filter(([key,mark])=>
+      /^(?:W[1-5]|A|B|C|D|E)$/.test(key)&&mark&&!mark.superseded)
+      .map(([key,mark])=>({
+        anchorField:"marks_"+key,sourceFieldPath:sourcePath+".marks."+key,
+        label:key,price:mark.price,time:mark.time
+      }));
+    models.push(makeModel({degree,modelVersion,sourcePath,
+      selectionStatus:"CANONICAL_DEGREE_STATE",
+      approvalReference:ownerApprovedWorkingSelection.approvalReference,specs}));
+  }
+  return models;
+}
