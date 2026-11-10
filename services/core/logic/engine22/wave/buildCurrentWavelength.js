@@ -578,13 +578,20 @@ export function buildCurrentWavelength({
       ownerSubmicroW3Nov9InternalResearch:{
         version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
-        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
-        parentDegree:"micro",parentWave:"W3_RESEARCH",
+        activeWave:"B",direction:"UP",stage:"ABC_CORRECTION_DEVELOPING",
+        parentDegree:"micro",parentWave:"W4_RESEARCH",
         anchors:{
           w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
           w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
           w2Low:7449.25,w2LowLocalTime:"2026-11-09 06:20 AZ",
           w2LowAtUtc:"2026-11-09T13:20:00Z",w2CompletionConfirmed:false,w3StartConfirmed:false,
+          aHigh:7600.00,aHighLocalTime:"2026-11-09 13:00 AZ",
+          aHighAtUtc:"2026-11-09T20:00:00Z",
+          aLow:7507.25,aLowLocalTime:"2026-11-10 06:40 AZ",
+          aLowAtUtc:"2026-11-10T13:40:00Z",
+          bHigh:7566.00,bHighLocalTime:"2026-11-10 08:00 AZ",
+          bHighAtUtc:"2026-11-10T15:00:00Z",
+          abcStatus:"OWNER_MARKED_A_B_REFERENCES_C_UNCONFIRMED",
           provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
         },
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
@@ -681,7 +688,7 @@ export function buildCurrentWavelength({
       ownerMicroW3Nov9ReclassifiedResearch:{
         version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
-        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
+        activeWave:"W4",direction:"DOWN",stage:"W4_DEVELOPING_CANDIDATE",
         parentDegree:"subminute",parentWave:"W1_FORMING_RESEARCH",
         anchors:{
           w1Low:7324,w1LowLocalTime:"2026-11-05 15:20 AZ",w1High:7469,
@@ -690,6 +697,9 @@ export function buildCurrentWavelength({
           w2LowAtUtc:"2026-11-08T23:00:00Z",
           priorAnchorRevision:{w2Low:7362,w2LowLocalTime:"2026-11-08 15:00 AZ",w2LowAtUtc:"2026-11-08T22:00:00Z",status:"SUPERSEDED_BY_OWNER_20261109_CORRECTION"},
           w2CompletionConfirmed:false,w3StartConfirmed:false,
+          w3High:7600.00,w3HighLocalTime:"2026-11-09 13:00 AZ",
+          w3HighAtUtc:"2026-11-09T20:00:00Z",
+          w3CompletionStatus:"OWNER_MARKED_W3_END_RESEARCH",
           provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
         },
         fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",

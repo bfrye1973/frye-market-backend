@@ -19,11 +19,15 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     ["W1 Low",7324,"2026-11-05T22:20:00.000Z"],
     ["W1 High",7469,"2026-11-06T14:40:00.000Z"],
     ["W2 research anchor",7362,"2026-11-08T23:00:00.000Z"],
+    ["W3 ending high",7600,"2026-11-09T20:00:00.000Z"],
   ]);
   assert.deepEqual(submicro.map(n=>[n.label,n.price,n.marketAtUtc]),[
     ["W1 Low",7390.25,"2026-11-09T08:00:00.000Z"],
     ["W1 High",7476,"2026-11-09T13:00:00.000Z"],
     ["W2 research anchor",7449.25,"2026-11-09T13:20:00.000Z"],
+    ["A starting high",7600,"2026-11-09T20:00:00.000Z"],
+    ["A ending low",7507.25,"2026-11-10T13:40:00.000Z"],
+    ["B ending high",7566,"2026-11-10T15:00:00.000Z"],
   ]);
   assert.ok([...micro,...submicro].every(n=>n.plotAllowed===false &&
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));
