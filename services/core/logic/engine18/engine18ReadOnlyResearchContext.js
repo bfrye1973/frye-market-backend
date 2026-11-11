@@ -1,7 +1,14 @@
 // Gate1 research preparation only: read-only snapshots of existing ES sources.
 // No new Elliott Wave, Fibonacci, institutional levels, or book liquidity.
-const copy=obj=>structuredClone(obj);
-const frozen=(obj)=>Object.freeze(obj);
+function deepFreeze(obj){
+ if(obj&&typeof obj==='object'&&!Object.isFrozen(obj)){
+  for(const value of Object.values(obj))deepFreeze(value);
+  Object.freeze(obj);
+ }
+ return obj;
+}
+const copy=obj=>deepFreeze(structuredClone(obj));
+const frozen=deepFreeze;
 function isAvailableAt(value,asOf){
  if(typeof value!=='string'||!Number.isFinite(Date.parse(value)))return false;
  if(asOf===null)return true;
