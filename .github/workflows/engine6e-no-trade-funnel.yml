@@ -1,0 +1,24 @@
+name: Engine 6E No-Trade Funnel
+on:
+  push:
+    branches:
+      - engine6e-no-trade-funnel-integration
+  pull_request:
+    paths:
+      - 'services/core/logic/engine6/6e-funnel/**'
+      - 'services/core/tests/engine6ENoTradeFunnel*.test.js'
+      - 'services/core/routes/engine6ENoTradeFunnel.js'
+      - '.github/workflows/engine6e-no-trade-funnel.yml'
+jobs:
+  isolated-diagnostics:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Run read-only funnel tests
+        working-directory: services/core
+        run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelStore.test.js
