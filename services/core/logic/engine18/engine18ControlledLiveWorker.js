@@ -54,11 +54,6 @@ export async function runEngine18ControlledRecording({env=process.env,
     (BigInt(initialSample.offsetNs)<0n?-BigInt(initialSample.offsetNs):BigInt(initialSample.offsetNs))>5000000n)
   throw Error('controlled trial refuses unverified or imprecise host clock');
  const clock=createEngine18ReceiptClock();
- const writer=await Engine18BufferedRecorder.openBounded({
-  root:config.disk,clock,maxQueued:4096,maxQueueBytes:32*1024*1024,
-  batchSize:128,flushDelayMs:2,provider:'IRONBEAM_V2',
-  allowLiveProvider:true
- });
  const encryptedStore=new Engine18S3PrivateStore({
   endpoint:env.ENGINE18_R2_ENDPOINT,bucket:env.ENGINE18_R2_BUCKET,
   region:env.ENGINE18_R2_REGION||'auto',accessKeyId:env.ENGINE18_R2_ACCESS_KEY,
@@ -68,6 +63,13 @@ export async function runEngine18ControlledRecording({env=process.env,
   stagingRoot:config.disk,retentionDays:Number(env.ENGINE18_RETENTION_DAYS||30)
  });
  const backup=new Engine18S3ArchiveCoordinator({root:config.disk,store:encryptedStore});
+ // Verify private remote state before opening a recorder or writing START.
+ await backup.inventory({expectedLastSeq:config.expectedLastSeq});
+ const writer=await Engine18BufferedRecorder.openBounded({
+  root:config.disk,clock,maxQueued:4096,maxQueueBytes:32*1024*1024,
+  batchSize:128,flushDelayMs:2,provider:'IRONBEAM_V2',
+  allowLiveProvider:true
+ });
  const scheduler=new Engine18ContinuousBackup({backup,intervalMs:30000,onFailure:onAlert});
  const source=new Engine18IronbeamLiveRecorderSource({
   recorder:writer,credentials:{username:env.IRONBEAM_USERNAME,
@@ -87,7 +89,6 @@ export async function runEngine18ControlledRecording({env=process.env,
   await backup.syncClosed();
  };
  try{
-  await backup.inventory({expectedLastSeq:config.expectedLastSeq});
   // Establish a trusted backup heartbeat before accepting source frames.
   await scheduler.tick();
   scheduler.start();
