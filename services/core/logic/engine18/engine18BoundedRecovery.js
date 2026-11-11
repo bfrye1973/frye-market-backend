@@ -1,7 +1,7 @@
 // Engine 18 bounded crash recovery. Synthetic-only, no external source or transport.
 // Never manufacture data or accept a missing original manifest as new proof.
 import {createReadStream,createWriteStream,existsSync,readFileSync,readdirSync,
- openSync,closeSync,fsyncSync,ftruncateSync,renameSync,unlinkSync,statSync,writeFileSync} from 'node:fs';
+ openSync,closeSync,fsyncSync,ftruncateSync,renameSync,unlinkSync,writeSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {createGunzip,createGzip} from 'node:zlib';
 import {pipeline} from 'node:stream/promises';
@@ -22,15 +22,10 @@ function syncDirectory(path){
 function atomic(path,data){
  const tmp=path+'.tmp';
  const fd=openSync(tmp,'wx',0o600);
- try{const b=Buffer.from(data);let n=0;while(n<b.length){const k=writeFileSync;const x=writeSyncLoop(fd,b,n);n+=x;}fsyncSync(fd);}
+ try{const b=Buffer.from(data);let n=0;while(n<b.length){const written=writeSync(fd,b,n,b.length-n);if(written<=0)throw Error('atomic short write');n+=written;}fsyncSync(fd);}
  finally{closeSync(fd);}
  renameSync(tmp,path);syncDirectory(path);
 }
-function writeSyncLoop(fd,b,start){
- // local helper deliberately uses a blocking, complete small metadata write.
- return requireWriteSync(fd,b,start);
-}
-import {writeSync as requireWriteSync} from 'node:fs';
 function remove(path){unlinkSync(path);syncDirectory(path);}
 function validRecord(e){
  if(!e||e.schemaVersion!=='engine18.raw.v2'||!Number.isSafeInteger(e.localSeq)||
@@ -127,7 +122,7 @@ export async function recoverEngine18Bounded({root,calendarVersion='cme-eth-prov
  for(const tmp of walk(base).filter(p=>p.endsWith('.jsonl.gz.tmp')||p.endsWith('.manifest.json.tmp'))){
   const source=tmp.endsWith('.jsonl.gz.tmp')?tmp.replace(/\.jsonl\.gz\.tmp$/,'.jsonl.open'):null;
   const archive=tmp.slice(0,-4);
-  if(!existsSync(source||archive)&&!existsSync(archive))throw Error('orphan archive temp');
+  if(source?!existsSync(source)&&!existsSync(archive):!existsSync(archive))throw Error('orphan archive temp');
   remove(tmp);
  }
  // Verify all existing archives before modifying an open segment.
