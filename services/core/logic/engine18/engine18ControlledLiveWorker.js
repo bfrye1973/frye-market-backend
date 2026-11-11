@@ -90,6 +90,18 @@ export async function runEngine18ControlledRecording({env=process.env,
   // Establish a trusted backup heartbeat before accepting source frames.
   await scheduler.tick();
   scheduler.start();
+  // Revalidate host time source periodically; mark collection unsafe on failure.
+  clockTimer=setInterval(()=>{
+   void chrony().then(sample=>{
+    if(!sample||BigInt(sample.uncertaintyNs)>5000000n){
+     onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});
+    }
+   }).catch(()=>{onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});});
+  },60000);
+  clockTimer.unref?.();
+  stopTimer=setTimeout(()=>{void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));},config.windowMinutes*60000);
+  const connected=await source.start();
+  if(connected!==true)throw Error('initial Ironbeam subscription not established');
   heartbeat=setInterval(()=>{
    const h=writer.health(),b=scheduler.health(),s=source.health();
    const flags=assessEngine18RecorderHealth({
@@ -103,18 +115,6 @@ export async function runEngine18ControlledRecording({env=process.env,
    });
    if(flags.shouldHalt||!s.active||!s.connected){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));}
   },5000);
-  // Revalidate host time source periodically; mark collection unsafe on failure.
-  clockTimer=setInterval(()=>{
-   void chrony().then(sample=>{
-    if(!sample||BigInt(sample.uncertaintyNs)>5000000n){
-     onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});
-    }
-   }).catch(()=>{onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});});
-  },60000);
-  clockTimer.unref?.();
-  stopTimer=setTimeout(()=>{void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));},config.windowMinutes*60000);
-  const connected=await source.start();
-  if(connected!==true)throw Error('initial Ironbeam subscription not established');
   return {source,writer,backup,scheduler,stop};
  }catch{
   await stop().catch(()=>{});
