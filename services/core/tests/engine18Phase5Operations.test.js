@@ -148,8 +148,13 @@ test('S3-compatible mock SigV4 encrypted immutable object round trip with key ID
  const result=await s3.restoreClosed({key:m.key,destination:join(root,'restored'),expected:m});
  assert.equal(result.sha256,sha);
  assert.deepEqual(readFileSync(result.tempPath),body);
- await assert.rejects(s3.uploadClosed({path:archive,key:m.key,
-  plaintextSha256:sha,expectedSize:body.length}),/conflicts/);
+ const retried=await s3.uploadClosed({path:archive,key:m.key,
+  plaintextSha256:sha,expectedSize:body.length});
+ assert.deepEqual(retried,m,'duplicate source with new encryption nonce must re-use immutable remote ciphertext');
+ const other=join(root,'conflict.gz'),otherBytes=Buffer.from('different archive content');
+ writeFileSync(other,otherBytes);
+ await assert.rejects(s3.uploadClosed({path:other,key:m.key,
+  plaintextSha256:createHash('sha256').update(otherBytes).digest('hex'),expectedSize:otherBytes.length}),/conflicts/);
  await assert.rejects(s3.restoreClosed({key:m.key,destination:join(root,'wrong'),
   expected:{...m,keyId:'other-key'}}),/versioned restore key/);
 }));
