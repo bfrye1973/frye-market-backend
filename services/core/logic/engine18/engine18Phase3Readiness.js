@@ -133,7 +133,8 @@ export class Engine18SyntheticReadinessSupervisor{
   const snapshot=snapshotFrameAtReceipt(data); // clone mutable byte views immediately
   return this.enqueue(async()=>{
    const {raw,rawEncoding}=await getExactBinary(snapshot);
-   return this.writer.offerCaptured(Object.freeze({...stamp,raw,rawEncoding,
+   const encodedRaw=rawEncoding==='base64'?raw.toString('base64'):raw;
+   return this.writer.offerCaptured(Object.freeze({...stamp,raw:encodedRaw,rawEncoding,
     msgClass:'unknown',statusCode:null,streamGeneration:known.generation}));
   });
  }
