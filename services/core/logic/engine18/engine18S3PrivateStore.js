@@ -154,13 +154,14 @@ export class Engine18S3PrivateStore {
   if(!obj||typeof obj!=='object'||obj.keyId!==this.keyId)throw Error('private inventory key version mismatch');
   return obj;
  }
- async listObjectKeys(prefix){
+ async listObjectKeys(prefix,{pageSize=1000}={}){
+  if(!Number.isInteger(pageSize)||pageSize<1||pageSize>1000)throw Error('invalid S3 page size');
   if(typeof prefix!=='string'||!keyRe.test(prefix)||prefix.includes('..'))throw Error('unsafe S3 inventory prefix');
   const result=[];let token=null;
   for(let page=0;page<1000;page++){
    const url=new URL(this.endpoint+'/'+encodeURIComponent(this.bucket));
    url.searchParams.set('list-type','2');
-   url.searchParams.set('max-keys','1000');
+   url.searchParams.set('max-keys',String(pageSize));
    url.searchParams.set('prefix',prefix);
    if(token)url.searchParams.set('continuation-token',token);
    url.searchParams.sort();
