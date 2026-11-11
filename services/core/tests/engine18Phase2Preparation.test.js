@@ -7,7 +7,7 @@ import {spawn,spawnSync} from 'node:child_process';
 import {once} from 'node:events';
 import {createHash} from 'node:crypto';
 import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
-import {classifyIronbeamRawFrame,IronbeamFrameShapeDiagnostics,SyntheticIronbeamRecorderTap} from '../logic/engine18/ironbeamV2RecorderAdapter.js';
+import {classifyIronbeamRawFrame,IronbeamFrameShapeDiagnostics,SyntheticIronbeamRecorderTap,createSyntheticRecorderWebSocketImpl} from '../logic/engine18/ironbeamV2RecorderAdapter.js';
 import {replayRaw,deterministicReplayBytes} from '../logic/engine18/gate1RawRecorder.js';
 const dir=fn=>{const root=mkdtempSync(join(tmpdir(),'e18-phase2-'));return Promise.resolve().then(()=>fn(root)).finally(()=>rmSync(root,{recursive:true,force:true}));};
 const clock=()=>({wallNs:()=>String(BigInt(Date.parse('2026-11-10T21:10:00Z'))*1000000n),monoNs:(()=>{let i=0n;return ()=>String(++i)})()});
@@ -165,4 +165,48 @@ test('raw frame receipt timestamp is frozen before parser/diagnostic work',()=>d
  assert.equal(e.receivedWallNs,String(t));
  assert.ok(BigInt(e.writtenMonoNs)>=BigInt(e.receivedMonoNs));
  assert.equal(tap.safeDiagnostics().counts.depth,1);
+}));
+
+test('injectable synthetic WebSocket seam waits for raw durable ACK before existing reader callback',()=>dir(async root=>{
+ class FakeWebSocket {
+  constructor(){this.listeners={};this.readyState=1;this.bufferedAmount=0;FakeWebSocket.current=this;}
+  addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);}
+  emit(name,e){for(const fn of this.listeners[name]||[])fn(e);}
+  close(){this.readyState=3;}
+  send(){}
+ }
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const Bridged=createSyntheticRecorderWebSocketImpl(FakeWebSocket,{tap,maxInbound:16});
+ const ws=new Bridged('wss://synthetic.invalid/do-not-open-real-socket');
+ let invoked=0,seqAtCallback=[];
+ ws.addEventListener('message',e=>{invoked++;seqAtCallback.push(r.writer.seq);});
+ FakeWebSocket.current.emit('message',{data:'{"d":[{"s":"XCME:ES.Z26","b":[],"a":[]}]}'});
+ assert.equal(invoked,0,'reader cannot process frame before async durable record');
+ await ws.queue;
+ assert.equal(invoked,1);assert.equal(seqAtCallback[0],2);
+ await r.close();
+ assert.equal(replayRaw(root).filter(x=>x.msgClass==='market').length,1);
+}));
+test('synthetic WebSocket ingress overload fails closed and never acknowledges unseen frames',()=>dir(async root=>{
+ class FakeWebSocket{
+  constructor(){this.listeners={};this.readyState=1;FakeWebSocket.current=this;}
+  addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
+  emit(data){for(const fn of this.listeners.message||[])fn({data});}
+  close(){this.readyState=3;}
+  send(){}
+ }
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ let reason=null;const WS=createSyntheticRecorderWebSocketImpl(FakeWebSocket,{tap,maxInbound:1,onFailure:r=>{reason=r;}});
+ const ws=new WS('wss://synthetic.invalid');
+ const readerEvents=[];
+ ws.addEventListener('message',e=>readerEvents.push(e.data));
+ FakeWebSocket.current.emit('{"q":1}');
+ FakeWebSocket.current.emit('{"q":2}');
+ await ws.queue;
+ assert.equal(ws.failed,true);assert.equal(reason,'RECORDER_CAPTURE_FAILED');
+ assert.equal(r.health().recordingActive,false);
+ assert.equal(readerEvents.length,0);
+ r.writer.rotate();r.writer.releaseLock();
+ const b=recorder(root);await b.close();
+ assert.equal(replayRaw(root).filter(x=>x.statusCode==='GAP').length,1);
 }));
