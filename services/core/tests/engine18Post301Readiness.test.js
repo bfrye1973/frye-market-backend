@@ -56,6 +56,7 @@ test('normal scans avoid remote inventory downloads; only new immutable entry ve
  const getBefore=metrics.get;
  await coordinator.syncClosed();await coordinator.syncClosed();
  assert.equal(metrics.list,1);assert.equal(metrics.get,getBefore);
+ assert.ok(coordinator.health().skippedVerifiedArchives>=2,'normal scans avoid rehashing old verified files');
  clock.set('2026-11-10T23:00:00Z');
  await rec.offer({raw:'three',msgClass:'market',at:new Date('2026-11-10T23:00:00Z')});
  const second=await coordinator.syncClosed();
