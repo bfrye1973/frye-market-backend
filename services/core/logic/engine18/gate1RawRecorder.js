@@ -98,6 +98,31 @@ function verify(path){
  return parsed.entries;
 }
 const BATCH_TOKEN=Symbol('batch-commit-only');
+async function scanOpenStreaming(path){
+ let pending=Buffer.alloc(0),firstSeq=null,lastSeq=0,firstWallNs=null,lastWallNs=null,count=0;
+ for await(const chunk of createReadStream(path,{highWaterMark:65536})){
+  pending=Buffer.concat([pending,chunk]);
+  if(pending.length>16*1024*1024&&!pending.includes(10))throw Error('excessive recorder frame size');
+  let cut;
+  while((cut=pending.indexOf(10))>=0){
+   const line=pending.subarray(0,cut+1),result=parse(line);
+   if(result.entries.length!==1||result.bytes!==line.length)throw Error('invalid streamed JSONL');
+   const e=result.entries[0];
+   if(count&&e.localSeq!==lastSeq+1)throw Error('streamed sequence discontinuity');
+   if(!count){firstSeq=e.localSeq;firstWallNs=e.receivedWallNs;}
+   lastSeq=e.localSeq;lastWallNs=e.receivedWallNs;count++;
+   pending=pending.subarray(cut+1);
+  }
+  if(pending.length>16*1024*1024)throw Error('excessive recorder frame size');
+ }
+ if(pending.length)throw Error('incomplete trailing streamed JSONL');
+ return {count,firstSeq,lastSeq,firstWallNs,lastWallNs};
+}
+async function hashCompressedStreaming(path){
+ const h=createHash('sha256');let bytes=0;
+ for await(const chunk of createReadStream(path,{highWaterMark:65536})){h.update(chunk);bytes+=chunk.length;}
+ return {sha256:h.digest('hex'),bytes};
+}
 export class Engine18RawRecorder{
  constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
@@ -254,16 +279,17 @@ export class Engine18RawRecorder{
   if(this.fd===null)return;
   fsyncSync(this.fd);closeSync(this.fd);this.fd=null;
   const path=this.path;this.path=null;
-  const plain=readFileSync(path),parsed=parse(plain);
-  if(parsed.bytes!==plain.length)throw Error('incomplete streaming source');
-  if(!parsed.entries.length){unlinkDurably(path);return;}
+  const summary=await scanOpenStreaming(path);
+  if(!summary.count){unlinkDurably(path);return;}
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz'),tmp=dest+'.tmp';
   if(existsSync(dest)||existsSync(tmp))throw Error('archive collision');
   await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
   const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
   renameSync(tmp,dest);syncDir(dest);
-  const gzip=readFileSync(dest);
-  atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\n');
+  const hashed=await hashCompressedStreaming(dest);
+  atomic(dest+'.manifest.json',JSON.stringify({
+   schemaVersion:'engine18.manifest.v1',...hashed,...summary,calendarVersion:this.calendarVersion
+  })+'\n');
   unlinkDurably(path);
  }
  async closeStreaming(){
