@@ -126,6 +126,58 @@ export class Engine18S3PrivateStore {
     cipherSha256:cipher.sha256,cipherBytes:size};
   }finally{rmSync(dir,{recursive:true,force:true});}
  }
+ async readSmallEncryptedJson(key,{maxEncryptedBytes=128*1024}={}){
+  // Inventory is small, encrypted and authenticated; market-data archives use
+  // streaming restoreClosed() instead of this bounded JSON helper.
+  const response=await this.request('GET',key,{expectedCode:[200]});
+  if(!response.body)throw Error('private inventory object missing');
+  const parts=[];let n=0;
+  for await(const c of Readable.fromWeb(response.body)){
+   n+=c.length;if(n>maxEncryptedBytes)throw Error('encrypted inventory too large');
+   parts.push(c);
+  }
+  const bytes=Buffer.concat(parts);
+  if(bytes.length<36||!bytes.subarray(0,8).equals(MAGIC))throw Error('invalid private inventory envelope');
+  const decipher=createDecipheriv('aes-256-gcm',this.key,bytes.subarray(8,20));
+  decipher.setAuthTag(bytes.subarray(bytes.length-16));
+  let plain;
+  try{plain=Buffer.concat([decipher.update(bytes.subarray(20,-16)),decipher.final()]);}
+  catch{throw Error('private inventory authentication failed');}
+  let obj;
+  try{obj=JSON.parse(plain.toString('utf8'));}catch{throw Error('corrupt private inventory JSON');}
+  if(!obj||typeof obj!=='object'||obj.keyId!==this.keyId)throw Error('private inventory key version mismatch');
+  return obj;
+ }
+ async listObjectKeys(prefix){
+  if(typeof prefix!=='string'||!keyRe.test(prefix)||prefix.includes('..'))throw Error('unsafe S3 inventory prefix');
+  const result=[];let token=null;
+  for(let page=0;page<1000;page++){
+   const url=new URL(this.endpoint+'/'+encodeURIComponent(this.bucket));
+   url.searchParams.set('list-type','2');
+   url.searchParams.set('max-keys','1000');
+   url.searchParams.set('prefix',prefix);
+   if(token)url.searchParams.set('continuation-token',token);
+   url.searchParams.sort();
+   const headers=canonicalAuth({method:'GET',url,bodyHash:hash(Buffer.alloc(0)),
+    now:this.now(),accessKeyId:this.accessKeyId,secretAccessKey:this.secretAccessKey,region:this.region});
+   let response;
+   try{response=await this.fetch(url,{method:'GET',headers});}
+   catch{throw Error('private S3 inventory listing failed');}
+   if(response.status!==200)throw Error('private S3 inventory listing refused');
+   const xml=await response.text();
+   if(xml.length>4*1024*1024)throw Error('private inventory listing exceeds safe page');
+   const keys=[...xml.matchAll(/<Key>([^<]+)<\/Key>/g)].map(x=>x[1]);
+   for(const key of keys){
+    if(!key.startsWith(prefix)||!keyRe.test(key)||key.includes('..'))throw Error('unsafe listed S3 object');
+    result.push(key);
+   }
+   if(!/<IsTruncated>true<\/IsTruncated>/.test(xml))return result.sort();
+   const match=xml.match(/<NextContinuationToken>([^<]+)<\/NextContinuationToken>/);
+   if(!match||match[1]===token)throw Error('invalid S3 continuation token');
+   token=match[1];
+  }
+  throw Error('inventory pagination safety limit exceeded');
+ }
  async uploadClosed({path,key,plaintextSha256,expectedSize}={}){
   if(!path||typeof plaintextSha256!=='string'||!/^[a-f0-9]{64}$/.test(plaintextSha256)||
     !Number.isSafeInteger(expectedSize)||expectedSize<0)throw Error('verified sealed archive required');
