@@ -158,7 +158,7 @@ test('read-only context retains approved source values but refuses missing point
  assert.equal(packet.bookLiquidity,null);
  const accepted=buildEngine18ReadOnlyContext({institutionalResponse,strategySnapshot,
   institutionalAvailableAt:'2026-11-10T12:00:00Z',strategyAvailableAt:'2026-11-10T12:00:00Z',
-  priceBasisStatus:'MATCHED'});
+  priceBasisStatus:'MATCHED',asOfTime:'2026-11-10T13:00:00Z'});
  assert.equal(accepted.usableForChronologicalResearch,true);
  const hindsight=buildEngine18ReadOnlyContext({institutionalResponse,strategySnapshot,
   institutionalAvailableAt:'2026-11-11T12:00:00Z',strategyAvailableAt:'2026-11-11T12:00:00Z',
