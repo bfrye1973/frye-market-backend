@@ -1,5 +1,5 @@
 // Engine 18 Gate 1: offline-only, synthetic raw recorder. No live feed integration.
-import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync} from 'node:fs';
+import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,statSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {gzipSync,gunzipSync} from 'node:zlib';
 import {createHash} from 'node:crypto';
@@ -9,7 +9,38 @@ const classes=new Set(['market','control','error','unknown']);
 const digest=buffer=>createHash('sha256').update(buffer).digest('hex');
 const ident=v=>{if(typeof v!=='string'||!/^[A-Za-z0-9_.-]{1,80}$/.test(v)||v==='.'||v==='..')throw Error('invalid partition identifier');return v;};
 const walk=dir=>!existsSync(dir)?[]:readdirSync(dir,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(join(dir,e.name)):[join(dir,e.name)]);
-function atomic(path,data){const tmp=path+'.tmp';writeFileSync(tmp,data,{flag:'wx',mode:0o600});renameSync(tmp,path);}
+function syncDir(path){const fd=openSync(dirname(path),'r');try{fsyncSync(fd);}finally{closeSync(fd);}}
+function atomic(path,data){
+ const tmp=path+'.tmp';
+ const fd=openSync(tmp,'wx',0o600);
+ try{const bytes=Buffer.isBuffer(data)?data:Buffer.from(data);let offset=0;while(offset<bytes.length){const n=writeSync(fd,bytes,offset,bytes.length-offset);if(n<=0)throw Error('short atomic write');offset+=n;}fsyncSync(fd);}
+ finally{closeSync(fd);}
+ renameSync(tmp,path);syncDir(path);
+}
+function unlinkDurably(path){unlinkSync(path);syncDir(path);}
+function manifestFor(gzip,entries,calendarVersion){
+ return {schemaVersion:'engine18.manifest.v1',sha256:digest(gzip),bytes:gzip.length,count:entries.length,firstSeq:entries[0].localSeq,lastSeq:entries.at(-1).localSeq,firstWallNs:entries[0].tLocalWallNs,lastWallNs:entries.at(-1).tLocalWallNs,calendarVersion};
+}
+function recoverArchiveManifest(path,calendarVersion){
+ const gzip=readFileSync(path),plain=gunzipSync(gzip),parsed=parse(plain);
+ if(!parsed.entries.length||parsed.bytes!==plain.length)throw Error('invalid orphan archive');
+ if(!existsSync(path+'.manifest.json'))atomic(path+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,calendarVersion))+'\n');
+ return verify(path);
+}
+function lockRoot(root){
+ const lock=join(root,'.engine18-recorder.lock');
+ const take=()=>{const fd=openSync(lock,'wx',0o600);try{writeSync(fd,Buffer.from(JSON.stringify({pid:process.pid,createdAt:new Date().toISOString()})+'\n'));fsyncSync(fd);}finally{closeSync(fd);}syncDir(lock);};
+ try{take();}catch(e){
+  if(e.code!=='EEXIST')throw e;
+  let info;try{info=JSON.parse(readFileSync(lock,'utf8'));}catch{throw Error('unreadable recorder lock requires operator inspection');}
+  if(!Number.isSafeInteger(info.pid)||info.pid<=0)throw Error('invalid recorder lock requires operator inspection');
+  try{process.kill(info.pid,0);throw Error('recorder writer already active');}
+  catch(err){if(err.code==='EPERM')throw Error('recorder writer ownership unknown');if(err.code!=='ESRCH')throw err;}
+  // A dead same-host PID is recoverable. Network filesystems/multi-host are NOT supported.
+  unlinkDurably(lock);take();
+ }
+ return lock;
+}
 function parse(buf){
  let pos=0,last=0,entries=[];
  while(pos<buf.length){
@@ -38,29 +69,39 @@ export class Engine18RawRecorder{
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;
-  mkdirSync(this.root,{recursive:true,mode:0o700});this.recover();
+  mkdirSync(this.root,{recursive:true,mode:0o700});
+  this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
+  try{this.recover();if(this.recoveredOpen)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP',at:new Date()});}
+  catch(e){this.releaseLock();throw e;}
  }
  recover(){
   let last=0;
-  for(const path of walk(this.root).sort()){
-   if(path.endsWith('.jsonl.open')){
+  // Existing archives are checked first, including a crash between archive rename and manifest commit.
+  for(const path of walk(this.root).filter(x=>x.endsWith('.jsonl.gz')).sort()){
+   const e=recoverArchiveManifest(path,this.calendarVersion);last=Math.max(last,e.at(-1)?.localSeq??0);
+  }
+  for(const path of walk(this.root).filter(x=>x.endsWith('.jsonl.open')).sort()){
     const buf=readFileSync(path),p=parse(buf);
     if(p.bytes!==buf.length){const fd=openSync(path,'r+');try{ftruncateSync(fd,p.bytes);fsyncSync(fd);}finally{closeSync(fd);}}
-    if(p.entries.length)this.finish(path,p.entries);else unlinkSync(path);
-    last=Math.max(last,p.entries.at(-1)?.localSeq??0);this.gaps++;
-   }else if(path.endsWith('.jsonl.gz')){
-    const e=verify(path);last=Math.max(last,e.at(-1)?.localSeq??0);
-   }
+    const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
+    if(existsSync(dest)){
+      // Orphan .open from a successful compressed write: verify same content before removing.
+      const gz=gunzipSync(readFileSync(dest));
+      if(!gz.equals(readFileSync(path)))throw Error('archive and open file conflict');
+      unlinkDurably(path);
+    }else if(p.entries.length)this.finish(path,p.entries);
+    else unlinkDurably(path);
+    last=Math.max(last,p.entries.at(-1)?.localSeq??0);this.recoveredOpen++;
   }
-  this.seq=last;
+  this.seq=last;this.gaps+=this.recoveredOpen;
  }
  finish(path,entries){
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
   if(existsSync(dest))throw Error('archive collision');
   const gzip=gzipSync(readFileSync(path),{mtime:0});
   atomic(dest,gzip);
-  atomic(dest+'.manifest.json',JSON.stringify({schemaVersion:'engine18.manifest.v1',sha256:digest(gzip),bytes:gzip.length,count:entries.length,firstSeq:entries[0].localSeq,lastSeq:entries.at(-1).localSeq,firstWallNs:entries[0].tLocalWallNs,lastWallNs:entries.at(-1).tLocalWallNs,calendarVersion:this.calendarVersion})+'\n');
-  unlinkSync(path);
+  atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,entries,this.calendarVersion))+'\n');
+  unlinkDurably(path);
  }
  rotate(){
   if(this.fd===null)return;
@@ -68,7 +109,7 @@ export class Engine18RawRecorder{
   const path=this.path;this.path=null;
   const buf=readFileSync(path),p=parse(buf);
   if(p.bytes!==buf.length)throw Error('incomplete active record');
-  if(p.entries.length)this.finish(path,p.entries);else unlinkSync(path);
+  if(p.entries.length)this.finish(path,p.entries);else unlinkDurably(path);
  }
  append({raw,msgClass='unknown',streamGeneration=0,at=new Date(),statusCode=null}={}){
   if(typeof raw!=='string'||!classes.has(msgClass)||!Number.isSafeInteger(streamGeneration)||streamGeneration<0)throw Error('invalid frame');
@@ -77,18 +118,19 @@ export class Engine18RawRecorder{
   const stem=join(this.root,this.provider,this.contract,tradeDate(at),at.toISOString().slice(0,13).replace('T','-'));
   let path=stem+'.jsonl.open';
   if(this.path?.startsWith(stem+'.part-'))path=this.path;
-  else if(existsSync(stem+'.jsonl.gz')){let n=1;while(existsSync(stem+`.part-${n}.jsonl.gz`))n++;path=stem+`.part-${n}.jsonl.open`;}
+  else if(existsSync(stem+'.jsonl.gz')){let n=1;while(existsSync(stem+`.part-${n}.jsonl.gz`)||existsSync(stem+`.part-${n}.jsonl.open`))n++;path=stem+`.part-${n}.jsonl.open`;}
   if(path!==this.path){this.rotate();mkdirSync(dirname(path),{recursive:true,mode:0o700});this.fd=openSync(path,'a',0o600);this.path=path;}
   const wall=String(this.clock.wallNs()),mono=String(this.clock.monoNs());
   if(!/^\d+$/.test(wall)||!/^\d+$/.test(mono)||this.lastMono!==null&&BigInt(mono)<BigInt(this.lastMono))throw Error('invalid monotonic or wall clock');
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,tLocalWallNs:wall,tLocalMonoNs:mono,streamGeneration,msgClass,statusCode,raw};
   const line=Buffer.from(JSON.stringify(item)+'\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;throw Error('recorder write failed');}
-  this.seq++;this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP')this.gaps++;
+  this.seq++;this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP'&&!this.recoveredOpen)this.gaps++;
   return {localSeq:this.seq};
  }
  health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null});}
- close(){this.rotate();}
+ releaseLock(){if(this.lockPath&&existsSync(this.lockPath)){unlinkDurably(this.lockPath);this.lockPath=null;}}
+ close(){try{this.rotate();}finally{this.releaseLock();}}
 }
 export function replayRaw(root){
  const all=walk(resolve(root)).filter(p=>p.endsWith('.jsonl.gz')).sort().flatMap(verify).sort((a,b)=>a.localSeq-b.localSeq);
