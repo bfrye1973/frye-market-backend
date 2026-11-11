@@ -31,7 +31,7 @@ export function buildEngine18ReadOnlyContext({
   priceBasis:priceBasisStatus==='MATCHED'?'MATCHED':'UNVERIFIED'
  };
  const allowed=sourceStatus.institutional==='AVAILABLE'&&sourceStatus.strategies==='AVAILABLE'&&
-  sourceStatus.priceBasis==='MATCHED';
+  sourceStatus.priceBasis==='MATCHED'&&typeof asOfTime==='string'&&Number.isFinite(Date.parse(asOfTime));
  const packet={
   schema:'engine18.context.readonly.v1',symbol,physicalContract,
   asOfTime:asOfTime??null,sourceStatus:frozen({...sourceStatus}),
