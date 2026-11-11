@@ -1,6 +1,6 @@
 # Engine 18B — Post-PR301 Engineering Readiness
 
-**Status:** isolated development branch, NOT merged/deployed. Branch starts from PR #301's approved tested commit `42967bce968e2bad76fac1f3051ee9ffe3f06567`. Open the next PR against the isolated Engine 18 foundation **only after PR #301 is actually merged** by its manager.
+**Status:** PR #302 on manager-created clean branch `engine18-manager-post301-clean-20261111`, **NOT merged/deployed**. The manager has already merged approved PR #301 into the isolated Engine 18 foundation. All subsequent work belongs in **PR #302 only**, with the manager owning final merge.
 
 ## Work completed without rebuilding the recorder
 
@@ -25,9 +25,9 @@
 
 ## Shortest safe path to first controlled recording
 
-1. **Manager merges PR #301** (confirmed approved, GitHub still reports not merged). This branch can then be opened as the next isolated engineering PR against the merged foundation; manager/Claude audit its tests.
-2. Finish the independent live-source worker wiring in a separately gated review (reuse existing Ironbeam v2 read-only connection contract, never touch the current market reader or chart). Test it with a fake feed and explicit failure/GAP controls.
-3. Verify private destination, encrypted backup and externally pinned inventory, credentials/no-delete keys, host clock, CME calendar, worker capacity and recovery/alerts; provision no infrastructure without manager's separate approval.
+1. **Manager independently audits and merges PR #302** after exact-head CI. PR #301 is already merged; do not repeat its work or create another duplicate PR.
+2. Accept the independent synthetic Ironbeam v2 connection rehearsal: explicit WebSocket OPEN before subscribe, immutable generation, exact raw depth/quote/trade/binary preservation, denied/failed subscriptions and FEED_GAP. This is **not** a real authorized source adapter; the separate private-worker credential/transport configuration remains an activation gate.
+3. Apply the dedicated 19-check private controlled-trial gate in `engine18ControlledTrialReadiness.js`, and follow `docs/engine18b/PR302_CONTROLLED_RECORDING_TRIAL.md`: private destination, encrypted backup and externally pinned inventory, protected credentials, host clock, CME calendar, worker capacity, supervisor and shutdown drill. Do not provision infrastructure without manager's separate approval.
 4. Authorize one tightly supervised real Ironbeam ES recording trial. Capture all raw depth/quote/trade frames and subscriptions, reconcile source events to durable sequence, and complete a verified restore.
 5. Claude validates full/delta/conflated depth semantics, level-index/zero-size/implied fields and vendor time provenance. Only then build tested liquidity persistence/depletion/replenishment and price-contact labels; afterward compare institutional zones and Micro/Submicro/Fib context read-only, without hindsight.
 
@@ -36,3 +36,9 @@
 No Render service, S3/R2 bucket, paid worker/disk, licensed raw recording, LIVE chart, Engine 11/22, trading system or existing `/var/data/replay` 100 GB backend disk changed.
 
 **Owner priority is engineering completion.** The conditional ~$22/month estimate is not a live activation authorization, and actual outbound bandwidth/compute should be checked briefly at the provisioning decision, not optimized before finishing the recorder. The separate manager approval gate will resolve cost if the safe design exceeds the initial estimate.
+
+## PR #302 verification and merge boundary
+
+The updated `.github/workflows/engine18b-post301-readiness.yml` now targets `engine18-manager-post301-clean-20261111`, runs UTC and Arizona CI, and includes the full prior Gate 1–5 regression suite and the PR302 integration tests. `engine18ControlledTrialReadiness.js` only reports missing readiness evidence and **never enables live capture**. The existing LIVE chart, Ironbeam research monitor, Engine 11, Engine 22, broker and execution systems are not modified.
+
+Exact-head GitHub Actions evidence must be referenced in PR #302's final review handoff. The manager alone merges. Approval of the synthetic PR does not authorize deployment, paid storage or real Ironbeam raw recording.
