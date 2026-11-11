@@ -31,7 +31,7 @@ export function verifyEngine18LiveEnvironment(env,stat=statSync){
  // Avoid silently using Render's ephemeral root filesystem. The worker must
  // actually have the dedicated disk mounted at the proposed private mount.
  let mounts='';try{mounts=readFileSync('/proc/self/mountinfo','utf8');}catch{}
- if(!mounts.split('\n').some(line=>line.split(' - ')[0]?.split(' ').at(-1)==='/var/data/engine18-recorder'))
+ if(!mounts.split('\n').some(line=>line.split(' - ')[0]?.trim().split(/\s+/)[4]==='/var/data/engine18-recorder'))
   throw Error('dedicated private persistent disk mount not verified');
  if(!/^[a-fA-F0-9]{64}$/.test(env.ENGINE18_R2_ENCRYPTION_KEY_HEX))
   throw Error('private backup encryption key invalid');
