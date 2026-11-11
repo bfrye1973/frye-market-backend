@@ -19,6 +19,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Syntax check snapshot integration
+        working-directory: services/core
+        run: node --check jobs/buildStrategySnapshot.js && node --check routes/runAllEngines.js && node --check server.js
       - name: Run read-only funnel tests
         working-directory: services/core
         run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js
