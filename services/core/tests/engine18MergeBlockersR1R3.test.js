@@ -153,3 +153,31 @@ test('R3 reference time is UTC in both host timezones and malformed dates fail c
  assert.equal(parseChronyReferenceUtc('Tue Nov 10 20:59:30 2026 PST'),null);
  assert.equal(parseChronyReferenceUtc('Mon Nov 10 20:59:30 2026'),null);
 });
+
+test('R1 abandoned atomic manifest temp is reconciled only from exact open source',()=>withRoot(async root=>{
+ const first=await Engine18RawRecorder.openBounded({root,clock:clock(),testFault:fault});
+ first.append({raw:'source with exact 7500.2500',msgClass:'market'});
+ await assert.rejects(first.rotateStreaming(),/SIMULATED_RENAME_MANIFEST_CRASH/);
+ first.releaseLock();
+ const gz=files(root).find(p=>p.endsWith('.jsonl.gz'));
+ writeFileSync(gz+'.manifest.json.tmp','{"incomplete":');
+ const recovered=await Engine18RawRecorder.openBounded({root,clock:clock()});
+ recovered.close();
+ assert.deepEqual(rawMarket(replayRaw(root)),['source with exact 7500.2500']);
+ assert.ok(!existsSync(gz+'.manifest.json.tmp'));
+ assert.ok(existsSync(gz+'.manifest.json'));
+ assert.ok(!files(root).some(p=>p.endsWith('.integrity-unverified.json')));
+}));
+test('R1 legacy abandoned manifest temp is reconciled after matching gzip and open',()=>withRoot(async root=>{
+ const first=new Engine18RawRecorder({root,clock:clock(),testFault:fault});
+ first.append({raw:'legacy source exact',msgClass:'market'});
+ assert.throws(()=>first.rotate(),/SIMULATED_RENAME_MANIFEST_CRASH/);
+ first.releaseLock();
+ const gz=files(root).find(p=>p.endsWith('.jsonl.gz'));
+ writeFileSync(gz+'.manifest.json.tmp','partial');
+ const recovered=new Engine18RawRecorder({root,clock:clock()});
+ recovered.close();
+ assert.deepEqual(rawMarket(replayRaw(root)),['legacy source exact']);
+ assert.ok(!existsSync(gz+'.manifest.json.tmp'));
+ assert.ok(!files(root).some(p=>p.endsWith('.integrity-unverified.json')));
+}));
