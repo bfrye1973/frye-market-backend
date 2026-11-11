@@ -30,9 +30,10 @@ export class MockPrivateEncryptedStore{
  constructor({key}={}){
   if(!Buffer.isBuffer(key)||key.length!==32)throw Error('32-byte encryption key required');
   this.key=Buffer.from(key);
-  this.objects=new Map();this.inventory=new Map();this.failures=0;this.remoteHighWater=0;
+  this.objects=new Map();this.inventory=new Map();this.failures=0;this.failAfterCommit=0;this.remoteHighWater=0;
  }
  failNext(count){this.failures=count;}
+ loseAckNext(count){this.failAfterCommit=count;}
  async putStream(id,readable){
   if(!/^archive\/[A-Za-z0-9_.\-/]+$/.test(id)||id.includes('..'))throw Error('unsafe object key');
   if(this.failures>0){this.failures--;throw Error('SIMULATED_REMOTE_FAILURE');}
@@ -41,6 +42,7 @@ export class MockPrivateEncryptedStore{
   let ciphertextBytes=0;
   await pipeline(readable,cipher,new Writable({write(c,enc,cb){chunks.push(Buffer.from(c));ciphertextBytes+=c.length;cb();}}));
   this.objects.set(id,{iv,tag:cipher.getAuthTag(),chunks,ciphertextBytes});
+  if(this.failAfterCommit>0){this.failAfterCommit--;throw Error('SIMULATED_ACK_LOST_AFTER_UPLOAD');}
   return {objectId:id,ciphertextBytes};
  }
  async *getStream(id){
@@ -90,7 +92,17 @@ export class Engine18SyntheticArchiveBackup{
   }
   for(let attempt=1;attempt<=this.maxRetries;attempt++){
    try{await this.store.putStream(id,createReadStream(path));return;}
-   catch(e){if(attempt===this.maxRetries)throw Error('private backup upload failed; archive not acknowledged');this.retryCount++;}
+   catch(e){
+    // The object may be durably stored even when its upload ACK is lost.
+    // Verify remote bytes before any retry; never overwrite an immutable ID.
+    if(this.store.objects.has(id)){
+     const bytes=await this.store.getBytes(id);
+     if(sha(bytes)!==expected.sha256||bytes.length!==expected.bytes)throw Error('existing remote object corrupt');
+     return;
+    }
+    if(attempt===this.maxRetries)throw Error('private backup upload failed; archive not acknowledged');
+    this.retryCount++;
+   }
   }
  }
  async backupClosed(){
