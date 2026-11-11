@@ -203,7 +203,7 @@ test('synthetic WebSocket ingress overflow faults recorder WITHOUT blocking read
  FakeWebSocket.current.emit('{"q":1}');
  FakeWebSocket.current.emit('{"q":2}');
  await ws.queue;
- assert.equal(ws.failed,true);assert.equal(reason,'RECORDER_CAPTURE_FAILED');
+ assert.equal(ws.failed,true);assert.equal(reason,'RECORDER_INGRESS_OVERFLOW');
  assert.equal(r.health().recordingActive,false);
  assert.equal(readerEvents.length,2,'market reader must receive both frames regardless of recorder failure');
  assert.equal(FakeWebSocket.current.readyState,1,'recorder failure must not close reader socket');
