@@ -2,6 +2,12 @@
 // No new Elliott Wave, Fibonacci, institutional levels, or book liquidity.
 const copy=obj=>structuredClone(obj);
 const frozen=(obj)=>Object.freeze(obj);
+function isAvailableAt(value,asOf){
+ if(typeof value!=='string'||!Number.isFinite(Date.parse(value)))return false;
+ if(asOf===null)return true;
+ return typeof asOf==='string'&&Number.isFinite(Date.parse(asOf))&&
+  Date.parse(value)<=Date.parse(asOf);
+}
 export function buildEngine18ReadOnlyContext({
  institutionalResponse,strategySnapshot,
  symbol='ES',physicalContract='XCME:ES.Z26',priceBasisStatus='UNVERIFIED',
@@ -13,8 +19,8 @@ export function buildEngine18ReadOnlyContext({
  const wave=strategySnapshot?.strategies?.['intraday_scalp@10m']?.engine22WaveStrategy;
  const degrees=wave?.currentWavelength?.degrees;
  const sourceStatus={
-  institutional:!Array.isArray(structures)?'UNAVAILABLE':institutionalAvailableAt?'AVAILABLE':'POINT_IN_TIME_UNVERIFIED',
-  strategies:!degrees?.micro||!degrees?.submicro?'UNAVAILABLE':strategyAvailableAt?'AVAILABLE':'POINT_IN_TIME_UNVERIFIED',
+  institutional:!Array.isArray(structures)?'UNAVAILABLE':isAvailableAt(institutionalAvailableAt,asOfTime)?'AVAILABLE':'POINT_IN_TIME_UNVERIFIED',
+  strategies:!degrees?.micro||!degrees?.submicro?'UNAVAILABLE':isAvailableAt(strategyAvailableAt,asOfTime)?'AVAILABLE':'POINT_IN_TIME_UNVERIFIED',
   priceBasis:priceBasisStatus==='MATCHED'?'MATCHED':'UNVERIFIED'
  };
  const allowed=sourceStatus.institutional==='AVAILABLE'&&sourceStatus.strategies==='AVAILABLE'&&
