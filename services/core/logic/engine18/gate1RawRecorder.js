@@ -131,9 +131,9 @@ export class Engine18RawRecorder{
   }
   if(highWater!==null&&last<highWater)throw Error('high-watermark checkpoint proves missing tail archive');
   this.seq=last;this.gaps+=this.recoveredOpen;
-  replayRaw(this.root);
   if(highWater===null&&last>0)throw Error('missing historical high-watermark checkpoint; operator review required');
   if(last>0&&last!==highWater)saveCheckpoint(this.root,last);
+  replayRaw(this.root);
  }
  finish(path,entries){
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
