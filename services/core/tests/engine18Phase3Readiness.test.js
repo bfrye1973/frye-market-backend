@@ -171,3 +171,15 @@ test('synthetic actual crash/recovery of large open archive records memory RSS a
   rssBeforeMiB:Number((before/1048576).toFixed(1)),rssAfterMiB:Number((after/1048576).toFixed(1)),
   caveat:'sampled RSS, not peak; unbounded sync recovery still requires gate'}}));
 }));
+
+test('opt-in periodic clock monitor writes durable UNVERIFIED samples and stops cleanly',()=>temp(async root=>{
+ const s=supervisor(root);await s.start();
+ s.startClockMonitoring({intervalMs:8});
+ await new Promise(resolve=>setTimeout(resolve,40));
+ s.stopClockMonitoring();
+ await s.close();
+ const samples=replayRaw(root).filter(e=>e.statusCode==='CLOCK_SAMPLE');
+ assert.ok(samples.length>=1);
+ assert.ok(samples.every(e=>JSON.parse(e.raw).quality==='UNVERIFIED'));
+ assert.equal(s.clockTimer,null);
+}));
