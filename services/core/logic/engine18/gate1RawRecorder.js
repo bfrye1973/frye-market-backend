@@ -77,7 +77,7 @@ function parse(buf){
   if(e.schemaVersion!==SCHEMA||!Number.isSafeInteger(e.localSeq)||e.localSeq<=last||
    typeof e.runId!=='string'||!/^[a-f0-9-]{36}$/.test(e.runId)||
    typeof e.raw!=='string'||typeof e.receivedWallNs!=='string'||typeof e.receivedMonoNs!=='string'||typeof e.writtenMonoNs!=='string'||
-   !/^\\d+$/.test(e.receivedWallNs)||!/^\\d+$/.test(e.receivedMonoNs)||!/^\\d+$/.test(e.writtenMonoNs)||
+   !/^\d+$/.test(e.receivedWallNs)||!/^\d+$/.test(e.receivedMonoNs)||!/^\d+$/.test(e.writtenMonoNs)||
    (e.rawEncoding!=='utf8'&&e.rawEncoding!=='base64')||!classes.has(e.msgClass))throw Error('invalid raw record');
   if(e.rawEncoding==='base64'&&!validBase64(e.raw))throw Error('invalid encoded binary');
   entries.push(e);last=e.localSeq;pos=end+1;
@@ -185,7 +185,7 @@ export class Engine18RawRecorder{
   if(at!==undefined&&(!(at instanceof Date)||!Number.isFinite(at.getTime())))throw Error('invalid receipt time');
   const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):String(this.clock.wallNs());
   const receivedMonoNs=String(this.clock.monoNs());
-  if(!/^\\d+$/.test(receivedWallNs)||!/^\\d+$/.test(receivedMonoNs))throw Error('invalid receipt clock');
+  if(!/^\d+$/.test(receivedWallNs)||!/^\d+$/.test(receivedMonoNs))throw Error('invalid receipt clock');
   const receiptDate=new Date(Number(BigInt(receivedWallNs)/1000000n));
   if(!Number.isFinite(receiptDate.getTime()))throw Error('invalid receipt wall time');
   return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate});
@@ -193,8 +193,8 @@ export class Engine18RawRecorder{
  append(args){return this.appendReceived(this.capture(args));}
  appendReceived(receipt){
   if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
-  if(!receipt||typeof receipt.receivedWallNs!=='string'||!/^\\d+$/.test(receipt.receivedWallNs)||
-     typeof receipt.receivedMonoNs!=='string'||!/^\\d+$/.test(receipt.receivedMonoNs)||
+  if(!receipt||typeof receipt.receivedWallNs!=='string'||!/^\d+$/.test(receipt.receivedWallNs)||
+     typeof receipt.receivedMonoNs!=='string'||!/^\d+$/.test(receipt.receivedMonoNs)||
      !classes.has(receipt.msgClass)||!Number.isSafeInteger(receipt.streamGeneration)||receipt.streamGeneration<0||
      !Number.isFinite(receipt.receiptDate?.getTime())||
      (receipt.statusCode!==null&&!/^[A-Z_]{1,40}$/.test(receipt.statusCode)))throw Error('invalid captured receipt');
@@ -207,9 +207,9 @@ export class Engine18RawRecorder{
   else if(existsSync(stem+'.jsonl.gz')){let n=1;while(existsSync(stem+`.part-${n}.jsonl.gz`)||existsSync(stem+`.part-${n}.jsonl.open`))n++;path=stem+`.part-${n}.jsonl.open`;}
   if(path!==this.path){this.rotate();mkdirSync(dirname(path),{recursive:true,mode:0o700});this.fd=openSync(path,'a',0o600);this.path=path;}
   const writtenMonoNs=String(this.clock.monoNs());
-  if(!/^\\d+$/.test(writtenMonoNs)||BigInt(writtenMonoNs)<BigInt(receipt.receivedMonoNs))throw Error('invalid written monotonic timestamp');
+  if(!/^\d+$/.test(writtenMonoNs)||BigInt(writtenMonoNs)<BigInt(receipt.receivedMonoNs))throw Error('invalid written monotonic timestamp');
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,runId:this.runId,receivedWallNs:receipt.receivedWallNs,receivedMonoNs:receipt.receivedMonoNs,writtenMonoNs,streamGeneration:receipt.streamGeneration,msgClass:receipt.msgClass,statusCode:receipt.statusCode,rawEncoding:receipt.rawEncoding,raw};
-  const line=Buffer.from(JSON.stringify(item)+'\\n');
+  const line=Buffer.from(JSON.stringify(item)+'\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
   this.seq++;
   try{saveCheckpoint(this.root,this.seq);}catch{this.writeErrors++;this.faulted=true;throw Error('checkpoint failed; recovery required');}
