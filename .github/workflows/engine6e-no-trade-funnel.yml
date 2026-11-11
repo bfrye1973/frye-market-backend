@@ -25,3 +25,24 @@ jobs:
       - name: Run read-only funnel tests
         working-directory: services/core
         run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js tests/engine6EAdvisoryContext.test.js
+
+  downstream-paper-regressions:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install isolated test dependencies
+        run: npm install --ignore-scripts
+      - name: Official Strategy 1 management contract
+        run: node --test services/core/tests/engine9Strategy1Phase8.test.js
+      - name: Engine 8 to Engine 10 PAPER lifecycle replay (ephemeral workspace)
+        env:
+          TRADE_JOURNAL_DIR: ${{ github.workspace }}/services/core/data
+          ENGINE8_LIVE_TRADING_ENABLED: '0'
+          ENGINE8_ALLOW_LIVE_FUTURES: '0'
+        run: node --test services/core/tests/engine8Engine10Strategy1LifecycleReplay.test.js
