@@ -15,12 +15,18 @@ const hmac=(key,data)=>createHmac('sha256',key).update(data).digest();
 const keyRe=/^[a-zA-Z0-9_./:-]{1,240}$/;
 const idRe=/^[A-Za-z0-9_.:-]{1,80}$/;
 const MAGIC=Buffer.from('E18GCM01');
-function pathEncode(s){return s.split('/').map(encodeURIComponent).join('/');}
+export function rfc3986Encode(s){return encodeURIComponent(String(s)).replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());}
+function pathEncode(s){return s.split('/').map(rfc3986Encode).join('/');}
+export function canonicalQueryRFC3986(url){
+ return [...url.searchParams.entries()].map(([k,v])=>[rfc3986Encode(k),rfc3986Encode(v)])
+  .sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:a[1]<b[1]?-1:a[1]>b[1]?1:0)
+  .map(([k,v])=>k+'='+v).join('&');
+}
 function signingKey(secret,date,region){
  const k=hmac('AWS4'+secret,date);
  return hmac(hmac(hmac(k,region),'s3'),'aws4_request');
 }
-function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,region,metadata={}}){
+export function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,region,metadata={}}){
  const dt=now.toISOString().replace(/[-:]|\.\d{3}/g,'');
  const date=dt.slice(0,8),scope=date+'/'+region+'/s3/aws4_request';
  const headers={'host':url.host,'x-amz-content-sha256':bodyHash,'x-amz-date':dt};
@@ -28,7 +34,7 @@ function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,regi
  const keys=Object.keys(headers).sort();
  const canonicalHeaders=keys.map(k=>k+':'+headers[k].trim()+'\n').join('');
  const signedHeaders=keys.join(';');
- const request=[method,url.pathname,url.searchParams.toString(),canonicalHeaders,signedHeaders,bodyHash].join('\n');
+ const request=[method,url.pathname,canonicalQueryRFC3986(url),canonicalHeaders,signedHeaders,bodyHash].join('\n');
  const stringToSign=['AWS4-HMAC-SHA256',dt,scope,hash(request)].join('\n');
  const signature=hmac(signingKey(secretAccessKey,date,region),stringToSign).toString('hex');
  return {...headers,'authorization':'AWS4-HMAC-SHA256 Credential='+accessKeyId+'/'+scope+
