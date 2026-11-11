@@ -158,3 +158,82 @@ test('isolated existing recorder phase2/3/4 behavior remains synthetic only',()=
  const w=writer(root);await w.offer({raw:'synthetic-only',msgClass:'market'});await w.close();
  assert.ok(files(root).some(x=>x.endsWith('.manifest.json')));
 }));
+
+test('backup uploaded but ACK lost is idempotently verified without overwriting',()=>withRoot(async root=>{
+ const w=writer(root);await w.offer({raw:'archived-value',msgClass:'market'});await w.close();
+ const remote=new MockPrivateEncryptedStore({key:randomBytes(32)});
+ remote.loseAckNext(1);
+ const backup=new Engine18SyntheticArchiveBackup({root,store:remote,maxRetries:3});
+ const a=await backup.backupClosed();
+ assert.equal(a.remoteArchiveCount,1);
+ const object=remote.listInventory()[0];
+ const content=await remote.getBytes(object.objectId);
+ await backup.backupClosed();
+ assert.deepEqual(await remote.getBytes(object.objectId),content);
+ assert.equal(remote.objects.size,2);
+}));
+
+test('isolated slow-storage worker does not block parent receipt callbacks and preserves every ACK',()=>withRoot(async root=>{
+ const bridge=new Engine18SyntheticWorkerBridge({root,maxInflight:128,syntheticSlowDiskMs:30});
+ await bridge.start();
+ const begin=performance.now();
+ const promises=[];
+ for(let i=0;i<96;i++)promises.push(bridge.submit('SLOW_FSYNC_'+i,{msgClass:'market'}));
+ const submitElapsedMs=performance.now()-begin;
+ const ack=await Promise.all(promises);
+ assert.equal(ack.length,96);
+ assert.ok(submitElapsedMs<1000,'parent must not wait for simulated fsync before submitting');
+ const h=bridge.health();
+ assert.equal(h.acked,96);
+ assert.ok(h.callbackUsP99<100000,'synthetic callback cannot block on disk');
+ await bridge.close();
+ assert.deepEqual(replayRaw(root).filter(x=>x.msgClass==='market').map(x=>x.raw),
+  Array.from({length:96},(_,i)=>'SLOW_FSYNC_'+i));
+}));
+
+test('sustained 24000 mixed synthetic ES depth/quote/trade frames across three hours with concurrent backup',()=>withRoot(async root=>{
+ const w=new Engine18BufferedRecorder({root,clock:fakeClock(),batchSize:64,maxQueued:256,flushDelayMs:0});
+ const remote=new MockPrivateEncryptedStore({key:randomBytes(32)});
+ const backup=new Engine18SyntheticArchiveBackup({root,store:remote,maxRetries:3});
+ const background=new Engine18ContinuousBackup({backup});
+ const total=24000,begin=performance.now();let accepted=0;
+ for(let group=0;group<total/64;group++){
+  const promises=[];
+  for(let k=0;k<64;k++){
+   const i=group*64+k;
+   const hour=Math.floor(i/8000);
+   const at=new Date(Date.UTC(2026,10,10,21+hour,0,0));
+   const raw=i%3===0?
+    '{"d":[{"s":"XCME:ES.Z26","b":[{"p":7500.2500,"sz":0,"l":0}],"a":[]}],"i":'+i+'}':
+    i%3===1?'{"q":{"symbol":"XCME:ES.Z26","seq":'+i+'}}':
+    '{"tr":[{"s":"XCME:ES.Z26","p":7500.2500,"sz":1}],"i":'+i+'}';
+   promises.push(w.offer({raw,at,msgClass:'market'}));
+  }
+  const a=await Promise.all(promises);accepted+=a.length;
+  if(group===125||group===250)await background.tick();
+ }
+ await w.close();
+ await background.tick();
+ const elapsed=performance.now()-begin;
+ assert.equal(accepted,total);
+ const originals=replayRaw(root).filter(e=>e.msgClass==='market');
+ assert.equal(originals.length,total);
+ assert.deepEqual(originals.map(e=>e.localSeq),Array.from({length:total},(_,i)=>i+2));
+ assert.equal(backup.store.listInventory().at(-1).lastSeq,w.writer.seq);
+ const recoveredRoot=root+'-restored';
+ try{
+  const b=await backup.restore({destination:recoveredRoot});
+  assert.equal(b.lastSeq,w.writer.seq);
+  const a=createHash('sha256').update(JSON.stringify(replayRaw(root))).digest('hex');
+  const z=createHash('sha256').update(JSON.stringify(replayRaw(recoveredRoot))).digest('hex');
+  assert.equal(a,z);
+ }finally{rmSync(recoveredRoot,{recursive:true,force:true});}
+ const mem=process.memoryUsage();
+ console.log(JSON.stringify({phase5SustainedSynthetic:{
+  frames:total,elapsedMs:+elapsed.toFixed(1),
+  framesPerSecond:+(total*1000/elapsed).toFixed(0),
+  rssMiB:+(mem.rss/1048576).toFixed(1),
+  completedArchives:remote.listInventory().length,backupFailures:background.health().failures
+ }}));
+ await background.stop();
+}));
