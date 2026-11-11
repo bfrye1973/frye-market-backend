@@ -91,7 +91,11 @@ test('Node child.send false is queued pressure, not automatically lost, when cal
  assert.equal(b.health().ipcQueuedSignals,1);
  assert.equal(b.health().acked,1);
  await b.close();
- assert.deepEqual(replayRaw(root).filter(x=>x.msgClass==='market').map(x=>x.raw),['QUEUED_BUT_PERSISTED']);
+ const frame=replayRaw(root).find(x=>x.msgClass==='market');
+ assert.equal(frame.raw,'QUEUED_BUT_PERSISTED');
+ assert.equal(frame.receiptClockSource,'HOST_WALL_ANCHORED_MONOTONIC');
+ assert.equal(frame.receiptPrecision,'SUBMILLISECOND_ESTIMATE');
+ assert.equal(frame.clockQuality,'UNVERIFIED');
 }));
 
 test('worker whose parent dies exits instead of collecting orphaned frames; restart emits GAP',()=>withRoot(async root=>{
@@ -325,6 +329,14 @@ test('mock S3 lifecycle: independent encrypted inventory, current-hour concurren
  const previous=await coordinator.syncClosed();
  assert.equal(previous.added,0,'idempotent remote inventory sync');
  assert.equal(coordinator.health().failures,0);
+ const archiveKey=[...objectMap.keys()].find(k=>k.startsWith('engine18/archives/')&&k.endsWith('.jsonl.gz'));
+ const goodCipher=Buffer.from(objectMap.get(archiveKey));
+ const corrupt=Buffer.from(goodCipher);corrupt[25]^=1;objectMap.set(archiveKey,corrupt);
+ const corruptedPath=root+'-corrupted-restore';
+ try{
+  await assert.rejects(coordinator.restore({destination:corruptedPath,expectedLastSeq:knownLast}),
+   /SHA256|integrity|checksum/);
+ }finally{rmSync(corruptedPath,{recursive:true,force:true});objectMap.set(archiveKey,goodCipher);}
  const lastInventoryKey=[...objectMap.keys()].filter(k=>k.startsWith('engine18/inventory/')).sort().at(-1);
  objectMap.delete(lastInventoryKey);
  await assert.rejects(coordinator.inventory({expectedLastSeq:knownLast}),/high-watermark/);
