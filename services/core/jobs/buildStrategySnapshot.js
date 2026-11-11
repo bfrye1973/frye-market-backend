@@ -2377,7 +2377,7 @@ function buildEngine6PaperPermission({
         "engine4CurrentScalpParticipation"
     );
 
-  const engine25HardBlocked =
+  const engine25AdvisoryRiskWarning =
     engine25Context?.ok === true &&
     (
       String(
@@ -2632,10 +2632,9 @@ const engine22StructuralDirection =
     );
   }
 
-  if (engine25HardBlocked) {
-    blockers.push(
-      "ENGINE25_HARD_RISK_BLOCK"
-    );
+  if (engine25AdvisoryRiskWarning) {
+    warnings.push("ENGINE25_ADVISORY_RISK_WARNING");
+    reasonCodes.push("ENGINE25_RISK_CONTEXT_ADVISORY_ONLY");
   }
 
   if (
@@ -2860,7 +2859,7 @@ const engine22StructuralDirection =
     participationWaitingForEngine3 !== true &&
     participationHardBlocked !== true &&
 
-    engine25HardBlocked !== true &&
+    
     ["LONG", "SHORT"].includes(direction) &&
     Number.isFinite(targetPoints) &&
     targetPoints >= 8;
@@ -2872,7 +2871,7 @@ const engine22StructuralDirection =
     reactionAllowed &&
     participationAllowed &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
+    
     direction === "LONG";
 
   const allowed =
@@ -2915,7 +2914,7 @@ const engine22StructuralDirection =
     );
 
     reasonCodes.push(
-      "ENGINE25_NOT_HARD_BLOCKED"
+      "ENGINE25_CONTEXT_ADVISORY_ONLY"
     );
 
     reasonCodes.push(
@@ -2967,15 +2966,12 @@ const engine22StructuralDirection =
     reactionActive === true &&
     direction === "LONG" &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
+    
     !uniqueBlockers.includes(
       "PAPER_DIRECTION_MISSING"
     ) &&
     !uniqueBlockers.includes(
       "PAPER_SHORT_RESEARCH_DISABLED_V1"
-    ) &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
     );
 
   const shortReactionState =
@@ -3015,10 +3011,6 @@ const engine22StructuralDirection =
     engine26ShortResearchOnly === true &&
     engine3ShortRejection === true &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
-    ) &&
     !uniqueBlockers.includes(
       "ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED"
     );
@@ -3029,11 +3021,7 @@ const engine22StructuralDirection =
     shortResearchWatch !== true &&
     engine26ShortWatchOnly === true &&
     engine26DoNotChaseLong === true &&
-    engine26ShortResearchOnly === true &&
-    engine25HardBlocked !== true &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
-    );
+    engine26ShortResearchOnly === true;
 
   if (shortResearchWatch) {
     reasonCodes.push(
