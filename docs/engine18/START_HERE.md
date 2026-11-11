@@ -56,6 +56,14 @@ G. Separate reach, reject-on-touch and reaction/risk models.
 H. Leakage-free preregistered out-of-sample comparisons to price-only, naive size, random matched levels; calibration/economic tests.
 I. Existing LIVE chart as a read-only consumer with max 2 BUY and 2 SELL **display** zones. Evaluate every eligible research candidate, not just displayed 2+2.
 
+
+## Latest owner-approved organization and Gate1 recorder design (Nov 10, 2026)
+- **Manager:** GPT-6 Engine 18 manager reviews architecture, isolation, GitHub/Render changes and acceptance; **Implementer:** Engine 18A dedicated recorder/replay teammate (separate ChatGPT conversation created by owner); **Quant research lead/reviewer:** Claude. Manager is not an autonomous background worker and cannot create/chat with the other teammate directly; handoffs and code reviews run through GitHub and owner-shared replies.
+- **Read next:** [Claude/GPT-6 recorder architecture decisions](./RECORDER_ARCHITECTURE_DECISIONS.md). These are approved design principles, not a deployed raw data recorder.
+- **Implementation gate:** first implement a noncollecting, offline-tested raw recorder component that stores the exact received message string, monotonic localSeq, wall/monotonic timestamps, connection-generation, classification, safe error/control records, and versioned event schema. Test rotation, manifest hashes, recovery and deterministic replay. No secret-bearing WebSocket URL in logs or records.
+- **Before enabling live raw recording:** owner must verify Ironbeam licensing permits private historical recording, confirm secret rotation, and approve secure durable storage and retention. An isolated component may be developed/tested from synthetic fixtures before permissions are resolved. Do not activate collection or spend money unilaterally.
+- **No additional LIVE chart changes or calibrated probability display during Gate1.**
+
 ## Immediate work order — NO new chart changes
 1. Finish independent **review of Gate1 spec**, including its proposed 99.9% fill/trade reconciliation and 100% parity rules; verify Databento semantics against a real pilot before declaring a pass.
 2. Verify Ironbeam per-frame level-index/zero-size/full-image-vs-delta behavior; record shape histograms for full ETH/RTH with safe counters. Already-established 10+10 counts do **not** prove full snapshots.
