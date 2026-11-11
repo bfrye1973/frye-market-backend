@@ -96,7 +96,8 @@ export class Engine18SyntheticArchiveBackup{
  async backupClosed(){
   if(walk(this.root).some(x=>x.endsWith('.jsonl.open')))throw Error('open archive must not be backed up');
   const archives=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'))
-   .map(path=>({path,manifest:JSON.parse(readFileSync(path+'.manifest.json','utf8'))}))
+   .map(path=>{if(!existsSync(path+'.manifest.json'))throw Error('original archive manifest required');
+    return {path,manifest:JSON.parse(readFileSync(path+'.manifest.json','utf8'))};})
    .sort((a,b)=>a.manifest.firstSeq-b.manifest.firstSeq);
   for(const {path,manifest} of archives){
    const manifestPath=path+'.manifest.json';
