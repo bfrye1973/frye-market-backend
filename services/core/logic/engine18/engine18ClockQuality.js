@@ -6,7 +6,7 @@ const execFileAsync=promisify(execFile);
 export function parseChronyTracking(text,{nowMs=Date.now(),maxReferenceAgeMs=120000}={}){
  if(typeof text!=='string'||text.length>100000)return null;
  const lines=Object.fromEntries(text.split(/\r?\n/).map(x=>{
-  const idx=x.indexOf(':');return idx<0?[]:[[x.slice(0,idx).trim(),x.slice(idx+1).trim()]];
+  const idx=x.indexOf(':');return idx<0?[]:[x.slice(0,idx).trim(),x.slice(idx+1).trim()];
  }).filter(x=>x.length));
  const stratum=Number(lines['Stratum']);
  if(!Number.isInteger(stratum)||stratum<1||stratum>15||lines['Leap status']!=='Normal')return null;
