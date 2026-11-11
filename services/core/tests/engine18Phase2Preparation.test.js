@@ -167,7 +167,7 @@ test('raw frame receipt timestamp is frozen before parser/diagnostic work',()=>d
  assert.equal(tap.safeDiagnostics().counts.depth,1);
 }));
 
-test('injectable synthetic WebSocket seam waits for raw durable ACK before existing reader callback',()=>dir(async root=>{
+test('nonblocking synthetic WebSocket never delays reader callback while recording',()=>dir(async root=>{
  class FakeWebSocket {
   constructor(){this.listeners={};this.readyState=1;this.bufferedAmount=0;FakeWebSocket.current=this;}
   addEventListener(name,fn){(this.listeners[name]??=[]).push(fn);}
@@ -181,13 +181,13 @@ test('injectable synthetic WebSocket seam waits for raw durable ACK before exist
  let invoked=0,seqAtCallback=[];
  ws.addEventListener('message',e=>{invoked++;seqAtCallback.push(r.writer.seq);});
  FakeWebSocket.current.emit('message',{data:'{"d":[{"s":"XCME:ES.Z26","b":[],"a":[]}]}'});
- assert.equal(invoked,0,'reader cannot process frame before async durable record');
+ assert.equal(invoked,1,'reader callback must execute immediately even before fsync');
  await ws.queue;
- assert.equal(invoked,1);assert.equal(seqAtCallback[0],2);
+ assert.equal(invoked,1);assert.ok(seqAtCallback[0]>=1);
  await r.close();
  assert.equal(replayRaw(root).filter(x=>x.msgClass==='market').length,1);
 }));
-test('synthetic WebSocket ingress overload fails closed and never acknowledges unseen frames',()=>dir(async root=>{
+test('synthetic WebSocket ingress overflow faults recorder WITHOUT blocking reader',()=>dir(async root=>{
  class FakeWebSocket{
   constructor(){this.listeners={};this.readyState=1;FakeWebSocket.current=this;}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
@@ -205,8 +205,31 @@ test('synthetic WebSocket ingress overload fails closed and never acknowledges u
  await ws.queue;
  assert.equal(ws.failed,true);assert.equal(reason,'RECORDER_CAPTURE_FAILED');
  assert.equal(r.health().recordingActive,false);
- assert.equal(readerEvents.length,0);
+ assert.equal(readerEvents.length,2,'market reader must receive both frames regardless of recorder failure');
+ assert.equal(FakeWebSocket.current.readyState,1,'recorder failure must not close reader socket');
  r.writer.rotate();r.writer.releaseLock();
  const b=recorder(root);await b.close();
  assert.equal(replayRaw(root).filter(x=>x.statusCode==='GAP').length,1);
+}));
+
+test('synthetic WebSocket automatically persists CONNECTED/DISCONNECTED/RECONNECT/GAP without credentials',()=>dir(async root=>{
+ class FakeWebSocket{
+  constructor(){this.events={};this.readyState=1;FakeWebSocket.current=this;}
+  addEventListener(k,fn){(this.events[k]??=[]).push(fn);}
+  emit(k){for(const fn of this.events[k]||[])fn({type:k});}
+  close(){this.readyState=3;this.emit('close');}
+  send(){}
+ }
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const W=createSyntheticRecorderWebSocketImpl(FakeWebSocket,{tap,maxInbound:12});
+ const ws1=new W('wss://synthetic.invalid/?token=do-not-record');
+ FakeWebSocket.current.emit('open');await ws1.queue;FakeWebSocket.current.emit('close');await ws1.queue;
+ const ws2=new W('wss://synthetic.invalid/?token=do-not-record');
+ FakeWebSocket.current.emit('open');await ws2.queue;FakeWebSocket.current.emit('error');await ws2.queue;
+ await r.close();
+ const events=replayRaw(root);
+ assert.deepEqual(events.map(e=>e.statusCode).filter(Boolean),[
+  'RECORDER_START','CONNECTED','DISCONNECTED','RECONNECT','GAP','RECORDER_STOP']);
+ assert.ok(events.every(e=>!e.raw.includes('token=')));
+ assert.equal(events.find(e=>e.statusCode==='RECONNECT').streamGeneration,2);
 }));
