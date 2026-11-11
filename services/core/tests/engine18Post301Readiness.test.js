@@ -244,3 +244,29 @@ test('controlled real-data trial remains blocked without explicit private operat
  assert.equal(ready.status,'READY_FOR_SEPARATE_ACTIVATION');
  assert.equal(ready.liveCaptureActive,false,'readiness must never itself start licensed capture');
 });
+
+test('independent Ironbeam rehearsal fails closed on unopened WebSocket and leaves GAP evidence',()=>withRoot(async root=>{
+ const supervisor=new Engine18SyntheticReadinessSupervisor({root,clock:localClock(),
+  metadata:{softwareVersion:'synthetic-only',gitCommit:'abcdef1234',
+   physicalContract:'XCME:ES.Z26',contractMapping:'XCME:ES.Z26',
+   clockSource:'UNVERIFIED',clockConfiguration:'HOST_UNVERIFIED'}});
+ await supervisor.start();
+ class NeverOpens{
+  constructor(){this.events={};this.closed=false;}
+  addEventListener(k,fn){(this.events[k]??=[]).push(fn);}
+  close(){this.closed=true;for(const cb of this.events.close??[])cb({code:1000});}
+ }
+ const fetchImpl=async url=>{
+  if(url.endsWith('/v2/auth'))return {ok:true,json:async()=>({token:'HIDDEN_TOKEN'})};
+  if(url.endsWith('/v2/stream/create'))return {ok:true,json:async()=>({streamId:'never_opened'})};
+  throw Error('subscription should never be called without OPEN');
+ };
+ const rehearsal=createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,
+  WebSocketImpl:NeverOpens,openTimeoutMs:10});
+ await assert.rejects(rehearsal.connect(),/WebSocket unavailable/);
+ await rehearsal.drain();await supervisor.close();
+ const events=replayRaw(root);
+ assert.equal(events.filter(x=>x.statusCode==='SUBSCRIPTION_ACK').length,0);
+ assert.equal(events.filter(x=>x.statusCode==='FEED_GAP').length,1);
+ assert.ok(!JSON.stringify(events).includes('HIDDEN_TOKEN'));
+}));
