@@ -10,6 +10,7 @@ export class Engine18BufferedRecorder {
   this.maxQueued=maxQueued;this.maxQueueBytes=maxQueueBytes;this.batchSize=batchSize;this.flushDelayMs=flushDelayMs;
   this.pending=[];this.pendingBytes=0;this.received=0;this.recorded=0;this.rejected=0;
   this.failed=false;this.draining=false;this.closed=false;this.closing=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
+  this.batchCommitSamplesUs=[];this.maxQueueDepth=0;this.batchCommitCount=0;
  }
  static async openBounded(options={}){
   const writer=await Engine18RawRecorder.openBounded(options);
@@ -33,6 +34,7 @@ export class Engine18BufferedRecorder {
   }
   return new Promise((resolve,reject)=>{
    this.pending.push({receipt,bytes,resolve,reject});this.pendingBytes+=bytes;
+   this.maxQueueDepth=Math.max(this.maxQueueDepth,this.pending.length);
    if(this.pending.length>=this.batchSize)this.schedule(true);
    else this.schedule(false);
   });
@@ -61,7 +63,12 @@ export class Engine18BufferedRecorder {
     const batch=this.pending.splice(0,this.batchSize);
     const bytes=batch.reduce((n,e)=>n+e.bytes,0);this.pendingBytes-=bytes;
     try{
+     const started=process.hrtime.bigint();
      const acknowledgments=await this.writer.appendBatch(batch.map(x=>x.receipt));
+     const committedUs=Number(process.hrtime.bigint()-started)/1000;
+     this.batchCommitCount++;
+     this.batchCommitSamplesUs.push(committedUs);
+     if(this.batchCommitSamplesUs.length>10000)this.batchCommitSamplesUs.shift();
      if(this.failed)throw Error('recorder failed while committing');
      this.recorded+=batch.length;
      batch.forEach((e,i)=>e.resolve({...acknowledgments[i],receivedMonoNs:e.receipt.receivedMonoNs,receivedWallNs:e.receipt.receivedWallNs}));
@@ -86,7 +93,12 @@ export class Engine18BufferedRecorder {
  health(){
   let diskFreeBytes=null,diskTotalBytes=null;
   try{const s=statfsSync(this.writer.root,{bigint:true});diskFreeBytes=String(s.bavail*s.bsize);diskTotalBytes=String(s.blocks*s.bsize);}catch{}
+  const p999=(()=>{const a=[...this.batchCommitSamplesUs].sort((x,y)=>x-y);
+   return a.length?a[Math.min(a.length-1,Math.ceil(a.length*0.999)-1)]:null;})();
   return Object.freeze({schema:'engine18.buffered.health.v1',recordingActive:!this.closed&&!this.failed,
+   batchCommitCount:this.batchCommitCount,commitLatencyUsP999:p999,
+   maxQueueDepth:this.maxQueueDepth,workerRssBytes:process.memoryUsage().rss,
+   workerCpuUserUs:process.cpuUsage().user,workerCpuSystemUs:process.cpuUsage().system,
    received:this.received,recorded:this.recorded,unacknowledged:this.pending.length,rejected:this.rejected,
    gapCount:this.writer.gaps,bytesWritten:this.writer.bytes,lastReceivedWallNs:this.lastReceiptWallNs,
    diskFreeBytes,diskTotalBytes,clockOffsetStatus:'UNVERIFIED',reconnects:this.reconnects,failedClosed:this.failed});

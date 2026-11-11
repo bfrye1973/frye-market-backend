@@ -4,7 +4,7 @@
 // Explicit credentials and endpoint injected; NO env credentials, paid calls, or defaults.
 import {createHash,createHmac,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,mkdtempSync,readFileSync,writeFileSync,appendFileSync,
- statSync,rmSync,openSync,closeSync,fsyncSync,readSync} from 'node:fs';
+ statSync,rmSync,existsSync,openSync,closeSync,fsyncSync,readSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pipeline,finished} from 'node:stream/promises';
@@ -15,12 +15,18 @@ const hmac=(key,data)=>createHmac('sha256',key).update(data).digest();
 const keyRe=/^[a-zA-Z0-9_./:-]{1,240}$/;
 const idRe=/^[A-Za-z0-9_.:-]{1,80}$/;
 const MAGIC=Buffer.from('E18GCM01');
-function pathEncode(s){return s.split('/').map(encodeURIComponent).join('/');}
+export function rfc3986Encode(s){return encodeURIComponent(String(s)).replace(/[!'()*]/g,c=>'%'+c.charCodeAt(0).toString(16).toUpperCase());}
+function pathEncode(s){return s.split('/').map(rfc3986Encode).join('/');}
+export function canonicalQueryRFC3986(url){
+ return [...url.searchParams.entries()].map(([k,v])=>[rfc3986Encode(k),rfc3986Encode(v)])
+  .sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:a[1]<b[1]?-1:a[1]>b[1]?1:0)
+  .map(([k,v])=>k+'='+v).join('&');
+}
 function signingKey(secret,date,region){
  const k=hmac('AWS4'+secret,date);
  return hmac(hmac(hmac(k,region),'s3'),'aws4_request');
 }
-function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,region,metadata={}}){
+export function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,region,metadata={}}){
  const dt=now.toISOString().replace(/[-:]|\.\d{3}/g,'');
  const date=dt.slice(0,8),scope=date+'/'+region+'/s3/aws4_request';
  const headers={'host':url.host,'x-amz-content-sha256':bodyHash,'x-amz-date':dt};
@@ -28,7 +34,7 @@ function canonicalAuth({method,url,bodyHash,now,accessKeyId,secretAccessKey,regi
  const keys=Object.keys(headers).sort();
  const canonicalHeaders=keys.map(k=>k+':'+headers[k].trim()+'\n').join('');
  const signedHeaders=keys.join(';');
- const request=[method,url.pathname,url.searchParams.toString(),canonicalHeaders,signedHeaders,bodyHash].join('\n');
+ const request=[method,url.pathname,canonicalQueryRFC3986(url),canonicalHeaders,signedHeaders,bodyHash].join('\n');
  const stringToSign=['AWS4-HMAC-SHA256',dt,scope,hash(request)].join('\n');
  const signature=hmac(signingKey(secretAccessKey,date,region),stringToSign).toString('hex');
  return {...headers,'authorization':'AWS4-HMAC-SHA256 Credential='+accessKeyId+'/'+scope+
@@ -148,13 +154,14 @@ export class Engine18S3PrivateStore {
   if(!obj||typeof obj!=='object'||obj.keyId!==this.keyId)throw Error('private inventory key version mismatch');
   return obj;
  }
- async listObjectKeys(prefix){
+ async listObjectKeys(prefix,{pageSize=1000}={}){
+  if(!Number.isInteger(pageSize)||pageSize<1||pageSize>1000)throw Error('invalid S3 page size');
   if(typeof prefix!=='string'||!keyRe.test(prefix)||prefix.includes('..'))throw Error('unsafe S3 inventory prefix');
   const result=[];let token=null;
   for(let page=0;page<1000;page++){
    const url=new URL(this.endpoint+'/'+encodeURIComponent(this.bucket));
    url.searchParams.set('list-type','2');
-   url.searchParams.set('max-keys','1000');
+   url.searchParams.set('max-keys',String(pageSize));
    url.searchParams.set('prefix',prefix);
    if(token)url.searchParams.set('continuation-token',token);
    url.searchParams.sort();
@@ -245,12 +252,19 @@ export class Engine18S3PrivateStore {
    const decipher=createDecipheriv('aes-256-gcm',this.key,header.subarray(8,20));
    decipher.setAuthTag(tag);
    const output=destination+'.restore.tmp';
-   await pipeline(createReadStream(tmp,{start:20,end:size-17}),decipher,
-    createWriteStream(output,{flags:'wx',mode:0o600}));
-   const plain=await hashFile(output);
-   if(plain.sha256!==expected.plainSha256||plain.bytes!==expected.plainBytes)
-    throw Error('restored plaintext SHA256 mismatch');
-   return {tempPath:output,keyId:this.keyId,sha256:plain.sha256,bytes:plain.bytes};
+   if(existsSync(output))throw Error('restore staging already exists');
+   try{
+    await pipeline(createReadStream(tmp,{start:20,end:size-17}),decipher,
+     createWriteStream(output,{flags:'wx',mode:0o600}));
+    const plain=await hashFile(output);
+    if(plain.sha256!==expected.plainSha256||plain.bytes!==expected.plainBytes)
+     throw Error('restored plaintext SHA256 mismatch');
+    return {tempPath:output,keyId:this.keyId,sha256:plain.sha256,bytes:plain.bytes};
+   }catch{
+    // Never leave a partial or unauthenticated plaintext file on disk.
+    rmSync(output,{force:true});
+    throw Error('encrypted restore authentication or checksum failed');
+   }
   }finally{rmSync(dir,{recursive:true,force:true});}
  }
 }
