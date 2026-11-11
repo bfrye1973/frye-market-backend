@@ -2,9 +2,8 @@
 // Synthetic/mock-endpoint tested only. Not wired to licensed market data.
 // Restores require an independently pinned lastSeq to detect tail inventory loss.
 import {createHash} from 'node:crypto';
-import {createReadStream,existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync,
+import {createReadStream,existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync,statSync,
  mkdtempSync,rmSync,openSync,closeSync,fsyncSync,renameSync} from 'node:fs';
-import {tmpdir} from 'node:os';
 import {join,resolve,relative,dirname} from 'node:path';
 import {Engine18S3PrivateStore} from './engine18S3PrivateStore.js';
 import {scanEngine18ReplayBounded} from './engine18BoundedReplayScan.js';
@@ -27,6 +26,7 @@ export class Engine18S3ArchiveCoordinator {
   if(typeof root!=='string'||!(store instanceof Engine18S3PrivateStore))throw Error('private S3 store and root required');
   this.root=resolve(root);this.store=store;this.prefix='engine18/inventory/v1/';
   this.inFlight=null;this.failures=0;this.lastSuccessAtMs=null;this.retries=0;
+  this.pendingRotation=new Map();this.pendingRotationArchives=0;
  }
  async inventory({expectedLastSeq=null}={}){
   const keys=await this.store.listObjectKeys(this.prefix);
@@ -64,9 +64,20 @@ export class Engine18S3ArchiveCoordinator {
  async _syncClosed(){
   let inventory=await this.inventory(),added=0;
   const paths=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'));
-  const closed=[];
+  const closed=[];this.pendingRotationArchives=0;
   for(const path of paths){
-   if(!existsSync(path+'.manifest.json'))throw Error('closed archive missing original manifest');
+   if(!existsSync(path+'.manifest.json')){
+    const original=path.replace(/\.jsonl\.gz$/,'.jsonl.open');
+    // A renamed gzip can precede the manifest; a still-present source proves
+    // finalization may be in progress. Do not read or upload unfinished files.
+    // After a bounded grace interval, persistent unmanifested files fail closed.
+    if(!existsSync(original))throw Error('unmanifested archive without original source requires recovery');
+    const age=Math.max(0,Date.now()-Math.min(statSync(path).mtimeMs,statSync(original).mtimeMs));
+    if(age>120000)throw Error('unmanifested archive stuck beyond rotation grace; recovery required');
+    this.pendingRotation.set(path,Date.now());this.pendingRotationArchives++;
+    continue;
+   }
+   this.pendingRotation.delete(path);
    const manifest=JSON.parse(readFileSync(path+'.manifest.json','utf8'));
    if(!Number.isSafeInteger(manifest.firstSeq)||!Number.isSafeInteger(manifest.lastSeq))
     throw Error('invalid archive sequence');
@@ -100,7 +111,7 @@ export class Engine18S3ArchiveCoordinator {
    const encoded=Buffer.from(JSON.stringify(entry)),entryHash=digest(encoded);
    const inventoryKey=this.prefix+String(entry.firstSeq).padStart(16,'0')+'-'+
     String(entry.lastSeq).padStart(16,'0')+'-'+entryHash+'.json';
-   const directory=mkdtempSync(join(tmpdir(),'engine18-s3-inventory-'));
+   const directory=mkdtempSync(join(this.store.stagingRoot,'engine18-s3-inventory-'));
    try{
     const p=join(directory,'entry.json');writeFileSync(p,encoded,{mode:0o600});
     await this.store.uploadClosed({path:p,key:inventoryKey,
@@ -109,7 +120,7 @@ export class Engine18S3ArchiveCoordinator {
    inventory=await this.inventory({expectedLastSeq:entry.lastSeq});added++;
    this.lastSuccessAtMs=Date.now();
   }
-  return {added,remoteArchived:inventory.entries.length,lastSeq:inventory.lastSeq,headHash:inventory.headHash};
+  return {added,remoteArchived:inventory.entries.length,lastSeq:inventory.lastSeq,headHash:inventory.headHash,pendingRotationArchives:this.pendingRotationArchives};
  }
  async restore({destination,expectedLastSeq}={}){
   if(typeof destination!=='string'||!Number.isSafeInteger(expectedLastSeq)||expectedLastSeq<0)
@@ -140,7 +151,8 @@ export class Engine18S3ArchiveCoordinator {
  }
  health({nowMs=Date.now()}={}){
   return Object.freeze({schema:'engine18.s3.backup.health.v1',inFlight:this.inFlight!==null,
-   failures:this.failures,lastSuccessAtMs:this.lastSuccessAtMs,
+   failures:this.failures,lastSuccessAtMs:this.lastSuccessAtMs,pendingRotationArchives:this.pendingRotationArchives,
+   remoteArchived:null,
    lagMs:this.lastSuccessAtMs===null?null:Math.max(0,nowMs-this.lastSuccessAtMs)});
  }
 }
