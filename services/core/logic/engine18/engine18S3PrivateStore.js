@@ -7,7 +7,7 @@ import {createReadStream,createWriteStream,mkdtempSync,readFileSync,writeFileSyn
  statSync,rmSync,openSync,closeSync,fsyncSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {pipeline} from 'node:stream/promises';
+import {pipeline,finished} from 'node:stream/promises';
 import {Readable} from 'node:stream';
 
 const hash=b=>createHash('sha256').update(b).digest('hex');
@@ -67,12 +67,21 @@ export class Engine18S3PrivateStore {
   if(file){headers['content-length']=String(size);headers['if-none-match']='*';}
   // Authorization signing includes all x-amz headers; the conditional header
   // is deliberately not signed and must be supported by the target provider.
-  const response=await this.fetch(url,{method,headers,body:file?createReadStream(file):undefined,
-   ...(file?{duplex:'half'}:{})});
+  const body=file?createReadStream(file):undefined;
+  let response;
+  try{
+   response=await this.fetch(url,{method,headers,body,...(file?{duplex:'half'}:{})});
+  }catch{
+   if(body){body.destroy();await finished(body).catch(()=>{});}
+   throw Error('private S3 transport failed');
+  }
   if(!expectedCode.includes(response.status)){
-   // Never expose response bodies or potentially credential-bearing upstream text.
+   // S3 can reject conditional PUT before consuming request body. Drain/close
+   // the staged file stream BEFORE cleanup or it may reopen after unlink.
+   if(body){body.destroy();await finished(body).catch(()=>{});}
    throw Error('private S3 operation refused: HTTP '+response.status);
   }
+  if(body)await finished(body).catch(()=>{throw Error('S3 request upload incomplete');});
   return response;
  }
  async uploadClosed({path,key,plaintextSha256,expectedSize}={}){
