@@ -89,6 +89,14 @@ export async function runEngine18ControlledRecording({env=process.env,
   await backup.syncClosed();
  };
  try{
+  // Durable nonsecret run identity for historical replay; vendor payloads remain raw.
+  const softwareVersion=String(env.ENGINE18_SOFTWARE_VERSION||'UNSPECIFIED').replace(/[^A-Za-z0-9_.-]/g,'_').slice(0,80);
+  const gitCommit=String(env.ENGINE18_GIT_COMMIT||'UNSPECIFIED').replace(/[^A-Fa-f0-9]/g,'').slice(0,40)||'UNVERIFIED';
+  await writer.offer({raw:JSON.stringify({schema:'engine18.recorder.startup.v1',
+   softwareVersion,gitCommit,provider:'IRONBEAM_V2',apiVersion:'v2',
+   physicalContract:'XCME:ES.Z26',contractMapping:'XCME:ES.Z26',
+   clockSource:'HOST_WALL_ANCHORED_MONOTONIC',clockQuality:'UNVERIFIED',
+   trialMinutes:config.windowMinutes}),msgClass:'control',statusCode:'RECORDER_METADATA'});
   // Establish a trusted backup heartbeat before accepting source frames.
   await scheduler.tick();
   scheduler.start();
