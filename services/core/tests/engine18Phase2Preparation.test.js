@@ -131,3 +131,24 @@ test('real SIGKILL buffered group acknowledgments, recovery + deterministic repl
   assert.deepEqual(deterministicReplayBytes(root),deterministicReplayBytes(root));
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test('real Ironbeam-style ES d array retains zero rows, l, and implied fields before filtering',()=>dir(async root=>{
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const raw='{"d":[{"s":"XCME:ES.Z26","b":[{"p":7500,"sz":0,"o":0,"l":0,"is":7,"ioc":1},{"p":7499.75,"sz":4,"o":1,"l":1}],"a":[{"p":7500.25,"sz":1,"o":1,"l":0}]}]}';
+ await tap.onFrame(raw);await tap.onFrame(raw);await r.close();
+ assert.deepEqual(market(replayRaw(root)).map(x=>x.raw),[raw,raw]);
+ const d=tap.safeDiagnostics();assert.equal(d.counts.depth,2);
+ assert.equal(d.counts.acceptedDepth,2);assert.equal(d.counts.zeroSize,2);
+ assert.equal(d.counts.levelIndexCount,6);
+ assert.equal(d.bidLevelHistogram['2'],2);assert.equal(d.askLevelHistogram['1'],2);
+ assert.equal(Object.values(d.intervalsMs).reduce((a,b)=>a+b,0),1);
+}));
+test('malformed, one-sided and empty d frames retained, all shapes counted',()=>dir(async root=>{
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const frames=['{"d":[{"s":"XCME:ES.Z26","b":[{"sz":0}]}]}','{"d":[]}','{"d":[{"s":"XCME:ES.Z26","b":[],"a":[]}]}','{"d":[{"s":"OTHER","b":[],"a":[]}]}'];
+ await Promise.all(frames.map(f=>tap.onFrame(f)));await r.close();
+ assert.deepEqual(market(replayRaw(root)).map(x=>x.raw),frames);
+ const d=tap.safeDiagnostics();
+ assert.equal(d.counts.depth,4);assert.ok(d.counts.rejectedDepth>=2);
+ assert.equal(d.feedSemantics,'UNVERIFIED');
+}));
