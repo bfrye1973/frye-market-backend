@@ -290,6 +290,8 @@ export class Engine18RawRecorder{
    item.receiptClockSource=receipt.receiptClockSource;
    item.receiptPrecision=receipt.receiptPrecision;
    item.clockQuality=receipt.clockQuality;
+   if(typeof receipt.rawHostWallObservedNs==='string'&&/^\d+$/.test(receipt.rawHostWallObservedNs))
+    item.rawHostWallObservedNs=receipt.rawHostWallObservedNs;
   }
   const line=Buffer.from(JSON.stringify(item)+'\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}if(token!==BATCH_TOKEN)fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
