@@ -101,7 +101,7 @@ export class Engine18RawRecorder{
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
-  this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;
+  this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;this.closed=false;
   this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
   this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
@@ -178,6 +178,7 @@ export class Engine18RawRecorder{
  }
  // Capture at the receipt boundary BEFORE any rotation, disk I/O or fsync.
  capture({raw,msgClass='unknown',streamGeneration=0,at,rawEncoding='utf8',statusCode=null}={}){
+  if(this.closed)throw Error('recorder already closed');
   if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
   if(!classes.has(msgClass)||!Number.isSafeInteger(streamGeneration)||streamGeneration<0)throw Error('invalid frame');
   if(statusCode!==null&&!/^[A-Z_]{1,40}$/.test(statusCode))throw Error('unsafe status code');
@@ -219,7 +220,13 @@ export class Engine18RawRecorder{
  }
  health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null,runId:this.runId});}
  releaseLock(){if(this.lockPath&&existsSync(this.lockPath)){unlinkDurably(this.lockPath);this.lockPath=null;}}
- close(){try{if(this.fd!==null&&!this.faulted||this.fd===null&&!this.faulted)this.append({raw:'',msgClass:'control',statusCode:'RECORDER_STOP'});this.rotate();}finally{this.releaseLock();}}
+ close(){
+  if(this.closed)return;
+  try{
+   if(!this.faulted)this.append({raw:'',msgClass:'control',statusCode:'RECORDER_STOP'});
+   this.rotate();this.closed=true;
+  }finally{this.releaseLock();}
+ }
 }
 export function replayRaw(root){
  const paths=walk(resolve(root));
