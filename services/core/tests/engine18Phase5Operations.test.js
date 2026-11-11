@@ -75,7 +75,7 @@ test('high-resolution receipt anchor resolves sub-ms deltas and does not claim v
  assert.equal(a.receiptPrecision,'SUBMILLISECOND_ESTIMATE');
  assert.equal(b.clockQuality,'UNVERIFIED');
  assert.throws(()=>{mono=1n;c.capture();},/regression/);
-}));
+});
 
 test('Node child.send false is queued pressure, not automatically lost, when callback eventually ACKs',()=>withRoot(async root=>{
  const b=new Engine18SyntheticWorkerBridge({root,maxInflight:64});
