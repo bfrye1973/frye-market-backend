@@ -13,6 +13,7 @@ import {Engine18ContinuousBackup} from '../logic/engine18/engine18ContinuousBack
 import {Engine18SyntheticWorkerBridge} from '../logic/engine18/engine18Phase4WorkerBridge.js';
 import {createEngine18ReceiptClock} from '../logic/engine18/engine18ReceiptClock.js';
 import {Engine18S3PrivateStore} from '../logic/engine18/engine18S3PrivateStore.js';
+import {Engine18S3ArchiveCoordinator} from '../logic/engine18/engine18Phase5S3Coordinator.js';
 
 const withRoot=async fn=>{
  const root=mkdtempSync(join(tmpdir(),'e18-phase5-'));
@@ -269,4 +270,58 @@ test('S3 retry verifies remote exact ciphertext after PUT succeeds but ACK is lo
  assert.equal(record.keyId,'version-2');
  const restored=await store.restoreClosed({key:record.key,destination:join(root,'output'),expected:record});
  assert.deepEqual(readFileSync(restored.tempPath),body);
+}));
+
+test('mock S3 lifecycle: independent encrypted inventory, current-hour concurrent backup, pinned complete restoration',()=>withRoot(async root=>{
+ const objectMap=new Map();
+ const fakeS3=async(url,init)=>{
+  const key=url.pathname.replace(/^\/private-recordings\//,'');
+  if(init.method==='PUT'){
+   if(objectMap.has(key))return new Response(null,{status:412});
+   const chunks=[];for await(const c of init.body)chunks.push(Buffer.from(c));
+   objectMap.set(key,Buffer.concat(chunks));return new Response(null,{status:200});
+  }
+  if(init.method==='GET'&&url.searchParams.has('list-type')){
+   const prefix=url.searchParams.get('prefix')||'';
+   const keys=[...objectMap.keys()].filter(k=>k.startsWith(prefix)).sort();
+   const xml='<ListBucketResult><IsTruncated>false</IsTruncated>'+
+    keys.map(k=>'<Contents><Key>'+k+'</Key></Contents>').join('')+'</ListBucketResult>';
+   return new Response(xml,{status:200,headers:{'content-type':'application/xml'}});
+  }
+  if(init.method==='GET')return objectMap.has(key)?
+   new Response(objectMap.get(key),{status:200}):new Response(null,{status:404});
+  return new Response(null,{status:405});
+ };
+ const s3=new Engine18S3PrivateStore({endpoint:'https://mock.r2.example',bucket:'private-recordings',
+  accessKeyId:'synthetic-access',secretAccessKey:'synthetic-secret-for-tests',
+  keyId:'synthetic-key-v1',encryptionKey:randomBytes(32),fetchImpl:fakeS3});
+ const coordinator=new Engine18S3ArchiveCoordinator({root,store:s3});
+ const w=writer(root);
+ await w.offer({raw:'{"d":{"sz":0,"l":1},"original":7500.2500}',msgClass:'market',at:new Date('2026-11-10T21:59:50Z')});
+ await w.offer({raw:'{"q":{"seq":2}}',msgClass:'market',at:new Date('2026-11-10T22:00:00Z')});
+ assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
+ const [backup,receipt]=await Promise.all([coordinator.syncClosed(),
+  w.offer({raw:'while-S3-remote-backup-is-active',msgClass:'market',at:new Date('2026-11-10T22:00:01Z')})]);
+ assert.equal(backup.added,1);assert.ok(receipt.localSeq>=4);
+ assert.equal((await coordinator.inventory()).entries.length,1);
+ assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
+ await w.close();
+ const completed=await coordinator.syncClosed();
+ assert.equal(completed.added,1);
+ const knownLast=w.writer.seq;
+ assert.equal((await coordinator.inventory({expectedLastSeq:knownLast})).entries.length,2);
+ const restoreRoot=root+'-from-r2';
+ try{
+  const restored=await coordinator.restore({destination:restoreRoot,expectedLastSeq:knownLast});
+  assert.equal(restored.lastSeq,knownLast);
+  const origHash=createHash('sha256').update(JSON.stringify(replayRaw(root))).digest('hex');
+  const cloneHash=createHash('sha256').update(JSON.stringify(replayRaw(restoreRoot))).digest('hex');
+  assert.equal(origHash,cloneHash);
+ }finally{rmSync(restoreRoot,{recursive:true,force:true});}
+ const previous=await coordinator.syncClosed();
+ assert.equal(previous.added,0,'idempotent remote inventory sync');
+ assert.equal(coordinator.health().failures,0);
+ const lastInventoryKey=[...objectMap.keys()].filter(k=>k.startsWith('engine18/inventory/')).sort().at(-1);
+ objectMap.delete(lastInventoryKey);
+ await assert.rejects(coordinator.inventory({expectedLastSeq:knownLast}),/high-watermark/);
 }));
