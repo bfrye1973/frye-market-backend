@@ -9,12 +9,17 @@ export class Engine18BufferedRecorder {
   this.writer=new Engine18RawRecorder({root,clock,provider:'SYNTHETIC'});
   this.maxQueued=maxQueued;this.maxQueueBytes=maxQueueBytes;this.batchSize=batchSize;this.flushDelayMs=flushDelayMs;
   this.pending=[];this.pendingBytes=0;this.received=0;this.recorded=0;this.rejected=0;
-  this.failed=false;this.draining=false;this.closed=false;this.timer=null;this.lastReceiptWallNs=null;
+  this.failed=false;this.draining=false;this.closed=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
  }
- offer(args){
+ capture(args){
+  if(this.failed||this.closed)throw Error('recorder stopped');
+  return this.writer.capture(args);
+ }
+ offer(args){return this.offerCaptured(this.capture(args));}
+ offerCaptured(receipt){
   if(this.failed||this.closed)return Promise.reject(Error('recorder stopped'));
-  // Receipt boundary. No async work or queue delay before capture.
-  const receipt=this.writer.capture(args);
+  // The receipt was already timestamped at the source boundary.
+  if(!receipt||typeof receipt.raw!=='string'||typeof receipt.receivedWallNs!=='string'||typeof receipt.receivedMonoNs!=='string')return Promise.reject(Error('invalid pre-captured receipt'));
   this.received++;this.lastReceiptWallNs=receipt.receivedWallNs;
   const bytes=Buffer.byteLength(receipt.raw,'utf8')+384;
   if(this.pending.length>=this.maxQueued||this.pendingBytes+bytes>this.maxQueueBytes){
@@ -27,6 +32,7 @@ export class Engine18BufferedRecorder {
    else this.schedule(false);
   });
  }
+ onReconnect(){this.reconnects++;}
  fail(reason){
   if(this.failed)return;
   this.failed=true;this.failureReason=reason;
@@ -76,6 +82,6 @@ export class Engine18BufferedRecorder {
   return Object.freeze({schema:'engine18.buffered.health.v1',recordingActive:!this.closed&&!this.failed,
    received:this.received,recorded:this.recorded,unacknowledged:this.pending.length,rejected:this.rejected,
    gapCount:this.writer.gaps,bytesWritten:this.writer.bytes,lastReceivedWallNs:this.lastReceiptWallNs,
-   diskFreeBytes,diskTotalBytes,clockOffsetStatus:'UNVERIFIED',reconnects:null,failedClosed:this.failed});
+   diskFreeBytes,diskTotalBytes,clockOffsetStatus:'UNVERIFIED',reconnects:this.reconnects,failedClosed:this.failed});
  }
 }
