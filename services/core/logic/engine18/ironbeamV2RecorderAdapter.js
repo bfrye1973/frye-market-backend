@@ -160,6 +160,7 @@ export function createSyntheticRecorderWebSocketImpl(BaseWebSocket,{tap,maxInbou
   abort(){
    if(this.failed)return;
    this.failed=true;
+   tap.recorder.fail('RECEIVE_QUEUE_OVERFLOW_OR_WRITE_ERROR');
    try{this.inner.close();}catch{}
    try{onFailure('RECORDER_CAPTURE_FAILED');}catch{}
   }
