@@ -170,3 +170,32 @@ test('read-only context retains approved source values but refuses missing point
  assert.equal(accepted.institutionalZones[0].high,7492.25);
  assert.throws(()=>buildEngine18ReadOnlyContext({physicalContract:'SPY'}),/ES source/);
 });
+
+test('synthetic Ironbeam subscription failure stores failed ACK and uncertain source interruption',()=>withRoot(async root=>{
+ const clock=localClock(),supervisor=new Engine18SyntheticReadinessSupervisor({
+  root,clock,metadata:{softwareVersion:'synthetic-only',gitCommit:'abcdef1234',
+   physicalContract:'XCME:ES.Z26',contractMapping:'XCME:ES.Z26',
+   clockSource:'UNVERIFIED',clockConfiguration:'HOST_UNVERIFIED'}
+ });
+ await supervisor.start();
+ class FakeSocket{
+  constructor(){this.listeners={};this.closed=false;}
+  addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
+  close(){this.closed=true;for(const cb of this.listeners.close??[])cb({code:1000});}
+ }
+ const fetchImpl=async(url)=>{
+  if(url.endsWith('/v2/auth'))return {ok:true,json:async()=>({token:'SENSITIVE_MOCK_TOKEN'})};
+  if(url.endsWith('/v2/stream/create'))return {ok:true,json:async()=>({streamId:'one_stream'})};
+  if(url.includes('/depths/subscribe/'))return {ok:false,status:403};
+  return {ok:true,json:async()=>({status:'OK'})};
+ };
+ const a=createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,WebSocketImpl:FakeSocket});
+ await assert.rejects(a.connect(),/subscription failed/);
+ await a.drain();await supervisor.close();
+ const entries=replayRaw(root);
+ const subs=entries.filter(e=>e.statusCode==='SUBSCRIPTION_ACK');
+ assert.equal(subs.length,2);
+ assert.deepEqual(subs.map(e=>JSON.parse(e.raw).status),['SUCCESS','FAILED']);
+ assert.equal(entries.filter(e=>e.statusCode==='FEED_GAP').length,1);
+ assert.ok(!JSON.stringify(entries).includes('SENSITIVE_MOCK_TOKEN'));
+}));
