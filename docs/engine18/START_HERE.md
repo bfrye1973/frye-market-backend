@@ -74,6 +74,12 @@ I. Existing LIVE chart as a read-only consumer with max 2 BUY and 2 SELL **displ
 - **Status:** this resolves WHERE the owner's existing 100 GB disk is, not a production authorization to record raw data or deploy a recorder.
 - Render service dashboard: https://dashboard.render.com/web/srv-d2ds5nodl3ps73b7i2og ; official limitations: https://render.com/docs/disks
 
+
+## November 10 latest updates: Claude approved synthetic recorder and owner institutional-context request
+- **PR #292 merged SYNTHETIC ONLY** into isolated Engine18 foundation branch after Claude approved and required D1 docs correction. Merge commit `b39b76f10d13b89a2a14da289ee408d8b284da06`; all three current-head CI workflows passed. This did NOT deploy, connect raw capture, create paid storage or authorize trading.
+- **Before real recording**, implement Claude's L1-L5 requirements: binary ArrayBuffer/Blob handling; per-socket generation; distinct WebSocket error versus recorder gap and sanitized close details; REST subscription ACK evidence including streamId without credentials; sanitized run header; trusted clock/NTP sample payload, plus dedicated durable worker, bounds, backups, session calendar and capacity tests.
+- **Owner wants Engine18 context from institutional ES zones and current Engine22 Micro/Submicro strategy/Fib cards.** Read-only source mapping/constraints are documented in [institutional/micro/submicro context contract](./INSTITUTIONAL_MICRO_SUBMICRO_CONTEXT.md). Do not alter chart or infer order-book liquidity from an institutional or Fibonacci chart zone. Integrate as later research features only after point-in-time/source-basis validation.
+
 ## Immediate work order — NO new chart changes
 1. Finish independent **review of Gate1 spec**, including its proposed 99.9% fill/trade reconciliation and 100% parity rules; verify Databento semantics against a real pilot before declaring a pass.
 2. Verify Ironbeam per-frame level-index/zero-size/full-image-vs-delta behavior; record shape histograms for full ETH/RTH with safe counters. Already-established 10+10 counts do **not** prove full snapshots.
