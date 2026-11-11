@@ -1,0 +1,62 @@
+name: Engine18B Gate1 Final Operational Acceptance
+on:
+  push:
+    branches: [engine18b-gate1-final-acceptance-20261111]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18ContinuousBackup.js'
+      - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
+      - 'services/core/logic/engine18/engine18S3PrivateStore.js'
+      - 'services/core/logic/engine18/engine18ReceiptClock.js'
+      - 'services/core/logic/engine18/engine18Phase4WorkerBridge.js'
+      - 'services/core/logic/engine18/gate1RawRecorder.js'
+      - 'services/core/tests/engine18Issue300Acceptance.test.js'
+      - 'services/core/tests/engine18S3ExternalCompatibility.test.js'
+      - '.github/workflows/engine18b-gate1-final-acceptance.yml'
+jobs:
+  final-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.timezone }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
+      - run: node --check services/core/logic/engine18/engine18S3PrivateStore.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js services/core/tests/engine18MergeBlockersR1R3.test.js services/core/tests/engine18Phase5Operations.test.js services/core/tests/engine18Issue300Acceptance.test.js
+  s3-reference-minio:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read}
+    env:
+      ENGINE18_MINIO_CI: '1'
+      ENGINE18_MINIO_ENDPOINT: http://127.0.0.1:9000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - name: Install independent AWS Smithy reference signer (CI only)
+        run: npm install --no-save --package-lock=false @smithy/signature-v4 @smithy/protocol-http @smithy/hash-node
+      - name: Start temporary local MinIO (no paid cloud)
+        run: |
+          docker run -d --name engine18-minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=engine18-minio-test \
+            -e MINIO_ROOT_PASSWORD=engine18-minio-test-secret \
+            quay.io/minio/minio:latest server /data
+          for i in $(seq 1 45); do
+            if curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker logs engine18-minio
+          exit 1
+      - name: Independent signer plus real local S3 protocol
+        run: node --test services/core/tests/engine18S3ExternalCompatibility.test.js
+      - if: always()
+        run: docker rm -f engine18-minio || true
