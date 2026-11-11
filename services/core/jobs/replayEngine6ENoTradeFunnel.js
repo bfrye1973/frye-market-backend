@@ -12,7 +12,7 @@ if(!validFunnelDate(date)){
 }else{
   const base=process.env.REPLAY_DATA_DIR||path.resolve(dirname,"../data");
   const day=path.join(base,"replay","es",date);
-  const files=fs.existsSync(day)?fs.readdirSync(day).filter(f=>/^[0-9]{4}\\.json$/.test(f)).sort():[];
+  const files=fs.existsSync(day)?fs.readdirSync(day).filter(f=>/^[0-9]{4}[.]json$/.test(f)).sort():[];
   const records=[];
   for(const file of files){
     try{
