@@ -175,6 +175,8 @@ export class Engine18RawRecorder{
    const compressed=gunzipSync(readFileSync(gz));
    if(!compressed.equals(buf))throw Error('archive and original source mismatch');
    const gzip=readFileSync(gz);
+   // A stale temp manifest is disposable only after original/open gzip match.
+   if(existsSync(gz+'.manifest.json.tmp'))unlinkDurably(gz+'.manifest.json.tmp');
    atomic(gz+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\n');
    verify(gz);
    const marker=gz+'.integrity-unverified.json';
