@@ -54,10 +54,10 @@ node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/t
 Run CI from latest PR head and record the exact numbers and synthetic throughput. Benchmark output is measured on a GitHub Actions runner, **not a measured live ES peak or production hardware guarantee**.
 
 ## Measured synthetic CI evidence — November 10
-- Isolated Phase 2 + original Gate 1 tests: **34 passed, 0 failed** at implementation commit `27a2d6c3f468edc21e67e18906fb00591120f84d`; GitHub Actions https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844299
-- Existing Engine 18 isolated baseline: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844241
-- Existing synthetic recorder workflow: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844278
-- 20,000 synthetic frames / 2,112.1 ms = **9,469 frames/sec**, **3.32 MB/sec** on this GitHub Actions runner. This is only a synthetic benchmark: payload size, host storage, compressibility, concurrency, real Ironbeam network characteristics, and peak ES open bursts will differ. Earlier CI also observed 5,593 frames/sec, demonstrating runner variability.
+- Isolated Phase 2 + original Gate 1 tests: **36 passed, 0 failed** at synthetic WebSocket bridge commit `6d49f6062a15e742c32bfbfcb0448219840a0816`; GitHub Actions https://github.com/bfrye1973/frye-market-backend/actions/runs/42949351352
+- Existing Engine 18 isolated baseline: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42949351335
+- Existing synthetic recorder workflow: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42949351359
+- 20,000 synthetic frames / 4,486.6 ms = **4,458 frames/sec**, **1.56 MB/sec** on the latest GitHub Actions runner. This is only a synthetic benchmark: payload size, host storage, compressibility, concurrency, real Ironbeam network characteristics, and peak ES open bursts will differ. Other CI runs observed 5,123, 5,593 and 9,469 frames/sec, demonstrating substantial runner variability.
 - Synthetic tests include exact depth/trade/quote/unknown/malformed and binary preservation, real Ironbeam-style `d:[{s,b,a}]` raw shapes with `sz=0`, `l`, `is`, `ioc`, receipt-before-parse clock boundary, interarrival counters, queue overflow fail-closed, 20k high-load batch commits, streaming rotation/checksum, SIGKILL and deterministic replay.
 - **No actual Ironbeam feed capture occurred.** Synthetic WebSocket bridge is tested against a fake transport and can be injected through the existing reader's constructor seam in a future authorized service. Live adapter injection into the real WebSocket receiver remains deferred pending owner/manager license and production isolation authorization. Nothing here establishes feed snapshot/delta/conflation semantics.
 
