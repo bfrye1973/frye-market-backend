@@ -1,0 +1,35 @@
+# REVIEW ONLY: do NOT apply before separate manager operational approval.
+# Dedicated private Engine18 source+recorder worker, NOT the LIVE chart/monitor.
+# All credentials and authorization flags must be injected as private env vars
+# AFTER a supervised trial is approved. Empty environment => exits safely.
+services:
+  - type: worker
+    name: frye-engine18-ironbeam-raw-private-proposed
+    runtime: node
+    region: oregon
+    plan: starter
+    branch: engine18-liquidity-intelligence-foundation-20261109
+    autoDeploy: false
+    buildCommand: npm install
+    startCommand: node services/core/logic/engine18/engine18ControlledLiveEntrypoint.js
+    disk:
+      name: engine18-dedicated-recorder-proposed
+      mountPath: /var/data/engine18-recorder
+      sizeGB: 50
+    envVars:
+      - key: ENGINE18_LIVE_CAPTURE_APPROVED
+        value: "NO"
+      - key: ENGINE18_MANAGER_TRIAL_ACCEPTED
+        value: "NO"
+      - key: ENGINE18_CME_CALENDAR_VERIFIED
+        value: "NO"
+      - key: ENGINE18_TRIAL_MINUTES
+        value: "0"
+      - key: ENGINE18_RECORDER_DISK
+        value: "/var/data/engine18-recorder/records"
+# IMPORTANT:
+# Private IRONBEAM_* and ENGINE18_R2_* credentials/key IDs are NOT defined here.
+# Operator must configure separate Render secret values & private bucket backup.
+# The independent inventory head, trusted Chrony, CME calendar, retention, and
+# supervised recording approval are still required.
+# Never mount the existing production 100GB disk at /var/data/replay.
