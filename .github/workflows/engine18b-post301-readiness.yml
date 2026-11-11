@@ -1,0 +1,30 @@
+name: Engine18B Post301 Recorder Engineering
+on:
+  push:
+    branches: [engine18b-post301-readiness-20261111]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
+      - 'services/core/tests/engine18Post301Readiness.test.js'
+      - '.github/workflows/engine18b-post301-readiness.yml'
+concurrency:
+  group: engine18-post301-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  post301-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.timezone }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
+      - run: node --test services/core/tests/engine18Post301Readiness.test.js
+      - run: node --test services/core/tests/engine18Issue300Acceptance.test.js
