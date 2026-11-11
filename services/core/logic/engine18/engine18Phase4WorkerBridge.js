@@ -10,9 +10,11 @@ function quantile(a,q){
  const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.ceil(q*s.length)-1)];
 }
 export class Engine18SyntheticWorkerBridge{
- constructor({root,maxInflight=256,onFailure=()=>{}}={}){
+ constructor({root,maxInflight=256,onFailure=()=>{},syntheticSlowDiskMs=0}={}){
   if(!root||!root.startsWith('/tmp/')||!Number.isSafeInteger(maxInflight)||maxInflight<1)
    throw Error('synthetic root and bounded IPC required');
+  if(!Number.isInteger(syntheticSlowDiskMs)||syntheticSlowDiskMs<0||syntheticSlowDiskMs>100)throw Error('invalid synthetic disk delay');
+  this.syntheticSlowDiskMs=syntheticSlowDiskMs;
   this.root=root;this.maxInflight=maxInflight;this.onFailure=onFailure;
   this.pending=new Map();this.child=null;this.nextId=1;this.failed=false;
   this.accepted=0;this.acked=0;this.rejected=0;this.latencyUs=[];this.closed=false;
@@ -21,7 +23,7 @@ export class Engine18SyntheticWorkerBridge{
  async start(){
   if(this.child)throw Error('already started');
   const child=fork(CHILD,[],{
-   env:{ENGINE18_SYNTHETIC_WORKER:'1'},
+   env:{ENGINE18_SYNTHETIC_WORKER:'1',ENGINE18_SYNTHETIC_SLOW_DISK_MS:String(this.syntheticSlowDiskMs)},
    stdio:['ignore','ignore','ignore','ipc']
   });this.child=child;
   child.on('message',message=>{
