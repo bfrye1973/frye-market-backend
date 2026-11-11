@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readdirSync,readFileSync,appendFileSync,closeSync,writeFileSync,unlinkSync} from 'node:fs';
+import {mkdtempSync,rmSync,readdirSync,readFileSync,appendFileSync,closeSync,writeFileSync,unlinkSync,writeSync,fsyncSync,renameSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
@@ -135,4 +135,55 @@ test('missing backup archive is detected on restore; no silent certified replay'
  const first=remote.listInventory()[0];remote.removeForFault(first.objectId);
  await assert.rejects(backup.restore({destination:root+'-bad'}),/remote object missing|restore failed/);
  rmSync(root+'-bad',{recursive:true,force:true});
+}));
+
+test('large 96+ MiB synthetic open log recovers without whole-file loading and legacy sync path refuses',()=>temp(async root=>{
+ const recorder=await make(root),originalRun=recorder.writer.runId;
+ const active=allFiles(root).find(x=>x.endsWith('.jsonl.open'));
+ assert.ok(active);
+ const size=24576,raw='X'.repeat(4096);
+ for(let i=0;i<size;i++){
+  const item={schemaVersion:'engine18.raw.v2',localSeq:i+2,runId:originalRun,
+   receivedWallNs:'1794350000000000000',receivedMonoNs:String(i*2+100),
+   writtenMonoNs:String(i*2+101),streamGeneration:1,msgClass:'market',
+   statusCode:null,rawEncoding:'utf8',raw};
+  const frame=Buffer.from(JSON.stringify(item)+'\n');
+  let n=0;while(n<frame.length){const k=writeSync(recorder.writer.fd,frame,n,frame.length-n);assert.ok(k>0);n+=k;}
+ }
+ fsyncSync(recorder.writer.fd);
+ const totalBytes=statSync(active).size;
+ assert.ok(totalBytes>96*1024*1024);
+ const cp=join(root,'.engine18-highwater.json'),tmp=cp+'.fixture';
+ writeFileSync(tmp,JSON.stringify({schemaVersion:'engine18.checkpoint.v1',lastSeq:size+1})+'\n');renameSync(tmp,cp);
+ closeSync(recorder.writer.fd);recorder.writer.fd=null;recorder.writer.releaseLock();
+ assert.throws(()=>new Engine18RawRecorder({root,clock:clock()}),/bounded recovery factory/);
+ const before=process.memoryUsage().rss,begin=performance.now();
+ const recovered=await make(root);
+ const elapsed=performance.now()-begin,after=process.memoryUsage().rss;
+ assert.equal(recovered.writer.recoveryMetrics.recoveredOpen,1);
+ assert.ok(recovered.writer.recoveryMetrics.maxBufferedBytes<16*1024*1024);
+ await recovered.close();
+ const scan=await scanEngine18ReplayBounded(root);
+ assert.equal(scan.records,size+4);
+ assert.equal(scan.lastSeq,size+4);
+ console.log(JSON.stringify({phase4LargeRecovery:{
+  rawMiB:+(totalBytes/1048576).toFixed(1),frames:size,elapsedMs:+elapsed.toFixed(1),
+  sampledRssBeforeMiB:+(before/1048576).toFixed(1),
+  sampledRssAfterMiB:+(after/1048576).toFixed(1),
+  bufferedRemainderBytes:recovered.writer.recoveryMetrics.maxBufferedBytes
+ }}));
+}));
+test('independent mock inventory high-watermark detects removal of final remote entry',()=>temp(async root=>{
+ const w=await make(root);
+ await w.offer({raw:'hour1',at:new Date('2026-11-10T21:59:00Z')});
+ await w.offer({raw:'hour2',at:new Date('2026-11-10T22:01:00Z')});
+ await w.close();
+ const remote=store(),backup=new Engine18SyntheticArchiveBackup({root,store:remote});
+ await backup.backupClosed();
+ const entries=remote.listInventory();
+ assert.ok(entries.length>=2);
+ remote.inventory.delete(entries.at(-1).archiveId);
+ assert.throws(()=>remote.listInventory(),/high-watermark/);
+ await assert.rejects(backup.restore({destination:root+'-restore'}),/high-watermark/);
+ rmSync(root+'-restore',{recursive:true,force:true});
 }));
