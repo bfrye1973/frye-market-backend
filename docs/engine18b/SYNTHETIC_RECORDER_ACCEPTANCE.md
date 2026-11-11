@@ -24,7 +24,7 @@ Date: 2026-11-10 (Arizona). Status: **implementation candidate / manager and Cla
 node --check services/core/logic/engine18/gate1RawRecorder.js
 node --test services/core/tests/engine18Gate1RawRecorder.test.js
 ```
-CI workflow on PR #291 runs both. The Engine 18B v2 suite has 21 regression cases covering the new lifecycle/encoding/clock behavior plus original integrity safeguards. Consult the latest GitHub Actions run and its exact test count.
+CI workflow on PR #291 runs both. The Engine 18B v2 suite has 22 regression cases covering the new lifecycle/encoding/clock behavior plus original integrity safeguards. Consult the latest GitHub Actions run and its exact test count.
 
 ## Security boundary
 - `provider !== SYNTHETIC` is explicitly rejected.
@@ -52,3 +52,5 @@ Review the recorder as a **synthetic, noncollecting Gate 1 building block**; mer
 - **B4**: `utf8` accepts exact text; `base64` accepts byte arrays or canonical encoding, validated strictly; replay returns original base64 bytes.
 - **Gap count**: increment every new GAP; prior persisted GAPs counted by replay on startup.
 - **Migration**: v2 cannot transparently consume v1 archives; this is a synthetic-only branch and no licensed data is migrated. Fail closed on unexpected version.
+
+- **Lifecycle hardening**: `close()` is idempotent; after successful shutdown, no further frame capture or append is allowed. An additional regression test prevents duplicate STOP records.
