@@ -6,6 +6,7 @@ import {join} from 'node:path';
 import {gzipSync} from 'node:zlib';
 import {randomBytes,createHash} from 'node:crypto';
 import {Engine18RawRecorder,replayRaw} from '../logic/engine18/gate1RawRecorder.js';
+import {Engine18SyntheticWorkerBridge,recommendEngine18MaxInflight} from '../logic/engine18/engine18Phase4WorkerBridge.js';
 import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
 import {Engine18ContinuousBackup} from '../logic/engine18/engine18ContinuousBackup.js';
 import {Engine18S3ArchiveCoordinator} from '../logic/engine18/engine18Phase5S3Coordinator.js';
@@ -144,4 +145,39 @@ test('Issue300 S3 authentication failure leaves no partial restore file',()=>tem
  const out=join(root,'restored');
  await assert.rejects(store.restoreClosed({key:receipt.key,destination:out,expected}),/authentication|checksum/);
  assert.equal(existsSync(out+'.restore.tmp'),false);
+}));
+
+test('Issue300 actual synthetic slow disk commit p99.9, CPU/RSS and maxInflight sizing',()=>temp(async root=>{
+ const worker=new Engine18SyntheticWorkerBridge({root,maxInflight:256,syntheticSlowDiskMs:25});
+ await worker.start();
+ for(let group=0;group<3;group++){
+  await Promise.all(Array.from({length:64},(_,i)=>worker.submit('depth-'+(group*64+i),{msgClass:'market'})));
+ }
+ const detail=await worker.requestWorkerHealth();
+ const h=worker.health();
+ assert.ok(detail.batchCommitCount>=3);
+ assert.ok(detail.commitLatencyUsP999>=20000,'injected slow 25ms disk commit must register');
+ assert.ok(detail.maxQueueDepth>0);
+ assert.ok(detail.workerRssBytes>0);
+ assert.ok(detail.workerCpuUserUs>=0&&detail.workerCpuSystemUs>=0);
+ assert.equal(h.workerCommitLatencyUsP999,detail.commitLatencyUsP999);
+ const sized=recommendEngine18MaxInflight({
+  peakFramesPerSecond:8000,diskCommitP999Us:detail.commitLatencyUsP999,safetyFactor:2.5
+ });
+ assert.ok(sized>=400,'safe maxInflight estimate exceeds old hardcoded 256 in this scenario');
+ const early=performance.now();
+ const pressure=worker.health();assert.ok(pressure.callbackUsP99>=0);
+ assert.ok(performance.now()-early<200);
+ await worker.close();
+ assert.equal(replayRaw(root).filter(x=>x.msgClass==='market').length,192);
+ console.log(JSON.stringify({engine18Issue300Capacity:{
+  injectedSlowDiskMs:25,measuredCommitUsP999:+detail.commitLatencyUsP999.toFixed(1),
+  measuredMaxQueued:detail.maxQueueDepth,
+  recommendedMaxInflight:sized,
+  workerRssMiB:+(detail.workerRssBytes/1048576).toFixed(1),
+  workerCpuUserUs:detail.workerCpuUserUs,
+  parentCallbackUsP95:+h.callbackUsP95.toFixed(1),
+  parentCallbackUsP99:+h.callbackUsP99.toFixed(1),
+  scope:'synthetic burst and injected slow fsync; NOT live ES feed'
+ }}));
 }));
