@@ -101,7 +101,7 @@ test('isolated Ironbeam v2 synthetic connection records subscriptions, reconnect
  await supervisor.start();
  const sockets=[],requests=[];
  class FakeSocket{
-  constructor(url){this.url=url;this.events={};sockets.push(this);}
+  constructor(url){this.url=url;this.events={};sockets.push(this);queueMicrotask(()=>this.emit('open'));}
   addEventListener(k,fn){(this.events[k]??=[]).push(fn);}
   emit(k,data,code){for(const cb of this.events[k]??[])cb({data,code});}
   close(){this.emit('close',null,1000);}
@@ -179,7 +179,7 @@ test('synthetic Ironbeam subscription failure stores failed ACK and uncertain so
  });
  await supervisor.start();
  class FakeSocket{
-  constructor(){this.listeners={};this.closed=false;}
+  constructor(){this.listeners={};this.closed=false;queueMicrotask(()=>{for(const cb of this.listeners.open??[])cb({});});}
   addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
   close(){this.closed=true;for(const cb of this.listeners.close??[])cb({code:1000});}
  }
@@ -198,4 +198,29 @@ test('synthetic Ironbeam subscription failure stores failed ACK and uncertain so
  assert.deepEqual(subs.map(e=>JSON.parse(e.raw).status),['SUCCESS','FAILED']);
  assert.equal(entries.filter(e=>e.statusCode==='FEED_GAP').length,1);
  assert.ok(!JSON.stringify(entries).includes('SENSITIVE_MOCK_TOKEN'));
+}));
+
+test('synthetic Ironbeam transport never subscribes before real OPEN or hides recorder fault',()=>withRoot(async root=>{
+ const clock=localClock(),supervisor=new Engine18SyntheticReadinessSupervisor({
+  root,clock,metadata:{softwareVersion:'synthetic-only',gitCommit:'abcdef1234',
+   physicalContract:'XCME:ES.Z26',contractMapping:'XCME:ES.Z26',
+   clockSource:'UNVERIFIED',clockConfiguration:'HOST_UNVERIFIED'}
+ });
+ await supervisor.start();
+ let subscribed=0,opened=false;
+ class FakeSocket{
+  constructor(){this.listeners={};queueMicrotask(()=>{opened=true;for(const cb of this.listeners.open??[])cb({});});}
+  addEventListener(k,fn){(this.listeners[k]??=[]).push(fn);}
+  close(){}
+ }
+ const fetchImpl=async url=>{
+  if(url.endsWith('/v2/auth'))return {ok:true,json:async()=>({token:'SENSITIVE_MOCK'})};
+  if(url.endsWith('/v2/stream/create'))return {ok:true,json:async()=>({streamId:'open_then_subscribe'})};
+  if(url.includes('/subscribe/')){assert.ok(opened);subscribed++;return {ok:true,json:async()=>({status:'OK'})};}
+  throw Error('bad synthetic request');
+ };
+ const rehearsal=createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,WebSocketImpl:FakeSocket});
+ const a=await rehearsal.connect();assert.equal(a.generation,1);assert.equal(subscribed,3);
+ await rehearsal.drain();await supervisor.close();
+ assert.equal(replayRaw(root).filter(e=>e.statusCode==='SUBSCRIPTION_ACK').length,3);
 }));
