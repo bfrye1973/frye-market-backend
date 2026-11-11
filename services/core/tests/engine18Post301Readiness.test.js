@@ -11,6 +11,7 @@ import {Engine18SyntheticReadinessSupervisor} from '../logic/engine18/engine18Ph
 import {createEngine18IronbeamV2RecorderRehearsal} from '../logic/engine18/engine18IronbeamV2RecorderRehearsal.js';
 import {buildEngine18ReadOnlyContext} from '../logic/engine18/engine18ReadOnlyResearchContext.js';
 import {replayRaw} from '../logic/engine18/gate1RawRecorder.js';
+import {assessEngine18ControlledTrialReadiness} from '../logic/engine18/engine18ControlledTrialReadiness.js';
 
 const withRoot=async fn=>{const root=mkdtempSync(join(tmpdir(),'e18-post301-'));try{return await fn(root);}finally{rmSync(root,{recursive:true,force:true});}};
 const localClock=()=>{
@@ -224,3 +225,22 @@ test('synthetic Ironbeam transport never subscribes before real OPEN or hides re
  await rehearsal.drain();await supervisor.close();
  assert.equal(replayRaw(root).filter(e=>e.statusCode==='SUBSCRIPTION_ACK').length,3);
 }));
+
+test('controlled real-data trial remains blocked without explicit private operational evidence',()=>{
+ const denied=assessEngine18ControlledTrialReadiness({
+  managerApprovedTrial:false,separatePrivateWorker:true,
+  credentialsLoadedPrivately:true,supervisorPresent:true,
+  token:'FAKE_BEARER_TOKEN_NEVER_EXPOSE'
+ });
+ assert.equal(denied.recordingAllowed,false);
+ assert.equal(denied.liveCaptureActive,false);
+ assert.ok(denied.failedChecks.includes('managerApprovedTrial'));
+ assert.ok(denied.failedChecks.includes('independentInventoryPinVerified'));
+ assert.ok(!JSON.stringify(denied).includes('FAKE_BEARER_TOKEN_NEVER_EXPOSE'));
+ const positive=Object.fromEntries(denied.failedChecks.map(k=>[k,true]));
+ Object.assign(positive,{managerApprovedTrial:true,separatePrivateWorker:true,
+  credentialsLoadedPrivately:true,supervisorPresent:true});
+ const ready=assessEngine18ControlledTrialReadiness(positive);
+ assert.equal(ready.status,'READY_FOR_SEPARATE_ACTIVATION');
+ assert.equal(ready.liveCaptureActive,false,'readiness must never itself start licensed capture');
+});
