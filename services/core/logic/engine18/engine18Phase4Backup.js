@@ -30,7 +30,7 @@ export class MockPrivateEncryptedStore{
  constructor({key}={}){
   if(!Buffer.isBuffer(key)||key.length!==32)throw Error('32-byte encryption key required');
   this.key=Buffer.from(key);
-  this.objects=new Map();this.inventory=new Map();this.failures=0;
+  this.objects=new Map();this.inventory=new Map();this.failures=0;this.remoteHighWater=0;
  }
  failNext(count){this.failures=count;}
  async putStream(id,readable){
@@ -60,10 +60,17 @@ export class MockPrivateEncryptedStore{
    if(JSON.stringify(old)!==JSON.stringify(entry))throw Error('immutable inventory conflict');
    return old;
   }
+  if(entry.firstSeq!==this.remoteHighWater+1)throw Error('remote immutable inventory sequence discontinuity');
   this.inventory.set(entry.archiveId,Object.freeze({...entry}));
+  this.remoteHighWater=entry.lastSeq;
   return entry;
  }
- listInventory(){return [...this.inventory.values()].sort((a,b)=>a.firstSeq-b.firstSeq);}
+ listInventory(){
+  const entries=[...this.inventory.values()].sort((a,b)=>a.firstSeq-b.firstSeq);
+  let seq=0;for(const e of entries){if(e.firstSeq!==seq+1)throw Error('remote inventory missing segment');seq=e.lastSeq;}
+  if(seq!==this.remoteHighWater)throw Error('independent remote high-watermark mismatch');
+  return entries;
+ }
  removeForFault(id){this.objects.delete(id);}
  tamperForFault(id){
   const obj=this.objects.get(id);if(obj)obj.tag=Buffer.from('00000000000000000000000000000000','hex');
@@ -88,11 +95,12 @@ export class Engine18SyntheticArchiveBackup{
  }
  async backupClosed(){
   if(walk(this.root).some(x=>x.endsWith('.jsonl.open')))throw Error('open archive must not be backed up');
-  const archives=walk(this.root).filter(x=>x.endsWith('.jsonl.gz')).sort();
-  for(const path of archives){
+  const archives=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'))
+   .map(path=>({path,manifest:JSON.parse(readFileSync(path+'.manifest.json','utf8'))}))
+   .sort((a,b)=>a.manifest.firstSeq-b.manifest.firstSeq);
+  for(const {path,manifest} of archives){
    const manifestPath=path+'.manifest.json';
    if(!existsSync(manifestPath))throw Error('original archive manifest required');
-   const manifest=JSON.parse(readFileSync(manifestPath,'utf8'));
    const local=await digest(path);
    if(local.sha256!==manifest.sha256||local.bytes!==manifest.bytes)throw Error('local archive integrity error');
    const manifestHash=await digest(manifestPath);
