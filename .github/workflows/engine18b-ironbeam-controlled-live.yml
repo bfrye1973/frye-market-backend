@@ -7,6 +7,7 @@ on:
       - 'services/core/logic/engine18/engine18IronbeamLiveRecorderSource.js'
       - 'services/core/logic/engine18/engine18ControlledLiveWorker.js'
       - 'services/core/logic/engine18/engine18ControlledLiveEntrypoint.js'
+      - 'services/core/logic/engine18/engine18ControlledTrialVerifier.js'
       - 'services/core/logic/engine18/gate1RawRecorder.js'
       - 'services/core/tests/engine18LiveIronbeamSource.test.js'
       - '.github/workflows/engine18b-ironbeam-controlled-live.yml'
@@ -31,5 +32,6 @@ jobs:
       - run: node --check services/core/logic/engine18/engine18IronbeamLiveRecorderSource.js
       - run: node --check services/core/logic/engine18/engine18ControlledLiveWorker.js
       - run: node --check services/core/logic/engine18/engine18ControlledLiveEntrypoint.js
+      - run: node --check services/core/logic/engine18/engine18ControlledTrialVerifier.js
       - run: node --test services/core/tests/engine18LiveIronbeamSource.test.js
       - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js services/core/tests/engine18MergeBlockersR1R3.test.js services/core/tests/engine18Phase5Operations.test.js services/core/tests/engine18Issue300Acceptance.test.js services/core/tests/engine18Post301Readiness.test.js
