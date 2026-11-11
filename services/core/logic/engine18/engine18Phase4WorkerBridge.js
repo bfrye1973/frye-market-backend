@@ -31,9 +31,11 @@ export class Engine18SyntheticWorkerBridge{
   });
   child.once('exit',()=>{if(!this.closed)this.fail('WORKER_EXITED');});
   await new Promise((resolve,reject)=>{
+   const timeout=setTimeout(()=>reject(Error('worker startup timeout')),10000);
+   child.once('exit',()=>{clearTimeout(timeout);reject(Error('worker exited before READY'));});
    const handler=m=>{
-    if(m?.type==='READY'){child.off('message',handler);resolve();}
-    if(m?.type==='FAILED'){child.off('message',handler);reject(Error('worker startup failed'));}
+    if(m?.type==='READY'){clearTimeout(timeout);child.off('message',handler);resolve();}
+    if(m?.type==='FAILED'){clearTimeout(timeout);child.off('message',handler);reject(Error('worker startup failed'));}
    };
    child.on('message',handler);
    child.send({type:'INIT',root:this.root},err=>{if(err){child.off('message',handler);reject(Error('worker IPC init failed'));}});
@@ -83,7 +85,14 @@ export class Engine18SyntheticWorkerBridge{
  }
  async close(){
   if(!this.child||this.closed)return;
-  if(this.failed){this.child.kill('SIGKILL');this.closed=true;return;}
+  if(this.failed){
+   const child=this.child;
+   if(child.exitCode===null&&child.signalCode===null){
+    const exited=new Promise(resolve=>child.once('exit',resolve));
+    child.kill('SIGKILL');await exited;
+   }
+   this.closed=true;return;
+  }
   if(this.pending.size)await Promise.allSettled([...this.pending.values()].map(p=>
    new Promise((resolve)=>{const old=p.resolve;p.resolve=x=>{old(x);resolve();};const reject=p.reject;p.reject=e=>{reject(e);resolve();};})));
   await new Promise((resolve,reject)=>{
