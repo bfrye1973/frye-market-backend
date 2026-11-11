@@ -4,6 +4,8 @@ import {mkdtempSync,rmSync,readdirSync,readFileSync,appendFileSync,closeSync,wri
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {randomBytes,createHash} from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {assessEngine18RecorderHealth,sanitizedRecordingError} from '../logic/engine18/engine18Phase4HealthPolicy.js';
 import {Engine18RawRecorder,replayRaw} from '../logic/engine18/gate1RawRecorder.js';
 import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
 import {Engine18SyntheticArchiveBackup,MockPrivateEncryptedStore} from '../logic/engine18/engine18Phase4Backup.js';
@@ -187,3 +189,30 @@ test('independent mock inventory high-watermark detects removal of final remote 
  await assert.rejects(backup.restore({destination:root+'-restore'}),/high-watermark/);
  rmSync(root+'-restore',{recursive:true,force:true});
 }));
+
+test('private health policy fails closed when clock/calendar/backup unverified or disk threshold reached',()=>{
+ const base={recordingActive:true,workerConnected:true,clockQuality:'VERIFIED',calendarQuality:'VERIFIED',
+  backupInventoryVerified:true,diskFreeBytes:'25000000000',diskTotalBytes:'50000000000',
+  queueDepth:1,queueCapacity:100,backupLagMinutes:2};
+ const ok=assessEngine18RecorderHealth(base);
+ assert.equal(ok.status,'OK');assert.equal(ok.captureEligible,true);
+ assert.equal(assessEngine18RecorderHealth({...base,clockQuality:'UNVERIFIED'}).captureEligible,false);
+ const disk=assessEngine18RecorderHealth({...base,diskFreeBytes:'9000000000'});
+ assert.equal(disk.shouldHalt,true);assert.ok(disk.reasons.includes('DISK_THRESHOLD_STOP'));
+ const backup=assessEngine18RecorderHealth({...base,backupLagMinutes:300});
+ assert.equal(backup.status,'FAIL_CLOSED');
+ assert.equal(assessEngine18RecorderHealth({...base,queueDepth:95}).shouldHalt,true);
+ assert.equal(assessEngine18RecorderHealth({...base,writeFailures:1}).shouldHalt,true);
+ const secret='Bearer abc?token=secret';
+ assert.equal(sanitizedRecordingError({code:'ENOSPC',message:secret}),'ENOSPC');
+ assert.equal(sanitizedRecordingError({code:'UNKNOWN',message:secret}),'UNKNOWN_RECORDING_ERROR');
+ assert.ok(!JSON.stringify(disk).includes(secret));
+});
+test('proposed Render deployment guard cannot activate actual raw recording',()=>{
+ const url=new URL('../logic/engine18/engine18Phase4DeploymentGuard.js',import.meta.url);
+ const proc=spawnSync(process.execPath,[url.pathname],{
+  env:{ENGINE18_RAW_CAPTURE_ENABLED:'1',ENGINE18_PRIVATE_BACKUP_ENABLED:'1'},encoding:'utf8'
+ });
+ assert.equal(proc.status,78);
+ assert.match(proc.stderr,/NOT_IMPLEMENTED_OR_AUTHORIZED/);
+});
