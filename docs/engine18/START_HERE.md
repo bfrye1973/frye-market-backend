@@ -1,3 +1,5 @@
+> **LATEST AUTHORITATIVE MANAGER CONTINUITY LOCK (Nov 11, 2026):** [MANAGER_CONTINUITY_2026-11-11.md](./MANAGER_CONTINUITY_2026-11-11.md). This supersedes stale Phase 2–4 statuses below: **PR #295 is merged**, Phase 5 is the active next assignment, and conditional ~$22/month budget is recorded. Read that file first on any chat restart.
+
 
 ## Owner budget approval — November 10, 2026
 - Owner explicitly approved an **estimated ~$22/month incremental budget** for a dedicated Engine18 Render recorder worker, **new 50 GB persistent disk**, and private backups. **Approval is conditional: finish technical checks BEFORE provisioning**. This is not permission to deploy/turn on continuous recording or change the existing 100 GB main-backend disk.
