@@ -112,6 +112,7 @@ import {
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
+import {buildEngine6AdvisoryContext} from "../logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js";
 import {
   evaluateEngine6Strategy1Phase4Contract,
   filterEngine15ArtifactsForFastLane,
@@ -11745,6 +11746,32 @@ if (String(symbol || "").toUpperCase() === "ES") {
         noJournalMutation:
           true,
       };
+    }
+  }
+
+  // Engine 6E read-only advisory publication: after all authoritative decisions.
+  // This cannot enter Phase 4 qualification, PAPER locking, sizing, or execution.
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const readAdvisoryJson = (name) => {
+      try { return JSON.parse(fs.readFileSync(`${DATA_DIR}/${name}`, "utf8")); }
+      catch { return null; }
+    };
+    const strategy1 = result.strategies?.["intraday_scalp@10m"];
+    if (strategy1 && typeof strategy1 === "object") {
+      try {
+        strategy1.engine6AdvisoryContext = buildEngine6AdvisoryContext({
+          snapshot: result,
+          engine25Participation: readAdvisoryJson("engine25-participation.json"),
+          engine29Stress: readAdvisoryJson("engine29-cross-market-stress.json"),
+        });
+      } catch (error) {
+        strategy1.engine6AdvisoryContext = {
+          schema: "engine6.marketIntelligenceAdvisory.v1",
+          mode: "READ_ONLY_ADVISORY", available: false,
+          noPermissionCreated: true, noEntryVeto: true,
+          reasonCodes: ["ENGINE6_ADVISORY_CONTEXT_UNAVAILABLE"],
+        };
+      }
     }
   }
 
