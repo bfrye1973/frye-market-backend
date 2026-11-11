@@ -72,7 +72,7 @@ export class Engine18S3ArchiveCoordinator {
     // finalization may be in progress. Do not read or upload unfinished files.
     // After a bounded grace interval, persistent unmanifested files fail closed.
     if(!existsSync(original))throw Error('unmanifested archive without original source requires recovery');
-    const age=Math.max(0,Date.now()-Math.min(statSync(path).mtimeMs,statSync(original).mtimeMs));
+    const age=Math.max(0,Date.now()-statSync(path).mtimeMs);
     if(age>120000)throw Error('unmanifested archive stuck beyond rotation grace; recovery required');
     this.pendingRotation.set(path,Date.now());this.pendingRotationArchives++;
     continue;
