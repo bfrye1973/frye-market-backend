@@ -4,11 +4,11 @@
 // Explicit credentials and endpoint injected; NO env credentials, paid calls, or defaults.
 import {createHash,createHmac,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,mkdtempSync,readFileSync,writeFileSync,appendFileSync,
- statSync,rmSync,openSync,closeSync,fsyncSync} from 'node:fs';
+ statSync,rmSync,openSync,closeSync,fsyncSync,readSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pipeline,finished} from 'node:stream/promises';
-import {Readable} from 'node:stream';
+import {Readable,Writable} from 'node:stream';
 
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const hmac=(key,data)=>createHmac('sha256',key).update(data).digest();
@@ -41,7 +41,7 @@ async function hashFile(path){
 }
 export class Engine18S3PrivateStore {
  constructor({endpoint,bucket,region='auto',accessKeyId,secretAccessKey,keyId,encryptionKey,
-  fetchImpl=fetch,now=()=>new Date(),maxObjectBytes=1024*1024*1024,maxRetries=3,retentionDays=30}={}){
+  fetchImpl=fetch,now=()=>new Date(),maxObjectBytes=1024*1024*1024,maxRetries=3,retentionDays=30,stagingRoot=tmpdir()}={}){
   const url=new URL(endpoint);
   if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.search||
      (url.protocol==='http:'&&!['localhost','127.0.0.1'].includes(url.hostname)))
@@ -55,6 +55,7 @@ export class Engine18S3PrivateStore {
   if(!Number.isInteger(maxRetries)||maxRetries<1||maxRetries>8||
      !Number.isInteger(retentionDays)||retentionDays<1||retentionDays>3650)throw Error('invalid backup retry/retention policy');
   this.maxObjectBytes=maxObjectBytes;this.maxRetries=maxRetries;this.retentionDays=retentionDays;
+  this.stagingRoot=stagingRoot; // Must be dedicated private disk in authorized live worker.
  }
  url(key){
   if(typeof key!=='string'||!keyRe.test(key)||key.includes('..')||key.startsWith('/'))throw Error('unsafe object path');
@@ -97,12 +98,40 @@ export class Engine18S3PrivateStore {
   }
   return {sha256:h.digest('hex'),bytes};
  }
+ async inspectExisting(key,plainSha256,expectedSize){
+  // Prove a remote immutable object is the SAME original archive, even when
+  // it was encrypted under a new nonce after a caller restart.
+  const dir=mkdtempSync(join(this.stagingRoot,'engine18-s3-inspect-'));
+  const encrypted=join(dir,'remote.enc');
+  try{
+   const response=await this.request('GET',key,{expectedCode:[200]});
+   if(!response.body)throw Error('remote immutable object missing');
+   await pipeline(Readable.fromWeb(response.body),createWriteStream(encrypted,{flags:'wx',mode:0o600}));
+   const cipher=await hashFile(encrypted),size=cipher.bytes;
+   if(size<36||size>this.maxObjectBytes)throw Error('invalid remote envelope size');
+   const header=Buffer.alloc(20),tag=Buffer.alloc(16),fd=openSync(encrypted,'r');
+   try{readSync(fd,header,0,20,0);readSync(fd,tag,0,16,size-16);}
+   finally{closeSync(fd);}
+   if(!header.subarray(0,8).equals(MAGIC))throw Error('wrong remote envelope');
+   const d=createDecipheriv('aes-256-gcm',this.key,header.subarray(8,20));
+   d.setAuthTag(tag);
+   const digest=createHash('sha256');let bytes=0;
+   try{
+    await pipeline(createReadStream(encrypted,{start:20,end:size-17}),d,
+     new Writable({write(chunk,encoding,callback){bytes+=chunk.length;digest.update(chunk);callback();}}));
+   }catch{throw Error('remote immutable object cannot be authenticated');}
+   if(bytes!==expectedSize||digest.digest('hex')!==plainSha256)
+    throw Error('remote immutable object conflicts with source archive');
+   return {key,keyId:this.keyId,plainSha256,plainBytes:expectedSize,
+    cipherSha256:cipher.sha256,cipherBytes:size};
+  }finally{rmSync(dir,{recursive:true,force:true});}
+ }
  async uploadClosed({path,key,plaintextSha256,expectedSize}={}){
   if(!path||typeof plaintextSha256!=='string'||!/^[a-f0-9]{64}$/.test(plaintextSha256)||
     !Number.isSafeInteger(expectedSize)||expectedSize<0)throw Error('verified sealed archive required');
   const local=await hashFile(path);
   if(local.sha256!==plaintextSha256||local.bytes!==expectedSize)throw Error('source archive changed before upload');
-  const dir=mkdtempSync(join(tmpdir(),'engine18-s3-stage-')),tmp=join(dir,'sealed.enc');
+  const dir=mkdtempSync(join(this.stagingRoot,'engine18-s3-stage-')),tmp=join(dir,'sealed.enc');
   try{
    const nonce=randomBytes(12),cipher=createCipheriv('aes-256-gcm',this.key,nonce);
    writeFileSync(tmp,Buffer.concat([MAGIC,nonce]),{flag:'wx',mode:0o600});
@@ -128,7 +157,10 @@ export class Engine18S3PrivateStore {
      try{
       const found=await this.remoteCipherDigest(key);
       if(found.sha256===encrypted.sha256&&found.bytes===encrypted.bytes){stored=true;break;}
-      throw Error('remote immutable object conflicts with staged ciphertext');
+      // Different nonce is expected on a restarted upload. Authenticate and
+      // hash remote plaintext instead of overwriting or falsely declaring loss.
+      const original=await this.inspectExisting(key,plaintextSha256,expectedSize);
+      return Object.freeze(original);
      }catch(err){
       if(/conflicts/.test(err.message))throw err;
       if(attempt===this.maxRetries-1)throw Error('private S3 immutable upload not verified');
@@ -142,7 +174,7 @@ export class Engine18S3PrivateStore {
  }
  async restoreClosed({key,destination,expected}={}){
   if(!expected||expected.keyId!==this.keyId)throw Error('versioned restore key missing');
-  const dir=mkdtempSync(join(tmpdir(),'engine18-s3-restore-')),tmp=join(dir,'encrypted');
+  const dir=mkdtempSync(join(this.stagingRoot,'engine18-s3-restore-')),tmp=join(dir,'encrypted');
   try{
    const response=await this.request('GET',key,{expectedCode:[200]});
    if(!response.body)throw Error('missing encrypted object body');
@@ -155,7 +187,6 @@ export class Engine18S3PrivateStore {
    const header=Buffer.alloc(20),tag=Buffer.alloc(16);
    const fh=openSync(tmp,'r');
    try{
-    const {readSync}=await import('node:fs');
     readSync(fh,header,0,20,0);readSync(fh,tag,0,16,size-16);
    }finally{closeSync(fh);}
    if(!header.subarray(0,8).equals(MAGIC))throw Error('invalid encrypted envelope');
