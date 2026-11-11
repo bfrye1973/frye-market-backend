@@ -7,6 +7,9 @@ on:
       - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
       - 'services/core/tests/engine18Post301Readiness.test.js'
       - '.github/workflows/engine18b-post301-readiness.yml'
+concurrency:
+  group: engine18-post301-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   post301-synthetic:
     runs-on: ubuntu-latest
