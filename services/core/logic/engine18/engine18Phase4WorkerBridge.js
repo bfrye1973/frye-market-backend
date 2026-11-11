@@ -66,10 +66,10 @@ export class Engine18SyntheticWorkerBridge{
    return Promise.reject(Error('IPC overflow; recorder failed closed'));
   }
   const stamp=this.clock.capture();
-  const {receivedWallNs,receivedMonoNs,receiptTimeSource,receiptPrecision,clockQuality}=stamp;
+  const {receivedWallNs,receivedMonoNs,rawHostWallObservedNs,receiptTimeSource,receiptPrecision,clockQuality}=stamp;
   const id=this.nextId++;
   const receipt={raw:encoded,rawEncoding,msgClass,statusCode,streamGeneration,receivedWallNs,receivedMonoNs,
-   receiptClockSource:receiptTimeSource,receiptPrecision,clockQuality};
+   receiptClockSource:receiptTimeSource,receiptPrecision,clockQuality,rawHostWallObservedNs};
   this.accepted++;
   const result=new Promise((resolve,reject)=>this.pending.set(id,{resolve,reject}));
   // Caller is never blocked on file/disk/backup operations; IPC is asynchronous.
