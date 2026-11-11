@@ -33,6 +33,11 @@ export function verifyEngine18LiveEnvironment(env,stat=statSync){
  let mounts='';try{mounts=readFileSync('/proc/self/mountinfo','utf8');}catch{}
  if(!mounts.split('\n').some(line=>line.split(' - ')[0]?.trim().split(/\s+/)[4]==='/var/data/engine18-recorder'))
   throw Error('dedicated private persistent disk mount not verified');
+ let backupUrl;
+ try{backupUrl=new URL(env.ENGINE18_R2_ENDPOINT);}catch{throw Error('private backup endpoint invalid');}
+ if(backupUrl.protocol!=='https:'||backupUrl.username||backupUrl.password||
+    ['localhost','127.0.0.1'].includes(backupUrl.hostname))
+  throw Error('real capture requires remote private HTTPS backup destination');
  if(!/^[a-fA-F0-9]{64}$/.test(env.ENGINE18_R2_ENCRYPTION_KEY_HEX))
   throw Error('private backup encryption key invalid');
  const pin=Number(env.ENGINE18_INDEPENDENT_INVENTORY_PIN);
