@@ -9,10 +9,10 @@
 - Subscriptions use `quotes`, `depths`, `trades`; actual depth shape inspected in `ironbeamV2Level2Zones.js` is `d:[{s:'XCME:ES.Z26',b:[{p,sz,o,t,l,is,ioc}],a:[...]}]`. Feed **full-image vs incremental vs conflated** is NOT confirmed. The current zone reader filters zero-size rows; synthetic adapter diagnostics are raw-prefilter and do NOT reproduce that filtering.
 
 ## New isolated components
-- `ironbeamV2RecorderAdapter.js`: raw-first quote/depth/trade/unknown/malformed binary-safe classifier, synthetic lifecycle control codes, shape counters/histograms before any level filtering, monotonic interarrival histogram, and an explicit `authorized:false` guard. It does NOT connect a socket. `t` is unverified vendor semantics; no invented exchange timestamp.
+- `ironbeamV2RecorderAdapter.js`: raw-first receipt capture before JSON classification, quote/depth/trade/unknown/malformed binary-safe classification, synthetic lifecycle control codes, shape counters/histograms before any level filtering, monotonic interarrival histogram, and an explicit `authorized:false` guard. It does NOT connect a socket. `t` is unverified vendor semantics; no invented exchange timestamp.
 - `engine18BufferedRecorder.js`: bounded queue, intake-time receipt stamps, groups consecutive records into an append/one-fsync/one-high-watermark-commit batch, acknowledges only AFTER durable group commit. Queue overflow -> fail closed and reject unacknowledged messages; previous run lacks STOP -> durable GAP on restart.
 - Existing `gate1RawRecorder.js` enhanced with `appendBatch()` and `rotateStreaming()` while keeping legacy synchronous `append()` behavior and original v2 schema. Streaming gzip creates a temp archive, fsyncs file and directory, publishes its SHA-256 manifest, then removes the open source. **Currently rotation still reads open JSONL into memory for validation and reads resulting .gz for hashing; this is not a memory-bounded end-to-end pipeline**. It must be bounded/optimized and profiled before authorized multi-session production.
-- In-process `health()` only: active, received, committed, unacknowledged, rejected, GAP count, recorded bytes, last receipt, disk total/free, and clock-offset `UNVERIFIED`. No HTTP endpoint was added. Reconnect counter is available in shape diagnostics, not yet connected into recorder health; the trusted NTP/chrony source is not configured.
+- In-process `health()` only: active, received, committed, unacknowledged, rejected, GAP count, recorded bytes, last receipt, disk total/free, reconnects, and clock-offset `UNVERIFIED`. No HTTP endpoint was added; the trusted NTP/chrony source is not configured.
 - No claims of exact physical ES source identity beyond the existing configured symbol. Multiple-source-message frames or source controls need verified vendor semantics.
 
 ## Replay and timing
@@ -51,3 +51,11 @@ node --check services/core/logic/engine18/engine18BufferedRecorder.js
 node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js
 ```
 Run CI from latest PR head and record the exact numbers and synthetic throughput. Benchmark output is measured on a GitHub Actions runner, **not a measured live ES peak or production hardware guarantee**.
+
+## Measured synthetic CI evidence — November 10
+- Isolated Phase 2 + original Gate 1 tests: **34 passed, 0 failed** at implementation commit `27a2d6c3f468edc21e67e18906fb00591120f84d`; GitHub Actions https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844299
+- Existing Engine 18 isolated baseline: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844241
+- Existing synthetic recorder workflow: **PASSED** https://github.com/bfrye1973/frye-market-backend/actions/runs/42948844278
+- 20,000 synthetic frames / 2,112.1 ms = **9,469 frames/sec**, **3.32 MB/sec** on this GitHub Actions runner. This is only a synthetic benchmark: payload size, host storage, compressibility, concurrency, real Ironbeam network characteristics, and peak ES open bursts will differ. Earlier CI also observed 5,593 frames/sec, demonstrating runner variability.
+- Synthetic tests include exact depth/trade/quote/unknown/malformed and binary preservation, real Ironbeam-style `d:[{s,b,a}]` raw shapes with `sz=0`, `l`, `is`, `ioc`, receipt-before-parse clock boundary, interarrival counters, queue overflow fail-closed, 20k high-load batch commits, streaming rotation/checksum, SIGKILL and deterministic replay.
+- **No actual Ironbeam feed capture occurred.** Live adapter injection into the existing WebSocket receiver is intentionally deferred pending owner/manager license and production isolation authorization. Nothing here establishes feed snapshot/delta/conflation semantics.
