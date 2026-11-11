@@ -64,3 +64,19 @@ test('CME ETH normal boundary partitions Sunday evening to Monday trade date',()
  a.close();
  assert.ok(files(root).some(x=>x.includes('2026-11-09')));
 }));
+
+test('orphan gzip temp after interrupted finalization is safely discarded',()=>withDir(root=>{
+ const a=new Engine18RawRecorder({root,clock});a.append({raw:'safe'});
+ const active=files(root).find(x=>x.endsWith('.jsonl.open'));
+ writeFileSync(active.replace('.jsonl.open','.jsonl.gz.tmp'),'partial gzip');
+ closeSync(a.fd);a.fd=null;a.releaseLock();
+ const b=new Engine18RawRecorder({root,clock});b.close();
+ assert.deepEqual(replayRaw(root).map(x=>x.statusCode||x.raw),['safe','GAP']);
+}));
+test('orphan manifest temp is recovered without data loss',()=>withDir(root=>{
+ const a=new Engine18RawRecorder({root,clock});a.append({raw:'safe'});a.close();
+ const manifest=files(root).find(x=>x.endsWith('.manifest.json'));
+ writeFileSync(manifest+'.tmp','partial manifest');unlinkSync(manifest);
+ const b=new Engine18RawRecorder({root,clock});b.close();
+ assert.equal(replayRaw(root)[0].raw,'safe');
+}));
