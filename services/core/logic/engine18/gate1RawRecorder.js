@@ -21,10 +21,27 @@ function unlinkDurably(path){unlinkSync(path);syncDir(path);}
 function manifestFor(gzip,entries,calendarVersion){
  return {schemaVersion:'engine18.manifest.v1',sha256:digest(gzip),bytes:gzip.length,count:entries.length,firstSeq:entries[0].localSeq,lastSeq:entries.at(-1).localSeq,firstWallNs:entries[0].tLocalWallNs,lastWallNs:entries.at(-1).tLocalWallNs,calendarVersion};
 }
-function recoverArchiveManifest(path,calendarVersion){
- const gzip=readFileSync(path),plain=gunzipSync(gzip),parsed=parse(plain);
- if(!parsed.entries.length||parsed.bytes!==plain.length)throw Error('invalid orphan archive');
- if(!existsSync(path+'.manifest.json'))atomic(path+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,calendarVersion))+'\n');
+const CHECKPOINT='.engine18-highwater.json';
+function checkpointPath(root){return join(root,CHECKPOINT);}
+function loadCheckpoint(root){
+ const p=checkpointPath(root);
+ if(!existsSync(p))return null;
+ const x=JSON.parse(readFileSync(p,'utf8'));
+ if(x.schemaVersion!=='engine18.checkpoint.v1'||!Number.isSafeInteger(x.lastSeq)||x.lastSeq<0)throw Error('invalid high-watermark checkpoint');
+ return x.lastSeq;
+}
+function saveCheckpoint(root,lastSeq){
+ const p=checkpointPath(root),old=loadCheckpoint(root);
+ if(old!==null&&lastSeq<old)throw Error('checkpoint cannot regress');
+ atomic(p,JSON.stringify({schemaVersion:'engine18.checkpoint.v1',lastSeq})+'\n');
+}
+function recoverArchiveManifest(path){
+ if(!existsSync(path+'.manifest.json')){
+  // Missing origin manifest is NOT equivalent to a fresh trustworthy checksum.
+  const marker=path+'.integrity-unverified.json';
+  if(!existsSync(marker))atomic(marker,JSON.stringify({schemaVersion:'engine18.integrity.v1',state:'UNVERIFIED',reason:'ORIGINAL_MANIFEST_MISSING'})+'\n');
+  throw Error('original archive manifest missing: integrity UNVERIFIED; operator review required');
+ }
  return verify(path);
 }
 function lockRoot(root){
@@ -76,6 +93,12 @@ export class Engine18RawRecorder{
  }
  recover(){
   let last=0;
+  const checkpointTemp=checkpointPath(this.root)+'.tmp';
+  if(existsSync(checkpointTemp)){
+    if(!existsSync(checkpointPath(this.root)))throw Error('orphan high-watermark checkpoint temp requires inspection');
+    unlinkDurably(checkpointTemp);
+  }
+  const highWater=loadCheckpoint(this.root);
   // Crash between atomic temp fsync and rename: only discard temps when
   // the source .open file or completed archive can independently be verified.
   for(const temp of walk(this.root).filter(x=>x.endsWith('.jsonl.gz.tmp')||x.endsWith('.manifest.json.tmp'))){
@@ -91,7 +114,7 @@ export class Engine18RawRecorder{
   }
   // Existing archives are checked first, including a crash between archive rename and manifest commit.
   for(const path of walk(this.root).filter(x=>x.endsWith('.jsonl.gz')).sort()){
-   const e=recoverArchiveManifest(path,this.calendarVersion);last=Math.max(last,e.at(-1)?.localSeq??0);
+   const e=recoverArchiveManifest(path);last=Math.max(last,e.at(-1)?.localSeq??0);
   }
   for(const path of walk(this.root).filter(x=>x.endsWith('.jsonl.open')).sort()){
     const buf=readFileSync(path),p=parse(buf);
@@ -106,8 +129,11 @@ export class Engine18RawRecorder{
     else unlinkDurably(path);
     last=Math.max(last,p.entries.at(-1)?.localSeq??0);this.recoveredOpen++;
   }
+  if(highWater!==null&&last<highWater)throw Error('high-watermark checkpoint proves missing tail archive');
   this.seq=last;this.gaps+=this.recoveredOpen;
-  replayRaw(this.root); // fail closed if a partition was lost, duplicated or reordered
+  replayRaw(this.root);
+  if(highWater===null&&last>0)throw Error('missing historical high-watermark checkpoint; operator review required');
+  if(last>0&&last!==highWater)saveCheckpoint(this.root,last);
  }
  finish(path,entries){
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
@@ -140,7 +166,9 @@ export class Engine18RawRecorder{
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,tLocalWallNs:wall,tLocalMonoNs:mono,streamGeneration,msgClass,statusCode,raw};
   const line=Buffer.from(JSON.stringify(item)+'\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
-  this.seq++;this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP'&&!this.recoveredOpen)this.gaps++;
+  this.seq++;
+  try{saveCheckpoint(this.root,this.seq);}catch{this.writeErrors++;this.faulted=true;throw Error('checkpoint failed; recovery required');}
+  this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP'&&!this.recoveredOpen)this.gaps++;
   return {localSeq:this.seq};
  }
  health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null});}
@@ -150,9 +178,13 @@ export class Engine18RawRecorder{
 export function replayRaw(root){
  const paths=walk(resolve(root));
  if(paths.some(p=>p.endsWith('.jsonl.open')))throw Error('unfinalized open archive; recover before replay');
+ if(paths.some(p=>p.endsWith('.integrity-unverified.json')))throw Error('archive integrity UNVERIFIED');
  const all=paths.filter(p=>p.endsWith('.jsonl.gz')).sort().flatMap(verify).sort((a,b)=>a.localSeq-b.localSeq);
  if(all.length&&all[0].localSeq!==1)throw Error('missing initial recorder sequence');
  for(let i=1;i<all.length;i++)if(all[i].localSeq!==all[i-1].localSeq+1)throw Error('replay sequence gap or duplicate');
+ const highWater=loadCheckpoint(resolve(root));
+ if(highWater===null&&all.length)throw Error('missing high-watermark checkpoint');
+ if(highWater!==null&&(all.at(-1)?.localSeq??0)!==highWater)throw Error('high-watermark mismatch: missing archive or uncommitted tail');
  return all;
 }
 export const deterministicReplayBytes=root=>Buffer.from(replayRaw(root).map(e=>JSON.stringify(e)).join('\n')+'\n');
