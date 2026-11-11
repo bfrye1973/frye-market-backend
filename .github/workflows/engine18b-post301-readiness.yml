@@ -1,11 +1,13 @@
 name: Engine18B Post301 Recorder Engineering
 on:
   push:
-    branches: [engine18b-post301-readiness-20261111]
+    branches: [engine18-manager-post301-clean-20261111]
   pull_request:
     paths:
       - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
       - 'services/core/tests/engine18Post301Readiness.test.js'
+      - 'services/core/logic/engine18/engine18IronbeamV2RecorderRehearsal.js'
+      - 'services/core/logic/engine18/engine18ReadOnlyResearchContext.js'
       - '.github/workflows/engine18b-post301-readiness.yml'
 concurrency:
   group: engine18-post301-${{ github.ref }}
@@ -26,5 +28,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
       - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
+      - run: node --check services/core/logic/engine18/engine18IronbeamV2RecorderRehearsal.js
+      - run: node --check services/core/logic/engine18/engine18ReadOnlyResearchContext.js
       - run: node --test services/core/tests/engine18Post301Readiness.test.js
       - run: node --test services/core/tests/engine18Issue300Acceptance.test.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js services/core/tests/engine18MergeBlockersR1R3.test.js services/core/tests/engine18Phase5Operations.test.js
