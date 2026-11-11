@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-11T21:09:10.634115+00:00",
+  "updated_at_utc": "2026-11-11T23:37:27.777158+00:00",
   "completedSessionDate": "2026-11-11",
   "score": 57.8,
   "state": "CONSTRUCTIVE_MIXED",
@@ -151,12 +151,12 @@
       "momentum_pct": 49.09
     },
     "Healthcare": {
-      "nh": 244,
+      "nh": 243,
       "nl": 177,
-      "up": 45,
-      "down": 53,
-      "breadth_pct": 57.96,
-      "momentum_pct": 45.92
+      "up": 44,
+      "down": 54,
+      "breadth_pct": 57.86,
+      "momentum_pct": 44.9
     },
     "Industrials": {
       "nh": 147,
@@ -204,12 +204,12 @@
       "symbol": "ES",
       "available": true,
       "state": "RED",
-      "sessionDate": "2026-11-10",
-      "close": 7645.5,
-      "ma10": 7579.325,
-      "ma20": 7660.7625,
-      "ma10Prior": 7590.85,
-      "ma20Prior": 7666.75,
+      "sessionDate": "2026-11-11",
+      "close": 7612.25,
+      "ma10": 7569.2,
+      "ma20": 7651.9125,
+      "ma10Prior": 7579.0,
+      "ma20Prior": 7660.6,
       "ma10Upsloping": false,
       "ma20Upsloping": false
     },
@@ -231,9 +231,9 @@
       "available": true,
       "state": "GREEN",
       "sessionDate": "2026-11-11",
-      "close": 681.65,
-      "ma10": 672.437,
-      "ma20": 668.6525,
+      "close": 681.63,
+      "ma10": 672.435,
+      "ma20": 668.6515,
       "ma10Prior": 671.166,
       "ma20Prior": 667.546,
       "ma10Upsloping": true,
@@ -244,9 +244,9 @@
       "available": true,
       "state": "GREEN",
       "sessionDate": "2026-11-11",
-      "close": 283.06,
-      "ma10": 279.709,
-      "ma20": 277.8515,
+      "close": 283.09,
+      "ma10": 279.712,
+      "ma20": 277.853,
       "ma10Prior": 279.532,
       "ma20Prior": 277.267,
       "ma10Upsloping": true,
@@ -263,45 +263,45 @@
       "breadth_pct": 48.36,
       "momentum_pct": 73.04,
       "prior": {
-        "nh": 982,
+        "nh": 981,
         "nl": 863,
-        "up": 170,
-        "down": 216,
-        "breadth_pct": 53.22,
-        "momentum_pct": 44.04
+        "up": 169,
+        "down": 217,
+        "breadth_pct": 53.2,
+        "momentum_pct": 43.78
       }
     },
     "large": {
       "members": 917,
-      "nh": 125,
+      "nh": 126,
       "nl": 69,
       "up": 60,
       "down": 7,
-      "breadth_pct": 64.43,
+      "breadth_pct": 64.62,
       "momentum_pct": 89.55,
       "prior": {
-        "nh": 169,
+        "nh": 170,
         "nl": 87,
         "up": 16,
         "down": 20,
-        "breadth_pct": 66.02,
+        "breadth_pct": 66.15,
         "momentum_pct": 44.44
       }
     },
     "mid": {
       "members": 1114,
-      "nh": 187,
+      "nh": 186,
       "nl": 120,
       "up": 66,
       "down": 11,
-      "breadth_pct": 60.91,
+      "breadth_pct": 60.78,
       "momentum_pct": 85.71,
       "prior": {
-        "nh": 246,
+        "nh": 245,
         "nl": 127,
         "up": 37,
         "down": 36,
-        "breadth_pct": 65.95,
+        "breadth_pct": 65.86,
         "momentum_pct": 50.68
       }
     },
@@ -314,12 +314,12 @@
       "breadth_pct": 42.03,
       "momentum_pct": 65.27,
       "prior": {
-        "nh": 564,
+        "nh": 563,
         "nl": 646,
-        "up": 116,
-        "down": 159,
-        "breadth_pct": 46.61,
-        "momentum_pct": 42.18
+        "up": 115,
+        "down": 160,
+        "breadth_pct": 46.57,
+        "momentum_pct": 41.82
       }
     },
     "unknown": {
