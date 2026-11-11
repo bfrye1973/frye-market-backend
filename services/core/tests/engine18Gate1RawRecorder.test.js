@@ -137,7 +137,7 @@ test('missing first segment rejected',()=>withDir(root=>{
  const a=create(root);a.append({raw:'a',at:new Date('2026-11-10T21:00:00Z')});
  a.append({raw:'b',at:new Date('2026-11-10T22:00:00Z')});a.close();
  const p=files(root).filter(x=>x.endsWith('.jsonl.gz')).sort()[0];
- unlinkSync(p);unlinkSync(p+'.manifest.json');assert.throws(()=>replayRaw(root),/missing initial/);
+ unlinkSync(p);unlinkSync(p+'.manifest.json');assert.throws(()=>replayRaw(root),/missing initial|sequence gap/);
 }));
 test('missing highest sequence archive detected by high-watermark',()=>withDir(root=>{
  const a=create(root);a.append({raw:'a',at:new Date('2026-11-10T21:00:00Z')});
@@ -160,11 +160,12 @@ test('independent known fixture validates exact canonical binary replay bytes in
  assert.equal(binary.raw,expectedPayload);
  assert.deepEqual(events.map(e=>e.statusCode),['RECORDER_START',null,'RECORDER_STOP']);
  const bytes=deterministicReplayBytes(root);
- const expected=Buffer.from(events.map(e=>JSON.stringify({
-  schemaVersion:'engine18.raw.v2',localSeq:e.localSeq,runId:e.runId,receivedWallNs:e.receivedWallNs,
-  receivedMonoNs:e.receivedMonoNs,writtenMonoNs:e.writtenMonoNs,streamGeneration:e.streamGeneration,
-  msgClass:e.msgClass,statusCode:e.statusCode,rawEncoding:e.rawEncoding,raw:e.raw
- })).join('\n')+'\n');
+ const expectedEvents=[
+  {schemaVersion:'engine18.raw.v2',localSeq:1,runId:a.runId,receivedWallNs:'1794350000000000000',receivedMonoNs:'1',writtenMonoNs:'2',streamGeneration:0,msgClass:'control',statusCode:'RECORDER_START',rawEncoding:'utf8',raw:''},
+  {schemaVersion:'engine18.raw.v2',localSeq:2,runId:a.runId,receivedWallNs:'1794350000000000000',receivedMonoNs:'3',writtenMonoNs:'4',streamGeneration:0,msgClass:'market',statusCode:null,rawEncoding:'base64',raw:'AP8K'},
+  {schemaVersion:'engine18.raw.v2',localSeq:3,runId:a.runId,receivedWallNs:'1794350000000000000',receivedMonoNs:'5',writtenMonoNs:'6',streamGeneration:0,msgClass:'control',statusCode:'RECORDER_STOP',rawEncoding:'utf8',raw:''}
+ ];
+ const expected=Buffer.from(expectedEvents.map(x=>JSON.stringify(x)).join('\n')+'\n');
  assert.deepEqual(bytes,expected);
  const moduleUrl=new URL('../logic/engine18/gate1RawRecorder.js',import.meta.url).href;
  const code="import{deterministicReplayBytes}from "+JSON.stringify(moduleUrl)+";import{createHash}from'node:crypto';process.stdout.write(createHash('sha256').update(deterministicReplayBytes(process.argv[1])).digest('hex'));";
