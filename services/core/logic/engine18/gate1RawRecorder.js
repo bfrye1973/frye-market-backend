@@ -1,5 +1,5 @@
 // Engine 18 Gate 1: offline-only, synthetic raw recorder. No live feed integration.
-import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,createReadStream,createWriteStream} from 'node:fs';
+import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,statSync,createReadStream,createWriteStream} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {gzipSync,gunzipSync,createGzip} from 'node:zlib';
 import {pipeline} from 'node:stream/promises';
@@ -124,7 +124,7 @@ async function hashCompressedStreaming(path){
  return {sha256:h.digest('hex'),bytes};
 }
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
@@ -134,6 +134,14 @@ export class Engine18RawRecorder{
   this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
   this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
+  if(boundedInitialization===true)return; // Only use via async openBounded() factory.
+  // Legacy synchronous constructor is a small-fixture compatibility path.
+  // Large archives MUST use bounded initialization to avoid OOM.
+  for(const path of walk(this.root).filter(p=>p.endsWith('.jsonl.gz')||p.endsWith('.jsonl.open'))){
+   if(statSync(path).size>64*1024*1024){
+    this.releaseLock();throw Error('large archive requires bounded recovery factory');
+   }
+  }
   try{
    this.recover();
    if(this.previousUnclean)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP'});
@@ -141,8 +149,44 @@ export class Engine18RawRecorder{
   }
   catch(e){this.releaseLock();throw e;}
  }
+ static async openBounded(options={}){
+  const recorder=new Engine18RawRecorder({...options,boundedInitialization:true});
+  try{
+   const {recoverEngine18Bounded}=await import('./engine18BoundedRecovery.js');
+   const result=await recoverEngine18Bounded({root:recorder.root,calendarVersion:recorder.calendarVersion,testFault:recorder.testFault});
+   recorder.seq=result.lastSeq;
+   recorder.gaps=result.gaps;
+   recorder.previousUnclean=result.previousUnclean;
+   recorder.recoveryMetrics=result.metrics;
+   if(recorder.previousUnclean)recorder.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP'});
+   recorder.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'RECORDER_START'});
+   return recorder;
+  }catch(err){recorder.releaseLock();throw err;}
+ }
  recover(){
   let last=0;
+  // Recover the rename-to-manifest crash only from a verified, intact .open.
+  // The original open source is authoritative; a gzip alone is not.
+  for(const gz of walk(this.root).filter(p=>p.endsWith('.jsonl.gz')&&!existsSync(p+'.manifest.json'))){
+   const source=gz.replace(/\.jsonl\.gz$/,'.jsonl.open');
+   if(!existsSync(source))continue;
+   const buf=readFileSync(source),parsed=parse(buf);
+   if(!parsed.entries.length||parsed.bytes!==buf.length)throw Error('unverified original source');
+   const compressed=gunzipSync(readFileSync(gz));
+   if(!compressed.equals(buf))throw Error('archive and original source mismatch');
+   const gzip=readFileSync(gz);
+   // A stale temp manifest is disposable only after original/open gzip match.
+   if(existsSync(gz+'.manifest.json.tmp'))unlinkDurably(gz+'.manifest.json.tmp');
+   atomic(gz+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\n');
+   verify(gz);
+   const marker=gz+'.integrity-unverified.json';
+   if(existsSync(marker)){
+    const info=JSON.parse(readFileSync(marker,'utf8'));
+    if(info.reason!=='ORIGINAL_MANIFEST_MISSING')throw Error('unrelated integrity marker');
+    unlinkDurably(marker);
+   }
+   unlinkDurably(source);
+  }
   const checkpointTemp=checkpointPath(this.root)+'.tmp';
   if(existsSync(checkpointTemp)){
     if(!existsSync(checkpointPath(this.root)))throw Error('orphan high-watermark checkpoint temp requires inspection');
@@ -194,6 +238,7 @@ export class Engine18RawRecorder{
   if(existsSync(dest))throw Error('archive collision');
   const gzip=gzipSync(readFileSync(path),{mtime:0});
   atomic(dest,gzip);
+  this.testFault?.('AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST',{source:path,archive:dest});
   atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,entries,this.calendarVersion))+'\n');
   unlinkDurably(path);
  }
@@ -286,6 +331,7 @@ export class Engine18RawRecorder{
   await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
   const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
   renameSync(tmp,dest);syncDir(dest);
+  this.testFault?.('AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST',{source:path,archive:dest});
   const hashed=await hashCompressedStreaming(dest);
   atomic(dest+'.manifest.json',JSON.stringify({
    schemaVersion:'engine18.manifest.v1',...hashed,...summary,calendarVersion:this.calendarVersion

@@ -3,13 +3,18 @@
 import {Engine18RawRecorder} from './gate1RawRecorder.js';
 import {statfsSync} from 'node:fs';
 export class Engine18BufferedRecorder {
- constructor({root,clock,maxQueued=4096,maxQueueBytes=32*1024*1024,batchSize=256,flushDelayMs=2,testFault=null}={}){
+ constructor({root,clock,maxQueued=4096,maxQueueBytes=32*1024*1024,batchSize=256,flushDelayMs=2,testFault=null,writer=null}={}){
   if(!Number.isSafeInteger(maxQueued)||maxQueued<1||!Number.isSafeInteger(maxQueueBytes)||maxQueueBytes<256||
      !Number.isSafeInteger(batchSize)||batchSize<1||!Number.isInteger(flushDelayMs)||flushDelayMs<0)throw Error('invalid queue bounds');
-  this.writer=new Engine18RawRecorder({root,clock,provider:'SYNTHETIC',testFault});
+  this.writer=writer??new Engine18RawRecorder({root,clock,provider:'SYNTHETIC',testFault});
   this.maxQueued=maxQueued;this.maxQueueBytes=maxQueueBytes;this.batchSize=batchSize;this.flushDelayMs=flushDelayMs;
   this.pending=[];this.pendingBytes=0;this.received=0;this.recorded=0;this.rejected=0;
   this.failed=false;this.draining=false;this.closed=false;this.closing=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
+ }
+ static async openBounded(options={}){
+  const writer=await Engine18RawRecorder.openBounded(options);
+  try{return new Engine18BufferedRecorder({...options,writer});}
+  catch(e){writer.releaseLock();throw e;}
  }
  capture(args){
   if(this.failed||this.closed||this.closing)throw Error('recorder stopped');

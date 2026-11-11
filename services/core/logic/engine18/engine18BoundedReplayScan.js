@@ -17,13 +17,24 @@ export async function scanEngine18ReplayBounded(root,{onRecord=()=>{},maxLineByt
  if(!existsSync(checkpoint))throw Error('missing high-watermark checkpoint');
  const expected=JSON.parse(readFileSync(checkpoint,'utf8')).lastSeq;
  if(!Number.isSafeInteger(expected)||expected<0)throw Error('invalid high-watermark');
- let sequence=0,records=0,compressedBytes=0,maxBufferedBytes=0;
- for(const path of paths.filter(p=>p.endsWith('.jsonl.gz')).sort()){
+ const segments=[];
+ for(const path of paths.filter(p=>p.endsWith('.jsonl.gz'))){
   if(!existsSync(path+'.manifest.json'))throw Error('archive manifest missing');
   const manifest=JSON.parse(readFileSync(path+'.manifest.json','utf8'));
+  if(!Number.isSafeInteger(manifest.firstSeq)||manifest.firstSeq<1||
+     !Number.isSafeInteger(manifest.lastSeq)||manifest.lastSeq<manifest.firstSeq||
+     !Number.isSafeInteger(manifest.count)||manifest.count!==manifest.lastSeq-manifest.firstSeq+1)
+   throw Error('invalid verified archive sequence range');
   const h=await hashFile(path);
   if(manifest.sha256!==h.sha256||manifest.bytes!==h.bytes)throw Error('archive manifest digest mismatch');
-  compressedBytes+=h.bytes;
+  segments.push({path,manifest,bytes:h.bytes});
+ }
+ // File names such as part-10 and part-2 are NOT sequence order.
+ segments.sort((a,b)=>a.manifest.firstSeq-b.manifest.firstSeq);
+ let sequence=0,records=0,compressedBytes=0,maxBufferedBytes=0;
+ for(const {path,manifest,bytes} of segments){
+  if(manifest.firstSeq!==sequence+1)throw Error('missing or duplicate sequence across archive manifests');
+  compressedBytes+=bytes;
   let lineBuffer=Buffer.alloc(0),count=0,firstSeq=null,lastSeq=null;
   const decompressed=createReadStream(path,{highWaterMark:65536}).pipe(createGunzip());
   for await(const chunk of decompressed){
