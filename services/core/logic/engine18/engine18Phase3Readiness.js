@@ -66,7 +66,7 @@ export class Engine18SyntheticReadinessSupervisor{
   if(clockSampler!==null&&typeof clockSampler!=='function')throw Error('clock sampler must be a function');
   this.clockSampler=clockSampler;
   this.writer=new Engine18BufferedRecorder({root,clock,maxQueued,batchSize,flushDelayMs});
-  this.generation=0;this.sockets=new Map();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;
+  this.generation=0;this.sockets=new Map();this.sourceGapMarked=new Set();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;
  }
  enqueue(fn){
   const p=this.chain.then(fn);
@@ -108,7 +108,19 @@ export class Engine18SyntheticReadinessSupervisor{
   const detail=safe(reason,CODE,'unsafe disconnect reason');
   if(closeCode!==null&&(!Number.isInteger(closeCode)||closeCode<1000||closeCode>4999))throw Error('invalid websocket close code');
   const stamp=this.snapshotReceipt();
-  return this.enqueue(()=>this.controlRecord(event,known.generation,{connectionId:known.connectionId,reason:detail,closeCode},stamp));
+  // Distinguish transport error from recorder crash GAP. Source coverage is
+  // UNKNOWN from interruption until a verified complete reseed.
+  const uncertain=event==='WS_ERROR'||(event==='DISCONNECTED'&&closeCode!==1000);
+  const firstGap=uncertain&&!this.sourceGapMarked.has(known.connectionId);
+  if(firstGap)this.sourceGapMarked.add(known.connectionId);
+  return this.enqueue(async()=>{
+   const ack=await this.controlRecord(event,known.generation,{connectionId:known.connectionId,reason:detail,closeCode},stamp);
+   if(firstGap)await this.controlRecord('FEED_GAP',known.generation,{
+    connectionId:known.connectionId,reason:'SOURCE_COVERAGE_UNKNOWN',fromReceiptWallNs:stamp.receivedWallNs,
+    confirmedLoss:false
+   },stamp);
+   return ack;
+  });
  }
  subscription(socket,{feedType,physicalContract='XCME:ES.Z26',streamId,status}={}){
   const known=this.validateSocket(socket);
