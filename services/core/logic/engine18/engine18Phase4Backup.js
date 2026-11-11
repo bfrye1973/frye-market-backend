@@ -3,7 +3,7 @@
 import {createHash,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,readFileSync,existsSync,readdirSync,openSync,
  closeSync,fsyncSync,renameSync,unlinkSync,mkdirSync} from 'node:fs';
-import {Readable,Writable} from 'node:stream';
+import {Readable,Writable,Transform} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import {join,dirname,relative,resolve} from 'node:path';
 
@@ -134,11 +134,16 @@ export class Engine18SyntheticArchiveBackup{
     const tmp=target+'.restore.tmp';
     const hash=createHash('sha256');let bytes=0;
     // Write encrypted object through verified streaming and atomic local rename.
-    const file=createWriteStream(tmp,{flags:'wx',mode:0o600});
     try{
-     for await(const c of this.store.getStream(id)){hash.update(c);bytes+=c.length;if(!file.write(c))await new Promise(r=>file.once('drain',r));}
-     await new Promise((res,rej)=>{file.once('error',rej);file.end(res);});
-    }catch(err){file.destroy();throw Error('encrypted backup restore failed integrity check');}
+     await pipeline(
+      Readable.from(this.store.getStream(id)),
+      new Transform({transform(chunk,encoding,done){hash.update(chunk);bytes+=chunk.length;done(null,chunk);}}),
+      createWriteStream(tmp,{flags:'wx',mode:0o600})
+     );
+    }catch{
+     if(existsSync(tmp))unlinkSync(tmp);
+     throw Error('encrypted backup restore failed integrity check');
+    }
     if(hash.digest('hex')!==expected||bytes!==size)throw Error('restored backup checksum mismatch');
     durableRename(tmp,target);
    }
