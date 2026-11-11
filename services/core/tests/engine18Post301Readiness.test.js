@@ -141,6 +141,9 @@ test('isolated Ironbeam v2 synthetic connection records subscriptions, reconnect
  assert.deepEqual(Buffer.from(frames[4].raw,'base64'),binary);
  const subscriptions=events.filter(x=>x.statusCode==='SUBSCRIPTION_ACK');
  assert.equal(subscriptions.length,6);
+ const firstConnected=events.findIndex(x=>x.statusCode==='CONNECTED');
+ const firstSub=events.findIndex(x=>x.statusCode==='SUBSCRIPTION_ACK');
+ assert.ok(firstConnected>=0&&firstConnected<firstSub,'durable OPEN precedes subscription ACK');
  assert.ok(subscriptions.every(x=>!x.raw.includes('DO_NOT_STORE_TEST_TOKEN')));
  assert.ok(JSON.stringify(events).includes('FEED_GAP'));
  assert.equal(session.status().feedSemantics,'UNVERIFIED');
@@ -267,6 +270,7 @@ test('independent Ironbeam rehearsal fails closed on unopened WebSocket and leav
  await rehearsal.drain();await supervisor.close();
  const events=replayRaw(root);
  assert.equal(events.filter(x=>x.statusCode==='SUBSCRIPTION_ACK').length,0);
+ assert.equal(events.filter(x=>x.statusCode==='CONNECTED').length,0,'never claim connected before WebSocket OPEN');
  assert.equal(events.filter(x=>x.statusCode==='FEED_GAP').length,1);
  assert.ok(!JSON.stringify(events).includes('HIDDEN_TOKEN'));
 }));
