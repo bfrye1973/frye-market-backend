@@ -259,12 +259,17 @@ export class Engine18RawRecorder{
   if(statusCode!==null&&!/^[A-Z_]{1,40}$/.test(statusCode))throw Error('unsafe status code');
   const payload=encodeRaw(raw,rawEncoding);
   if(at!==undefined&&(!(at instanceof Date)||!Number.isFinite(at.getTime())))throw Error('invalid receipt time');
-  const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):String(this.clock.wallNs());
-  const receivedMonoNs=String(this.clock.monoNs());
+  const clockSample=at===undefined&&typeof this.clock.capture==='function'?this.clock.capture():null;
+  const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):
+   String(clockSample?.receivedWallNs??this.clock.wallNs());
+  const receivedMonoNs=String(clockSample?.receivedMonoNs??this.clock.monoNs());
   if(!/^\d+$/.test(receivedWallNs)||!/^\d+$/.test(receivedMonoNs))throw Error('invalid receipt clock');
   const receiptDate=new Date(Number(BigInt(receivedWallNs)/1000000n));
   if(!Number.isFinite(receiptDate.getTime()))throw Error('invalid receipt wall time');
-  return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate});
+  return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate,
+   ...(clockSample?{receiptClockSource:clockSample.receiptTimeSource,
+    receiptPrecision:clockSample.receiptPrecision,clockQuality:clockSample.clockQuality,
+    rawHostWallObservedNs:clockSample.rawHostWallObservedNs}:{})});
  }
  append(args){return this.appendReceived(this.capture(args));}
  appendReceived(receipt,token=null){
