@@ -50,7 +50,8 @@ export async function runEngine18ControlledRecording({env=process.env,
  // The private host must supply actual Chrony evidence before recording.
  const chrony=makeChronySampler();
  const initialSample=await chrony();
- if(!initialSample||BigInt(initialSample.uncertaintyNs)>5000000n)
+ if(!initialSample||BigInt(initialSample.uncertaintyNs)>5000000n||
+    (BigInt(initialSample.offsetNs)<0n?-BigInt(initialSample.offsetNs):BigInt(initialSample.offsetNs))>5000000n)
   throw Error('controlled trial refuses unverified or imprecise host clock');
  const clock=createEngine18ReceiptClock();
  const writer=await Engine18BufferedRecorder.openBounded({
@@ -93,7 +94,8 @@ export async function runEngine18ControlledRecording({env=process.env,
   // Revalidate host time source periodically; mark collection unsafe on failure.
   clockTimer=setInterval(()=>{
    void chrony().then(sample=>{
-    if(!sample||BigInt(sample.uncertaintyNs)>5000000n){
+    if(!sample||BigInt(sample.uncertaintyNs)>5000000n||
+       (BigInt(sample.offsetNs)<0n?-BigInt(sample.offsetNs):BigInt(sample.offsetNs))>5000000n){
      onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});
     }
    }).catch(()=>{onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});});
