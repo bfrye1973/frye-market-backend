@@ -11,6 +11,9 @@ Date: 2026-11-10 (Arizona). Status: **implementation candidate / manager and Cla
 - Hourly gzip archives partition by provider / physical contract / provisional CME ETH trade date / UTC hour. SHA-256 manifest includes counts, time range, byte count and sequence range.
 - Crash recovery truncates an incomplete trailing JSONL line, finalizes valid records, emits a durable `GAP` status record, and never silently fabricates an unobserved market message.
 - Archive manifest and gzip are published with temp+rename and file/directory fsync; interrupted temp files are handled conservatively; archives verified before replay; missing sequences are errors.
+- A per-ack durable high-watermark checkpoint detects loss of the **last** archived segment even when its manifest is also deleted, provided the checkpoint remains intact. This is local crash-consistency evidence, not independent remote attestation; deletion or tampering of all local state cannot be ruled out.
+- Missing original gzip manifest produces a durable `integrity-unverified.json` record and refuses replay/recovery. No recomputed manifest can masquerade as evidence of original integrity.
+- A separate-process expected byte fixture and real OS `SIGKILL`/restart regression test assert acknowledged events are not duplicated and recovery GAP is persisted.
 - Per-root writer lock is **single-host local filesystem only**. Malformed active lock or live PID causes fail-closed.
 - Health API is an in-process object of counters and nonsecret identity only. **There is no HTTP health route in this milestone.**
 
@@ -19,7 +22,7 @@ Date: 2026-11-10 (Arizona). Status: **implementation candidate / manager and Cla
 node --check services/core/logic/engine18/gate1RawRecorder.js
 node --test services/core/tests/engine18Gate1RawRecorder.test.js
 ```
-CI workflow on PR #291 runs both. Consult latest GitHub Actions run rather than relying on an outdated copied number.
+CI workflow on PR #291 runs both. The manager's additional synthetic tests expand the suite to 16. Consult latest GitHub Actions run rather than relying on an outdated copied number.
 
 ## Security boundary
 - `provider !== SYNTHETIC` is explicitly rejected.
@@ -32,7 +35,7 @@ CI workflow on PR #291 runs both. Consult latest GitHub Actions run rather than 
 2. Global monotonic clock resets on process restart; `localSeq` is the cross-restart ordering authority. Wall/mono clock and true NTP offset/quality sample instrumentation need operational source validation.
 3. No bounded/backpressured asynchronous ingest, process isolation, high-throughput benchmark or per-session sizing study yet. Synchronous fsync is intentionally conservative for offline fixtures; no latency claims.
 4. Writer lock cannot be used across shared/network/multi-host disks and is not a substitute for fencing tokens in distributed storage.
-5. Recovery detects local truncated line and creates GAP evidence, **not a verified upstream vendor sequence gap**. Source sequence semantics require separate adapter and reference validation.
+5. Recovery detects local truncated line and creates GAP evidence, **not a verified upstream vendor sequence gap**. The synthetic `GAP` currently denotes recorder restart/recovery, not an empirically proven interval of missing source messages; production needs a structured reason/generation and time bounds. Source sequence semantics require separate adapter and reference validation.
 6. No five consecutive authorized market sessions; Ironbeam licensing/retention/rotation and protected storage gate remain unresolved.
 7. Gate 1 MBP/MBO feed-semantic tests (T1–T12, I1–I8), vendor reconstruction and real latency remain outstanding and out of scope for this recorder milestone.
 8. No private archival object-store uploads. Must approve license, retention, access control, encryption, cost, and restore procedures first.
