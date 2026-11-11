@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-11T00:26:34.874443+00:00",
+  "updated_at_utc": "2026-11-11T01:49:19.547318+00:00",
   "completedSessionDate": "2026-11-10",
   "score": 47.0,
   "state": "MIXED",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-10",
-      "close": 7559.75,
-      "ma10": 7570.75,
-      "ma20": 7656.475,
+      "close": 7577.0,
+      "ma10": 7572.475,
+      "ma20": 7657.3375,
       "ma10Prior": 7590.85,
       "ma20Prior": 7666.75,
       "ma10Upsloping": false,
@@ -289,7 +289,7 @@
       }
     },
     "mid": {
-      "members": 1112,
+      "members": 1111,
       "nh": 248,
       "nl": 126,
       "up": 37,
@@ -298,15 +298,15 @@
       "momentum_pct": 51.39,
       "prior": {
         "nh": 221,
-        "nl": 219,
+        "nl": 218,
         "up": 95,
         "down": 41,
-        "breadth_pct": 50.23,
+        "breadth_pct": 50.34,
         "momentum_pct": 69.85
       }
     },
     "small": {
-      "members": 3428,
+      "members": 3429,
       "nh": 569,
       "nl": 653,
       "up": 120,
@@ -315,10 +315,10 @@
       "momentum_pct": 42.7,
       "prior": {
         "nh": 519,
-        "nl": 840,
+        "nl": 841,
         "up": 164,
         "down": 117,
-        "breadth_pct": 38.19,
+        "breadth_pct": 38.16,
         "momentum_pct": 58.36
       }
     },
