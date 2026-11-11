@@ -72,7 +72,7 @@ test('Issue300 scheduler runs S3 coordinator automatically across hours without 
  assert.ok(w.health().recordingActive);
  await w.offer({raw:'hour-2 after backup',msgClass:'market',at:new Date('2026-11-10T22:00:03Z')});
  c.set('2026-11-10T22:00:05Z');
- await w.close();await scheduled.tick();await scheduled.stop();
+ await w.close();await scheduled.stop();await scheduled.tick();
  const head=await coordinator.inventory();
  assert.equal(head.entries.length,2);
  assert.equal(head.lastSeq,w.writer.seq);
