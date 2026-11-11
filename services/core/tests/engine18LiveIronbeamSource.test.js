@@ -69,7 +69,7 @@ test('independent read-only vendor source persists exact ES depth quote trade un
  const binary=Buffer.from([0,255,127,13,10,0]);
  ws.emit('message',binary);
  await source.stop();await writer.close();
- const records=replayRaw(root),markets=records.filter(e=>e.msgClass==='market');
+ const records=replayRaw(root),markets=records.filter(e=>e.msgClass!=='control');
  assert.deepEqual(markets.slice(0,5).map(x=>x.raw),raw);
  assert.deepEqual(Buffer.from(markets[5].raw,'base64'),binary);
  assert.ok(markets.every(x=>x.streamGeneration===1));
@@ -82,6 +82,9 @@ test('independent read-only vendor source persists exact ES depth quote trade un
  const twice=await Promise.all([scanEngine18ReplayBounded(root),scanEngine18ReplayBounded(root)]);
  assert.equal(twice[0].lastSeq,twice[1].lastSeq);
  assert.equal(source.health().framesReceived,6);
+ assert.deepEqual([source.health().frameTypes.depth,source.health().frameTypes.quote,
+  source.health().frameTypes.trade,source.health().frameTypes.unknown,
+  source.health().frameTypes.malformed,source.health().frameTypes.binary],[1,1,1,1,2,1]);
  assert.equal(alerts.length,0);
 }));
 test('real-source worker source reconnects, preserves generation and FEED_GAP without old-stream misattribution',()=>temp(async root=>{
@@ -111,7 +114,9 @@ test('real-source worker source reconnects, preserves generation and FEED_GAP wi
 test('source fails closed if recording cannot acknowledge; private alert has no raw payload',()=>temp(async root=>{
  const io=fixture(),alerts=[];
  let offers=0,failed=false;
- const writer={offer:()=>{offers++;return offers>1?Promise.reject(Error('secret vendor payload')):Promise.resolve({receivedWallNs:'123'});},
+ const writer={offer:()=>{offers++;return Promise.resolve({receivedWallNs:'123'});},
+  capture:args=>Object.freeze({...args,receivedWallNs:'123',receivedMonoNs:'456'}),
+  offerCaptured:()=>{offers++;return offers>1?Promise.reject(Error('secret vendor payload')):Promise.resolve({receivedWallNs:'123'});},
   fail:()=>{failed=true;}};
  const source=new Engine18IronbeamLiveRecorderSource({
   recorder:writer,fetchImpl:io.fetchImpl,WebSocketImpl:io.WebSocketImpl,
