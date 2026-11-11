@@ -51,13 +51,14 @@ export function summarizeFunnelCycles(records, date=null) {
     if(Object.hasOwn(byGate,gate)) byGate[gate]++;
     const failure=(record?.gates||[]).find(g=>g.gate===gate);
     const reason=failure?.reason||"NO_STOPPING_GATE";
-    reasons[reason]=(reasons[reason]||0)+1;
+    const reasonList=[reason,...(Array.isArray(failure?.observed?.blockers)?failure.observed.blockers:[]),...(Array.isArray(failure?.observed?.reasonCodes)?failure.observed.reasonCodes:[])];
+    for(const item of new Set(reasonList.filter(Boolean))) reasons[item]=(reasons[item]||0)+1;
     const id=record?.candidateId;
     const gen=record?.candidateGeneration ?? record?.candidateLifecycleStartTime ?? "unknown-generation";
     const key=id ? gen+"|"+id+"|"+(record?.zoneId||"") : null;
     if(key){
       seen.set(key,true);
-      for(const g of record.gates||[]) if(g.state==="PASS" && distinctByGate[g.gate]) distinctByGate[g.gate].add(key);
+      for(const g of record.gates||[]) if(g.reached!==false && distinctByGate[g.gate]) distinctByGate[g.gate].add(key);
     }
   }
   return {schema:"engine6e.noTradeFunnelSummary.v1",readOnly:true,date,cycles:records.length,distinctCandidates:seen.size,
