@@ -64,6 +64,16 @@ I. Existing LIVE chart as a read-only consumer with max 2 BUY and 2 SELL **displ
 - **Before enabling live raw recording:** owner must verify Ironbeam licensing permits private historical recording, confirm secret rotation, and approve secure durable storage and retention. An isolated component may be developed/tested from synthetic fixtures before permissions are resolved. Do not activate collection or spend money unilaterally.
 - **No additional LIVE chart changes or calibrated probability display during Gate1.**
 
+## Storage discovery and owner confirmation — November 10, 2026
+
+- **Owner explicitly states Ironbeam permits recording** for the project's internal use. Treat this as the owner's confirmation, not an independently examined license document. Do not repeatedly ask the owner to reapprove project development; if exact archival/replay/redistribution terms affect implementation, document a focused question only.
+- **Verified existing Render disk:** service `frye-market-backend-1` (`srv-d2ds5nodl3ps73b7i2og`) has a 100 GB persistent disk `dsk-d6a9f9fgi27c73affbdg` mounted at `/var/data/replay` in workspace `tea-d2d7147diees73fu8sog`.
+- **Do not confuse allocated capacity with free space**: actual free bytes and current disk contents not verified from the available service metadata. No file mutations performed.
+- **Render disk limitation (official Render docs):** an existing disk is accessible only to its attached service instance. A separate background recorder worker cannot mount or share the existing backend disk. Do not attach/reassign/resize existing backend disk or disturb Engine 8/11/replay without independent audit and explicit approval.
+- **Recommended isolation:** dedicated private single-writer recorder worker with its own durable volume and private backup; alternatively a carefully designed storage service/uploader on the existing backend only after formal impact analysis. First estimate real recorder size and existing free capacity, then approve recurring spend. Do not assume the 100 GB disk is available to Engine18.
+- **Status:** this resolves WHERE the owner's existing 100 GB disk is, not a production authorization to record raw data or deploy a recorder.
+- Render service dashboard: https://dashboard.render.com/web/srv-d2ds5nodl3ps73b7i2og ; official limitations: https://render.com/docs/disks
+
 ## Immediate work order — NO new chart changes
 1. Finish independent **review of Gate1 spec**, including its proposed 99.9% fill/trade reconciliation and 100% parity rules; verify Databento semantics against a real pilot before declaring a pass.
 2. Verify Ironbeam per-frame level-index/zero-size/full-image-vs-delta behavior; record shape histograms for full ETH/RTH with safe counters. Already-established 10+10 counts do **not** prove full snapshots.
