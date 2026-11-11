@@ -11,7 +11,8 @@ function ensureId(id){
 }
 export function createEngine18IronbeamV2RecorderRehearsal({
  supervisor,fetchImpl,WebSocketImpl,endpoint=MOCK_ORIGIN,physicalContract=PHYSICAL_ES,
- credentials={username:'MOCK_USER',password:'MOCK_PASS',apiKey:'MOCK_KEY'}
+ credentials={username:'MOCK_USER',password:'MOCK_PASS',apiKey:'MOCK_KEY'},
+ onRecorderFailure=()=>{},openTimeoutMs=5000
 }={}){
  if(endpoint!==MOCK_ORIGIN||typeof fetchImpl!=='function'||typeof WebSocketImpl!=='function')
   throw Error('real Ironbeam transport disabled; synthetic injected transport only');
@@ -19,10 +20,17 @@ export function createEngine18IronbeamV2RecorderRehearsal({
     typeof supervisor.subscription!=='function'||typeof supervisor.socketEvent!=='function')
   throw Error('isolated durable supervisor required');
  if(physicalContract!==PHYSICAL_ES)throw Error('unverified physical contract mapping');
+ if(typeof onRecorderFailure!=='function'||!Number.isInteger(openTimeoutMs)||openTimeoutMs<1||openTimeoutMs>30000)
+  throw Error('invalid private recorder supervision settings');
  let closed=false,current=null,lastGeneration=0;
  const asyncOps=new Set(),errors=[];
- const recordWork=p=>{
-  const tracked=Promise.resolve(p).catch(()=>{errors.push('RECORDER_REHEARSAL_FAILURE');});
+ const recordWork=action=>{
+  let promise;
+  try{promise=typeof action==='function'?action():action;}
+  catch{errors.push('RECORDER_REHEARSAL_FAILURE');try{onRecorderFailure('RECORDER_REHEARSAL_FAILURE');}catch{}return Promise.resolve();}
+  const tracked=Promise.resolve(promise).catch(()=>{
+   errors.push('RECORDER_REHEARSAL_FAILURE');try{onRecorderFailure('RECORDER_REHEARSAL_FAILURE');}catch{}
+  });
   asyncOps.add(tracked);tracked.finally(()=>asyncOps.delete(tracked));return tracked;
  };
  async function request(path,token,method='GET',body){
@@ -41,14 +49,14 @@ export function createEngine18IronbeamV2RecorderRehearsal({
   socket.addEventListener('message',event=>{
    // The ticket is immutable and remains attached to the OLD connection.
    // Do not substitute whichever generation happened to open most recently.
-   recordWork(supervisor.frame(ticket,event.data));
+   recordWork(()=>supervisor.frame(ticket,event.data));
   });
   socket.addEventListener('error',()=>{
-   recordWork(supervisor.socketEvent(ticket,'WS_ERROR',{reason:'TRANSPORT_FAILURE'}));
+   recordWork(()=>supervisor.socketEvent(ticket,'WS_ERROR',{reason:'TRANSPORT_FAILURE'}));
   });
   socket.addEventListener('close',event=>{
    const code=Number.isInteger(event?.code)&&event.code>=1000&&event.code<=4999?event.code:null;
-   recordWork(supervisor.socketEvent(ticket,'DISCONNECTED',{reason:'REMOTE_CLOSE',closeCode:code}));
+   recordWork(()=>supervisor.socketEvent(ticket,'DISCONNECTED',{reason:'REMOTE_CLOSE',closeCode:code}));
   });
  }
  async function connect(){
@@ -66,6 +74,22 @@ export function createEngine18IronbeamV2RecorderRehearsal({
   const ws=new WebSocketImpl(endpoint);
   attachFrame(ws,ticket);
   current={socket:ws,ticket,streamId};lastGeneration=ticket.generation;
+  // A created stream is NOT evidence that its WebSocket has opened.
+  // Never mark subscriptions successful before the transport is ready.
+  try{
+   await new Promise((resolve,reject)=>{
+    let finished=false;
+    const timer=setTimeout(()=>finish(Error('synthetic WS open timeout')),openTimeoutMs);
+    const finish=err=>{if(finished)return;finished=true;clearTimeout(timer);if(err)reject(err);else resolve();};
+    ws.addEventListener('open',()=>finish(null),{once:true});
+    ws.addEventListener('error',()=>finish(Error('synthetic WS open error')),{once:true});
+    ws.addEventListener('close',()=>finish(Error('synthetic WS closed before open')),{once:true});
+   });
+  }catch{
+   recordWork(()=>supervisor.socketEvent(ticket,'WS_ERROR',{reason:'OPEN_FAILED'}));
+   try{ws.close();}catch{}
+   throw Error('synthetic WebSocket unavailable');
+  }
   // Subscription receipts are local controls and never include Bearer tokens.
   try{
    for(const type of SUBS){
@@ -81,7 +105,7 @@ export function createEngine18IronbeamV2RecorderRehearsal({
   }catch{
    // A failed subscription must never leave a silently receiving session.
    // Preserve failure evidence first, then explicitly mark source uncertain.
-   recordWork(supervisor.socketEvent(ticket,'WS_ERROR',{reason:'SUBSCRIPTION_FAILURE'}));
+   recordWork(()=>supervisor.socketEvent(ticket,'WS_ERROR',{reason:'SUBSCRIPTION_FAILURE'}));
    try{ws.close();}catch{}
    throw Error('synthetic subscription failed; source coverage unverified');
   }
