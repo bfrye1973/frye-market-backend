@@ -2,6 +2,7 @@
 // Injection is mandatory for tests; production activation is gated by a separate
 // private worker entrypoint and manager-approved operational evidence.
 import {randomUUID} from 'node:crypto';
+import {classifyIronbeamRawFrame} from './ironbeamV2RecorderAdapter.js';
 const SUBS=Object.freeze(['quotes','depths','trades']);
 const SYMBOL='XCME:ES.Z26';
 const PROVIDER='https://demo.ironbeamapi.com';
@@ -13,7 +14,8 @@ export class Engine18IronbeamLiveRecorderSource{
  constructor({recorder,credentials,fetchImpl,WebSocketImpl,host=PROVIDER,
    retryMs=2000,maxRetryMs=60000,openTimeoutMs=6000,heartbeatTimeoutMs=30000,onAlert=()=>{},
    clockSampler=null}={}){
-  if(!recorder||typeof recorder.offer!=='function'||typeof fetchImpl!=='function'||
+  if(!recorder||typeof recorder.offer!=='function'||typeof recorder.capture!=='function'||
+   typeof recorder.offerCaptured!=='function'||typeof fetchImpl!=='function'||
    typeof WebSocketImpl!=='function'||host!==PROVIDER||
    !credentials||!['username','password','apiKey'].every(k=>typeof credentials[k]==='string'&&credentials[k].length))
    throw Error('isolated recorder, vendor v2 dependencies and private credentials required');
@@ -29,6 +31,7 @@ export class Engine18IronbeamLiveRecorderSource{
   this.pending=new Set();this.timer=null;this.retries=0;this.frames=0;
   this.subscriptions=0;this.disconnections=0;this.alerts=0;this.sourceUncertain=false;
   this.lastFrameWallNs=null;this.lastErrorCode=null;this.connected=false;
+  this.frameTypes={depth:0,quote:0,trade:0,unknown:0,malformed:0,other:0,binary:0};
   this.disconnectedAtMs=null;
  }
  alert(code){
@@ -42,9 +45,9 @@ export class Engine18IronbeamLiveRecorderSource{
   return this.write({raw,rawEncoding:'utf8',msgClass:'control',
    statusCode:control,streamGeneration:gen});
  }
- write(entry){
+ write(entry,capturedReceipt=null){
   let result;
-  try{result=this.recorder.offer(entry);}
+  try{result=capturedReceipt?this.recorder.offerCaptured(capturedReceipt):this.recorder.offer(entry);}
   catch{this.captureFailure();return Promise.reject(Error('RECORDER_WRITE_REJECTED'));}
   const promise=Promise.resolve(result).catch(()=>{
    this.captureFailure();throw Error('RECORDER_WRITE_REJECTED');
@@ -93,9 +96,20 @@ export class Engine18IronbeamLiveRecorderSource{
     const raw=textFrame(event.data);
     if(raw===null){this.captureFailure();return;}
     this.frames++;source.lastMessageAt=Date.now();
-    // Timestamp and write before parse or business logic. No data transformed.
-    void this.write({raw,rawEncoding:typeof raw==='string'?'utf8':'base64',
-     msgClass:'market',statusCode:null,streamGeneration:generation})
+    // Stamp and snapshot ORIGINAL bytes at the source boundary, BEFORE parsing.
+    // Classification changes metadata only, never the raw frame or vendor time.
+    let receipt,classified;
+    try{
+     receipt=this.recorder.capture({raw,rawEncoding:typeof raw==='string'?'utf8':'base64',
+      msgClass:'unknown',statusCode:null,streamGeneration:generation});
+     const shape=classifyIronbeamRawFrame(raw,{streamGeneration:generation});
+     const kind=shape.diagnostic.kind;
+     this.frameTypes[kind]===undefined?this.frameTypes.other++:this.frameTypes[kind]++;
+     if(typeof raw!=='string')this.frameTypes.binary++;
+     classified=Object.freeze({...receipt,
+      msgClass:shape.capture.msgClass,statusCode:shape.capture.statusCode});
+    }catch{this.captureFailure();return;}
+    void this.write(null,classified)
      .then(ack=>{this.lastFrameWallNs=ack.receivedWallNs??null;},()=>{});
    });
    ws.addEventListener('error',()=>{void this.interrupt(source,'WS_ERROR');});
@@ -185,6 +199,7 @@ export class Engine18IronbeamLiveRecorderSource{
    reconnects:Math.max(0,this.generation-1),disconnections:this.disconnections,
    lastFrameWallNs:this.lastFrameWallNs,lastErrorCode:this.lastErrorCode,
    alerts:this.alerts,captureUncertain:this.sourceUncertain,
+   frameTypes:Object.freeze({...this.frameTypes}),
    feedSemantics:'UNVERIFIED',clockQuality:'UNVERIFIED'});
  }
 }
