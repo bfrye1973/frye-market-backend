@@ -1,5 +1,5 @@
 // Engine 18 Gate 1: offline-only, synthetic raw recorder. No live feed integration.
-import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,createReadStream,createWriteStream} from 'node:fs';
+import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,statSync,createReadStream,createWriteStream} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {gzipSync,gunzipSync,createGzip} from 'node:zlib';
 import {pipeline} from 'node:stream/promises';
@@ -124,7 +124,7 @@ async function hashCompressedStreaming(path){
  return {sha256:h.digest('hex'),bytes};
 }
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
@@ -134,12 +134,34 @@ export class Engine18RawRecorder{
   this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
   this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
+  if(boundedInitialization===true)return; // Only use via async openBounded() factory.
+  // Legacy synchronous constructor is a small-fixture compatibility path.
+  // Large archives MUST use bounded initialization to avoid OOM.
+  for(const path of walk(this.root).filter(p=>p.endsWith('.jsonl.gz')||p.endsWith('.jsonl.open'))){
+   if(statSync(path).size>64*1024*1024){
+    this.releaseLock();throw Error('large archive requires bounded recovery factory');
+   }
+  }
   try{
    this.recover();
    if(this.previousUnclean)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP'});
    this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'RECORDER_START'});
   }
   catch(e){this.releaseLock();throw e;}
+ }
+ static async openBounded(options={}){
+  const recorder=new Engine18RawRecorder({...options,boundedInitialization:true});
+  try{
+   const {recoverEngine18Bounded}=await import('./engine18BoundedRecovery.js');
+   const result=await recoverEngine18Bounded({root:recorder.root,calendarVersion:recorder.calendarVersion});
+   recorder.seq=result.lastSeq;
+   recorder.gaps=result.gaps;
+   recorder.previousUnclean=result.previousUnclean;
+   recorder.recoveryMetrics=result.metrics;
+   if(recorder.previousUnclean)recorder.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP'});
+   recorder.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'RECORDER_START'});
+   return recorder;
+  }catch(err){recorder.releaseLock();throw err;}
  }
  recover(){
   let last=0;
