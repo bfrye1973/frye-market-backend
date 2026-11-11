@@ -31,6 +31,7 @@ export class Engine18S3ArchiveCoordinator {
   this.reconcileIntervalMs=reconcileIntervalMs;this.now=now;
   this.cachedInventory=null;this.lastFullReconciliationMs=null;
   this.fullReconciliations=0;this.cachedScans=0;
+  this.localArchiveProofs=new Map();this.skippedVerifiedArchives=0;
  }
  async inventory({expectedLastSeq=null,forceFull=true}={}){
   if(!forceFull&&expectedLastSeq===null&&this.cachedInventory&&
@@ -78,7 +79,9 @@ export class Engine18S3ArchiveCoordinator {
   finally{this.inFlight=null;}
  }
  async _syncClosed(){
+  const initialReconciliations=this.fullReconciliations;
   let inventory=await this.inventory({forceFull:false}),added=0;
+  const fullReconciliationThisScan=this.fullReconciliations!==initialReconciliations;
   const paths=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'));
   const closed=[];this.pendingRotationArchives=0;
   for(const path of paths){
@@ -103,10 +106,25 @@ export class Engine18S3ArchiveCoordinator {
   for(const {path,manifest} of closed){
    const archiveId=relative(this.root,path);
    if(archiveId.startsWith('..')||!/^[-A-Za-z0-9_.\/]+$/.test(archiveId))throw Error('unsafe archive file');
+   const manifestPath=path+'.manifest.json',archStat=statSync(path),manifestStat=statSync(manifestPath);
+   const proof=this.localArchiveProofs.get(path);
+   const known=inventory.entries.find(e=>e.firstSeq===manifest.firstSeq&&e.lastSeq===manifest.lastSeq);
+   if(known&&!fullReconciliationThisScan&&proof&&
+      proof.size===archStat.size&&proof.mtimeMs===archStat.mtimeMs&&
+      proof.manifestSize===manifestStat.size&&proof.manifestMtimeMs===manifestStat.mtimeMs){
+    if(known.archive.plainSha256!==manifest.sha256||known.archive.plainBytes!==archStat.size)
+     throw Error('previously verified archive fingerprint changed');
+    this.skippedVerifiedArchives++;continue;
+   }
    const sourceHash=await fileHash(path);
    if(sourceHash.sha256!==manifest.sha256||sourceHash.bytes!==manifest.bytes)
     throw Error('closed archive mutated after manifest');
-   const manifestPath=path+'.manifest.json',manifestHash=await fileHash(manifestPath);
+   const manifestHash=await fileHash(manifestPath);
+   if(statSync(path).mtimeMs!==archStat.mtimeMs||statSync(path).size!==archStat.size||
+      statSync(manifestPath).mtimeMs!==manifestStat.mtimeMs||statSync(manifestPath).size!==manifestStat.size)
+    throw Error('sealed archive changed during verification');
+   this.localArchiveProofs.set(path,{size:archStat.size,mtimeMs:archStat.mtimeMs,
+    manifestSize:manifestStat.size,manifestMtimeMs:manifestStat.mtimeMs});
    if(manifest.lastSeq<=inventory.lastSeq){
     const recorded=inventory.entries.find(e=>e.firstSeq===manifest.firstSeq&&e.lastSeq===manifest.lastSeq);
     if(!recorded||recorded.archive.plainSha256!==sourceHash.sha256||
@@ -180,6 +198,7 @@ export class Engine18S3ArchiveCoordinator {
    failures:this.failures,lastSuccessAtMs:this.lastSuccessAtMs,pendingRotationArchives:this.pendingRotationArchives,
    remoteArchived:this.cachedInventory?.entries.length??null,
    fullReconciliations:this.fullReconciliations,cachedScans:this.cachedScans,
+   skippedVerifiedArchives:this.skippedVerifiedArchives,
    lastFullReconciliationMs:this.lastFullReconciliationMs,
    lagMs:this.lastSuccessAtMs===null?null:Math.max(0,nowMs-this.lastSuccessAtMs)});
  }
