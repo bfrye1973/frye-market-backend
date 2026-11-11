@@ -16,7 +16,7 @@ export function createEngine18IronbeamV2RecorderRehearsal({
 }={}){
  if(endpoint!==MOCK_ORIGIN||typeof fetchImpl!=='function'||typeof WebSocketImpl!=='function')
   throw Error('real Ironbeam transport disabled; synthetic injected transport only');
- if(!supervisor||typeof supervisor.open!=='function'||typeof supervisor.frame!=='function'||
+ if(!supervisor||typeof supervisor.open!=='function'||typeof supervisor.confirmOpen!=='function'||typeof supervisor.frame!=='function'||
     typeof supervisor.subscription!=='function'||typeof supervisor.socketEvent!=='function')
   throw Error('isolated durable supervisor required');
  if(physicalContract!==PHYSICAL_ES)throw Error('unverified physical contract mapping');
@@ -67,7 +67,7 @@ export function createEngine18IronbeamV2RecorderRehearsal({
   if(typeof auth?.token!=='string'||!auth.token)throw Error('synthetic authentication missing token');
   const created=await request('/v2/stream/create',auth.token);
   const streamId=ensureId(created?.streamId);
-  const {socket:ticket,ack}=supervisor.open({connectionId:'stream_'+streamId});
+  const {socket:ticket,ack}=supervisor.open({connectionId:'stream_'+streamId,deferConnected:true});
   await ack;
   const endpoint='wss://synthetic.ironbeam.invalid/v2/stream/'+encodeURIComponent(streamId)+
    '?token='+encodeURIComponent(auth.token);
@@ -90,6 +90,9 @@ export function createEngine18IronbeamV2RecorderRehearsal({
    try{ws.close();}catch{}
    throw Error('synthetic WebSocket unavailable');
   }
+  // A reserved generation is NOT a connected socket. Persist CONNECTED only
+  // after the WebSocket open event, and before subscription ACKs.
+  await supervisor.confirmOpen(ticket);
   // Subscription receipts are local controls and never include Bearer tokens.
   try{
    for(const type of SUBS){
