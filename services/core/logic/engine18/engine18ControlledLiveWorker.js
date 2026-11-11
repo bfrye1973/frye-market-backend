@@ -101,7 +101,7 @@ export async function runEngine18ControlledRecording({env=process.env,
     clockQuality:'VERIFIED',calendarQuality:'VERIFIED',
     gaps:h.gapCount,rejected:h.rejected,writeFailures:h.failedClosed?1:0
    });
-   if(flags.shouldHalt||!s.active){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));}
+   if(flags.shouldHalt||!s.active||!s.connected){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));}
   },5000);
   // Revalidate host time source periodically; mark collection unsafe on failure.
   clockTimer=setInterval(()=>{
@@ -113,7 +113,8 @@ export async function runEngine18ControlledRecording({env=process.env,
   },60000);
   clockTimer.unref?.();
   stopTimer=setTimeout(()=>{void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));},config.windowMinutes*60000);
-  await source.start();
+  const connected=await source.start();
+  if(connected!==true)throw Error('initial Ironbeam subscription not established');
   return {source,writer,backup,scheduler,stop};
  }catch{
   await stop().catch(()=>{});
