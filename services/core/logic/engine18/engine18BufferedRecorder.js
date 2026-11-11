@@ -3,21 +3,21 @@
 import {Engine18RawRecorder} from './gate1RawRecorder.js';
 import {statfsSync} from 'node:fs';
 export class Engine18BufferedRecorder {
- constructor({root,clock,maxQueued=4096,maxQueueBytes=32*1024*1024,batchSize=256,flushDelayMs=2}={}){
+ constructor({root,clock,maxQueued=4096,maxQueueBytes=32*1024*1024,batchSize=256,flushDelayMs=2,testFault=null}={}){
   if(!Number.isSafeInteger(maxQueued)||maxQueued<1||!Number.isSafeInteger(maxQueueBytes)||maxQueueBytes<256||
      !Number.isSafeInteger(batchSize)||batchSize<1||!Number.isInteger(flushDelayMs)||flushDelayMs<0)throw Error('invalid queue bounds');
-  this.writer=new Engine18RawRecorder({root,clock,provider:'SYNTHETIC'});
+  this.writer=new Engine18RawRecorder({root,clock,provider:'SYNTHETIC',testFault});
   this.maxQueued=maxQueued;this.maxQueueBytes=maxQueueBytes;this.batchSize=batchSize;this.flushDelayMs=flushDelayMs;
   this.pending=[];this.pendingBytes=0;this.received=0;this.recorded=0;this.rejected=0;
-  this.failed=false;this.draining=false;this.closed=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
+  this.failed=false;this.draining=false;this.closed=false;this.closing=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
  }
  capture(args){
-  if(this.failed||this.closed)throw Error('recorder stopped');
+  if(this.failed||this.closed||this.closing)throw Error('recorder stopped');
   return this.writer.capture(args);
  }
  offer(args){return this.offerCaptured(this.capture(args));}
  offerCaptured(receipt){
-  if(this.failed||this.closed)return Promise.reject(Error('recorder stopped'));
+  if(this.failed||this.closed||this.closing)return Promise.reject(Error('recorder stopped'));
   // The receipt was already timestamped at the source boundary.
   if(!receipt||typeof receipt.raw!=='string'||typeof receipt.receivedWallNs!=='string'||typeof receipt.receivedMonoNs!=='string')return Promise.reject(Error('invalid pre-captured receipt'));
   this.received++;this.lastReceiptWallNs=receipt.receivedWallNs;
@@ -69,11 +69,13 @@ export class Engine18BufferedRecorder {
  }
  async close(){
   if(this.closed)return;
+  if(this.closing)throw Error('recorder shutdown already in progress');
+  this.closing=true;
   if(this.timer!==null){clearTimeout(this.timer);this.timer=null;}
   while(this.draining)await new Promise(resolve=>setImmediate(resolve));
   if(this.failed)throw Error('cannot close failed recorder; recover and inspect GAP');
-  await this.flush();
-  await this.writer.closeStreaming();this.closed=true;
+  try{await this.flush();await this.writer.closeStreaming();this.closed=true;}
+  catch{this.failed=true;this.writer.faulted=true;throw Error('recorder close failed; recovery required');}
  }
  // Internal only: never expose this snapshot at an unauthenticated endpoint.
  health(){
