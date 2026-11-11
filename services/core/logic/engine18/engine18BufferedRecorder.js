@@ -15,7 +15,7 @@ export class Engine18BufferedRecorder {
   if(this.failed||this.closed||this.closing)throw Error('recorder stopped');
   return this.writer.capture(args);
  }
- offer(args){return this.offerCaptured(this.capture(args));}
+ offer(args){try{return this.offerCaptured(this.capture(args));}catch(e){return Promise.reject(e);}}
  offerCaptured(receipt){
   if(this.failed||this.closed||this.closing)return Promise.reject(Error('recorder stopped'));
   // The receipt was already timestamped at the source boundary.
