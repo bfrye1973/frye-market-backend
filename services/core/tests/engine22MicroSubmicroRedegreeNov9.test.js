@@ -56,14 +56,16 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  assert.equal(m.anchors.cLowLocalTime,"2026-11-10 10:40 AZ");
  assert.equal(m.anchors.cLowAtUtc,"2026-11-10T17:40:00Z");
  assert.equal(m.anchors.w1StartLow,7492.25);
- assert.equal(m.anchors.newW1High,7560);
- assert.equal(m.anchors.newW1HighLocalTime,"2026-11-10 14:50 AZ");
- assert.equal(m.anchors.newW1HighAtUtc,"2026-11-10T21:50:00Z");
- assert.equal(m.anchors.newW1Length,67.75);
+ assert.equal(m.anchors.newW1High,7625);
+ assert.equal(m.anchors.newW1HighLocalTime,"2026-11-11 07:30 AZ");
+ assert.equal(m.anchors.newW1HighAtUtc,"2026-11-11T14:30:00Z");
+ assert.equal(m.anchors.newW1Length,132.75);
+ assert.equal(m.anchors.priorNewW1HighRevision.price,7560);
+ assert.equal(m.anchors.priorNewW1HighRevision.localTime,"2026-11-10 14:50 AZ");
  assert.equal(m.anchors.newW1CompletionConfirmed,true);
  assert.equal(m.anchors.newW2Low,null);
  assert.equal(m.w2FibMethod,"W2_DOWN_RETRACEMENT_OF_NEW_W1");
- assert.deepEqual(m.w2DownRetracementLevels.map(l=>[l.label,l.price]),[["0.236",7544],["0.382",7534],["0.500",7526.25],["0.618",7518.25],["0.786",7506.75],["1.000",7492.25]]);
+ assert.deepEqual(m.w2DownRetracementLevels.map(l=>[l.label,l.price]),[["0.236",7593.75],["0.382",7574.25],["0.500",7558.75],["0.618",7543],["0.786",7520.75],["1.000",7492.25]]);
  assert.equal(m.w1FibMethod,"PRIOR_CORRECTION_RETRACEMENT_FROM_C_LOW");
  assert.deepEqual(m.w1PriorCorrectionRetracementLevels.map(l=>[l.label,l.price]),[
   ["0.236",7517.75],["0.382",7533.50],["0.500",7546.25],
@@ -71,7 +73,7 @@ test("Submicro black internal W1/W2 owner anchors and W3 ES quarter tick extensi
  ]);
  assert.ok(m.w1PriorCorrectionRetracementLevels.every(l=>l.status==="WATCH"&&l.provisional));
  assert.ok(m.w1LegacyProxyLevels.every(l=>l.status==="SUPERSEDED_RESEARCH"));
- assert.equal(m.anchors.newW1High,7560,"W1 end is owner supplied; prior-correction retracements remain historic only");
+ assert.equal(m.anchors.newW1High,7625,"W1 latest high replaces earlier 7560; historical retracements remain archived");
  assert.deepEqual(m.cDownExtensionLevels.map(l=>[l.label,l.price]),[
   ["0.618",7508.75],["1.000",7473.25],["1.272",7448],
   ["1.618",7416],["2.000",7380.5],["2.618",7323.25]
@@ -111,21 +113,22 @@ test("Post-W2 completed candle touches persist without importing old blue Submic
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
 test("new Submicro W2 retracement touches are downside-only, after W1 high, and retained independently of Micro W5",()=>{
- const w1At=Date.parse("2026-11-10T21:50:00Z");
+ const w1At=Date.parse("2026-11-11T14:30:00Z");
  const early=priceRead(7490,{at:w1At-1000});
  assert(early.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels.every(l=>l.status==="WATCH"));
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),"submicro-w2-current-"));
  try{
  const storePath=path.join(dir,"touches.json");
- const first=priceRead(7550,{at:w1At+60000,storePath});
+ const first=priceRead(7600,{at:w1At+60000,storePath});
  assert(first.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels.every(l=>l.status==="WATCH"));
- const second=priceRead(7530,{at:w1At+120000,storePath});
+ const second=priceRead(7570,{at:w1At+120000,storePath});
  assert.deepEqual(second.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels.map(l=>l.status),
  ["TOUCHED","TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
- assert(second.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.every(l=>l.status==="WATCH"));
- const third=priceRead(7555,{at:w1At+180000,storePath});
+ assert.deepEqual(second.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.map(l=>l.status),
+ ["TOUCHED","WATCH","WATCH","WATCH","WATCH","WATCH"],"Micro W5 retains its independent legitimate touch history");
+ const third=priceRead(7610,{at:w1At+180000,storePath});
  assert.equal(third.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels[0].status,"TOUCHED");
- const oldBar=priceRead(7555,{at:w1At+900000,
+ const oldBar=priceRead(7610,{at:w1At+900000,
   bars:[{time:Math.floor((w1At-600000)/1000),low:7000,high:7600}]});
  assert(oldBar.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels.every(l=>l.status==="WATCH"));
  }finally{fs.rmSync(dir,{recursive:true,force:true})}

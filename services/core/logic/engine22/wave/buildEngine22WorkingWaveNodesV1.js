@@ -94,6 +94,32 @@ function fromModel(root,rule){
       noExecution:true,
     });
   }
+  // Owner Nov 11 correction: retain the earlier Nov 10 W1 high as
+  // superseded history only, never another current Engine2 chart marker.
+  const previousW1=model.anchors.priorNewW1HighRevision;
+  if(previousW1?.status==="SUPERSEDED_BY_OWNER_20261111_W1_FINAL_HIGH"&&
+     tick(previousW1.price)){
+    const local=arizonaMarketTimeUtc(previousW1.localTime);
+    const given=previousW1.atUtc;
+    const conflict=given!=null&&(!utc(given)||
+      (local!==null&&Date.parse(local)!==Date.parse(given)));
+    const marketAtUtc=conflict?null:(utc(given)?new Date(given).toISOString():local);
+    historicalAnchors.push({
+      nodeId:"node-"+sha([rule.degree,model.version,"newW1High","superseded-nov10"]).slice(0,24),
+      waveId:"wave-"+sha([rule.degree,model.version]).slice(0,24),
+      countId:model.version,modelVersion:model.version,degree:rule.degree,
+      sourcePath:"currentWavelength.degrees."+rule.degree+"."+rule.key,
+      anchorField:"priorNewW1HighRevision",label:"W1 superseded ending high",
+      price:previousW1.price,marketAtUtc,
+      ownerArizonaTime:previousW1.localTime??null,
+      sourceRevision:sha([previousW1.price,marketAtUtc,previousW1.localTime??null,given??null]),
+      approvalStatus:"SUPERSEDED",lifecycle:"SUPERSEDED",
+      waveCompletionConfirmed:false,plotAllowed:false,presentationAllowed:false,
+      selectedForResearchDisplay:false,sourceTimestampConflict:conflict,
+      priceBasisStatus:model.priceBasisReconciliation??"UNVERIFIED",
+      noExecution:true,
+    });
+  }
   return {
     degree:rule.degree,modelVersion:model.version,sourcePath:
       "currentWavelength.degrees."+rule.degree+"."+rule.key,

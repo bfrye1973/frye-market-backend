@@ -30,8 +30,12 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
     ["A ending low",7507.25,"2026-11-10T13:40:00.000Z"],
     ["B ending high",7566,"2026-11-10T15:00:00.000Z"],
     ["C ending low / W1 start",7492.25,"2026-11-10T17:40:00.000Z"],
-    ["W1 ending high",7560,"2026-11-10T21:50:00.000Z"],
+    ["W1 ending high",7625,"2026-11-11T14:30:00.000Z"],
   ]);
+  const revisedW1=submicro.find(n=>n.anchorField==="newW1High");
+  assert.equal(revisedW1.ownerArizonaTime,"2026-11-11 07:30 AZ");
+  assert.equal(packet.degrees.submicro.models.find(m=>m.selectedForResearchDisplay).historicalAnchors
+    .some(n=>n.price===7560&&n.approvalStatus==="SUPERSEDED"&&!n.presentationAllowed),true);
   assert.ok([...micro,...submicro].every(n=>n.plotAllowed===false &&
     n.approvalStatus==="RESEARCH"&&n.waveCompletionConfirmed===false&&n.noExecution));
   assert.ok([...micro,...submicro].every(n=>n.presentationAllowed===true));

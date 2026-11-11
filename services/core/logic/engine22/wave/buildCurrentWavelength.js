@@ -597,10 +597,15 @@ export function buildCurrentWavelength({
           cCompletionStatus:"OWNER_MARKED_C_COMPLETE",
           w1StartLow:7492.25,w1StartLocalTime:"2026-11-10 10:40 AZ",
           w1StartAtUtc:"2026-11-10T17:40:00Z",
-          newW1High:7560,newW1HighLocalTime:"2026-11-10 14:50 AZ",
-          newW1HighAtUtc:"2026-11-10T21:50:00Z",
+          newW1High:7625,newW1HighLocalTime:"2026-11-11 07:30 AZ",
+          newW1HighAtUtc:"2026-11-11T14:30:00Z",
+          priorNewW1HighRevision:{
+            price:7560,localTime:"2026-11-10 14:50 AZ",
+            atUtc:"2026-11-10T21:50:00Z",
+            status:"SUPERSEDED_BY_OWNER_20261111_W1_FINAL_HIGH"
+          },
           newW1CompletionConfirmed:true,
-          newW1Length:67.75,
+          newW1Length:132.75,
           newW2Low:null,newW2LowLocalTime:null,
           newW2CompletionConfirmed:false,
           provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
@@ -638,15 +643,16 @@ export function buildCurrentWavelength({
           status:"SUPERSEDED_RESEARCH",provisional:true,touchEvidenceAvailable:false,
           levelType:"SUBMICRO_W1_UP_PREVIOUS_W1_LENGTH_PROXY_ARCHIVED",
         })),
-        // OWNER 2026-11-10: New Submicro W1 completed at ES 7560 at
-        // 14:50 AZ. LOCKED FIB METHOD: W2 retraces THIS W1 advance
-        // (7492.25 -> 7560.00), NEVER the older 85.75-point W1 proxy.
+        // OWNER CORRECTION 2026-11-11: Submicro W1 ended at ES 7625.00
+        // at 07:30 AZ, superseding the Nov 10 14:50 AZ / 7560 mark.
+        // LOCKED FIB METHOD: W2 retraces THIS final W1 advance
+        // (7492.25 -> 7625.00), never the older 85.75-point proxy.
         // Only W2 WATCH retracements are current. W3 requires an owner W2 low.
         w2FibMethod:"W2_DOWN_RETRACEMENT_OF_NEW_W1",
         w2DownRetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
           key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
           label:ratio.toFixed(3),ratio,
-          price:Math.round((7560-(7560-7492.25)*ratio)*4)/4,
+          price:Math.round((7625-(7625-7492.25)*ratio)*4)/4,
           status:"WATCH",provisional:true,touchEvidenceAvailable:false,
           levelType:"SUBMICRO_W2_DOWN_RETRACEMENT_RESEARCH",
         })),
