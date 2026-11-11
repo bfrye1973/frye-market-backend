@@ -1,0 +1,37 @@
+name: Engine18B Gate1 Phase5 Synthetic Operations
+on:
+  push:
+    branches: [engine18b-gate1-phase5-operational-20261111]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18Phase4Backup.js'
+      - 'services/core/logic/engine18/engine18Phase4WorkerBridge.js'
+      - 'services/core/logic/engine18/engine18Phase4SyntheticWorker.js'
+      - 'services/core/logic/engine18/engine18ReceiptClock.js'
+      - 'services/core/logic/engine18/engine18ContinuousBackup.js'
+      - 'services/core/logic/engine18/engine18S3PrivateStore.js'
+      - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
+      - 'services/core/tests/fixtures/engine18Phase5Parent.js'
+      - 'services/core/logic/engine18/gate1RawRecorder.js'
+      - 'services/core/tests/engine18Phase5Operations.test.js'
+      - '.github/workflows/engine18b-gate1-phase5.yml'
+jobs:
+  phase5-synthetic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        timezone: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.timezone }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18S3PrivateStore.js
+      - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
+      - run: node --check services/core/logic/engine18/engine18ReceiptClock.js
+      - run: node --check services/core/logic/engine18/engine18ContinuousBackup.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js services/core/tests/engine18MergeBlockersR1R3.test.js services/core/tests/engine18Phase5Operations.test.js

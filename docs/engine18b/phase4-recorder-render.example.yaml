@@ -1,0 +1,26 @@
+# REVIEW TEMPLATE ONLY. Stored outside repository root; never autodetected.
+# DO NOT apply/provision until manager approval, verified cost and security.
+# Deliberately noncollecting guard exits 78 even if enable flags are modified.
+services:
+  - type: worker
+    name: frye-engine18-recorder-private-proposed
+    runtime: node
+    region: oregon
+    plan: starter
+    branch: engine18-liquidity-intelligence-foundation-20261109
+    autoDeploy: false
+    buildCommand: npm ci
+    startCommand: node services/core/logic/engine18/engine18Phase4DeploymentGuard.js
+    disk:
+      name: engine18-private-events-proposed
+      mountPath: /var/data/engine18-recorder
+      sizeGB: 50
+    envVars:
+      - key: ENGINE18_RAW_CAPTURE_ENABLED
+        value: "0"
+      - key: ENGINE18_PRIVATE_BACKUP_ENABLED
+        value: "0"
+      - key: ENGINE18_CLOCK_QUALITY
+        value: "UNVERIFIED"
+# No secret placeholders, external bucket, actual live socket, public route or
+# existing 100GB production /var/data/replay mount in this proposal.

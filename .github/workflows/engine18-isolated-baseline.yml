@@ -1,0 +1,60 @@
+name: Engine 18 Isolated Baseline Tests
+on:
+  push:
+    branches:
+      - engine18-liquidity-intelligence-foundation-20261109
+    paths:
+      - "services/core/logic/engine18/**"
+      - "services/core/tests/engine18*.test.js"
+      - ".github/workflows/engine18-isolated-baseline.yml"
+  pull_request:
+    paths:
+      - "services/core/logic/engine18/**"
+      - "services/core/tests/engine18*.test.js"
+      - ".github/workflows/engine18-isolated-baseline.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-engine18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Engine 18 demo chart endpoint smoke test (no raw market data logged)
+        run: |
+          node --input-type=module - <<'NODE'
+          const url="https://frye-engine18-liquidity-research.onrender.com/api/engine18/liquidity-zones";
+          const okay=await fetch(url,{headers:{Origin:"https://frye-dashboard.onrender.com"}});
+          if(okay.status!==200)throw Error("E18 chart status "+okay.status);
+          const payload=await okay.json();
+          if(payload.schema!=="engine18.chartLiquidityDemo.v1"||
+             payload.level!==2||payload.executionEligible!==false||
+             payload.displayOnly!==true||!Array.isArray(payload.zones)||
+             payload.zones.length>8)throw Error("E18 chart contract violated");
+          const blocked=await fetch(url);
+          if(blocked.status!==403)throw Error("E18 demo public gate missing");
+          console.log("E18 demo chart contract PASS",
+            JSON.stringify({available:payload.available,
+              zones:payload.zones.length,unauthorizedBlocked:true}));
+          NODE
+      - name: Engine 18 read-only live depth-coverage diagnostic
+        run: |
+          node --input-type=module - <<'NODE'
+          const response=await fetch("https://frye-engine18-liquidity-research.onrender.com/health");
+          if(!response.ok)throw Error("ENGINE18_HEALTH_UNAVAILABLE");
+          const health=await response.json();
+          const s=health.ironbeamLevel2Status||{};
+          const c=s.depthCoverage||{};
+          console.log("E18 LIVE DEPTH COVERAGE",
+            JSON.stringify({state:s.state,validSamples:c.validSamples||0,
+              bidMin:c.bidLevelsMin,bidMax:c.bidLevelsMax,
+              askMin:c.askLevelsMin,askMax:c.askLevelsMax,
+              latestBid:c.latestBidLevels,latestAsk:c.latestAskLevels}));
+          if(!c.validSamples)throw Error("ENGINE18_NO_VALID_BOOK_DEPTH_DIAGNOSTIC");
+          NODE
+      - name: Engine 18 research-only unit tests
+        run: node --test services/core/tests/engine18LiquidityBaseline.test.js services/core/tests/engine18Engine11Adapter.test.js services/core/tests/engine18Replay.test.js services/core/tests/engine18OrderBookResearch.test.js services/core/tests/engine18RithmicFeedContract.test.js services/core/tests/engine18VisibleLiquidityResearch.test.js services/core/tests/engine18IronbeamV3ReadOnly.test.js services/core/tests/engine18IronbeamV2DemoProbe.test.js services/core/tests/engine18IronbeamV2Level2Zones.test.js services/core/tests/engine18IronbeamV2Level2Monitor.test.js

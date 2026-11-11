@@ -1,0 +1,23 @@
+name: Engine18B Gate1 Phase2 Synthetic Preparation
+on:
+  push:
+    branches: [engine18b-gate1-phase2-prep-20261110]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/gate1RawRecorder.js'
+      - 'services/core/logic/engine18/engine18BufferedRecorder.js'
+      - 'services/core/logic/engine18/ironbeamV2RecorderAdapter.js'
+      - 'services/core/tests/engine18Phase2Preparation.test.js'
+      - '.github/workflows/engine18b-gate1-phase2.yml'
+jobs:
+  synthetic-phase2:
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/gate1RawRecorder.js
+      - run: node --check services/core/logic/engine18/engine18BufferedRecorder.js
+      - run: node --check services/core/logic/engine18/ironbeamV2RecorderAdapter.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js
