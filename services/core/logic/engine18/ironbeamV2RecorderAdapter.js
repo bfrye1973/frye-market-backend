@@ -136,42 +136,64 @@ export class SyntheticIronbeamRecorderTap {
  * An injectable synthetic WebSocket constructor for the existing Engine 18
  * monitor's WebSocketImpl seam. No edits to the production monitor are needed.
  * It never creates a connection itself; a synthetic BaseWebSocket is required.
- * Message handlers run only after the raw frame has been durably acknowledged.
+ * Market reader handlers run immediately; raw recording occurs in parallel and errors
+ * are reported separately. No guarantee of durable capture when source cannot pause.
  * Licensed use requires a separate manager-authorized integration/security gate.
  */
 export function createSyntheticRecorderWebSocketImpl(BaseWebSocket,{tap,maxInbound=1024,onFailure=()=>{}}={}){
  if(typeof BaseWebSocket!=='function'||!(tap instanceof SyntheticIronbeamRecorderTap))throw Error('synthetic transport and recorder tap required');
  if(!Number.isInteger(maxInbound)||maxInbound<1)throw Error('invalid synthetic ingress cap');
+ // This is a NONBLOCKING observation shim, not a durable relay. The reader must not depend
+ // on disk throughput. Recorder failure is reported to supervisor while reader continues.
+ let previousConnection=false;
  return class SyntheticRecordingWebSocket{
   constructor(...args){
    this.inner=new BaseWebSocket(...args);
-   this.handlers=[];this.pending=0;this.failed=false;this.queue=Promise.resolve();
+   this.pending=0;this.failed=false;this.queue=Promise.resolve();this.lastControl=Promise.resolve();
+   this.inner.addEventListener('open',()=>{
+    const event=previousConnection?'RECONNECT':'CONNECTED';previousConnection=true;
+    this.recordControl(event);
+   });
+   this.inner.addEventListener('close',()=>this.recordControl('DISCONNECTED'));
+   this.inner.addEventListener('error',()=>this.recordControl('GAP'));
    this.inner.addEventListener('message',e=>{
-    if(this.failed)return;
-    if(this.pending>=maxInbound){this.abort();return;}
-    this.pending++;
-    const source=e.data;
-    this.queue=this.queue.then(()=>tap.onFrame(source))
-      .then(()=>{if(!this.failed)for(const fn of this.handlers)fn(e);})
-      .catch(()=>this.abort())
-      .finally(()=>{this.pending--;});
+    // The raw callback is invoked synchronously and capture() stamps receipt
+    // before classification. No disk wait blocks any existing market reader.
+    if(!this.failed){
+     if(this.pending>=maxInbound)this.abort('RECORDER_INGRESS_OVERFLOW');
+     else{
+      this.pending++;
+      let result;
+      try{result=tap.onFrame(e.data);}
+      catch{this.abort('RECORDER_CAPTURE_FAILED');}
+      if(result){
+       const tracked=Promise.resolve(result).catch(()=>this.abort('RECORDER_WRITE_FAILED'))
+         .finally(()=>{this.pending--;});
+       this.queue=Promise.allSettled([this.queue,tracked]).then(()=>{});
+      }else if(!this.failed)this.pending--;
+     }
+    }
    });
   }
-  abort(){
+  recordControl(code){
+   if(this.failed)return;
+   let work;
+   try{work=tap.onControl(code);}catch{this.abort('RECORDER_CONTROL_FAILED');return;}
+   // Every accepted control event must be acknowledged durably, else recorder
+   // faults; no control raw vendor URLs or credentials are copied.
+   this.lastControl=Promise.resolve(work).catch(()=>this.abort('RECORDER_CONTROL_FAILED'));
+   this.queue=Promise.allSettled([this.queue,this.lastControl]).then(()=>{});
+  }
+  abort(reason){
    if(this.failed)return;
    this.failed=true;
-   tap.recorder.fail('RECEIVE_QUEUE_OVERFLOW_OR_WRITE_ERROR');
-   try{this.inner.close();}catch{}
-   try{onFailure('RECORDER_CAPTURE_FAILED');}catch{}
+   tap.recorder.fail(reason);
+   // Deliberately DO NOT close the market-data reader's socket.
+   // Production recorder will require a separate isolated transport.
+   try{onFailure(reason);}catch{}
   }
-  addEventListener(type,handler,options){
-   if(type==='message'){this.handlers.push(handler);return;}
-   this.inner.addEventListener(type,handler,options);
-  }
-  removeEventListener(type,handler,options){
-   if(type==='message'){this.handlers=this.handlers.filter(fn=>fn!==handler);return;}
-   this.inner.removeEventListener?.(type,handler,options);
-  }
+  addEventListener(type,handler,options){return this.inner.addEventListener(type,handler,options);}
+  removeEventListener(type,handler,options){return this.inner.removeEventListener?.(type,handler,options);}
   send(...args){return this.inner.send(...args);}
   close(...args){return this.inner.close(...args);}
   get readyState(){return this.inner.readyState;}
