@@ -126,13 +126,19 @@ export class SyntheticIronbeamRecorderTap {
   });
  }
  onFrame(frame,{at}={}){return this.persistCaptured(this.captureSource(frame,{at}));}
- async onControl(code,{at}={}){
+ captureControl(code,{at}={}){
   if(code==='CONNECTED'||code==='RECONNECT'){this.generation++;this.connected=true;}
   if(code==='DISCONNECTED')this.connected=false;
   const safe=sanitizedRecorderControl(code,this.generation);
-  const ack=await this.recorder.offer({...safe,at});
-  this.diagnostics.event(code);if(code==='RECONNECT')this.recorder.onReconnect?.();return ack;
+  return Object.freeze({code,receipt:this.recorder.capture({...safe,at})});
  }
+ async persistControl({code,receipt}){
+  const ack=await this.recorder.offerCaptured(receipt);
+  this.diagnostics.event(code);
+  if(code==='RECONNECT')this.recorder.onReconnect?.();
+  return ack;
+ }
+ onControl(code,{at}={}){return this.persistControl(this.captureControl(code,{at}));}
  safeDiagnostics(){return this.diagnostics.summary();}
 }
 
@@ -177,12 +183,12 @@ export function createSyntheticRecorderWebSocketImpl(BaseWebSocket,{tap,maxInbou
   }
   recordControl(code){
    if(this.failed)return;
-   let work;
-   try{work=tap.onControl(code);}catch{this.abort('RECORDER_CONTROL_FAILED');return;}
-   // Every accepted control event must be acknowledged durably, else recorder
-   // faults; no control raw vendor URLs or credentials are copied.
-   this.lastControl=Promise.resolve(work).catch(()=>this.abort('RECORDER_CONTROL_FAILED'));
-   this.queue=Promise.allSettled([this.queue,this.lastControl]).then(()=>{});
+   let captured;
+   try{captured=tap.captureControl(code);}catch{this.abort('RECORDER_CONTROL_FAILED');return;}
+   const work=this.queue.then(()=>tap.persistControl(captured))
+     .catch(()=>this.abort('RECORDER_CONTROL_FAILED'));
+   this.lastControl=work;
+   this.queue=work.then(()=>{});
   }
   abort(reason){
    if(this.failed)return;
