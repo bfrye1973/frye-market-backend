@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - "services/core/logic/journal/**"
+      - "services/core/scripts/auditEngine10BNov9Nov10TwoDayReadOnly.js"
       - "services/core/tests/engine10*.test.js"
       - "services/core/engine10_oct22_offline_acceptance.mjs"
       - "services/core/engine10_seven_real_cutover_preflight.mjs"
@@ -28,6 +29,7 @@ jobs:
           node --check services/core/scripts/preflightEngine10BPrecutoverProvenance.js
           node --check services/core/scripts/applyEngine10BPrecutoverProvenance.js
           node --check services/core/scripts/auditEngine10BCurrentRealAccounting.js
+          node --check services/core/scripts/auditEngine10BNov9Nov10TwoDayReadOnly.js
           node --check services/core/logic/journal/oct22ClassificationMigration.js
           node --check services/core/logic/journal/realPerformanceSections.js
           node --check services/core/engine10_oct22_offline_acceptance.mjs
