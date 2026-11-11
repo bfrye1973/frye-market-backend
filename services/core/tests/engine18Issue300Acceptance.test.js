@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,readdirSync,unlinkSync} from 'node:fs';
+import {mkdtempSync,rmSync,readFileSync,writeFileSync,existsSync,readdirSync,unlinkSync,utimesSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {gzipSync} from 'node:zlib';
@@ -180,4 +180,19 @@ test('Issue300 actual synthetic slow disk commit p99.9, CPU/RSS and maxInflight 
   parentCallbackUsP99:+h.callbackUsP99.toFixed(1),
   scope:'synthetic burst and injected slow fsync; NOT live ES feed'
  }}));
+}));
+
+test('Issue300 stale unmanifested gzip exceeds grace and fails closed despite intact open',()=>temp(async root=>{
+ const {c,coordinator}=setup(root);
+ const fault=stage=>{if(stage==='AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST')throw Error('SIMULATED_CRASH');};
+ const recorder=await Engine18RawRecorder.openBounded({root,clock:c,testFault:fault});
+ recorder.append({raw:'intact original but stuck archive',msgClass:'market'});
+ await assert.rejects(recorder.rotateStreaming(),/SIMULATED_CRASH/);
+ recorder.releaseLock();
+ const relative=readdirSync(root,{recursive:true}).find(x=>x.endsWith('.jsonl.gz'));
+ const gz=join(root,relative);
+ const old=new Date(Date.now()-200000);
+ utimesSync(gz,old,old);
+ await assert.rejects(coordinator.syncClosed(),/private sealed-hour backup failed/);
+ assert.equal(coordinator.health().failures,1);
 }));
