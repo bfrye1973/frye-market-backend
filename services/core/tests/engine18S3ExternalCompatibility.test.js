@@ -40,7 +40,7 @@ test('AWS Smithy SignatureV4 independently matches canonical query and Authoriza
   const b=signed.headers.authorization.match(/Signature=([a-f0-9]+)/)?.[1];
   assert.equal(a,b,'Smithy signature must equal our signature for '+url.search);
  }
- assert.equal(canonicalQueryRFC3986(cases[0]),'a=%21&prefix=with%20space&z=~&z=x%2Ay');
+ assert.equal(canonicalQueryRFC3986(cases[0]),'a=%21&prefix=with%20space&z=x%2Ay&z=~');
 });
 
 test('MinIO real S3 PUT/GET, conditional 412, paginated listing and AES-256 restore',async()=>{
