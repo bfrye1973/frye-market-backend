@@ -1,0 +1,33 @@
+# Engine18 authorized private infrastructure ONLY. No real market-data capture.
+# Approved by owner: one $7/month 0.5c-512mb worker + dedicated 50GB disk
+# (~$12.50/month disk). No R2 resources or real Ironbeam credentials provisioned.
+services:
+  - type: worker
+    name: frye-engine18-private-recorder-standby
+    runtime: node
+    repo: https://github.com/bfrye1973/frye-market-backend
+    branch: engine18b-private-recorder-standby-20261111
+    region: oregon
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: off
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: node services/core/logic/engine18/engine18PrivateStandby.js
+    disk:
+      name: engine18-private-raw-recordings
+      mountPath: /var/data/engine18-recorder
+      sizeGB: 50
+    envVars:
+      - key: ENGINE18_LIVE_CAPTURE_APPROVED
+        value: "NO"
+      - key: ENGINE18_MANAGER_TRIAL_ACCEPTED
+        value: "NO"
+      - key: ENGINE18_CME_CALENDAR_VERIFIED
+        value: "NO"
+      - key: ENGINE18_TRIAL_MINUTES
+        value: "0"
+      - key: ENGINE18_PRIVATE_STANDBY
+        value: "YES"
+# Do not add Ironbeam tokens, R2 credentials or encryption keys until
+# separately authorized operational preparation. No public HTTP endpoint.
+# Main backend 100GB /var/data/replay disk is completely independent.
