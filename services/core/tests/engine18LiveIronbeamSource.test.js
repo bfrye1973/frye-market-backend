@@ -9,6 +9,9 @@ import {verifyEngine18LiveEnvironment} from '../logic/engine18/engine18Controlle
 import {createEngine18ReceiptClock} from '../logic/engine18/engine18ReceiptClock.js';
 import {replayRaw,Engine18RawRecorder} from '../logic/engine18/gate1RawRecorder.js';
 import {scanEngine18ReplayBounded} from '../logic/engine18/engine18BoundedReplayScan.js';
+import {Engine18SyntheticArchiveBackup,MockPrivateEncryptedStore} from '../logic/engine18/engine18Phase4Backup.js';
+import {randomBytes} from 'node:crypto';
+import {verifyEngine18ControlledTrial} from '../logic/engine18/engine18ControlledTrialVerifier.js';
 
 const temp=async fn=>{
  const root=mkdtempSync(join(tmpdir(),'e18-real-source-test-'));
@@ -143,3 +146,36 @@ test('live entrypoint remains disabled with no operational keys; trial cannot to
  env.ENGINE18_RECORDER_DISK='/var/data/replay';
  assert.throws(()=>verifyEngine18LiveEnvironment(env),/refusing shared or non-private/);
 });
+
+test('private end-of-trial full backup restore matches source byte-for-byte and reports only sanitized counts',()=>temp(async root=>{
+ const writer=await Engine18BufferedRecorder.openBounded({root,clock:clock(),
+  provider:'IRONBEAM_V2',allowLiveProvider:true,batchSize:8,flushDelayMs:0});
+ const inputs=['{"d":[{"s":"XCME:ES.Z26","b":[{"sz":0,"l":0}],"a":[]}]}',
+  '{"q":{"bid":"7500.2500"}}','{"tr":[{"p":7500.2500,"sz":3}]}','{malformed'];
+ for(const raw of inputs)await writer.offer({raw,msgClass:'market'});
+ await writer.offer({raw:Buffer.from([0,255,4]),rawEncoding:'base64',msgClass:'unknown'});
+ await writer.offer({raw:'',msgClass:'control',statusCode:'FEED_GAP'});
+ await writer.close();
+ const store=new MockPrivateEncryptedStore({key:randomBytes(32)});
+ const backup=new Engine18SyntheticArchiveBackup({root,store});
+ const uploaded=await backup.backupClosed();
+ assert.equal(uploaded.lastSeq,writer.writer.seq);
+ const restoredRoot=root+'-independent-restore';
+ try{
+  const verified=await verifyEngine18ControlledTrial({
+   recorderRoot:root,restoredRoot,remoteCoordinator:backup,
+   independentLastSeq:writer.writer.seq
+  });
+  assert.equal(verified.byteIdenticalReplay,true);
+  assert.equal(verified.depth,1);assert.equal(verified.quote,1);
+  assert.equal(verified.trade,1);assert.equal(verified.binary,1);
+  assert.equal(verified.sourceGaps,1);
+  assert.equal(verified.vendorDepthSemantics,'UNVERIFIED');
+  assert.ok(!JSON.stringify(verified).includes('7500.2500'));
+ }finally{rmSync(restoredRoot,{recursive:true,force:true});}
+ await assert.rejects(verifyEngine18ControlledTrial({
+  recorderRoot:root,restoredRoot:root+'-wrong-restore',remoteCoordinator:backup,
+  independentLastSeq:writer.writer.seq+1
+ }),/independently pinned/);
+ rmSync(root+'-wrong-restore',{recursive:true,force:true});
+}));
