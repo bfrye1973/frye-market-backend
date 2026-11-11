@@ -120,7 +120,7 @@ test('independent byte fixture and separate-process replay hash',()=>withDir(roo
  const b=new Engine18RawRecorder({root,clock:localClock});b.append({raw:'z',msgClass:'control',streamGeneration:8,at:new Date('2026-11-10T22:00:00Z')});b.close();
  const expected='{"schemaVersion":"engine18.raw.v1","localSeq":1,"tLocalWallNs":"111","tLocalMonoNs":"222","streamGeneration":7,"msgClass":"market","statusCode":null,"raw":" { \\"n\\": 01 } "}\\n'+
  '{"schemaVersion":"engine18.raw.v1","localSeq":2,"tLocalWallNs":"111","tLocalMonoNs":"222","streamGeneration":8,"msgClass":"control","statusCode":null,"raw":"z"}\\n';
- const expectedBytes=Buffer.from(expected.replaceAll('\\n','\n'));
+ const expectedBytes=Buffer.from(expected);
  assert.deepEqual(deterministicReplayBytes(root),expectedBytes);
  const moduleUrl=new URL('../logic/engine18/gate1RawRecorder.js',import.meta.url).href;
  const code=`import {deterministicReplayBytes} from ${JSON.stringify(moduleUrl)};import{createHash}from'node:crypto';process.stdout.write(createHash('sha256').update(deterministicReplayBytes(process.argv[1])).digest('hex'));`;
