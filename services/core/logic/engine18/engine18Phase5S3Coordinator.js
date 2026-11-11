@@ -22,13 +22,22 @@ function durablyRename(src,dest){
  const dir=openSync(dirname(dest),'r');try{fsyncSync(dir);}finally{closeSync(dir);}
 }
 export class Engine18S3ArchiveCoordinator {
- constructor({root,store}={}){
+ constructor({root,store,reconcileIntervalMs=900000,now=()=>Date.now()}={}){
   if(typeof root!=='string'||!(store instanceof Engine18S3PrivateStore))throw Error('private S3 store and root required');
   this.root=resolve(root);this.store=store;this.prefix='engine18/inventory/v1/';
   this.inFlight=null;this.failures=0;this.lastSuccessAtMs=null;this.retries=0;
   this.pendingRotation=new Map();this.pendingRotationArchives=0;
+  if(!Number.isSafeInteger(reconcileIntervalMs)||reconcileIntervalMs<1000||typeof now!=='function')throw Error('invalid inventory reconciliation policy');
+  this.reconcileIntervalMs=reconcileIntervalMs;this.now=now;
+  this.cachedInventory=null;this.lastFullReconciliationMs=null;
+  this.fullReconciliations=0;this.cachedScans=0;
  }
- async inventory({expectedLastSeq=null}={}){
+ async inventory({expectedLastSeq=null,forceFull=true}={}){
+  if(!forceFull&&expectedLastSeq===null&&this.cachedInventory&&
+    this.now()-this.lastFullReconciliationMs<this.reconcileIntervalMs){
+   this.cachedScans++;
+   return this.cachedInventory;
+  }
   const keys=await this.store.listObjectKeys(this.prefix);
   const entries=[];
   for(const key of keys){
@@ -51,7 +60,10 @@ export class Engine18S3ArchiveCoordinator {
    last=entry.lastSeq;prev=entry.entryHash;
   }
   if(expectedLastSeq!==null&&last!==expectedLastSeq)throw Error('pinned independent inventory high-watermark mismatch');
-  return {entries,lastSeq:last,headHash:prev,tailPinned:expectedLastSeq!==null};
+  const snapshot={entries,lastSeq:last,headHash:prev,tailPinned:expectedLastSeq!==null};
+  this.cachedInventory={...snapshot,tailPinned:false};
+  this.lastFullReconciliationMs=this.now();this.fullReconciliations++;
+  return snapshot;
  }
  async syncClosed(){
   if(this.inFlight)return this.inFlight;
@@ -62,7 +74,7 @@ export class Engine18S3ArchiveCoordinator {
   finally{this.inFlight=null;}
  }
  async _syncClosed(){
-  let inventory=await this.inventory(),added=0;
+  let inventory=await this.inventory({forceFull:false}),added=0;
   const paths=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'));
   const closed=[];this.pendingRotationArchives=0;
   for(const path of paths){
@@ -117,10 +129,20 @@ export class Engine18S3ArchiveCoordinator {
     await this.store.uploadClosed({path:p,key:inventoryKey,
      plaintextSha256:entryHash,expectedSize:encoded.length});
    }finally{rmSync(directory,{recursive:true,force:true});}
-   inventory=await this.inventory({expectedLastSeq:entry.lastSeq});added++;
+   // Confirm only the new encrypted chain entry. Never re-download the entire
+   // inventory for every closed hour; full listing is periodic and at startup.
+   const confirmed=await this.store.readSmallEncryptedJson(inventoryKey);
+   if(digest(Buffer.from(JSON.stringify(confirmed)))!==entryHash||
+      confirmed.previousEntryHash!==inventory.headHash||confirmed.lastSeq!==entry.lastSeq)
+    throw Error('new S3 inventory entry verification failed');
+   const validated={...confirmed,entryHash,key:inventoryKey};
+   inventory={entries:[...inventory.entries,validated],lastSeq:entry.lastSeq,
+    headHash:entryHash,tailPinned:false};
+   this.cachedInventory=inventory;
+   added++;
    this.lastSuccessAtMs=Date.now();
   }
-  return {added,remoteArchived:inventory.entries.length,lastSeq:inventory.lastSeq,headHash:inventory.headHash,pendingRotationArchives:this.pendingRotationArchives};
+  return {added,remoteArchived:inventory.entries.length,lastSeq:inventory.lastSeq,headHash:inventory.headHash,pendingRotationArchives:this.pendingRotationArchives,fullReconciliations:this.fullReconciliations};
  }
  async restore({destination,expectedLastSeq}={}){
   if(typeof destination!=='string'||!Number.isSafeInteger(expectedLastSeq)||expectedLastSeq<0)
@@ -152,7 +174,9 @@ export class Engine18S3ArchiveCoordinator {
  health({nowMs=Date.now()}={}){
   return Object.freeze({schema:'engine18.s3.backup.health.v1',inFlight:this.inFlight!==null,
    failures:this.failures,lastSuccessAtMs:this.lastSuccessAtMs,pendingRotationArchives:this.pendingRotationArchives,
-   remoteArchived:null,
+   remoteArchived:this.cachedInventory?.entries.length??null,
+   fullReconciliations:this.fullReconciliations,cachedScans:this.cachedScans,
+   lastFullReconciliationMs:this.lastFullReconciliationMs,
    lagMs:this.lastSuccessAtMs===null?null:Math.max(0,nowMs-this.lastSuccessAtMs)});
  }
 }
