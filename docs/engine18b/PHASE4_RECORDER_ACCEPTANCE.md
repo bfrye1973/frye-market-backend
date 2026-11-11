@@ -87,3 +87,30 @@ Run the isolated Phase 4 workflow: `node --test` on original Gate1, Phase2, Phas
 - Manager may accept the **synthetic-only bounded recovery and mock backup foundation** for an isolated research merge.
 - Manager must independently accept real storage/clock/credentials/restore, worker transport, feed semantics and sustained throughput **before** controlled live operation.
 - Owner's conditional ~$22/month budget permits engineering preparation but **does not authorize purchase/provisioning until technical acceptance and exact cost verification**.
+
+## 8. Verified Phase 4 test evidence — final implementation benchmark
+
+Current verified synthetic implementation head before documentation update: `89c309088eb2df28e688732e27fb91ab101bebca`.
+
+- **Combined Gate 1 + Phase 2 + Phase 3 + Phase 4:** 64 passed, 0 failed, GitHub Actions [Phase 4 reliability run](https://github.com/bfrye1973/frye-market-backend/actions/runs/42958816635).
+- **Existing Engine 18 isolated baseline:** PASSED, [baseline run](https://github.com/bfrye1973/frye-market-backend/actions/runs/42958816562).
+- **Original Gate 1 recorder:** PASSED, [recorder run](https://github.com/bfrye1973/frye-market-backend/actions/runs/42958816729).
+- **Phase 2 synthetic preparation:** PASSED, [Phase 2 run](https://github.com/bfrye1973/frye-market-backend/actions/runs/42958816591).
+
+| Failure or property under test | Synthetic result | Interpretation |
+| --- | --- | --- |
+| 102.5 MiB unclosed JSONL; 24,576 source events | 882.6 ms bounded recovery; sampled RSS 214.9 → 214.7 MiB, buffered remainder 4,371 bytes | Bounded scan tested; **not** a measured multi-GB peak-memory guarantee |
+| 4,096 acknowledged frames and torn 21-byte tail | Valid frames preserved once, partial bytes truncated; recorder GAP on restart; RSS 99.5 → 109.5 MiB | Acknowledged sequence continuity verified |
+| Corrupted gzip, missing last archived segment | Fail closed on SHA-256 or high-watermark mismatch | No silent acceptance of missing acknowledged tail |
+| Encrypted mock backup upload transient failures | Automatic retries, archive/manifest checksum verification, restored replay matches source | No real cloud bucket yet; mock encryption and inventory only |
+| Remote missing/corrupted ciphertext or inventory tail | Reject restore and flag integrity/inventory mismatch | Not a real durable object-store SLA |
+| 20,000 source frames to separate child worker | 5,820.7 ms = **3,436 frames/sec**; parent callback p95 **6.3 µs**, p99 **21.8 µs** | Synthetic IPC callback latency, not live market-reader lag or guaranteed cash-open throughput |
+| 20,000 Phase 2 synthetic frames in shared run | 5,515.3 ms = **3,626 frames/sec**, 1.27 MB/sec | Workload/runner dependent |
+| Disk-full, partial group writes, queue overflow | Unacknowledged group rejected, restart preserves integrity/GAP evidence | Synthetic fault injection, not a physical disk-full experiment |
+| Reader independence and source ordering | Existing reader unchanged; synthetic child IPC parent does not wait on disk/fsync | Real source transport still requires proof |
+| Health/clock/session/backup states | Strict safe status codes, 70% disk warning, 80% stop, 90% queue stop, unverified clock/calendar ineligible | Policy simulated, not wired to production alerts |
+| Phase 4 deployment guard | Exits 78 even when raw-capture flag enabled | Explicit prohibition on accidental production activation |
+
+**Verification limits:** RSS points above are snapshots, not sampled peak or hard heap limits. 102.5 MiB synthetic recovery meets the large fixture gate; it does not prove arbitrary multi-GB days-long recovery, high sustained disk wear tolerance, remote durability, or independently reconciled Ironbeam Level 2 reconstruction. Gate 1 operational acceptance remains separate.
+
+**Pricing checked against current public provider pages:** Render $7 entry worker and $0.25/GB-month SSD; Cloudflare R2 Standard $0.015/GB-month above first 10 GB-month and Class A/B operations beyond free thresholds. The estimate is not a fixed-cost guarantee; if actual metering, taxes or required compute exceeds the conditional ~$22/month owner budget, get an updated explicit owner decision **before provisioning**.
