@@ -2,12 +2,12 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-10T22:30:26.734178+00:00",
+  "updated_at_utc": "2026-11-11T00:26:34.874443+00:00",
   "completedSessionDate": "2026-11-10",
   "score": 47.0,
   "state": "MIXED",
   "breadthScore": 53.0,
-  "momentumScore": 40.9,
+  "momentumScore": 41.0,
   "sectorCards": [
     {
       "sector": "Communication Services",
@@ -47,12 +47,12 @@
     },
     {
       "sector": "Financials",
-      "breadth_pct": 56.02,
-      "momentum_pct": 51.79,
+      "breadth_pct": 56.28,
+      "momentum_pct": 52.73,
       "nh": 121,
-      "nl": 95,
+      "nl": 94,
       "up": 29,
-      "down": 27
+      "down": 26
     },
     {
       "sector": "Healthcare",
@@ -204,12 +204,12 @@
       "symbol": "ES",
       "available": true,
       "state": "RED",
-      "sessionDate": "2026-11-09",
-      "close": 7555.0,
-      "ma10": 7590.85,
-      "ma20": 7666.75,
-      "ma10Prior": 7611.025,
-      "ma20Prior": 7681.775,
+      "sessionDate": "2026-11-10",
+      "close": 7559.75,
+      "ma10": 7570.75,
+      "ma20": 7656.475,
+      "ma10Prior": 7590.85,
+      "ma20Prior": 7666.75,
       "ma10Upsloping": false,
       "ma20Upsloping": false
     },
@@ -257,11 +257,11 @@
     "all": {
       "members": 5470,
       "nh": 990,
-      "nl": 869,
+      "nl": 868,
       "up": 174,
-      "down": 218,
-      "breadth_pct": 53.25,
-      "momentum_pct": 44.39,
+      "down": 217,
+      "breadth_pct": 53.28,
+      "momentum_pct": 44.5,
       "prior": {
         "nh": 890,
         "nl": 1248,
@@ -325,11 +325,11 @@
     "unknown": {
       "members": 19,
       "nh": 3,
-      "nl": 4,
+      "nl": 3,
       "up": 1,
-      "down": 2,
-      "breadth_pct": 42.86,
-      "momentum_pct": 33.33,
+      "down": 1,
+      "breadth_pct": 50.0,
+      "momentum_pct": 50.0,
       "prior": {
         "nh": 2,
         "nl": 6,
