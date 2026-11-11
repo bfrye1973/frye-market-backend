@@ -149,7 +149,7 @@ test('S3-compatible mock SigV4 encrypted immutable object round trip with key ID
  assert.equal(result.sha256,sha);
  assert.deepEqual(readFileSync(result.tempPath),body);
  await assert.rejects(s3.uploadClosed({path:archive,key:m.key,
-  plaintextSha256:sha,expectedSize:body.length}),/HTTP 412/);
+  plaintextSha256:sha,expectedSize:body.length}),/conflicts/);
  await assert.rejects(s3.restoreClosed({key:m.key,destination:join(root,'wrong'),
   expected:{...m,keyId:'other-key'}}),/versioned restore key/);
 }));
@@ -236,4 +236,32 @@ test('sustained 24000 mixed synthetic ES depth/quote/trade frames across three h
   completedArchives:remote.listInventory().length,backupFailures:background.health().failures
  }}));
  await background.stop();
+}));
+
+test('S3 retry verifies remote exact ciphertext after PUT succeeds but ACK is lost',()=>withRoot(async root=>{
+ const body=Buffer.from('closed gzip fixture original bytes');
+ const path=join(root,'sealed.gz');writeFileSync(path,body);
+ const plain=createHash('sha256').update(body).digest('hex');
+ const objects=new Map();let first=true;
+ const fetchImpl=async(url,init)=>{
+  const key=url.pathname;
+  if(init.method==='PUT'){
+   if(objects.has(key))return new Response(null,{status:412});
+   const chunks=[];for await(const c of init.body)chunks.push(Buffer.from(c));
+   objects.set(key,Buffer.concat(chunks));
+   if(first){first=false;return new Response(null,{status:503});}
+   return new Response(null,{status:200});
+  }
+  if(init.method==='GET')return objects.has(key)?
+   new Response(objects.get(key),{status:200}):new Response(null,{status:404});
+  return new Response(null,{status:400});
+ };
+ const store=new Engine18S3PrivateStore({endpoint:'https://mock-private.r2.example',bucket:'private',
+  accessKeyId:'mock-key',secretAccessKey:'mock-secret-key',keyId:'version-2',
+  encryptionKey:randomBytes(32),fetchImpl,maxRetries:3});
+ const record=await store.uploadClosed({path,key:'sealed/test.gz',plaintextSha256:plain,expectedSize:body.length});
+ assert.equal(objects.size,1);
+ assert.equal(record.keyId,'version-2');
+ const restored=await store.restoreClosed({key:record.key,destination:join(root,'output'),expected:record});
+ assert.deepEqual(readFileSync(restored.tempPath),body);
 }));
