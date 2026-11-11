@@ -8,7 +8,7 @@ export class Engine18BufferedRecorder {
      !Number.isSafeInteger(batchSize)||batchSize<1||!Number.isInteger(flushDelayMs)||flushDelayMs<0)throw Error('invalid queue bounds');
   this.writer=writer??new Engine18RawRecorder({root,clock,provider:'SYNTHETIC',testFault});
   this.maxQueued=maxQueued;this.maxQueueBytes=maxQueueBytes;this.batchSize=batchSize;this.flushDelayMs=flushDelayMs;
-  this.pending=[];this.pendingBytes=0;this.received=0;this.recorded=0;this.rejected=0;
+  this.pending=[];this.pendingBytes=0;this.inflightCount=0;this.inflightBytes=0;this.received=0;this.recorded=0;this.rejected=0;
   this.failed=false;this.draining=false;this.closed=false;this.closing=false;this.timer=null;this.lastReceiptWallNs=null;this.reconnects=0;
   this.batchCommitSamplesUs=[];this.maxQueueDepth=0;this.batchCommitCount=0;
  }
@@ -28,13 +28,14 @@ export class Engine18BufferedRecorder {
   if(!receipt||typeof receipt.raw!=='string'||typeof receipt.receivedWallNs!=='string'||typeof receipt.receivedMonoNs!=='string')return Promise.reject(Error('invalid pre-captured receipt'));
   this.received++;this.lastReceiptWallNs=receipt.receivedWallNs;
   const bytes=Buffer.byteLength(receipt.raw,'utf8')+384;
-  if(this.pending.length>=this.maxQueued||this.pendingBytes+bytes>this.maxQueueBytes){
+  if(this.pending.length+this.inflightCount>=this.maxQueued||
+     this.pendingBytes+this.inflightBytes+bytes>this.maxQueueBytes){
    this.rejected++;this.fail('BACKPRESSURE');
    return Promise.reject(Error('recorder backpressure; no acknowledgment issued'));
   }
   return new Promise((resolve,reject)=>{
    this.pending.push({receipt,bytes,resolve,reject});this.pendingBytes+=bytes;
-   this.maxQueueDepth=Math.max(this.maxQueueDepth,this.pending.length);
+   this.maxQueueDepth=Math.max(this.maxQueueDepth,this.pending.length+this.inflightCount);
    if(this.pending.length>=this.batchSize)this.schedule(true);
    else this.schedule(false);
   });
@@ -62,6 +63,7 @@ export class Engine18BufferedRecorder {
    while(this.pending.length){
     const batch=this.pending.splice(0,this.batchSize);
     const bytes=batch.reduce((n,e)=>n+e.bytes,0);this.pendingBytes-=bytes;
+    this.inflightCount+=batch.length;this.inflightBytes+=bytes;
     try{
      const started=process.hrtime.bigint();
      const acknowledgments=await this.writer.appendBatch(batch.map(x=>x.receipt));
@@ -75,6 +77,8 @@ export class Engine18BufferedRecorder {
     }catch{
      batch.forEach(e=>e.reject(Error('group commit failed; no acknowledgment')));
      this.fail('WRITE_FAILED');throw Error('group commit failed');
+    }finally{
+     this.inflightCount-=batch.length;this.inflightBytes-=bytes;
     }
    }
   }finally{this.draining=false;}
@@ -99,7 +103,8 @@ export class Engine18BufferedRecorder {
    batchCommitCount:this.batchCommitCount,commitLatencyUsP999:p999,
    maxQueueDepth:this.maxQueueDepth,workerRssBytes:process.memoryUsage().rss,
    workerCpuUserUs:process.cpuUsage().user,workerCpuSystemUs:process.cpuUsage().system,
-   received:this.received,recorded:this.recorded,unacknowledged:this.pending.length,rejected:this.rejected,
+   received:this.received,recorded:this.recorded,unacknowledged:this.pending.length+this.inflightCount,
+   pendingBytes:this.pendingBytes+this.inflightBytes,rejected:this.rejected,
    gapCount:this.writer.gaps,bytesWritten:this.writer.bytes,lastReceivedWallNs:this.lastReceiptWallNs,
    diskFreeBytes,diskTotalBytes,clockOffsetStatus:'UNVERIFIED',reconnects:this.reconnects,failedClosed:this.failed});
  }

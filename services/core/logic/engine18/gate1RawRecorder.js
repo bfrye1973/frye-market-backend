@@ -124,10 +124,11 @@ async function hashCompressedStreaming(path){
  return {sha256:h.digest('hex'),bytes};
 }
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false,allowLiveProvider=false}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
-  if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
+  if(provider!=='SYNTHETIC'&&!(provider==='IRONBEAM_V2'&&allowLiveProvider===true))
+   throw Error('live raw collection disabled pending manager operational authorization');
   if(testFault!==null&&typeof testFault!=='function')throw Error('testFault must be function');
   this.testFault=testFault;
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;this.closed=false;
@@ -258,12 +259,17 @@ export class Engine18RawRecorder{
   if(statusCode!==null&&!/^[A-Z_]{1,40}$/.test(statusCode))throw Error('unsafe status code');
   const payload=encodeRaw(raw,rawEncoding);
   if(at!==undefined&&(!(at instanceof Date)||!Number.isFinite(at.getTime())))throw Error('invalid receipt time');
-  const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):String(this.clock.wallNs());
-  const receivedMonoNs=String(this.clock.monoNs());
+  const clockSample=at===undefined&&typeof this.clock.capture==='function'?this.clock.capture():null;
+  const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):
+   String(clockSample?.receivedWallNs??this.clock.wallNs());
+  const receivedMonoNs=String(clockSample?.receivedMonoNs??this.clock.monoNs());
   if(!/^\d+$/.test(receivedWallNs)||!/^\d+$/.test(receivedMonoNs))throw Error('invalid receipt clock');
   const receiptDate=new Date(Number(BigInt(receivedWallNs)/1000000n));
   if(!Number.isFinite(receiptDate.getTime()))throw Error('invalid receipt wall time');
-  return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate});
+  return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate,
+   ...(clockSample?{receiptClockSource:clockSample.receiptTimeSource,
+    receiptPrecision:clockSample.receiptPrecision,clockQuality:clockSample.clockQuality,
+    rawHostWallObservedNs:clockSample.rawHostWallObservedNs}:{})});
  }
  append(args){return this.appendReceived(this.capture(args));}
  appendReceived(receipt,token=null){
