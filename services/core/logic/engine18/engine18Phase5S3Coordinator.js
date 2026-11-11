@@ -60,6 +60,10 @@ export class Engine18S3ArchiveCoordinator {
    last=entry.lastSeq;prev=entry.entryHash;
   }
   if(expectedLastSeq!==null&&last!==expectedLastSeq)throw Error('pinned independent inventory high-watermark mismatch');
+  if(this.cachedInventory&&last<this.cachedInventory.lastSeq)
+   throw Error('remote inventory regressed below previously verified high-watermark');
+  if(this.cachedInventory&&last===this.cachedInventory.lastSeq&&prev!==this.cachedInventory.headHash)
+   throw Error('remote inventory head changed for same acknowledged sequence');
   const snapshot={entries,lastSeq:last,headHash:prev,tailPinned:expectedLastSeq!==null};
   this.cachedInventory={...snapshot,tailPinned:false};
   this.lastFullReconciliationMs=this.now();this.fullReconciliations++;
