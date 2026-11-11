@@ -28,11 +28,17 @@ export class Engine18IronbeamLiveRecorderSource{
   this.retryMs=retryMs;this.maxRetryMs=maxRetryMs;this.openTimeoutMs=openTimeoutMs;
   this.heartbeatTimeoutMs=heartbeatTimeoutMs;
   this.clockSampler=clockSampler;this.current=null;this.generation=0;this.active=false;
-  this.pending=new Set();this.timer=null;this.retries=0;this.frames=0;
+  this.pending=new Set();this.sourceOps=new Set();this.timer=null;this.retries=0;this.frames=0;
   this.subscriptions=0;this.disconnections=0;this.alerts=0;this.sourceUncertain=false;
   this.lastFrameWallNs=null;this.lastErrorCode=null;this.connected=false;
   this.frameTypes={depth:0,quote:0,trade:0,unknown:0,malformed:0,other:0,binary:0};
   this.disconnectedAtMs=null;
+ }
+ trackSourceOp(promise){
+  const task=Promise.resolve(promise).catch(()=>this.captureFailure());
+  this.sourceOps.add(task);
+  void task.finally(()=>this.sourceOps.delete(task)).catch(()=>{});
+  return task;
  }
  alert(code){
   this.lastErrorCode=code;this.alerts++;
@@ -66,7 +72,7 @@ export class Engine18IronbeamLiveRecorderSource{
   const response=await this.fetchImpl(PROVIDER+path,{method,headers:{
    Accept:'application/json',...(body?{'Content-Type':'application/json'}:{}),
    ...(token?{Authorization:'Bearer '+token}:{})},
-   ...(body?{body:JSON.stringify(body)}:{})});
+   ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(8000)});
   if(!response?.ok)throw Error('VENDOR_HTTP_REFUSED');
   const result=await response.json();
   if(result?.status==='ERROR')throw Error('VENDOR_REJECTED');
@@ -112,9 +118,9 @@ export class Engine18IronbeamLiveRecorderSource{
     void this.write(null,classified)
      .then(ack=>{this.lastFrameWallNs=ack.receivedWallNs??null;},()=>{});
    });
-   ws.addEventListener('error',()=>{void this.interrupt(source,'WS_ERROR');});
-   ws.addEventListener('close',e=>{void this.interrupt(source,'DISCONNECTED',
-    Number.isInteger(e?.code)?e.code:null);});
+   ws.addEventListener('error',()=>{this.trackSourceOp(this.interrupt(source,'WS_ERROR'));});
+   ws.addEventListener('close',e=>{this.trackSourceOp(this.interrupt(source,'DISCONNECTED',
+    Number.isInteger(e?.code)?e.code:null));});
    await new Promise((resolve,reject)=>{
     let completed=false;const done=err=>{
      if(completed)return;completed=true;clearTimeout(timer);err?reject(err):resolve();};
@@ -146,7 +152,7 @@ export class Engine18IronbeamLiveRecorderSource{
     if(!source.closed&&this.current===source&&this.active&&
        Date.now()-source.lastMessageAt>this.heartbeatTimeoutMs){
       this.alert('IRONBEAM_SOURCE_STALE');
-      void this.interrupt(source,'HEARTBEAT_TIMEOUT');
+      this.trackSourceOp(this.interrupt(source,'HEARTBEAT_TIMEOUT'));
     }
    },Math.max(5,Math.min(5000,this.heartbeatTimeoutMs)));
    source.watchdog.unref?.();
@@ -190,6 +196,7 @@ export class Engine18IronbeamLiveRecorderSource{
    await this.record('DISCONNECTED',source.generation,{
     connectionId:source.connectionId,reason:'OPERATOR_STOP',closeCode:1000});
   }
+  await Promise.allSettled([...this.sourceOps]);
   await Promise.allSettled([...this.pending]);
  }
  health(){
