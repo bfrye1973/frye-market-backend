@@ -43,7 +43,8 @@ export async function runEngine18ControlledRecording({env=process.env,
  const clock=createEngine18ReceiptClock();
  const writer=await Engine18BufferedRecorder.openBounded({
   root:config.disk,clock,maxQueued:4096,maxQueueBytes:32*1024*1024,
-  batchSize:128,flushDelayMs:2
+  batchSize:128,flushDelayMs:2,provider:'IRONBEAM_V2',
+  allowLiveProvider:true
  });
  const encryptedStore=new Engine18S3PrivateStore({
   endpoint:env.ENGINE18_R2_ENDPOINT,bucket:env.ENGINE18_R2_BUCKET,
