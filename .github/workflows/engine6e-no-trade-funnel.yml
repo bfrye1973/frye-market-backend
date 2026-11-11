@@ -21,4 +21,4 @@ jobs:
           node-version: '22'
       - name: Run read-only funnel tests
         working-directory: services/core
-        run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js
+        run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js
