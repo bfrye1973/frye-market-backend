@@ -66,7 +66,7 @@ export class Engine18SyntheticReadinessSupervisor{
   if(clockSampler!==null&&typeof clockSampler!=='function')throw Error('clock sampler must be a function');
   this.clockSampler=clockSampler;
   this.writer=new Engine18BufferedRecorder({root,clock,maxQueued,batchSize,flushDelayMs});
-  this.generation=0;this.sockets=new Map();this.sourceGapMarked=new Set();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;
+  this.generation=0;this.sockets=new Map();this.sourceGapMarked=new Set();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;this.clockTimer=null;
  }
  enqueue(fn){
   const p=this.chain.then(fn);
@@ -160,6 +160,13 @@ export class Engine18SyntheticReadinessSupervisor{
    this.sampleCount++;return result;
   });
  }
- async close(){await this.chain;if(this.failed)throw Error('failed recorder cannot cleanly stop');await this.writer.close();}
+ startClockMonitoring({intervalMs=60000}={}){
+  if(!this.started||this.failed||this.clockTimer)throw Error('clock monitor unavailable');
+  if(!Number.isInteger(intervalMs)||intervalMs<1||intervalMs>3600000)throw Error('invalid clock monitoring interval');
+  this.clockTimer=setInterval(()=>{void this.clockSample().catch(()=>{});},intervalMs);
+  this.clockTimer.unref?.();
+ }
+ stopClockMonitoring(){if(this.clockTimer){clearInterval(this.clockTimer);this.clockTimer=null;}}
+ async close(){this.stopClockMonitoring();await this.chain;if(this.failed)throw Error('failed recorder cannot cleanly stop');await this.writer.close();}
  health(){return Object.freeze({...this.writer.health(),generationCount:this.generation,clockSamples:this.sampleCount});}
 }
