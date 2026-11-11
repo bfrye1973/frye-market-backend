@@ -9,7 +9,7 @@ function summarizeDepth(payload){
  const summary={bidCount:0,askCount:0,zeroSize:0,levelIndexCount:0,missingIndex:0,nonArraySides:0};
  const candidates=[];
  const d=payload.d;
- if(Array.isArray(d))candidates.push(...d.filter(isObject));
+ if(Array.isArray(d)){candidates.push(...d.filter(isObject));if(!candidates.length)summary.nonArraySides++;}
  else if(isObject(d))candidates.push(d);
  else{summary.nonArraySides++;return summary;}
  for(const ob of candidates){
