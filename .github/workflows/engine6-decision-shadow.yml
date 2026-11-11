@@ -1,0 +1,157 @@
+name: Engine6 Strategy1 Stages1-3 Baseline and Shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine6/evaluateZoneRotationDecision.js"
+      - "services/core/tests/engine6ZoneRotationDecision.test.js"
+      - "services/core/tests/engine6PhaseD3FocusedCorrection.test.js"
+      - "services/core/tests/engine6ModularBoundaries.test.js"
+      - "services/core/tests/engine6ApprovalLockExtraction.test.js"
+      - "services/core/tests/engine6Stage4PermissionGate.test.js"
+      - "services/core/tests/engine6Stage4ScenarioAcceptance.test.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/logic/engine6/**"
+      - "services/core/logic/engine6/strategy1PermissionContract.js"
+      - ".github/workflows/engine6-decision-shadow.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  phase4-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Historical Phase4 baseline — record failures, do not rewrite tests
+        shell: bash
+        run: |
+          set +e
+          node --test services/core/tests/engine6Strategy1Phase4.test.js > phase4-baseline.log 2>&1
+          code=$?
+          cat phase4-baseline.log
+          echo "PHASE4_BASELINE_EXIT_CODE=$code" >> "$GITHUB_STEP_SUMMARY"
+          echo '### Historical Phase4 baseline' >> "$GITHUB_STEP_SUMMARY"
+          echo '\`\`\`text' >> "$GITHUB_STEP_SUMMARY"
+          tail -55 phase4-baseline.log >> "$GITHUB_STEP_SUMMARY"
+          echo '\`\`\`' >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+      - name: Current Phase4 focused tests
+        run: |
+          node --test services/core/tests/engine6Strategy1Qualification.phaseD3.test.js
+  isolated-decision:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax checks
+        run: |
+          node --check services/core/logic/engine6/evaluateZoneRotationDecision.js
+          node --check services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Read-only Engine12 Oct21 Replay times availability
+        if: always()
+        shell: bash
+        run: |
+          curl --max-time 20 -sS -w '\nHTTP_STATUS:%{http_code}\n' "https://frye-market-backend-1.onrender.com/api/v1/replay/es/times?date=2026-10-21" | head -c 12000
+      - name: Read-only Oct21 Replay sample keys
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request
+          u="https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time=0652"
+          try:
+            with urllib.request.urlopen(u,timeout=20) as r:
+              d=json.load(r)
+            print("REPLAY_SAMPLE_ROOT_KEYS",list(d.keys()))
+            for k,v in d.items():
+              if isinstance(v,dict): print("REPLAY_SAMPLE_CHILD",k,list(v.keys())[:60])
+            print("REPLAY_SAMPLE_HEAD",json.dumps(d,default=str)[:1600])
+          except Exception as e: print("REPLAY_SAMPLE_ERROR",repr(e))
+          PY
+      - name: Read-only Oct21 Replay Engine6 evidence window
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json
+          for t in ("0640","0643","0647","0649","0652","0655","0658","0702","0704","0707","0710"):
+            try:
+              u=f"https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time={t}"
+              with urllib.request.urlopen(u,timeout=18) as r:d=json.load(r)
+              s=d.get("strategies",{}).get("intraday_scalp@10m",{})
+              p=s.get("permission",{}) or {}
+              paper=p.get("paper",{}) or {}
+              e26=s.get("engine26LocationCandidate",{}) or {}
+              e3=((s.get("confluence",{}) or {}).get("context",{}) or {}).get("reaction",{}).get("paperScalpReaction",{}) or {}
+              e4=((s.get("confluence",{}) or {}).get("context",{}) or {}).get("volume",{}).get("engine4AuthorizedReactionParticipation",{}) or {}
+              out=dict(time=t,price=d.get("currentPrice"),candidate=e26.get("candidateId"),zone=e26.get("zoneId"),candidateStatus=e26.get("status"),candidateDirection=e26.get("direction"),generation=e26.get("candidateLifecycleStartTime"),e3direction=e3.get("direction"),e3qualified=e3.get("engine3Strategy1QualifiedForEngine6"),e3reaction=e3.get("reactionState"),e4direction=e4.get("direction"),e4confirmed=e4.get("participationConfirmed"),e4allowed=e4.get("allowed"),permission=paper.get("decision"),allowed=paper.get("allowed"),locked=paper.get("locked"),blockers=paper.get("blockers"),e26b=(s.get("engine26ProposedGeometry") or {}).get("status"),e7=(s.get("engine7SizingPreview") or {}).get("finalContracts"),e8=(s.get("engine8PaperOrder") or {}).get("status"),stratKeys=list(s.keys())[:90] if t=="0652" else None)
+              print("ES_REPLAY_POINT",json.dumps(out,default=str)[:2900])
+            except Exception as e:print("ES_REPLAY_ERROR",t,repr(e))
+          PY
+      - name: Replay audit Engine3 versus Engine22 timing October21
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,json
+          for t in ("0640","0643","0647","0649","0652","0655","0658","0702","0704","0707","0710"):
+            try:
+              with urllib.request.urlopen(f"https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-10-21&time={t}",timeout=15) as r:d=json.load(r)
+              s=d.get("strategies",{}).get("intraday_scalp@10m",{})
+              rx=((s.get("confluence") or {}).get("context") or {}).get("reaction") or {}
+              e3=rx.get("paperScalpReaction") or {}
+              wave=s.get("engine22WaveStrategy") or {}
+              w=(wave.get("currentWavelength") or {}).get("degrees") or {}
+              o={"time":t,"price":d.get("currentPrice"),"e3":{k:e3.get(k) for k in ("direction","quality","reactionState","authorizedReactionState","engine3Strategy1QualifiedForEngine6","reactionConfirmed","evaluationAuthorized","allowed","blockers","reasonCodes","oneMinute","fiveMinute","fastTenMinute","canonical","diagnostics")},"reactionKeys":list(rx.keys()),"e3Keys":list(e3.keys()),"waveDegrees":list(w.keys()),"submicro":{k:(w.get("submicro") or {}).get(k) for k in ("activeWave","direction","state","stage")},"micro":{k:(w.get("micro") or {}).get(k) for k in ("activeWave","direction","state","stage")}}
+              print("AUDIT_E3",json.dumps(o,default=str)[:6000])
+            except Exception as e:print("AUDIT_E3_ERROR",t,repr(e))
+          PY
+      - name: Stage4 full decision-path scenario fixtures
+        run: node --test services/core/tests/engine6Stage4ScenarioAcceptance.test.js
+      - name: Stage4 permission and sequencing regressions
+        run: node --test services/core/tests/engine6Stage4PermissionGate.test.js
+      - name: Engine6D lock extraction regressions
+        run: node --test services/core/tests/engine6ApprovalLockExtraction.test.js
+      - name: Modular boundaries and compatibility
+        run: node --test services/core/tests/engine6ModularBoundaries.test.js
+      - name: Eight focused D3 regressions
+        run: node --test services/core/tests/engine6PhaseD3FocusedCorrection.test.js
+      - name: Decision regressions
+        run: node --test services/core/tests/engine6ZoneRotationDecision.test.js
+      - name: Existing shadow regression
+        run: node --test services/core/tests/engine6ZoneRotationContext.test.js
+      - name: Adjacent PAPER pipeline contract regressions
+        shell: bash
+        run: |
+          failures=0
+          for file in \
+            services/core/tests/engine7SingleSizingOwner.test.js \
+            services/core/tests/engine26Engine7Engine9CombinedVerification.test.js \
+            services/core/tests/engine8Engine10Strategy1Provenance.test.js \
+            services/core/tests/engine26Strategy1V2BidirectionalRotation.test.js; do
+            echo "=== $file ==="
+            node --test "$file" || failures=$((failures+1))
+          done
+          echo "ADJACENT_PIPELINE_FAILED_SUITES=$failures" >> "$GITHUB_STEP_SUMMARY"
+          exit "$failures"
+
+      - name: Compare adjacent failures with untouched pre-Stage4 baseline
+        if: always()
+        shell: bash
+        run: |
+          git fetch --no-tags --depth=1 origin 55ef4b917ae37a6d2bab3a527a0b025a1e644eea
+          git worktree add --detach /tmp/engine6-stage3-baseline 55ef4b917ae37a6d2bab3a527a0b025a1e644eea
+          cd /tmp/engine6-stage3-baseline
+          set +e
+          for file in \
+            services/core/tests/engine26Engine7Engine9CombinedVerification.test.js \
+            services/core/tests/engine8Engine10Strategy1Provenance.test.js; do
+            echo "=== PRE-STAGE4 BASELINE: $file ==="
+            node --test "$file"
+            echo "BASELINE_EXIT_$file=$?"
+          done
+          exit 0

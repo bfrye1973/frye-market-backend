@@ -807,8 +807,11 @@ const freshEngine3BranchConfirmed =
   ["LONG", "SHORT"].includes(e3.direction) &&
   engine3Qualification.qualified === true &&
   e3.allowed === true &&
-  e3.reactionConfirmed === true &&
-  e3.authorizedReactionState === "REACTION_CONFIRMED";
+  // Explicit Engine 3 qualification is canonical. reactionConfirmed and
+  // authorizedReactionState remain diagnostics; do not requalify here.
+  (engine3Qualification.explicitlyPublished === true ||
+    (e3.reactionConfirmed === true &&
+     e3.authorizedReactionState === "REACTION_CONFIRMED"));
 
 const freshEngine4BranchConfirmed =
   e4.participationConfirmed === true &&

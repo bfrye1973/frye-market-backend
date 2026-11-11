@@ -1,0 +1,26 @@
+name: Engine6 Zone Rotation V1 Isolated Tests
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine6/buildZoneRotationContext.js"
+      - "services/core/tests/engine6ZoneRotationContext.test.js"
+      - ".github/workflows/engine6-zone-rotation-v1.yml"
+      - "services/core/jobs/buildStrategySnapshot.js"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pure-context-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax-check context and tests
+        run: |
+          node --check services/core/logic/engine6/buildZoneRotationContext.js
+          node --check services/core/tests/engine6ZoneRotationContext.test.js
+          node --check services/core/jobs/buildStrategySnapshot.js
+      - name: Run isolated Engine 6 context tests
+        run: node --test services/core/tests/engine6ZoneRotationContext.test.js
