@@ -155,6 +155,10 @@ test('read-only context retains approved source values but refuses missing point
   institutionalAvailableAt:'2026-11-10T12:00:00Z',strategyAvailableAt:'2026-11-10T12:00:00Z',
   priceBasisStatus:'MATCHED'});
  assert.equal(accepted.usableForChronologicalResearch,true);
+ const hindsight=buildEngine18ReadOnlyContext({institutionalResponse,strategySnapshot,
+  institutionalAvailableAt:'2026-11-11T12:00:00Z',strategyAvailableAt:'2026-11-11T12:00:00Z',
+  asOfTime:'2026-11-10T12:00:00Z',priceBasisStatus:'MATCHED'});
+ assert.equal(hindsight.usableForChronologicalResearch,false,'never leak future strategy card revisions');
  assert.equal(accepted.micro.target,7625);
  assert.equal(accepted.submicro.target,7475.25);
  institutionalResponse.structures_sticky[0].high=0;
