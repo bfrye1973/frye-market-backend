@@ -2,9 +2,9 @@
 import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,statSync} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
 import {gzipSync,gunzipSync} from 'node:zlib';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 
-export const SCHEMA='engine18.raw.v1';
+export const SCHEMA='engine18.raw.v2';
 const classes=new Set(['market','control','error','unknown']);
 const digest=buffer=>createHash('sha256').update(buffer).digest('hex');
 const ident=v=>{if(typeof v!=='string'||!/^[A-Za-z0-9_.-]{1,80}$/.test(v)||v==='.'||v==='..')throw Error('invalid partition identifier');return v;};
@@ -19,7 +19,7 @@ function atomic(path,data){
 }
 function unlinkDurably(path){unlinkSync(path);syncDir(path);}
 function manifestFor(gzip,entries,calendarVersion){
- return {schemaVersion:'engine18.manifest.v1',sha256:digest(gzip),bytes:gzip.length,count:entries.length,firstSeq:entries[0].localSeq,lastSeq:entries.at(-1).localSeq,firstWallNs:entries[0].tLocalWallNs,lastWallNs:entries.at(-1).tLocalWallNs,calendarVersion};
+ return {schemaVersion:'engine18.manifest.v1',sha256:digest(gzip),bytes:gzip.length,count:entries.length,firstSeq:entries[0].localSeq,lastSeq:entries.at(-1).localSeq,firstWallNs:entries[0].receivedWallNs,lastWallNs:entries.at(-1).receivedWallNs,calendarVersion};
 }
 const CHECKPOINT='.engine18-highwater.json';
 function checkpointPath(root){return join(root,CHECKPOINT);}
@@ -58,12 +58,28 @@ function lockRoot(root){
  }
  return lock;
 }
+function validBase64(v){
+ if(typeof v!=='string'||v.length%4!==0||! /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(v))return false;
+ return Buffer.from(v,'base64').toString('base64')===v;
+}
+function encodeRaw(raw,rawEncoding){
+ if(rawEncoding==='utf8'){if(typeof raw!=='string')throw Error('utf8 raw must be a string');return raw;}
+ if(rawEncoding!=='base64')throw Error('invalid rawEncoding');
+ if(Buffer.isBuffer(raw)||raw instanceof Uint8Array)return Buffer.from(raw).toString('base64');
+ if(!validBase64(raw))throw Error('invalid base64 raw');
+ return raw;
+}
 function parse(buf){
  let pos=0,last=0,entries=[];
  while(pos<buf.length){
   const end=buf.indexOf(10,pos);if(end<0)break;
   let e;try{e=JSON.parse(buf.subarray(pos,end).toString('utf8'));}catch{throw Error('corrupt complete JSONL line');}
-  if(e.schemaVersion!==SCHEMA||!Number.isSafeInteger(e.localSeq)||e.localSeq<=last||typeof e.raw!=='string'||typeof e.tLocalWallNs!=='string'||typeof e.tLocalMonoNs!=='string'||!classes.has(e.msgClass))throw Error('invalid raw record');
+  if(e.schemaVersion!==SCHEMA||!Number.isSafeInteger(e.localSeq)||e.localSeq<=last||
+   typeof e.runId!=='string'||!/^[a-f0-9-]{36}$/.test(e.runId)||
+   typeof e.raw!=='string'||typeof e.receivedWallNs!=='string'||typeof e.receivedMonoNs!=='string'||typeof e.writtenMonoNs!=='string'||
+   !/^\\d+$/.test(e.receivedWallNs)||!/^\\d+$/.test(e.receivedMonoNs)||!/^\\d+$/.test(e.writtenMonoNs)||
+   (e.rawEncoding!=='utf8'&&e.rawEncoding!=='base64')||!classes.has(e.msgClass))throw Error('invalid raw record');
+  if(e.rawEncoding==='base64'&&!validBase64(e.raw))throw Error('invalid encoded binary');
   entries.push(e);last=e.localSeq;pos=end+1;
  }
  return {entries,bytes:pos};
@@ -86,9 +102,14 @@ export class Engine18RawRecorder{
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;
+  this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
   this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
-  try{this.recover();if(this.recoveredOpen)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP',at:new Date()});}
+  try{
+   this.recover();
+   if(this.previousUnclean)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP'});
+   this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'RECORDER_START'});
+  }
   catch(e){this.releaseLock();throw e;}
  }
  recover(){
@@ -133,7 +154,11 @@ export class Engine18RawRecorder{
   this.seq=last;this.gaps+=this.recoveredOpen;
   if(highWater===null&&last>0)throw Error('missing historical high-watermark checkpoint; operator review required');
   if(last>0&&last!==highWater)saveCheckpoint(this.root,last);
-  replayRaw(this.root);
+  const events=replayRaw(this.root);
+  const prior=events.at(-1);
+  this.previousRunId=prior?.runId??null;
+  this.previousUnclean=!!prior&&prior.statusCode!=='RECORDER_STOP';
+  this.gaps=events.filter(e=>e.statusCode==='GAP').length;
  }
  finish(path,entries){
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
@@ -151,29 +176,50 @@ export class Engine18RawRecorder{
   if(p.bytes!==buf.length)throw Error('incomplete active record');
   if(p.entries.length)this.finish(path,p.entries);else unlinkDurably(path);
  }
- append({raw,msgClass='unknown',streamGeneration=0,at=new Date(),statusCode=null}={}){
+ // Capture at the receipt boundary BEFORE any rotation, disk I/O or fsync.
+ capture({raw,msgClass='unknown',streamGeneration=0,at,rawEncoding='utf8',statusCode=null}={}){
   if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
-  if(typeof raw!=='string'||!classes.has(msgClass)||!Number.isSafeInteger(streamGeneration)||streamGeneration<0)throw Error('invalid frame');
-  if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('invalid date');
+  if(!classes.has(msgClass)||!Number.isSafeInteger(streamGeneration)||streamGeneration<0)throw Error('invalid frame');
   if(statusCode!==null&&!/^[A-Z_]{1,40}$/.test(statusCode))throw Error('unsafe status code');
+  const payload=encodeRaw(raw,rawEncoding);
+  if(at!==undefined&&(!(at instanceof Date)||!Number.isFinite(at.getTime())))throw Error('invalid receipt time');
+  const receivedWallNs=at!==undefined?String(BigInt(at.getTime())*1000000n):String(this.clock.wallNs());
+  const receivedMonoNs=String(this.clock.monoNs());
+  if(!/^\\d+$/.test(receivedWallNs)||!/^\\d+$/.test(receivedMonoNs))throw Error('invalid receipt clock');
+  const receiptDate=new Date(Number(BigInt(receivedWallNs)/1000000n));
+  if(!Number.isFinite(receiptDate.getTime()))throw Error('invalid receipt wall time');
+  return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate});
+ }
+ append(args){return this.appendReceived(this.capture(args));}
+ appendReceived(receipt){
+  if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
+  if(!receipt||typeof receipt.receivedWallNs!=='string'||!/^\\d+$/.test(receipt.receivedWallNs)||
+     typeof receipt.receivedMonoNs!=='string'||!/^\\d+$/.test(receipt.receivedMonoNs)||
+     !classes.has(receipt.msgClass)||!Number.isSafeInteger(receipt.streamGeneration)||receipt.streamGeneration<0||
+     !Number.isFinite(receipt.receiptDate?.getTime())||
+     (receipt.statusCode!==null&&!/^[A-Z_]{1,40}$/.test(receipt.statusCode)))throw Error('invalid captured receipt');
+  const raw=encodeRaw(receipt.raw,receipt.rawEncoding);
+  if(this.lastMono!==null&&BigInt(receipt.receivedMonoNs)<BigInt(this.lastMono))throw Error('monotonic clock regression in recording run');
+  const at=receipt.receiptDate;
   const stem=join(this.root,this.provider,this.contract,tradeDate(at),at.toISOString().slice(0,13).replace('T','-'));
   let path=stem+'.jsonl.open';
   if(this.path?.startsWith(stem+'.part-'))path=this.path;
   else if(existsSync(stem+'.jsonl.gz')){let n=1;while(existsSync(stem+`.part-${n}.jsonl.gz`)||existsSync(stem+`.part-${n}.jsonl.open`))n++;path=stem+`.part-${n}.jsonl.open`;}
   if(path!==this.path){this.rotate();mkdirSync(dirname(path),{recursive:true,mode:0o700});this.fd=openSync(path,'a',0o600);this.path=path;}
-  const wall=String(this.clock.wallNs()),mono=String(this.clock.monoNs());
-  if(!/^\d+$/.test(wall)||!/^\d+$/.test(mono)||this.lastMono!==null&&BigInt(mono)<BigInt(this.lastMono))throw Error('invalid monotonic or wall clock');
-  const item={schemaVersion:SCHEMA,localSeq:this.seq+1,tLocalWallNs:wall,tLocalMonoNs:mono,streamGeneration,msgClass,statusCode,raw};
-  const line=Buffer.from(JSON.stringify(item)+'\n');
+  const writtenMonoNs=String(this.clock.monoNs());
+  if(!/^\\d+$/.test(writtenMonoNs)||BigInt(writtenMonoNs)<BigInt(receipt.receivedMonoNs))throw Error('invalid written monotonic timestamp');
+  const item={schemaVersion:SCHEMA,localSeq:this.seq+1,runId:this.runId,receivedWallNs:receipt.receivedWallNs,receivedMonoNs:receipt.receivedMonoNs,writtenMonoNs,streamGeneration:receipt.streamGeneration,msgClass:receipt.msgClass,statusCode:receipt.statusCode,rawEncoding:receipt.rawEncoding,raw};
+  const line=Buffer.from(JSON.stringify(item)+'\\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
   this.seq++;
   try{saveCheckpoint(this.root,this.seq);}catch{this.writeErrors++;this.faulted=true;throw Error('checkpoint failed; recovery required');}
-  this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP'&&!this.recoveredOpen)this.gaps++;
-  return {localSeq:this.seq};
+  this.frames++;this.bytes+=line.length;this.lastMono=receipt.receivedMonoNs;
+  if(receipt.statusCode==='GAP')this.gaps++;
+  return {localSeq:this.seq,runId:this.runId};
  }
- health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null});}
+ health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null,runId:this.runId});}
  releaseLock(){if(this.lockPath&&existsSync(this.lockPath)){unlinkDurably(this.lockPath);this.lockPath=null;}}
- close(){try{this.rotate();}finally{this.releaseLock();}}
+ close(){try{if(this.fd!==null&&!this.faulted||this.fd===null&&!this.faulted)this.append({raw:'',msgClass:'control',statusCode:'RECORDER_STOP'});this.rotate();}finally{this.releaseLock();}}
 }
 export function replayRaw(root){
  const paths=walk(resolve(root));
