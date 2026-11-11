@@ -53,7 +53,7 @@ export class Engine18BufferedRecorder {
      const acknowledgments=await this.writer.appendBatch(batch.map(x=>x.receipt));
      if(this.failed)throw Error('recorder failed while committing');
      this.recorded+=batch.length;
-     batch.forEach((e,i)=>e.resolve(acknowledgments[i]));
+     batch.forEach((e,i)=>e.resolve({...acknowledgments[i],receivedMonoNs:e.receipt.receivedMonoNs,receivedWallNs:e.receipt.receivedWallNs}));
     }catch{
      batch.forEach(e=>e.reject(Error('group commit failed; no acknowledgment')));
      this.fail('WRITE_FAILED');throw Error('group commit failed');
