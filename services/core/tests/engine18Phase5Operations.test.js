@@ -1,0 +1,161 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,readdirSync,readFileSync,writeFileSync,existsSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createHash,randomBytes} from 'node:crypto';
+import {spawn} from 'node:child_process';
+import {once} from 'node:events';
+import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
+import {replayRaw} from '../logic/engine18/gate1RawRecorder.js';
+import {Engine18SyntheticArchiveBackup,MockPrivateEncryptedStore} from '../logic/engine18/engine18Phase4Backup.js';
+import {Engine18ContinuousBackup} from '../logic/engine18/engine18ContinuousBackup.js';
+import {Engine18SyntheticWorkerBridge} from '../logic/engine18/engine18Phase4WorkerBridge.js';
+import {createEngine18ReceiptClock} from '../logic/engine18/engine18ReceiptClock.js';
+import {Engine18S3PrivateStore} from '../logic/engine18/engine18S3PrivateStore.js';
+
+const withRoot=async fn=>{
+ const root=mkdtempSync(join(tmpdir(),'e18-phase5-'));
+ try{return await fn(root);}finally{rmSync(root,{recursive:true,force:true});}
+};
+const fakeClock=()=>({wallNs:()=>String(BigInt(Date.parse('2026-11-10T21:10:00Z'))*1000000n),
+ monoNs:(()=>{let i=0n;return()=>String(++i)})()});
+const writer=root=>new Engine18BufferedRecorder({root,clock:fakeClock(),batchSize:16,flushDelayMs:0});
+const files=root=>readdirSync(root,{recursive:true}).map(x=>join(root,x));
+
+test('closed hours are backed up while next .jsonl.open remains active and keeps growing',()=>withRoot(async root=>{
+ const w=writer(root),store=new MockPrivateEncryptedStore({key:randomBytes(32)});
+ const backup=new Engine18SyntheticArchiveBackup({root,store,maxRetries:4});
+ const scheduled=new Engine18ContinuousBackup({backup,intervalMs:100});
+ await w.offer({raw:'hour-1',msgClass:'market',at:new Date('2026-11-10T21:59:58Z')});
+ await w.offer({raw:'hour-2-early',msgClass:'market',at:new Date('2026-11-10T22:00:00Z')});
+ assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
+ const [result,liveAck]=await Promise.all([
+  scheduled.tick(),
+  w.offer({raw:'hour-2-during-backup',msgClass:'market',at:new Date('2026-11-10T22:00:01Z')})
+ ]);
+ assert.ok(liveAck.localSeq>=4);
+ assert.equal(result.remoteArchiveCount,1);
+ assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
+ const archived=store.listInventory()[0];
+ assert.equal(archived.lastSeq,2);
+ const before=await store.getBytes(archived.objectId);
+ await w.offer({raw:'hour-2-more',msgClass:'market',at:new Date('2026-11-10T22:00:02Z')});
+ assert.deepEqual(await store.getBytes(archived.objectId),before);
+ await w.close();
+ await scheduled.tick();
+ assert.equal(store.listInventory().at(-1).lastSeq,w.writer.seq);
+ assert.equal(scheduled.health().failures,0);
+ await scheduled.stop();
+}));
+
+test('backup remote fault does not block current-hour intake, reports lag/failure, retries sealed files',()=>withRoot(async root=>{
+ const w=writer(root),store=new MockPrivateEncryptedStore({key:randomBytes(32)});
+ const backup=new Engine18SyntheticArchiveBackup({root,store,maxRetries:2});
+ await w.offer({raw:'old',msgClass:'market',at:new Date('2026-11-10T21:59:00Z')});
+ await w.offer({raw:'new',msgClass:'market',at:new Date('2026-11-10T22:00:01Z')});
+ store.failNext(2);let signals=0;
+ const background=new Engine18ContinuousBackup({backup,onFailure:()=>signals++});
+ await assert.rejects(background.tick(),/closed-hour backup failed/);
+ assert.equal(background.health().failures,1);assert.equal(signals,1);
+ assert.equal(background.health().backupLagMs,null);
+ const newAck=await w.offer({raw:'during-network-outage',msgClass:'market',at:new Date('2026-11-10T22:00:02Z')});
+ assert.ok(newAck.localSeq>0);
+ const result=await background.tick();assert.equal(result.remoteArchiveCount,1);
+ assert.ok(background.health().backupLagMs>=0);
+ await w.close();await background.stop();
+}));
+
+test('high-resolution receipt anchor resolves sub-ms deltas and does not claim verified NTP',()=>{
+ let mono=50000000000n;
+ const c=createEngine18ReceiptClock({wallMs:()=>1794350000000,monotonicNs:()=>mono,reanchorMs:1000});
+ const a=c.capture();mono+=123456n;const b=c.capture();
+ assert.equal(BigInt(b.receivedWallNs)-BigInt(a.receivedWallNs),123456n);
+ assert.equal(BigInt(b.receivedMonoNs)-BigInt(a.receivedMonoNs),123456n);
+ assert.equal(a.receiptPrecision,'SUBMILLISECOND_ESTIMATE');
+ assert.equal(b.clockQuality,'UNVERIFIED');
+ assert.throws(()=>{mono=1n;c.capture();},/regression/);
+}));
+
+test('Node child.send false is queued pressure, not automatically lost, when callback eventually ACKs',()=>withRoot(async root=>{
+ const b=new Engine18SyntheticWorkerBridge({root,maxInflight:64});
+ await b.start();
+ const send=b.child.send.bind(b.child);
+ b.child.send=(message,...rest)=>{
+  const ok=send(message,...rest);
+  return message?.type==='FRAME'?false:ok;
+ };
+ const seq=await b.submit('QUEUED_BUT_PERSISTED',{msgClass:'market'});
+ assert.equal(seq,2);
+ assert.equal(b.health().ipcQueuedSignals,1);
+ assert.equal(b.health().acked,1);
+ await b.close();
+ assert.deepEqual(replayRaw(root).filter(x=>x.msgClass==='market').map(x=>x.raw),['QUEUED_BUT_PERSISTED']);
+}));
+
+test('worker whose parent dies exits instead of collecting orphaned frames; restart emits GAP',()=>withRoot(async root=>{
+ const moduleUrl=new URL('../logic/engine18/engine18Phase4WorkerBridge.js',import.meta.url).href;
+ const code="import{Engine18SyntheticWorkerBridge}from "+JSON.stringify(moduleUrl)+
+  ";const b=new Engine18SyntheticWorkerBridge({root:process.argv[1]});await b.start();await b.submit('BEFORE_PARENT_DEATH',{msgClass:'market'});process.stdout.write('PID '+b.child.pid+'\\n');setInterval(()=>{},1000);";
+ const parent=spawn(process.execPath,['--input-type=module','-e',code,root],{stdio:['ignore','pipe','pipe']});
+ let pid=null,output='';
+ await new Promise((resolve,reject)=>{
+  parent.stdout.on('data',b=>{output+=b.toString();const m=output.match(/PID (\d+)/);if(m){pid=+m[1];resolve();}});
+  parent.on('error',reject);parent.on('exit',()=>reject(Error('parent exited before READY')));
+ });
+ parent.kill('SIGKILL');await once(parent,'exit');
+ // Worker must die on IPC disconnect; do not leave an orphan.
+ let gone=false;
+ for(let n=0;n<40;n++){
+  await new Promise(r=>setTimeout(r,30));
+  try{process.kill(pid,0);}catch(e){if(e.code==='ESRCH'){gone=true;break;}}
+ }
+ assert.ok(gone,'orphan worker must terminate');
+ const w=await Engine18BufferedRecorder.openBounded({root,clock:fakeClock(),batchSize:16,flushDelayMs:0});
+ await w.close();
+ const e=replayRaw(root);
+ assert.deepEqual(e.filter(x=>x.msgClass==='market').map(x=>x.raw),['BEFORE_PARENT_DEATH']);
+ assert.equal(e.filter(x=>x.statusCode==='GAP').length,1);
+}));
+
+test('S3-compatible mock SigV4 encrypted immutable object round trip with key ID and no exposed plaintext',()=>withRoot(async root=>{
+ const body=Buffer.from('Synthetic ES message with unchanged 7500.2500 and binary \0\xff');
+ const archive=join(root,'archive.gz');writeFileSync(archive,body);
+ const sha=createHash('sha256').update(body).digest('hex');
+ const objects=new Map();let auth=null;
+ const fetchImpl=async(url,opts)=>{
+  auth=opts.headers.authorization;
+  const key=url.pathname;
+  if(opts.method==='PUT'){
+   assert.equal(opts.headers['if-none-match'],'*');
+   if(objects.has(key))return new Response(null,{status:412});
+   const chunks=[];for await(const c of opts.body)chunks.push(Buffer.from(c));
+   objects.set(key,Buffer.concat(chunks));return new Response(null,{status:200});
+  }
+  if(opts.method==='GET'){
+   if(!objects.has(key))return new Response(null,{status:404});
+   return new Response(objects.get(key),{status:200});
+  }
+  return new Response(null,{status:500});
+ };
+ const s3=new Engine18S3PrivateStore({endpoint:'https://test.r2.example',bucket:'private-test',
+  region:'auto',accessKeyId:'TESTKEY',secretAccessKey:'FAKE_TEST_SECRET',keyId:'key-v1',
+  encryptionKey:randomBytes(32),fetchImpl});
+ const m=await s3.uploadClosed({path:archive,key:'sealed/2026-11-10-21.jsonl.gz',
+  plaintextSha256:sha,expectedSize:body.length});
+ assert.equal(m.keyId,'key-v1');assert.ok(auth.startsWith('AWS4-HMAC-SHA256'));
+ assert.equal(objects.size,1);
+ assert.ok(![...objects.values()][0].includes(body));
+ const result=await s3.restoreClosed({key:m.key,destination:join(root,'restored'),expected:m});
+ assert.equal(result.sha256,sha);
+ assert.deepEqual(readFileSync(result.tempPath),body);
+ await assert.rejects(s3.uploadClosed({path:archive,key:m.key,
+  plaintextSha256:sha,expectedSize:body.length}),/HTTP 412/);
+ await assert.rejects(s3.restoreClosed({key:m.key,destination:join(root,'wrong'),
+  expected:{...m,keyId:'other-key'}}),/versioned restore key/);
+}));
+
+test('isolated existing recorder phase2/3/4 behavior remains synthetic only',()=>withRoot(async root=>{
+ const w=writer(root);await w.offer({raw:'synthetic-only',msgClass:'market'});await w.close();
+ assert.ok(files(root).some(x=>x.endsWith('.manifest.json')));
+}));
