@@ -233,3 +233,58 @@ test('synthetic WebSocket automatically persists CONNECTED/DISCONNECTED/RECONNEC
  assert.ok(events.every(e=>!e.raw.includes('token=')));
  assert.equal(events.find(e=>e.statusCode==='RECONNECT').streamGeneration,2);
 }));
+
+test('injected ENOSPC rejects group without ack, startup marks uncertain interval GAP',()=>dir(async root=>{
+ const enospc=()=>{const e=Error('simulated disk full');e.code='ENOSPC';throw e;};
+ let throwOnce=true;
+ const r=new Engine18BufferedRecorder({root,clock:clock(),batchSize:8,flushDelayMs:0,
+  testFault:(stage)=>{if(stage==='BEFORE_FSYNC'&&throwOnce){throwOnce=false;enospc();}}});
+ const promises=Array.from({length:8},(_,i)=>r.offer({raw:'UNACK'+i,msgClass:'market'}));
+ const outcomes=await Promise.allSettled(promises);
+ assert.ok(outcomes.every(x=>x.status==='rejected'));
+ assert.equal(r.health().failedClosed,true);
+ assert.equal(r.health().recorded,0);
+ r.writer.rotate();r.writer.releaseLock(); // simulate crash cleanup only, never clean STOP
+ const recovered=recorder(root);await recovered.close();
+ const all=replayRaw(root);
+ assert.equal(all.filter(x=>x.statusCode==='GAP').length,1);
+ assert.equal(new Set(all.map(x=>x.localSeq)).size,all.length);
+ // Unacknowledged bytes may survive as uncertain evidence; never pretend they were ACKed.
+ assert.equal(all.filter(x=>x.raw.startsWith('UNACK')).length,8);
+}));
+test('injected partial batch failure fails closed with acknowledged prefix preserved',()=>dir(async root=>{
+ const r=new Engine18BufferedRecorder({root,clock:clock(),batchSize:4,flushDelayMs:0});
+ await Promise.all(Array.from({length:4},(_,i)=>r.offer({raw:'ACK'+i,msgClass:'market'})));
+ let failed=false;
+ r.writer.testFault=(stage,{index}={})=>{if(!failed&&stage==='AFTER_FRAME'&&index===0){failed=true;throw Error('PARTIAL_WRITE');}};
+ const batch=await Promise.allSettled(Array.from({length:4},(_,i)=>r.offer({raw:'UNACK'+i,msgClass:'market'})));
+ assert.ok(batch.every(x=>x.status==='rejected'));
+ assert.equal(r.health().recorded,4);
+ r.writer.rotate();r.writer.releaseLock();
+ const recovered=recorder(root);await recovered.close();
+ const events=replayRaw(root),payloads=events.filter(x=>x.msgClass==='market').map(x=>x.raw);
+ assert.deepEqual(payloads.slice(0,4),['ACK0','ACK1','ACK2','ACK3']);
+ assert.equal(payloads.filter(x=>x==='UNACK0').length,1);
+ assert.equal(payloads.filter(x=>x.startsWith('UNACK')).length,1);
+ assert.equal(events.filter(x=>x.statusCode==='GAP').length,1);
+ assert.deepEqual(events.map(x=>x.localSeq),Array.from({length:events.length},(_,i)=>i+1));
+}));
+test('close while flush in progress accepts earlier offers and refuses new intake',()=>dir(async root=>{
+ const r=new Engine18BufferedRecorder({root,clock:clock(),batchSize:2,flushDelayMs:50});
+ const queued=r.offer({raw:'IN_QUEUE',msgClass:'market'});
+ const closing=r.close();
+ await assert.rejects(r.offer({raw:'AFTER_CLOSE_REQUEST'}),/stopped/);
+ await queued;await closing;
+ assert.deepEqual(market(replayRaw(root)).map(x=>x.raw),['IN_QUEUE']);
+ assert.equal(replayRaw(root).filter(x=>x.statusCode==='RECORDER_STOP').length,1);
+}));
+test('disk-full and partial write tests retain exact binary bytes and original frame order',()=>dir(async root=>{
+ const r=recorder(root);
+ const raw=Buffer.from([0,10,0,255,80,129]);
+ await r.offer({raw,rawEncoding:'base64',msgClass:'market'});
+ await r.offer({raw:'{"d":[{"s":"XCME:ES.Z26","b":[{"l":0,"sz":0}],"a":[]}]}',msgClass:'market'});
+ await r.close();
+ const payloads=market(replayRaw(root));
+ assert.deepEqual(Buffer.from(payloads[0].raw,'base64'),raw);
+ assert.equal(payloads[1].localSeq,payloads[0].localSeq+1);
+}));
