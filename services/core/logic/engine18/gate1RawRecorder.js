@@ -1,7 +1,8 @@
 // Engine 18 Gate 1: offline-only, synthetic raw recorder. No live feed integration.
-import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,statSync} from 'node:fs';
+import {mkdirSync,openSync,writeSync,fsyncSync,closeSync,ftruncateSync,readFileSync,readdirSync,renameSync,unlinkSync,existsSync,writeFileSync,createReadStream,createWriteStream} from 'node:fs';
 import {join,dirname,resolve} from 'node:path';
-import {gzipSync,gunzipSync} from 'node:zlib';
+import {gzipSync,gunzipSync,createGzip} from 'node:zlib';
+import {pipeline} from 'node:stream/promises';
 import {createHash,randomUUID} from 'node:crypto';
 
 export const SCHEMA='engine18.raw.v2';
@@ -96,11 +97,39 @@ function verify(path){
  if(parsed.bytes!==plain.length||parsed.entries.length!==manifest.count||parsed.entries[0]?.localSeq!==manifest.firstSeq||parsed.entries.at(-1)?.localSeq!==manifest.lastSeq)throw Error('replay manifest mismatch');
  return parsed.entries;
 }
+const BATCH_TOKEN=Symbol('batch-commit-only');
+async function scanOpenStreaming(path){
+ let pending=Buffer.alloc(0),firstSeq=null,lastSeq=0,firstWallNs=null,lastWallNs=null,count=0;
+ for await(const chunk of createReadStream(path,{highWaterMark:65536})){
+  pending=Buffer.concat([pending,chunk]);
+  if(pending.length>16*1024*1024&&!pending.includes(10))throw Error('excessive recorder frame size');
+  let cut;
+  while((cut=pending.indexOf(10))>=0){
+   const line=pending.subarray(0,cut+1),result=parse(line);
+   if(result.entries.length!==1||result.bytes!==line.length)throw Error('invalid streamed JSONL');
+   const e=result.entries[0];
+   if(count&&e.localSeq!==lastSeq+1)throw Error('streamed sequence discontinuity');
+   if(!count){firstSeq=e.localSeq;firstWallNs=e.receivedWallNs;}
+   lastSeq=e.localSeq;lastWallNs=e.receivedWallNs;count++;
+   pending=pending.subarray(cut+1);
+  }
+  if(pending.length>16*1024*1024)throw Error('excessive recorder frame size');
+ }
+ if(pending.length)throw Error('incomplete trailing streamed JSONL');
+ return {count,firstSeq,lastSeq,firstWallNs,lastWallNs};
+}
+async function hashCompressedStreaming(path){
+ const h=createHash('sha256');let bytes=0;
+ for await(const chunk of createReadStream(path,{highWaterMark:65536})){h.update(chunk);bytes+=chunk.length;}
+ return {sha256:h.digest('hex'),bytes};
+}
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1'}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
+  if(testFault!==null&&typeof testFault!=='function')throw Error('testFault must be function');
+  this.testFault=testFault;
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;this.closed=false;
   this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
@@ -192,7 +221,8 @@ export class Engine18RawRecorder{
   return Object.freeze({raw:payload,rawEncoding,msgClass,streamGeneration,statusCode,receivedWallNs,receivedMonoNs,receiptDate});
  }
  append(args){return this.appendReceived(this.capture(args));}
- appendReceived(receipt){
+ appendReceived(receipt,token=null){
+  if(token!==null&&token!==BATCH_TOKEN)throw Error('invalid batching authority');
   if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
   if(!receipt||typeof receipt.receivedWallNs!=='string'||!/^\d+$/.test(receipt.receivedWallNs)||
      typeof receipt.receivedMonoNs!=='string'||!/^\d+$/.test(receipt.receivedMonoNs)||
@@ -211,12 +241,64 @@ export class Engine18RawRecorder{
   if(!/^\d+$/.test(writtenMonoNs)||BigInt(writtenMonoNs)<BigInt(receipt.receivedMonoNs))throw Error('invalid written monotonic timestamp');
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,runId:this.runId,receivedWallNs:receipt.receivedWallNs,receivedMonoNs:receipt.receivedMonoNs,writtenMonoNs,streamGeneration:receipt.streamGeneration,msgClass:receipt.msgClass,statusCode:receipt.statusCode,rawEncoding:receipt.rawEncoding,raw};
   const line=Buffer.from(JSON.stringify(item)+'\n');
-  try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
+  try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}if(token!==BATCH_TOKEN)fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
   this.seq++;
-  try{saveCheckpoint(this.root,this.seq);}catch{this.writeErrors++;this.faulted=true;throw Error('checkpoint failed; recovery required');}
+  if(token!==BATCH_TOKEN){try{saveCheckpoint(this.root,this.seq);}catch{this.writeErrors++;this.faulted=true;throw Error('checkpoint failed; recovery required');}}
   this.frames++;this.bytes+=line.length;this.lastMono=receipt.receivedMonoNs;
   if(receipt.statusCode==='GAP')this.gaps++;
   return {localSeq:this.seq,runId:this.runId};
+ }
+ async appendBatch(receipts){
+  if(!Array.isArray(receipts)||receipts.length===0)return [];
+  if(this.faulted||this.closed)throw Error('recorder unavailable');
+  const ack=[];
+  try{
+   for(const receipt of receipts){
+    const d=receipt?.receiptDate;
+    if(!(d instanceof Date)||!Number.isFinite(d.getTime()))throw Error('invalid buffered receipt');
+    // Streaming gzip when transitioning between hourly partitions.
+    if(this.path){
+     const currentStem=join(this.root,this.provider,this.contract,tradeDate(d),d.toISOString().slice(0,13).replace('T','-'));
+     if(!this.path.startsWith(currentStem+'.jsonl.open')&&!this.path.startsWith(currentStem+'.part-'))await this.rotateStreaming();
+    }
+    ack.push(this.appendReceived(receipt,BATCH_TOKEN));
+    this.testFault?.('AFTER_FRAME',{index:ack.length-1,seq:this.seq});
+   }
+   this.testFault?.('BEFORE_FSYNC',{count:ack.length,seq:this.seq});
+   fsyncSync(this.fd);
+   this.testFault?.('BEFORE_CHECKPOINT',{count:ack.length,seq:this.seq});
+   saveCheckpoint(this.root,this.seq);
+   this.testFault?.('AFTER_CHECKPOINT',{count:ack.length,seq:this.seq});
+   return ack;
+  }catch{
+   this.faulted=true;this.writeErrors++;
+   throw Error('buffered group commit failed; restart required');
+  }
+ }
+ async rotateStreaming(){
+  if(this.fd===null)return;
+  fsyncSync(this.fd);closeSync(this.fd);this.fd=null;
+  const path=this.path;this.path=null;
+  const summary=await scanOpenStreaming(path);
+  if(!summary.count){unlinkDurably(path);return;}
+  const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz'),tmp=dest+'.tmp';
+  if(existsSync(dest)||existsSync(tmp))throw Error('archive collision');
+  await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
+  const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
+  renameSync(tmp,dest);syncDir(dest);
+  const hashed=await hashCompressedStreaming(dest);
+  atomic(dest+'.manifest.json',JSON.stringify({
+   schemaVersion:'engine18.manifest.v1',...hashed,...summary,calendarVersion:this.calendarVersion
+  })+'\n');
+  unlinkDurably(path);
+ }
+ async closeStreaming(){
+  if(this.closed)return;
+  if(this.faulted){this.releaseLock();throw Error('cannot cleanly stop faulted recorder');}
+  try{
+   this.append({raw:'',msgClass:'control',statusCode:'RECORDER_STOP'});
+   await this.rotateStreaming();this.closed=true;
+  }finally{this.releaseLock();}
  }
  health(){return Object.freeze({schemaVersion:'engine18.health.v1',provider:this.provider,physicalContract:this.contract,frames:this.frames,bytesWritten:this.bytes,lastSeq:this.seq,gaps:this.gaps,writeErrors:this.writeErrors,recording:this.fd!==null,runId:this.runId});}
  releaseLock(){if(this.lockPath&&existsSync(this.lockPath)){unlinkDurably(this.lockPath);this.lockPath=null;}}
