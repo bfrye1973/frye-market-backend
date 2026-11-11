@@ -160,6 +160,7 @@ export class Engine18IronbeamLiveRecorderSource{
  async interrupt(source,reason,closeCode=null){
   if(source.closed)return;
   source.closed=true;this.connected=false;this.disconnectedAtMs=Date.now();this.disconnections++;
+  if(this.active&&!this.sourceUncertain)this.alert('IRONBEAM_SOURCE_INTERRUPTED');
   if(source.watchdog){clearInterval(source.watchdog);source.watchdog=null;}
   try{source.socket?.close();}catch{}
   const current=this.current===source;
