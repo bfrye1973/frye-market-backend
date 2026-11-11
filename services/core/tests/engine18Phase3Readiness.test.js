@@ -44,7 +44,8 @@ test('record sanitized disconnect and websocket error separately from recovery G
  await s.socketEvent(socket,'DISCONNECTED',{reason:'REMOTE_CLOSE',closeCode:1006});
  await s.close();
  const all=replayRaw(root);const statuses=all.map(x=>x.statusCode).filter(Boolean);
- assert.ok(statuses.includes('WS_ERROR'));assert.ok(statuses.includes('DISCONNECTED'));assert.ok(!statuses.includes('GAP'));
+ assert.ok(statuses.includes('WS_ERROR'));assert.ok(statuses.includes('DISCONNECTED'));assert.ok(statuses.includes('FEED_GAP'));assert.ok(!statuses.includes('GAP'));
+ assert.equal(statuses.filter(x=>x==='FEED_GAP').length,1,'error+disconnect of same source yields one feed interruption');
  const err=JSON.parse(all.find(e=>e.statusCode==='WS_ERROR').raw);
  assert.deepEqual(err,{connectionId:'s1',reason:'TRANSPORT_FAILURE',closeCode:null});
  assert.throws(()=>s.socketEvent(socket,'WS_ERROR',{reason:'Bearer abc'}),/unsafe/);
@@ -126,4 +127,47 @@ test('no real provider capture or public/market integrations are created',()=>te
  const events=replayRaw(root);
  assert.ok(events.every(e=>e.schemaVersion==='engine18.raw.v2'));
  assert.ok(events.every(e=>!e.raw.includes('token=')));
+}));
+
+test('chronyc tracking requires synchronized, fresh reference and safe verified offsets',async()=>{
+ const {parseChronyTracking,makeChronySampler}=await import('../logic/engine18/engine18ClockQuality.js');
+ const now=Date.parse('2026-11-10T21:00:00Z');
+ const output=[
+  'Stratum : 3','Ref time (UTC) : Tue Nov 10 20:59:30 2026',
+  'System time : 0.0000123 seconds slow of NTP time',
+  'Last offset : -0.0000033 seconds','RMS offset : 0.0000020 seconds',
+  'Root dispersion : 0.0000050 seconds','Leap status : Normal'
+ ].join('\n');
+ const sample=parseChronyTracking(output,{nowMs:now});
+ assert.deepEqual(sample,{verified:true,source:'CHRONY',offsetNs:'-12300',uncertaintyNs:'7000'});
+ assert.equal(parseChronyTracking(output.replace('Leap status : Normal','Leap status : Not synchronised'),{nowMs:now}),null);
+ assert.equal(parseChronyTracking(output,{nowMs:now+300000}),null);
+ const injected=makeChronySampler({now:()=>now,exec:async(command,args)=>{
+  assert.equal(command,'chronyc');assert.deepEqual(args,['tracking','-n']);return {stdout:output};
+ }});
+ assert.equal((await injected()).offsetNs,'-12300');
+ const failed=makeChronySampler({now:()=>now,exec:async()=>{throw Error('command absent');}});
+ assert.equal(await failed(),null);
+ assert.throws(()=>makeChronySampler({command:'sh'}),/only chronyc/);
+});
+test('synthetic actual crash/recovery of large open archive records memory RSS and GAP',()=>temp(async root=>{
+ const {Engine18BufferedRecorder}=await import('../logic/engine18/engine18BufferedRecorder.js');
+ const before=process.memoryUsage().rss,writer=new Engine18BufferedRecorder({root,clock:clock(),batchSize:64,flushDelayMs:0});
+ const data='X'.repeat(16384);
+ for(let i=0;i<512;i++){
+  const items=Array.from({length:64},(_,j)=>writer.offer({raw:data+String(i*64+j),msgClass:'market'}));
+  await Promise.all(items);
+  if(i===3)break; // 256 frames, about 4 MiB synthetic raw open archive
+ }
+ // Kill-equivalent: release lock without clean STOP, preserve .open file
+ writer.writer.rotate();writer.writer.releaseLock();
+ const {Engine18RawRecorder,replayRaw}=await import('../logic/engine18/gate1RawRecorder.js');
+ const recovered=new Engine18RawRecorder({root,clock:clock()});recovered.close();
+ const events=replayRaw(root);
+ assert.ok(events.some(x=>x.statusCode==='GAP'));
+ assert.equal(events.filter(x=>x.msgClass==='market').length,256);
+ const after=process.memoryUsage().rss;
+ console.log(JSON.stringify({phase3RecoveryMemory:{frames:256,rawMiB:4,
+  rssBeforeMiB:Number((before/1048576).toFixed(1)),rssAfterMiB:Number((after/1048576).toFixed(1)),
+  caveat:'sampled RSS, not peak; unbounded sync recovery still requires gate'}}));
 }));
