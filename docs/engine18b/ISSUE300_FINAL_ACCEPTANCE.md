@@ -33,13 +33,13 @@ Sealed hourly gzip+manifest are immutable after inventory acknowledgment. A prio
 
 GitHub Actions reports:
 
-- **93/93 pass in UTC; 93/93 pass in America/Phoenix** across original Gate1, Phase2, Phase3, Phase4, R1–R3, Phase5 and Issue300: https://github.com/bfrye1973/frye-market-backend/actions/runs/43067177075
+- **94/94 pass in UTC; 94/94 pass in America/Phoenix** across original Gate1, Phase2, Phase3, Phase4, R1–R3, Phase5 and Issue300: https://github.com/bfrye1973/frye-market-backend/actions/runs/43067672025
 - **2/2 pass in separate AWS Smithy + real local MinIO compatibility suite**, same run. MinIO test uses historical checksum-verified upstream binary in GitHub Actions only. This is an actual MinIO protocol test; **not a real paid Cloudflare R2 integration**.
-- Existing isolated baseline, original Gate1, Phase2, Phase4, Phase5 workflows separately green at code commit `bc38a13eab5cf3139a87f861ba87de1294951e36`.
+- Existing isolated baseline, original Gate1, Phase2, Phase4, Phase5 workflows separately green at code commit `e7ae8d5f3a968081c896ed00515ece02565b0ad0`.
 
 Synthetic capacity with **25ms injected disk delays**:
-- UTC: commit p99.9 ≈ **56,413 µs**, worker RSS **68.5 MiB**, parent callback p95 **42.5 µs**, p99 **989.9 µs**; recommended illustrative maxInflight **1,129** at assumed 8,000 fps × 56.4ms × 2.5 safety.
-- Arizona: commit p99.9 ≈ **75,432 µs**, worker RSS **69.7 MiB**, parent callback p95 **46.1 µs**, p99 **1,132.3 µs**; illustrative maxInflight **1,509** at the same assumed rate/factor.
+- UTC: commit p99.9 ≈ **44,076 µs**, worker RSS **69.8 MiB**, parent callback p95 **49.1 µs**, p99 **218.6 µs**; recommended illustrative maxInflight **882** at assumed 8,000 fps × 44.1ms × 2.5 safety.
+- Arizona: commit p99.9 ≈ **36,897 µs**, worker RSS **69.2 MiB**, parent callback p95 **23.3 µs**, p99 **109.4 µs**; illustrative maxInflight **738** at the same assumed rate/factor.
 - These are **sampled, synthetic** scenarios, not live market-open measurements or a safe unconditional capacity configuration.
 
 ## Render, bandwidth and the conditional $22/month budget — CRITICAL REVIEW
@@ -80,3 +80,10 @@ Current public pricing references, checked Nov 11 2026:
 6. **Rollback:** stop source intake, drain the isolated worker if healthy (clean STOP), else let crash/GAP evidence persist; seal and verify closed archives, last external inventory pin, and restore into a fresh empty private path. Roll back worker code only, preserve old dedicated disk/backups until byte-exact replay is proven, and never touch the main production disk/reader/chart/trading systems.
 
 Future institutional ES zones and Engine22 Micro/Submicro owner-approved strategy/Fib targets remain **read-only research context**, per `docs/engine18/INSTITUTIONAL_MICRO_SUBMICRO_CONTEXT.md`. No strategy calculations, nodes or chart changed.
+
+## Final Issue #300 result — Nov 11 UTC/Phoenix
+- All **six relevant GitHub Actions workflows** passed at code commit `e7ae8d5f3a968081c896ed00515ece02565b0ad0`. The new acceptance CI includes 94/94 tests in each of UTC and Phoenix, plus 2/2 independent Smithy/real local MinIO protocol tests: https://github.com/bfrye1973/frye-market-backend/actions/runs/43067672025.
+- The temporary MinIO executable was downloaded from the original MinIO GitHub release `RELEASE.2025-09-07T16-13-09Z`, SHA-256-verified against its published release checksum, run only on local GitHub Actions loopback, and destroyed afterward. Modern MinIO public container images have been withdrawn; this historical CI binary is **not approved production software**.
+- Verified actual MinIO PUT/GET/conditional HTTP 412 and two-page ListObjectsV2; independent AWS Smithy signer comparison over spaces, stars, duplicate query names, and continuation tokens. MinIO is S3-compatible evidence, **not** actual Cloudflare R2 acceptance.
+- Additional negative synthetic test: an unmanifested gzip with intact source is only temporarily skipped for 120 seconds, then triggers fail-closed recovery if still unresolved. Missing source fails immediately.
+- **Operational budget gate remains RED.** The original ~$21.60 subtotal excludes Render outbound public network traffic from backup uploads to Cloudflare R2, which can materially exceed the conditional ~$22 owner budget. Require actual workspace bandwidth/remaining allowance and measured GB/session before provisioning.
