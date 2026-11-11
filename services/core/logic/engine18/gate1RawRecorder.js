@@ -99,10 +99,12 @@ function verify(path){
 }
 const BATCH_TOKEN=Symbol('batch-commit-only');
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1'}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
+  if(testFault!==null&&typeof testFault!=='function')throw Error('testFault must be function');
+  this.testFault=testFault;
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;this.closed=false;
   this.runId=randomUUID();this.previousUnclean=false;this.previousRunId=null;
   mkdirSync(this.root,{recursive:true,mode:0o700});
@@ -235,9 +237,13 @@ export class Engine18RawRecorder{
      if(!this.path.startsWith(currentStem+'.jsonl.open')&&!this.path.startsWith(currentStem+'.part-'))await this.rotateStreaming();
     }
     ack.push(this.appendReceived(receipt,BATCH_TOKEN));
+    this.testFault?.('AFTER_FRAME',{index:ack.length-1,seq:this.seq});
    }
+   this.testFault?.('BEFORE_FSYNC',{count:ack.length,seq:this.seq});
    fsyncSync(this.fd);
+   this.testFault?.('BEFORE_CHECKPOINT',{count:ack.length,seq:this.seq});
    saveCheckpoint(this.root,this.seq);
+   this.testFault?.('AFTER_CHECKPOINT',{count:ack.length,seq:this.seq});
    return ack;
   }catch{
    this.faulted=true;this.writeErrors++;
