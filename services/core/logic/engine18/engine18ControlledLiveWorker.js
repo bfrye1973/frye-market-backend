@@ -2,7 +2,6 @@
 // Completely separate from existing chart/monitor/trading services.
 // Hard disabled until manager approves private deployment and trial credentials.
 import {statSync,existsSync} from 'node:fs';
-import {WebSocket} from 'ws';
 import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 import {Engine18IronbeamLiveRecorderSource} from './engine18IronbeamLiveRecorderSource.js';
 import {createEngine18ReceiptClock} from './engine18ReceiptClock.js';
@@ -40,7 +39,8 @@ export function verifyEngine18LiveEnvironment(env,stat=statSync){
 }
 function alert(code){process.stderr.write('ENGINE18_PRIVATE_ALERT '+code+'\n');}
 export async function runEngine18ControlledRecording({env=process.env,
- fetchImpl=fetch,WebSocketImpl=WebSocket,onAlert=alert}={}){
+ fetchImpl=fetch,WebSocketImpl,onAlert=alert}={}){
+ if(typeof WebSocketImpl!=='function')throw Error('explicit private WebSocket transport required');
  const config=verifyEngine18LiveEnvironment(env);
  // The private host must supply actual Chrony evidence before recording.
  const chrony=makeChronySampler();
