@@ -20,7 +20,7 @@ export function parseChronyTracking(text,{nowMs=Date.now(),maxReferenceAgeMs=120
  const magnitude=Number(m[1]);
  if(!Number.isFinite(magnitude)||magnitude<0)return null;
  const offsetNs=BigInt(Math.round(magnitude*1e9))*(m[2].toLowerCase()==='fast'?1n:-1n);
- const uncertaintyNs=BigInt(Math.ceil((dispersion+rms)*1e9));
+ const uncertaintyNs=BigInt(Math.round(dispersion*1e9)+Math.round(rms*1e9));
  if(uncertaintyNs<0n)return null;
  return Object.freeze({verified:true,source:'CHRONY',offsetNs:String(offsetNs),uncertaintyNs:String(uncertaintyNs)});
 }
