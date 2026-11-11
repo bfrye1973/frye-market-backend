@@ -153,7 +153,7 @@ export class Engine18RawRecorder{
   const recorder=new Engine18RawRecorder({...options,boundedInitialization:true});
   try{
    const {recoverEngine18Bounded}=await import('./engine18BoundedRecovery.js');
-   const result=await recoverEngine18Bounded({root:recorder.root,calendarVersion:recorder.calendarVersion});
+   const result=await recoverEngine18Bounded({root:recorder.root,calendarVersion:recorder.calendarVersion,testFault:recorder.testFault});
    recorder.seq=result.lastSeq;
    recorder.gaps=result.gaps;
    recorder.previousUnclean=result.previousUnclean;
@@ -165,6 +165,26 @@ export class Engine18RawRecorder{
  }
  recover(){
   let last=0;
+  // Recover the rename-to-manifest crash only from a verified, intact .open.
+  // The original open source is authoritative; a gzip alone is not.
+  for(const gz of walk(this.root).filter(p=>p.endsWith('.jsonl.gz')&&!existsSync(p+'.manifest.json'))){
+   const source=gz.replace(/\.jsonl\.gz$/,'.jsonl.open');
+   if(!existsSync(source))continue;
+   const buf=readFileSync(source),parsed=parse(buf);
+   if(!parsed.entries.length||parsed.bytes!==buf.length)throw Error('unverified original source');
+   const compressed=gunzipSync(readFileSync(gz));
+   if(!compressed.equals(buf))throw Error('archive and original source mismatch');
+   const gzip=readFileSync(gz);
+   atomic(gz+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\n');
+   verify(gz);
+   const marker=gz+'.integrity-unverified.json';
+   if(existsSync(marker)){
+    const info=JSON.parse(readFileSync(marker,'utf8'));
+    if(info.reason!=='ORIGINAL_MANIFEST_MISSING')throw Error('unrelated integrity marker');
+    unlinkDurably(marker);
+   }
+   unlinkDurably(source);
+  }
   const checkpointTemp=checkpointPath(this.root)+'.tmp';
   if(existsSync(checkpointTemp)){
     if(!existsSync(checkpointPath(this.root)))throw Error('orphan high-watermark checkpoint temp requires inspection');
@@ -216,6 +236,7 @@ export class Engine18RawRecorder{
   if(existsSync(dest))throw Error('archive collision');
   const gzip=gzipSync(readFileSync(path),{mtime:0});
   atomic(dest,gzip);
+  this.testFault?.('AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST',{source:path,archive:dest});
   atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,entries,this.calendarVersion))+'\n');
   unlinkDurably(path);
  }
@@ -308,6 +329,7 @@ export class Engine18RawRecorder{
   await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
   const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
   renameSync(tmp,dest);syncDir(dest);
+  this.testFault?.('AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST',{source:path,archive:dest});
   const hashed=await hashCompressedStreaming(dest);
   atomic(dest+'.manifest.json',JSON.stringify({
    schemaVersion:'engine18.manifest.v1',...hashed,...summary,calendarVersion:this.calendarVersion
