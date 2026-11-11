@@ -199,3 +199,25 @@ test('silent ES feed triggers supervised reconnect, private alert, and uncertain
  assert.ok(alerts.includes('IRONBEAM_SOURCE_INTERRUPTED'));
  assert.ok(events.every(x=>!x.raw.includes('SENSITIVE_TEST_TOKEN')));
 }));
+
+test('in-flight durable group counts toward strict frame and byte pressure during slow storage',()=>temp(async root=>{
+ const writer=await Engine18BufferedRecorder.openBounded({root,clock:clock(),
+  maxQueued:1,batchSize:1,flushDelayMs:0});
+ let release,entered;
+ const started=new Promise(resolve=>{entered=resolve;});
+ const original=writer.writer.appendBatch.bind(writer.writer);
+ writer.writer.appendBatch=async receipts=>{
+  entered();
+  await new Promise(resolve=>{release=resolve;});
+  return original(receipts);
+ };
+ const first=writer.offer({raw:'FIRST',msgClass:'market'});
+ await started;
+ assert.equal(writer.health().unacknowledged,1,'in-flight frame remains unacknowledged');
+ assert.ok(writer.health().pendingBytes>0);
+ await assert.rejects(writer.offer({raw:'SECOND',msgClass:'market'}),/backpressure/);
+ release();
+ await assert.rejects(first,/group commit failed/);
+ assert.equal(writer.health().failedClosed,true);
+ writer.writer.releaseLock();
+}));
