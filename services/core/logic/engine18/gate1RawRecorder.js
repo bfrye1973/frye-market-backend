@@ -285,6 +285,12 @@ export class Engine18RawRecorder{
   const writtenMonoNs=String(this.clock.monoNs());
   if(!/^\d+$/.test(writtenMonoNs)||BigInt(writtenMonoNs)<BigInt(receipt.receivedMonoNs))throw Error('invalid written monotonic timestamp');
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,runId:this.runId,receivedWallNs:receipt.receivedWallNs,receivedMonoNs:receipt.receivedMonoNs,writtenMonoNs,streamGeneration:receipt.streamGeneration,msgClass:receipt.msgClass,statusCode:receipt.statusCode,rawEncoding:receipt.rawEncoding,raw};
+  if(receipt.receiptClockSource!==undefined||receipt.receiptPrecision!==undefined||receipt.clockQuality!==undefined){
+   if(receipt.receiptClockSource!=='HOST_WALL_ANCHORED_MONOTONIC'||receipt.receiptPrecision!=='SUBMILLISECOND_ESTIMATE'||receipt.clockQuality!=='UNVERIFIED')throw Error('unverified receipt metadata required');
+   item.receiptClockSource=receipt.receiptClockSource;
+   item.receiptPrecision=receipt.receiptPrecision;
+   item.clockQuality=receipt.clockQuality;
+  }
   const line=Buffer.from(JSON.stringify(item)+'\n');
   try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}if(token!==BATCH_TOKEN)fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
   this.seq++;
