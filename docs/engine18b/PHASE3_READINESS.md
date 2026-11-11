@@ -38,3 +38,13 @@ Existing Gate 1/Phase 2 CI additionally checks disk-full, partial batch writes, 
 node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js
 ```
 Published CI evidence and memory/throughput measurements are attached to PR #293. The manager reviews the **latest exact HEAD**, not earlier synthetic runs, before any decision.
+
+## Verified synthetic CI results — 2026-11-10 Arizona
+- **53 passed, 0 failed** at code commit `32c706da7e503421cfe10f55e76123eba1aac2a1`: https://github.com/bfrye1973/frye-market-backend/actions/runs/42954493727
+- Existing Engine 18 isolated baseline workflow: **PASS**, https://github.com/bfrye1973/frye-market-backend/actions/runs/42954493644
+- Existing Phase 2 and Gate 1 tests are included in the 53-test suite (22 original Gate 1 + 20 Phase 2 + 11 Phase 3).
+- 20,000 synthetic frames in **5,075.2 ms** (~**3,941 frames/sec**, **1.38 MB/sec**). Runner variability is substantial; this is not a production peak feed SLA.
+- Independent bounded streaming replay: 4,004 synthetic records on two passes, identical hashes, sampled process RSS **82.7 MiB / 83.7 MiB**, max buffered remainder **1,645 bytes**. This metric excludes any consumer retaining events.
+- Interrupted ~4 MiB raw .open archive recovery: **256 messages**, sampled RSS **101.1 MiB before** and **138.5 MiB after**; the +37.4 MiB difference demonstrates the remaining memory exposure, NOT a peak-usage upper bound. Explicit pre-live blocker.
+- Synthetic Chrony parser rejects stale/unsynchronized clocks and untrusted clock source, and the periodic sampler writes UNVERIFIED when no time source is connected.
+- Latest HEAD includes documentation after the cited code commit. Check the exact latest HEAD CI again before manager approval.
