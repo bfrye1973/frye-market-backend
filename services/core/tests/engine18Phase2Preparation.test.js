@@ -42,7 +42,7 @@ test('control and reconnect statuses recorded without token or raw source URL',(
  const all=replayRaw(root);
  assert.deepEqual(all.map(e=>e.statusCode).filter(Boolean),['RECORDER_START','CONNECTED','SUBSCRIBED','DISCONNECTED','RECONNECT','RECORDER_STOP']);
  assert.equal(all.find(e=>e.raw.includes('"q"')).streamGeneration,2);
- assert.equal(tap.safeDiagnostics().counts.reconnects,1);
+ assert.equal(tap.safeDiagnostics().counts.reconnects,1);assert.equal(r.health().reconnects,1);
 }));
 test('binary and malformed frames remain unchanged',()=>dir(async root=>{
  const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
@@ -151,4 +151,18 @@ test('malformed, one-sided and empty d frames retained, all shapes counted',()=>
  const d=tap.safeDiagnostics();
  assert.equal(d.counts.depth,4);assert.ok(d.counts.rejectedDepth>=2);
  assert.equal(d.feedSemantics,'UNVERIFIED');
+}));
+
+test('raw frame receipt timestamp is frozen before parser/diagnostic work',()=>dir(async root=>{
+ const t=BigInt(Date.parse('2026-11-10T21:00:00Z'))*1000000n;
+ let wall=t,mono=10n;
+ const r=new Engine18BufferedRecorder({root,clock:{wallNs:()=>String(wall),monoNs:()=>String(++mono)},flushDelayMs:0});
+ const oldCapture=r.capture.bind(r);
+ r.capture=(args)=>{const receipt=oldCapture(args);wall+=60000000000n;return receipt;};
+ const tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ await tap.onFrame('{"d":[{"s":"XCME:ES.Z26","b":[],"a":[]}]}');await r.close();
+ const e=market(replayRaw(root)).at(-1);
+ assert.equal(e.receivedWallNs,String(t));
+ assert.ok(BigInt(e.writtenMonoNs)>=BigInt(e.receivedMonoNs));
+ assert.equal(tap.safeDiagnostics().counts.depth,1);
 }));
