@@ -28,6 +28,12 @@ export function getSafeStartupMetadata({
   clockSource:safe(clockSource,SAFE_ID),clockConfiguration:safe(clockConfiguration,SAFE_ID)
  });
 }
+export function snapshotFrameAtReceipt(message){
+ if(typeof message==='string'||(typeof Blob!=='undefined'&&message instanceof Blob))return message;
+ if(message instanceof ArrayBuffer)return Buffer.from(new Uint8Array(message));
+ if(ArrayBuffer.isView(message))return Buffer.from(new Uint8Array(message.buffer,message.byteOffset,message.byteLength));
+ throw Error('unsupported WebSocket frame; recorder must fail closed');
+}
 export async function getExactBinary(message){
  if(typeof message==='string')return {raw:message,rawEncoding:'utf8'};
  if(Buffer.isBuffer(message))return {raw:Buffer.from(message),rawEncoding:'base64'};
@@ -124,8 +130,9 @@ export class Engine18SyntheticReadinessSupervisor{
  frame(socket,data){
   const known=this.validateSocket(socket);
   const stamp=this.snapshotReceipt(); // stamp BEFORE Blob reading/decoding/queue
+  const snapshot=snapshotFrameAtReceipt(data); // clone mutable byte views immediately
   return this.enqueue(async()=>{
-   const {raw,rawEncoding}=await getExactBinary(data);
+   const {raw,rawEncoding}=await getExactBinary(snapshot);
    return this.writer.offerCaptured(Object.freeze({...stamp,raw,rawEncoding,
     msgClass:'unknown',statusCode:null,streamGeneration:known.generation}));
   });
