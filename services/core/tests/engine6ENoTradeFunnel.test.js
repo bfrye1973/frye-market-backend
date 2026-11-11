@@ -11,9 +11,9 @@ const snapshot = () => ({
       volume:{engine4AuthorizedReactionParticipation:{allowed:true,participationConfirmed:true,direction:"LONG",hardBlocked:false}}
     }},
     permission:{paper:{allowed:true,decision:"FAST_INTRADAY_PAPER_ALLOW",locked:true,direction:"LONG"}},
-    engine26ProposedGeometry:{geometryFeasible:true},
+    engine26ProposedGeometry:{geometryFeasible:true,geometryReady:true},
     engine9OfficialManagementPlan:{managementReady:true},
-    engine7PositionSizing:{finalContracts:3},
+    engine7PositionSizing:{finalContracts:3,finalSizingReady:true},
     engine8PaperOrder:{status:"READY_TO_CREATE_PAPER_ORDER",executable:true,planId:"plan-A"}
   }}
 });
