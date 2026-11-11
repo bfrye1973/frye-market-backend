@@ -11,7 +11,7 @@ const absent = (id, reason="EVIDENCE_UNAVAILABLE") => gate(id,"UNAVAILABLE",reas
 const waiting = (id, reason) => gate(id,"WAIT",reason);
 const blocked = (id, reason) => gate(id,"BLOCK",reason);
 const passed = (id, observed={}) => gate(id,"PASS","QUALIFIED",observed);
-const hasHard = v => v?.hardBlocked === true || v?.invalidated === true || v?.candidateInvalidated === true || v?.locationInvalidated === true || codes(v?.blockers).some(x=>/INVALIDAT|MISMATCH|HARD_BLOCK|CONFLICT|DISABLED/.test(up(x)));
+const hasHard = v => ["COMPLETED","INVALIDATED","CANCELLED","RETIRED"].includes(up(v?.status??v?.candidateState)) || v?.hardBlocked === true || v?.invalidated === true || v?.candidateInvalidated === true || v?.locationInvalidated === true || codes(v?.blockers).some(x=>/INVALIDAT|MISMATCH|HARD_BLOCK|CONFLICT|DISABLED/.test(up(x)));
 const truthful = (id, v, ok, neg, reason) => !isObj(v) ? absent(id) : ok ? passed(id,evidence(v)) : neg ? blocked(id,reason) : waiting(id,reason);
 const advisory = v => isObj(v) ? {available:true, timestamp:v.timestamp??v.snapshotTime??v.generatedAt??null, status:v.status??v.state??null, dataDegraded:v.dataDegraded===true, reasonCodes:codes(v.reasonCodes)} : {available:false};
 function match(executor, order, candidate, zone) {
@@ -20,6 +20,7 @@ function match(executor, order, candidate, zone) {
   if (e.candidateId !== candidate) return false;
   // Zone is mandatory if published by both; a missing executor zone requires a matching plan.
   if (e.zoneId != null && e.zoneId !== zone) return false;
+  if (e.snapshotTime != null && order.snapshotTime != null && e.snapshotTime !== order.snapshotTime) return false;
   if (e.planId == null || order.planId == null || e.planId !== order.planId) return false;
   if (order.orderId != null && e.orderId != null && order.orderId !== e.orderId) return false;
   return Boolean(e.orderId || e.executionId) && e.orderCreated === true && e.ok !== false && executor.ok !== false;
@@ -40,7 +41,8 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
   const gates=[];
   gates.push(!root ? absent("G0","SNAPSHOT_MISSING") : root.ok === true && up(root.symbol)==="ES" && v ? passed("G0") : root.ok === false || (root.symbol && up(root.symbol)!=="ES") ? blocked("G0","SNAPSHOT_INVALID") : absent("G0","SNAPSHOT_SCHEMA_UNVERIFIED"));
   gates.push(truthful("G1",c,Boolean(candidateId&&zoneId&&!hasHard(c)),hasHard(c),"CANDIDATE_NOT_VALID"));
-  const auth = c?.engine3EvaluationAuthorized ?? c?.evaluationAuthorized ?? r?.evaluationAuthorized;
+  const handoff=v?.engine26ReactionHandoff;
+  const auth = handoff?.authorizeEngine3Evaluation ?? r?.authorizeEngine3Evaluation ?? r?.evaluationAuthorized ?? c?.engine3EvaluationAuthorized ?? c?.evaluationAuthorized;
   gates.push(auth === true ? passed("G2") : auth === false ? waiting("G2","REACTION_NOT_AUTHORIZED") : absent("G2","AUTHORIZATION_FIELD_UNAVAILABLE"));
   gates.push(truthful("G3",r,r?.allowed===true&&r?.engine3Strategy1QualifiedForEngine6===true&&["LONG","SHORT"].includes(up(r?.direction)),hasHard(r),"ENGINE3_NOT_QUALIFIED"));
   gates.push(truthful("G4",p,p?.allowed===true&&p?.participationConfirmed===true&&p?.hardBlocked!==true&&up(p?.direction||p?.intendedDirection)===up(r?.direction),hasHard(p),"ENGINE4_NOT_CONFIRMED"));
@@ -58,10 +60,12 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
   const first=gates.find(x=>x.state!=="PASS")??null;
   return {schema:"engine6e.noTradeFunnel.v1",readOnly:true,symbol:"ES",strategyId:SID,
     snapshotTime:v?.snapshotTime??root?.snapshotTime??root?.generatedAt??null,
-    price:c?.currentPrice??v?.price??null,candidateId,zoneId,direction:direction||null,
+    price:c?.currentPrice??v?.price??null,candidateId,zoneId,
+    candidateLifecycleStartTime:c?.candidateLifecycleStartTime??c?.zoneMemorySummary?.candidateLifecycleStartTime??null,
+    direction:direction||null,
     firstFailedGate:first?.gate??null,firstFailureState:first?.state??null,
     gates:gates.map((x,i)=>first && i>gates.indexOf(first)?{...x,reached:false}: {...x,reached:true}),
-    advisory:{engine22:advisory(v?.engine22WaveStrategy?.authorizedWorkingStructure),engine25:advisory(v?.engine25Context??v?.engine25Participation),engine29:advisory(v?.engine29CrossMarketStress),engine27:advisory(v?.engine27MinuteDecision)},
+    advisory:{engine6:v?.engine6AdvisoryContext??null,engine22:advisory(v?.engine22WaveStrategy?.authorizedWorkingStructure),engine25:advisory(v?.engine25Context??v?.engine25Participation),engine29:advisory(v?.engine29CrossMarketStress),engine27:advisory(v?.engine27MinuteDecision)},
     executor:{available:isObj(executorResult),orderCreated:match(executorResult,order,candidateId,zoneId),candidateId:ex?.candidateId??null,planId:ex?.planId??null,orderId:ex?.orderId??null,status:ex?.status??null},
     lifecycle:{available:isObj(lifecycleOutcome),status:lifecycleOutcome?.status??null}
   };
