@@ -80,7 +80,7 @@ export class Engine18SyntheticArchiveBackup{
  constructor({root,store,maxRetries=3}={}){
   if(!root||!(store instanceof MockPrivateEncryptedStore)||!Number.isInteger(maxRetries)||maxRetries<1||maxRetries>10)throw Error('synthetic storage required');
   this.root=resolve(root);this.store=store;this.maxRetries=maxRetries;
-  this.uploaded=0;this.retryCount=0;
+  this.uploaded=0;this.retryCount=0;this.failures=0;this.lastCompletedAtMs=null;this.lastAttemptAtMs=null;this.inProgress=false;
  }
  async sendWithRetry(id,path,expected){
   if(this.store.objects.has(id)){
@@ -94,7 +94,15 @@ export class Engine18SyntheticArchiveBackup{
   }
  }
  async backupClosed(){
-  if(walk(this.root).some(x=>x.endsWith('.jsonl.open')))throw Error('open archive must not be backed up');
+  if(this.inProgress)throw Error('backup scan already in progress');
+  this.inProgress=true;this.lastAttemptAtMs=Date.now();
+  try{return await this._backupClosed();}
+  catch(e){this.failures++;throw e;}
+  finally{this.inProgress=false;}
+ }
+ async _backupClosed(){
+  // Closed, fsync-sealed hours are safe to copy while the next .jsonl.open grows.
+  // Never read/write the active segment or use its not-yet-closed checkpoint.
   const archives=walk(this.root).filter(x=>x.endsWith('.jsonl.gz'))
    .map(path=>{if(!existsSync(path+'.manifest.json'))throw Error('original archive manifest required');
     return {path,manifest:JSON.parse(readFileSync(path+'.manifest.json','utf8'))};})
@@ -113,6 +121,7 @@ export class Engine18SyntheticArchiveBackup{
     sha256:local.sha256,bytes:local.bytes,manifestSha256:manifestHash.sha256,manifestBytes:manifestHash.bytes};
    this.store.commitInventory(entry);
    this.uploaded++;
+   this.lastCompletedAtMs=Date.now();
   }
   const entries=this.store.listInventory();
   let last=0;
@@ -121,6 +130,11 @@ export class Engine18SyntheticArchiveBackup{
    last=e.lastSeq;
   }
   return {uploaded:this.uploaded,retries:this.retryCount,remoteArchiveCount:entries.length,lastSeq:last};
+ }
+ health({nowMs=Date.now()}={}){
+  return Object.freeze({schema:'engine18.backup.health.v1',inProgress:this.inProgress,
+   completedArchives:this.store.listInventory().length,failures:this.failures,retries:this.retryCount,
+   lastBackupAtMs:this.lastCompletedAtMs,backupLagMs:this.lastCompletedAtMs===null?null:Math.max(0,nowMs-this.lastCompletedAtMs)});
  }
  async restore({destination}={}){
   if(!destination)throw Error('restore destination required');
