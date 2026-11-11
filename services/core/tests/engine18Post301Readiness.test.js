@@ -120,7 +120,11 @@ test('isolated Ironbeam v2 synthetic connection records subscriptions, reconnect
  const session=createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,WebSocketImpl:FakeSocket});
  const a=await session.connect();
  const depth=' { "d":[{"s":"XCME:ES.Z26","b":[{"sz":0,"l":0}],"a":[]}], "vendor":"unverified" } ';
+ const quote='{"q":{"bp":7500.2500,"ap":7500.5000}}';
+ const trade='{"tr":[{"p":7500.2500,"sz":3}]}';
  a.socket.emit('message',depth);
+ a.socket.emit('message',quote);
+ a.socket.emit('message',trade);
  const b=await session.connect();
  a.socket.emit('message','{"old_connection":true}');
  const binary=Buffer.from([0,255,13,10]);
@@ -129,10 +133,10 @@ test('isolated Ironbeam v2 synthetic connection records subscriptions, reconnect
  await session.drain();await supervisor.close();
  const events=replayRaw(root);
  const frames=events.filter(x=>x.msgClass==='unknown');
- assert.deepEqual(frames.map(x=>x.rawEncoding),['utf8','utf8','base64']);
- assert.deepEqual(frames.map(x=>x.streamGeneration),[a.generation,a.generation,b.generation]);
- assert.deepEqual(frames.slice(0,2).map(x=>x.raw),[depth,'{"old_connection":true}']);
- assert.deepEqual(Buffer.from(frames[2].raw,'base64'),binary);
+ assert.deepEqual(frames.map(x=>x.rawEncoding),['utf8','utf8','utf8','utf8','base64']);
+ assert.deepEqual(frames.map(x=>x.streamGeneration),[a.generation,a.generation,a.generation,a.generation,b.generation]);
+ assert.deepEqual(frames.slice(0,4).map(x=>x.raw),[depth,quote,trade,'{"old_connection":true}']);
+ assert.deepEqual(Buffer.from(frames[4].raw,'base64'),binary);
  const subscriptions=events.filter(x=>x.statusCode==='SUBSCRIPTION_ACK');
  assert.equal(subscriptions.length,6);
  assert.ok(subscriptions.every(x=>!x.raw.includes('DO_NOT_STORE_TEST_TOKEN')));
