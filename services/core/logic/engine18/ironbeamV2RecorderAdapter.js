@@ -100,3 +100,30 @@ export function sanitizedRecorderControl(code,streamGeneration=0){
  if(!['CONNECTED','SUBSCRIBED','DISCONNECTED','RECONNECT','AUTH_FAILED','GAP','CLOCK_SAMPLE'].includes(code))throw Error('unsafe control code');
  return {raw:'',msgClass:code==='AUTH_FAILED'?'error':'control',statusCode:code,streamGeneration};
 }
+
+export class SyntheticIronbeamRecorderTap {
+ constructor({recorder,diagnostics=new IronbeamFrameShapeDiagnostics(),authorized=false}={}){
+  if(authorized!==false)throw Error('licensed Ironbeam recording NOT AUTHORIZED');
+  if(!recorder||typeof recorder.offer!=='function')throw Error('synthetic recorder required');
+  this.recorder=recorder;this.diagnostics=diagnostics;this.generation=0;this.connected=false;
+ }
+ onFrame(frame,{at}={}){
+  // classify synchronously, raw remains exact, and recorder captures receipt before queue delay.
+  const parsed=classifyIronbeamRawFrame(frame,{streamGeneration:this.generation,receivedAt:at});
+  const receiptPromise=this.recorder.offer({...parsed.capture,at});
+  // Diagnostics are never permitted to convert an unsuccessful write into an ACK.
+  return receiptPromise.then(ack=>{
+   const eventClock=this.recorder.lastReceiptWallNs;
+   this.diagnostics.observe(parsed,{receivedWallNs:eventClock});
+   return ack;
+  });
+ }
+ async onControl(code,{at}={}){
+  if(code==='CONNECTED'||code==='RECONNECT'){this.generation++;this.connected=true;}
+  if(code==='DISCONNECTED')this.connected=false;
+  const safe=sanitizedRecorderControl(code,this.generation);
+  const ack=await this.recorder.offer({...safe,at});
+  this.diagnostics.event(code);return ack;
+ }
+ safeDiagnostics(){return this.diagnostics.summary();}
+}
