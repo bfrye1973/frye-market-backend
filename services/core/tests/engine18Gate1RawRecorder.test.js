@@ -191,3 +191,9 @@ test('real SIGKILL and restart preserves acknowledged message once and emits GAP
   assert.deepEqual(e.map(x=>x.localSeq),[1,2,3,4,5,6]);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+test('close is idempotent and rejects any late receipt',()=>withDir(root=>{
+ const r=create(root);r.append({raw:'only-once',msgClass:'market'});
+ r.close();r.close();
+ assert.throws(()=>r.append({raw:'late'}),/closed/);
+ assert.deepEqual(statuses(replayRaw(root)),['RECORDER_START','only-once','RECORDER_STOP']);
+}));
