@@ -3,7 +3,7 @@
 import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 if(process.env.ENGINE18_SYNTHETIC_WORKER!=='1'||typeof process.send!=='function')
  throw Error('isolated synthetic worker disabled');
-let recorder=null,queue=Promise.resolve(),faulted=false;
+let recorder=null,queue=Promise.resolve(),faulted=false,cleanExit=false;
 const clock={wallNs:()=>String(BigInt(Date.now())*1000000n),monoNs:()=>String(process.hrtime.bigint())};
 function safeSend(item){try{process.send(item);}catch{}}
 async function dispatch(message){
@@ -34,7 +34,7 @@ async function dispatch(message){
   safeSend({type:'HEALTH',id:message.id,received:h.received,recorded:h.recorded,failedClosed:h.failedClosed});return;
  }
  if(message.type==='CLOSE'){
-  await recorder.close();safeSend({type:'CLOSED',lastSeq:recorder.writer.seq});
+  await recorder.close();cleanExit=true;safeSend({type:'CLOSED',lastSeq:recorder.writer.seq});
   process.exitCode=0;return;
  }
  if(message.type==='FAIL'){
@@ -49,4 +49,15 @@ process.on('message',message=>{
   recorder?.fail('WORKER_RECORDING_FAILED');
   safeSend({type:'FAILED',reason:'WORKER_RECORDING_FAILED',id:message?.id});
  });
+});
+
+// If the parent is killed, orphaned capture is unsafe. Preserve fsync-committed
+// records, NEVER emit a clean STOP, and let the next startup record GAP.
+process.on('disconnect',()=>{
+ if(!cleanExit){faulted=true;recorder?.fail('PARENT_IPC_DISCONNECTED');process.exit(76);}
+ process.exit(0);
+});
+process.on('SIGTERM',()=>{
+ if(!cleanExit)recorder?.fail('WORKER_TERMINATED');
+ process.exit(cleanExit?0:76);
 });
