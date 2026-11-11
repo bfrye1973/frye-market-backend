@@ -11,22 +11,24 @@ const textFrame=x=>typeof x==='string'?x:Buffer.isBuffer(x)||x instanceof Uint8A
  Buffer.from(x):x instanceof ArrayBuffer?Buffer.from(x):null;
 export class Engine18IronbeamLiveRecorderSource{
  constructor({recorder,credentials,fetchImpl,WebSocketImpl,host=PROVIDER,
-   retryMs=2000,maxRetryMs=60000,openTimeoutMs=6000,onAlert=()=>{},
+   retryMs=2000,maxRetryMs=60000,openTimeoutMs=6000,heartbeatTimeoutMs=30000,onAlert=()=>{},
    clockSampler=null}={}){
   if(!recorder||typeof recorder.offer!=='function'||typeof fetchImpl!=='function'||
    typeof WebSocketImpl!=='function'||host!==PROVIDER||
    !credentials||!['username','password','apiKey'].every(k=>typeof credentials[k]==='string'&&credentials[k].length))
    throw Error('isolated recorder, vendor v2 dependencies and private credentials required');
   if(!Number.isInteger(retryMs)||retryMs<1||!Number.isInteger(maxRetryMs)||maxRetryMs<retryMs||
-   !Number.isInteger(openTimeoutMs)||openTimeoutMs<1||typeof onAlert!=='function')
+   !Number.isInteger(openTimeoutMs)||openTimeoutMs<1||
+   !Number.isInteger(heartbeatTimeoutMs)||heartbeatTimeoutMs<1||typeof onAlert!=='function')
    throw Error('invalid source supervision limits');
   this.recorder=recorder;this.credentials=credentials;this.fetchImpl=fetchImpl;
   this.WebSocketImpl=WebSocketImpl;this.onAlert=onAlert;
   this.retryMs=retryMs;this.maxRetryMs=maxRetryMs;this.openTimeoutMs=openTimeoutMs;
+  this.heartbeatTimeoutMs=heartbeatTimeoutMs;
   this.clockSampler=clockSampler;this.current=null;this.generation=0;this.active=false;
   this.pending=new Set();this.timer=null;this.retries=0;this.frames=0;
   this.subscriptions=0;this.disconnections=0;this.alerts=0;this.sourceUncertain=false;
-  this.lastFrameWallNs=null;this.lastErrorCode=null;
+  this.lastFrameWallNs=null;this.lastErrorCode=null;this.connected=false;
  }
  alert(code){
   this.lastErrorCode=code;this.alerts++;
@@ -69,7 +71,8 @@ export class Engine18IronbeamLiveRecorderSource{
  async start(){if(this.active)throw Error('source already active');this.active=true;return this.connect();}
  async connect(){
   if(!this.active||this.sourceUncertain)return;
-  const generation=++this.generation,connectionId=randomUUID(),source={generation,connectionId,socket:null,closed:false,gap:false};
+  const generation=++this.generation,connectionId=randomUUID(),source={generation,connectionId,socket:null,closed:false,gap:false,watchdog:null,lastMessageAt:Date.now()};
+  this.connected=false;
   this.current=source;
   let ws;
   try{
@@ -88,7 +91,7 @@ export class Engine18IronbeamLiveRecorderSource{
     if(!this.active||this.current!==source||source.closed||this.sourceUncertain)return;
     const raw=textFrame(event.data);
     if(raw===null){this.captureFailure();return;}
-    this.frames++;
+    this.frames++;source.lastMessageAt=Date.now();
     // Timestamp and write before parse or business logic. No data transformed.
     void this.write({raw,rawEncoding:typeof raw==='string'?'utf8':'base64',
      msgClass:'market',statusCode:null,streamGeneration:generation})
@@ -108,26 +111,40 @@ export class Engine18IronbeamLiveRecorderSource{
    if(this.current!==source||!this.active)return;
    await this.record(generation===1?'CONNECTED':'RECONNECT',generation,{connectionId,streamId:stream.streamId});
    for(const feedType of SUBS){
+    if(!this.active||this.current!==source||source.closed)throw Error('SOURCE_CLOSED_BEFORE_SUBSCRIPTIONS');
     let status='FAILED';
     try{
      await this.api('/v2/market/'+feedType+'/subscribe/'+encodeURIComponent(stream.streamId)+
       '?symbols='+encodeURIComponent(SYMBOL),login.token);
+     if(this.current!==source||source.closed)throw Error('SOURCE_CLOSED_DURING_SUBSCRIPTION');
      status='SUCCESS';
     }finally{
      await this.record('SUBSCRIPTION_ACK',generation,{connectionId,streamId:stream.streamId,
       feedType,physicalContract:SYMBOL,status});
     }
    }
-   if(this.current!==source||!this.active)return;
-   this.subscriptions+=SUBS.length;this.retries=0;
+   if(this.current!==source||!this.active||source.closed)return false;
+   this.subscriptions+=SUBS.length;this.retries=0;this.connected=true;
+   source.lastMessageAt=Date.now();
+   source.watchdog=setInterval(()=>{
+    if(!source.closed&&this.current===source&&this.active&&
+       Date.now()-source.lastMessageAt>this.heartbeatTimeoutMs){
+      this.alert('IRONBEAM_SOURCE_STALE');
+      void this.interrupt(source,'HEARTBEAT_TIMEOUT');
+    }
+   },Math.max(5,Math.min(5000,this.heartbeatTimeoutMs)));
+   source.watchdog.unref?.();
+   return true;
   }catch{
    this.alert('IRONBEAM_CONNECTION_OR_SUBSCRIPTION_FAILED');
    if(this.current===source)await this.interrupt(source,'SOURCE_CONNECT_FAILED');
+   return false;
   }
  }
  async interrupt(source,reason,closeCode=null){
   if(source.closed)return;
-  source.closed=true;this.disconnections++;
+  source.closed=true;this.connected=false;this.disconnections++;
+  if(source.watchdog){clearInterval(source.watchdog);source.watchdog=null;}
   try{source.socket?.close();}catch{}
   const current=this.current===source;
   // Durably distinguish source interruption from a recorder crash.
@@ -150,7 +167,8 @@ export class Engine18IronbeamLiveRecorderSource{
   if(this.timer){clearTimeout(this.timer);this.timer=null;}
   const source=this.current;this.current=null;
   if(source&&!source.closed){
-   source.closed=true;
+   source.closed=true;this.connected=false;
+   if(source.watchdog){clearInterval(source.watchdog);source.watchdog=null;}
    try{source.socket?.close();}catch{}
    await this.record('DISCONNECTED',source.generation,{
     connectionId:source.connectionId,reason:'OPERATOR_STOP',closeCode:1000});
@@ -159,7 +177,7 @@ export class Engine18IronbeamLiveRecorderSource{
  }
  health(){
   return Object.freeze({schema:'engine18.ironbeam.live.source.health.v1',
-   active:this.active&&!this.sourceUncertain,generation:this.generation,
+   active:this.active&&!this.sourceUncertain,connected:this.connected,generation:this.generation,
    framesReceived:this.frames,subscriptionsAcknowledged:this.subscriptions,
    reconnects:Math.max(0,this.generation-1),disconnections:this.disconnections,
    lastFrameWallNs:this.lastFrameWallNs,lastErrorCode:this.lastErrorCode,
