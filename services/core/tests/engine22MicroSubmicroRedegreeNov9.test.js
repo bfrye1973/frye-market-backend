@@ -124,7 +124,8 @@ test("new Submicro W2 retracement touches are downside-only, after W1 high, and 
  const second=priceRead(7570,{at:w1At+120000,storePath});
  assert.deepEqual(second.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels.map(l=>l.status),
  ["TOUCHED","TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
- assert(second.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.every(l=>l.status==="WATCH"));
+ assert.deepEqual(second.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.w5UpExtensionLevels.map(l=>l.status),
+ ["TOUCHED","WATCH","WATCH","WATCH","WATCH","WATCH"],"Micro W5 retains its independent legitimate touch history");
  const third=priceRead(7610,{at:w1At+180000,storePath});
  assert.equal(third.degrees.submicro.ownerSubmicroW3Nov9InternalResearch.w2DownRetracementLevels[0].status,"TOUCHED");
  const oldBar=priceRead(7610,{at:w1At+900000,
