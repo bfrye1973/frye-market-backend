@@ -7,6 +7,10 @@ import {join} from 'node:path';
 import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
 import {Engine18S3PrivateStore} from '../logic/engine18/engine18S3PrivateStore.js';
 import {Engine18S3ArchiveCoordinator} from '../logic/engine18/engine18Phase5S3Coordinator.js';
+import {Engine18SyntheticReadinessSupervisor} from '../logic/engine18/engine18Phase3Readiness.js';
+import {createEngine18IronbeamV2RecorderRehearsal} from '../logic/engine18/engine18IronbeamV2RecorderRehearsal.js';
+import {buildEngine18ReadOnlyContext} from '../logic/engine18/engine18ReadOnlyResearchContext.js';
+import {replayRaw} from '../logic/engine18/gate1RawRecorder.js';
 
 const withRoot=async fn=>{const root=mkdtempSync(join(tmpdir(),'e18-post301-'));try{return await fn(root);}finally{rmSync(root,{recursive:true,force:true});}};
 const localClock=()=>{
@@ -86,3 +90,74 @@ test('restart reconciles full inventory and missing final chain fails at periodi
  await assert.rejects(next.inventory({expectedLastSeq:head.lastSeq}),/high-watermark/);
  assert.ok(metrics.list>=3);
 }));
+
+test('isolated Ironbeam v2 synthetic connection records subscriptions, reconnects and original frames',()=>withRoot(async root=>{
+ const clock=localClock(),supervisor=new Engine18SyntheticReadinessSupervisor({
+  root,clock,metadata:{softwareVersion:'phase-rehearsal',gitCommit:'abc1234567',
+   physicalContract:'XCME:ES.Z26',contractMapping:'XCME:ES.Z26',
+   clockSource:'UNVERIFIED',clockConfiguration:'MONOTONIC_UNVERIFIED'}
+ });
+ await supervisor.start();
+ const sockets=[],requests=[];
+ class FakeSocket{
+  constructor(url){this.url=url;this.events={};sockets.push(this);}
+  addEventListener(k,fn){(this.events[k]??=[]).push(fn);}
+  emit(k,data,code){for(const cb of this.events[k]??[])cb({data,code});}
+  close(){this.emit('close',null,1000);}
+ }
+ let stream=0;
+ const fetchImpl=async(url,request)=>{
+  requests.push({url,method:request.method});
+  if(url.endsWith('/v2/auth')){
+   assert.equal(request.method,'POST');
+   return {ok:true,json:async()=>({token:'DO_NOT_STORE_TEST_TOKEN'})};
+  }
+  if(url.endsWith('/v2/stream/create'))return {ok:true,json:async()=>({streamId:'s'+(++stream)})};
+  if(url.includes('/subscribe/'))return {ok:true,json:async()=>({status:'OK'})};
+  throw Error('wrong synthetic endpoint');
+ };
+ assert.throws(()=>createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,WebSocketImpl:FakeSocket,endpoint:'https://demo.ironbeamapi.com'}),/disabled/);
+ const session=createEngine18IronbeamV2RecorderRehearsal({supervisor,fetchImpl,WebSocketImpl:FakeSocket});
+ const a=await session.connect();
+ const depth=' { "d":[{"s":"XCME:ES.Z26","b":[{"sz":0,"l":0}],"a":[]}], "vendor":"unverified" } ';
+ a.socket.emit('message',depth);
+ const b=await session.connect();
+ a.socket.emit('message','{"old_connection":true}');
+ const binary=Buffer.from([0,255,13,10]);
+ b.socket.emit('message',binary);
+ a.socket.emit('error');
+ await session.drain();await supervisor.close();
+ const events=replayRaw(root);
+ const frames=events.filter(x=>x.msgClass==='unknown');
+ assert.deepEqual(frames.map(x=>x.rawEncoding),['utf8','utf8','base64']);
+ assert.deepEqual(frames.map(x=>x.streamGeneration),[a.generation,a.generation,b.generation]);
+ assert.deepEqual(frames.slice(0,2).map(x=>x.raw),[depth,'{"old_connection":true}']);
+ assert.deepEqual(Buffer.from(frames[2].raw,'base64'),binary);
+ const subscriptions=events.filter(x=>x.statusCode==='SUBSCRIPTION_ACK');
+ assert.equal(subscriptions.length,6);
+ assert.ok(subscriptions.every(x=>!x.raw.includes('DO_NOT_STORE_TEST_TOKEN')));
+ assert.ok(JSON.stringify(events).includes('FEED_GAP'));
+ assert.equal(session.status().feedSemantics,'UNVERIFIED');
+ assert.ok(requests.filter(x=>x.url.includes('/subscribe/')).length===6);
+ assert.ok(!JSON.stringify(events).includes('DO_NOT_STORE_TEST_TOKEN'));
+}));
+test('read-only context retains approved source values but refuses missing point-in-time evidence',()=>{
+ const institutionalResponse={structures_sticky:[{details:{id:'original-id'},high:7492.25,low:7490.00,status:'LOCKED'}]};
+ const strategySnapshot={strategies:{'intraday_scalp@10m':{engine22WaveStrategy:{
+  fingerprint:'owner-approved-fingerprint',
+  currentWavelength:{degrees:{micro:{target:7625,ratio:1.618},submicro:{target:7475.25,ratio:0.618}}},
+  workingWaveNodes:{schemaVersion:'engine22.workingWaveNodes.v1',revision:'approved-1'}
+ }}}};
+ const packet=buildEngine18ReadOnlyContext({institutionalResponse,strategySnapshot});
+ assert.equal(packet.usableForChronologicalResearch,false);
+ assert.equal(packet.bookLiquidity,null);
+ const accepted=buildEngine18ReadOnlyContext({institutionalResponse,strategySnapshot,
+  institutionalAvailableAt:'2026-11-10T12:00:00Z',strategyAvailableAt:'2026-11-10T12:00:00Z',
+  priceBasisStatus:'MATCHED'});
+ assert.equal(accepted.usableForChronologicalResearch,true);
+ assert.equal(accepted.micro.target,7625);
+ assert.equal(accepted.submicro.target,7475.25);
+ institutionalResponse.structures_sticky[0].high=0;
+ assert.equal(accepted.institutionalZones[0].high,7492.25);
+ assert.throws(()=>buildEngine18ReadOnlyContext({physicalContract:'SPY'}),/ES source/);
+});
