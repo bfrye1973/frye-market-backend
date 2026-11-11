@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,rmSync,readdirSync,readFileSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,rmSync,readdirSync,readFileSync,writeFileSync,closeSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -159,8 +159,8 @@ test('synthetic actual crash/recovery of large open archive records memory RSS a
   await Promise.all(items);
   if(i===3)break; // 256 frames, about 4 MiB synthetic raw open archive
  }
- // Kill-equivalent: release lock without clean STOP, preserve .open file
- writer.writer.rotate();writer.writer.releaseLock();
+ // Simulate killed process: close FD and release lock WITHOUT clean STOP or rotation.
+ closeSync(writer.writer.fd);writer.writer.fd=null;writer.writer.releaseLock();
  const {Engine18RawRecorder,replayRaw}=await import('../logic/engine18/gate1RawRecorder.js');
  const recovered=new Engine18RawRecorder({root,clock:clock()});recovered.close();
  const events=replayRaw(root);
