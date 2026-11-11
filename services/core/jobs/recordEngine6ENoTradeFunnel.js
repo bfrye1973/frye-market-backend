@@ -17,7 +17,12 @@ if(!output || path.resolve(output)===forbidden || path.resolve(output).startsWit
   throw new Error("ISOLATED_FUNNEL_DIR_REQUIRED");
 }
 const snapshot=JSON.parse(fs.readFileSync(input,"utf8"));
-const record=buildNoTradeFunnel(snapshot); // no assumed order creation
+let executorResult=null;
+if(process.env.ENGINE6E_EXECUTOR_RESULT_JSON){
+  try { executorResult=JSON.parse(process.env.ENGINE6E_EXECUTOR_RESULT_JSON); }
+  catch { executorResult=null; }
+}
+const record=buildNoTradeFunnel(snapshot,{executorResult}); // verified correlation required
 const stored=appendFunnelCycle(record,{root:output});
 console.log(JSON.stringify({ok:true,mode:"DIAGNOSTICS_ONLY",date:stored.date,
   firstFailedGate:record.firstFailedGate,state:record.firstFailureState,candidateId:record.candidateId,
