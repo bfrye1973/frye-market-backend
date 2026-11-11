@@ -48,3 +48,12 @@ test("reject out-of-order event clocks rather than revising historical state",()
  assert.equal(reader.observe(frame(120,90,now-100)).reason,"OUT_OF_ORDER_BOOK");
  assert.equal(reader.snapshot({nowMs:now+100}).images,1);
 });
+
+test("accepted depth image reports actual per-side visible count, not assumed 10 levels",()=>{
+ const reader=createEngine18Level2ZoneReader({minObservations:1});
+ const observation=reader.observe(frame());
+ assert.equal(observation.accepted,true);
+ assert.equal(observation.bidLevels,2);
+ assert.equal(observation.askLevels,2);
+ assert.equal(observation.depthLevels,4);
+});
