@@ -124,10 +124,11 @@ async function hashCompressedStreaming(path){
  return {sha256:h.digest('hex'),bytes};
 }
 export class Engine18RawRecorder{
- constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false}={}){
+ constructor({root,provider='SYNTHETIC',physicalContract='XCME_ES_Z26',clock,calendarVersion='cme-eth-provisional-v1',testFault=null,boundedInitialization=false,allowLiveProvider=false}={}){
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
-  if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
+  if(provider!=='SYNTHETIC'&&!(provider==='IRONBEAM_V2'&&allowLiveProvider===true))
+   throw Error('live raw collection disabled pending manager operational authorization');
   if(testFault!==null&&typeof testFault!=='function')throw Error('testFault must be function');
   this.testFault=testFault;
   this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;this.closed=false;
