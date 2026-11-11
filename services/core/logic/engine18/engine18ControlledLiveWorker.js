@@ -1,7 +1,7 @@
 // Engine 18 LIMITED independent read-only Ironbeam recorder entrypoint.
 // Completely separate from existing chart/monitor/trading services.
 // Hard disabled until manager approves private deployment and trial credentials.
-import {statSync,realpathSync,existsSync} from 'node:fs';
+import {statSync,existsSync} from 'node:fs';
 import {WebSocket} from 'ws';
 import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 import {Engine18IronbeamLiveRecorderSource} from './engine18IronbeamLiveRecorderSource.js';
@@ -16,11 +16,13 @@ export function verifyEngine18LiveEnvironment(env,stat=statSync){
  const required=['IRONBEAM_USERNAME','IRONBEAM_PASSWORD','IRONBEAM_API_KEY',
   'ENGINE18_RECORDER_DISK','ENGINE18_R2_ENDPOINT','ENGINE18_R2_BUCKET',
   'ENGINE18_R2_ACCESS_KEY','ENGINE18_R2_SECRET_KEY','ENGINE18_R2_ENCRYPTION_KEY_HEX',
-  'ENGINE18_R2_KEY_ID','ENGINE18_INDEPENDENT_INVENTORY_PIN'];
+  'ENGINE18_R2_KEY_ID','ENGINE18_INDEPENDENT_INVENTORY_PIN',
+  'ENGINE18_CME_CALENDAR_VERIFIED'];
  const missing=required.filter(k=>!env[k]);
  if(missing.length)throw Error('private recorder missing environment requirements: '+missing.join(','));
  if(env.ENGINE18_LIVE_CAPTURE_APPROVED!=='YES'||
-    env.ENGINE18_MANAGER_TRIAL_ACCEPTED!=='YES')
+    env.ENGINE18_MANAGER_TRIAL_ACCEPTED!=='YES'||
+    env.ENGINE18_CME_CALENDAR_VERIFIED!=='YES')
   throw Error('real Ironbeam capture disabled without manager operational acceptance');
  const disk=env.ENGINE18_RECORDER_DISK;
  if(!disk.startsWith('/var/data/engine18-recorder/')||disk.includes('..')||
@@ -40,6 +42,11 @@ function alert(code){process.stderr.write('ENGINE18_PRIVATE_ALERT '+code+'\n');}
 export async function runEngine18ControlledRecording({env=process.env,
  fetchImpl=fetch,WebSocketImpl=WebSocket,onAlert=alert}={}){
  const config=verifyEngine18LiveEnvironment(env);
+ // The private host must supply actual Chrony evidence before recording.
+ const chrony=makeChronySampler();
+ const initialSample=await chrony();
+ if(!initialSample||BigInt(initialSample.uncertaintyNs)>5000000n)
+  throw Error('controlled trial refuses unverified or imprecise host clock');
  const clock=createEngine18ReceiptClock();
  const writer=await Engine18BufferedRecorder.openBounded({
   root:config.disk,clock,maxQueued:4096,maxQueueBytes:32*1024*1024,
@@ -61,10 +68,10 @@ export async function runEngine18ControlledRecording({env=process.env,
    password:env.IRONBEAM_PASSWORD,apiKey:env.IRONBEAM_API_KEY},
   fetchImpl,WebSocketImpl,onAlert
  });
- let finished=false,heartbeat=null,stopTimer=null;
+ let finished=false,heartbeat=null,stopTimer=null,clockTimer=null;
  const stop=async()=>{
   if(finished)return;finished=true;
-  clearInterval(heartbeat);clearTimeout(stopTimer);
+  clearInterval(heartbeat);clearInterval(clockTimer);clearTimeout(stopTimer);
   await source.stop();
   await scheduler.stop();
   if(writer.health().failedClosed){onAlert('RECORDER_UNCLEAN_SHUTDOWN');return;}
@@ -75,6 +82,8 @@ export async function runEngine18ControlledRecording({env=process.env,
  };
  try{
   await backup.inventory({expectedLastSeq:config.expectedLastSeq});
+  // Establish a trusted backup heartbeat before accepting source frames.
+  await scheduler.tick();
   scheduler.start();
   heartbeat=setInterval(()=>{
    const h=writer.health(),b=scheduler.health(),s=source.health();
@@ -84,17 +93,21 @@ export async function runEngine18ControlledRecording({env=process.env,
     queueDepth:h.unacknowledged,queueCapacity:4096,
     backupLagMinutes:b.backupLagMs===null?null:b.backupLagMs/60000,
     backupInventoryVerified:b.failures===0,
-    clockQuality:'UNVERIFIED',calendarQuality:'UNVERIFIED',
+    clockQuality:'VERIFIED',calendarQuality:'VERIFIED',
     gaps:h.gapCount,rejected:h.rejected,writeFailures:h.failedClosed?1:0
    });
-   if(flags.shouldHalt||!s.active){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop();}
+   if(flags.shouldHalt||!s.active){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));}
   },5000);
-  // Host clock quality remains UNVERIFIED until direct Chrony evidence is observed.
-  const chrony=makeChronySampler();
-  void chrony().then(sample=>{
-   if(!sample)onAlert('CLOCK_QUALITY_UNVERIFIED');
-  }).catch(()=>onAlert('CLOCK_QUALITY_UNVERIFIED'));
-  stopTimer=setTimeout(()=>{void stop();},config.windowMinutes*60000);
+  // Revalidate host time source periodically; mark collection unsafe on failure.
+  clockTimer=setInterval(()=>{
+   void chrony().then(sample=>{
+    if(!sample||BigInt(sample.uncertaintyNs)>5000000n){
+     onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});
+    }
+   }).catch(()=>{onAlert('CLOCK_QUALITY_LOST');void stop().catch(()=>{});});
+  },60000);
+  clockTimer.unref?.();
+  stopTimer=setTimeout(()=>{void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));},config.windowMinutes*60000);
   await source.start();
   return {source,writer,backup,scheduler,stop};
  }catch{
