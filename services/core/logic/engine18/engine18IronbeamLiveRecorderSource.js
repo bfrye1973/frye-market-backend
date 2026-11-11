@@ -29,6 +29,7 @@ export class Engine18IronbeamLiveRecorderSource{
   this.pending=new Set();this.timer=null;this.retries=0;this.frames=0;
   this.subscriptions=0;this.disconnections=0;this.alerts=0;this.sourceUncertain=false;
   this.lastFrameWallNs=null;this.lastErrorCode=null;this.connected=false;
+  this.disconnectedAtMs=null;
  }
  alert(code){
   this.lastErrorCode=code;this.alerts++;
@@ -72,7 +73,7 @@ export class Engine18IronbeamLiveRecorderSource{
  async connect(){
   if(!this.active||this.sourceUncertain)return;
   const generation=++this.generation,connectionId=randomUUID(),source={generation,connectionId,socket:null,closed:false,gap:false,watchdog:null,lastMessageAt:Date.now()};
-  this.connected=false;
+  this.connected=false;this.disconnectedAtMs=Date.now();
   this.current=source;
   let ws;
   try{
@@ -125,6 +126,7 @@ export class Engine18IronbeamLiveRecorderSource{
    }
    if(this.current!==source||!this.active||source.closed)return false;
    this.subscriptions+=SUBS.length;this.retries=0;this.connected=true;
+   this.disconnectedAtMs=null;
    source.lastMessageAt=Date.now();
    source.watchdog=setInterval(()=>{
     if(!source.closed&&this.current===source&&this.active&&
@@ -143,7 +145,7 @@ export class Engine18IronbeamLiveRecorderSource{
  }
  async interrupt(source,reason,closeCode=null){
   if(source.closed)return;
-  source.closed=true;this.connected=false;this.disconnections++;
+  source.closed=true;this.connected=false;this.disconnectedAtMs=Date.now();this.disconnections++;
   if(source.watchdog){clearInterval(source.watchdog);source.watchdog=null;}
   try{source.socket?.close();}catch{}
   const current=this.current===source;
@@ -177,7 +179,8 @@ export class Engine18IronbeamLiveRecorderSource{
  }
  health(){
   return Object.freeze({schema:'engine18.ironbeam.live.source.health.v1',
-   active:this.active&&!this.sourceUncertain,connected:this.connected,generation:this.generation,
+   active:this.active&&!this.sourceUncertain,connected:this.connected,
+   disconnectedSinceMs:this.disconnectedAtMs,generation:this.generation,
    framesReceived:this.frames,subscriptionsAcknowledged:this.subscriptions,
    reconnects:Math.max(0,this.generation-1),disconnections:this.disconnections,
    lastFrameWallNs:this.lastFrameWallNs,lastErrorCode:this.lastErrorCode,
