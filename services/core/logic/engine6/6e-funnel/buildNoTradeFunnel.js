@@ -33,7 +33,7 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
   const p=v?.confluence?.context?.volume?.engine4AuthorizedReactionParticipation;
   const perm=v?.permission?.paper;
   const geom=v?.engine26ProposedGeometry, mgmt=v?.engine9OfficialManagementPlan;
-  const size=v?.engine7PositionSizing ?? v?.engine7SizingPreview;
+  const size=v?.engine7PositionSizing?.finalSizingReady === true ? v.engine7PositionSizing : (v?.engine7SizingPreview?.finalSizingReady === true ? v.engine7SizingPreview : (v?.engine7PositionSizing ?? v?.engine7SizingPreview));
   const order=v?.engine8PaperOrder;
   const candidateId=c?.candidateId??null, zoneId=c?.zoneId??null;
   const direction=up(r?.direction||perm?.direction||c?.direction);
@@ -46,11 +46,11 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
   gates.push(truthful("G4",p,p?.allowed===true&&p?.participationConfirmed===true&&p?.hardBlocked!==true&&up(p?.direction||p?.intendedDirection)===up(r?.direction),hasHard(p),"ENGINE4_NOT_CONFIRMED"));
   gates.push(truthful("G5",perm,perm?.allowed===true&&up(perm?.decision)==="FAST_INTRADAY_PAPER_ALLOW",hasHard(perm)||perm?.decision==="BLOCK","ENGINE6_NOT_ALLOWED"));
   gates.push(!isObj(perm)?absent("G6"):perm.locked===true?passed("G6"):perm.locked===false?waiting("G6","ENGINE6_APPROVAL_NOT_LOCKED"):absent("G6","LOCK_FIELD_UNAVAILABLE"));
-  const feasible=geom?.geometryFeasible ?? geom?.feasible ?? geom?.geometryReady;
+  const feasible=geom?.geometryReady === true && geom?.geometryFeasible === true ? true : geom?.geometryReady === false || geom?.geometryFeasible === false ? false : undefined;
   gates.push(!isObj(geom)?absent("G7"):feasible===true?passed("G7",evidence(geom)):feasible===false?waiting("G7","GEOMETRY_NOT_FEASIBLE"):absent("G7","GEOMETRY_FEASIBILITY_FIELD_UNAVAILABLE"));
   gates.push(truthful("G8",mgmt,mgmt?.managementReady===true,hasHard(mgmt),"MANAGEMENT_PLAN_NOT_READY"));
-  const count=size?.finalContracts ?? size?.contracts ?? size?.quantity;
-  gates.push(!isObj(size)?absent("G9"):Number.isInteger(count)&&count>=1?passed("G9",{contracts:count}):count!=null?waiting("G9","NO_VALID_FINAL_SIZE"):absent("G9","AUTHORITATIVE_FINAL_SIZE_UNAVAILABLE"));
+  const count=size?.finalContracts;
+  gates.push(!isObj(size)?absent("G9"):size?.finalSizingReady===true&&Number.isInteger(count)&&count>=1?passed("G9",{contracts:count}):count!=null?waiting("G9","NO_VALID_FINAL_SIZE"):absent("G9","AUTHORITATIVE_FINAL_SIZE_UNAVAILABLE"));
   gates.push(!isObj(order)?absent("G10"):up(order.status)==="READY_TO_CREATE_PAPER_ORDER"&&order.executable===true?passed("G10",evidence(order)):hasHard(order)?blocked("G10","PAPER_ADAPTER_BLOCKED"):waiting("G10","PAPER_ADAPTER_NOT_READY"));
   const ex=isObj(executorResult?.execution)?executorResult.execution:executorResult;
   gates.push(match(executorResult,order,candidateId,zoneId)?passed("G11",{orderId:ex.orderId??null,executionId:ex.executionId??null,planId:ex.planId??null}):isObj(executorResult)&&ex?.rejected===true&&ex?.candidateId===candidateId&&ex?.planId===order?.planId?blocked("G11","EXECUTOR_REJECTED"):absent("G11","EXECUTOR_ORDER_CREATION_NOT_VERIFIED"));
