@@ -41,7 +41,7 @@ async function hashFile(path){
 }
 export class Engine18S3PrivateStore {
  constructor({endpoint,bucket,region='auto',accessKeyId,secretAccessKey,keyId,encryptionKey,
-  fetchImpl=fetch,now=()=>new Date(),maxObjectBytes=1024*1024*1024}={}){
+  fetchImpl=fetch,now=()=>new Date(),maxObjectBytes=1024*1024*1024,maxRetries=3,retentionDays=30}={}){
   const url=new URL(endpoint);
   if(!['https:','http:'].includes(url.protocol)||url.username||url.password||url.search||
      (url.protocol==='http:'&&!['localhost','127.0.0.1'].includes(url.hostname)))
@@ -52,7 +52,9 @@ export class Engine18S3PrivateStore {
   this.endpoint=url.origin;this.bucket=bucket;this.region=region;
   this.accessKeyId=accessKeyId;this.secretAccessKey=secretAccessKey;
   this.keyId=keyId;this.key=Buffer.from(encryptionKey);this.fetch=fetchImpl;this.now=now;
-  this.maxObjectBytes=maxObjectBytes;
+  if(!Number.isInteger(maxRetries)||maxRetries<1||maxRetries>8||
+     !Number.isInteger(retentionDays)||retentionDays<1||retentionDays>3650)throw Error('invalid backup retry/retention policy');
+  this.maxObjectBytes=maxObjectBytes;this.maxRetries=maxRetries;this.retentionDays=retentionDays;
  }
  url(key){
   if(typeof key!=='string'||!keyRe.test(key)||key.includes('..')||key.startsWith('/'))throw Error('unsafe object path');
@@ -84,6 +86,17 @@ export class Engine18S3PrivateStore {
   if(body)await finished(body).catch(()=>{throw Error('S3 request upload incomplete');});
   return response;
  }
+ async remoteCipherDigest(key){
+  const response=await this.request('GET',key,{expectedCode:[200]});
+  if(!response.body)throw Error('missing private object stream');
+  const h=createHash('sha256');let bytes=0;
+  for await(const chunk of Readable.fromWeb(response.body)){
+   bytes+=chunk.length;
+   if(bytes>this.maxObjectBytes)throw Error('remote object exceeds bounded limit');
+   h.update(chunk);
+  }
+  return {sha256:h.digest('hex'),bytes};
+ }
  async uploadClosed({path,key,plaintextSha256,expectedSize}={}){
   if(!path||typeof plaintextSha256!=='string'||!/^[a-f0-9]{64}$/.test(plaintextSha256)||
     !Number.isSafeInteger(expectedSize)||expectedSize<0)throw Error('verified sealed archive required');
@@ -99,11 +112,30 @@ export class Engine18S3PrivateStore {
    // Ensure source archive has not changed during encryption.
    const after=await hashFile(path);
    if(after.sha256!==plaintextSha256||after.bytes!==expectedSize)throw Error('source archive changed during upload');
+   const retainUntil=new Date(this.now().getTime()+this.retentionDays*86400000).toISOString();
    const metadata={'x-amz-meta-engine18-key-id':this.keyId,
     'x-amz-meta-engine18-plain-sha256':plaintextSha256,
-    'x-amz-meta-engine18-plain-bytes':String(expectedSize)};
+    'x-amz-meta-engine18-plain-bytes':String(expectedSize),
+    // Advisory only: enforce actual deletion policy in bucket lifecycle controls.
+    'x-amz-meta-engine18-retain-until':retainUntil};
    const encrypted=await hashFile(tmp);
-   await this.request('PUT',key,{file:tmp,metadata,expectedCode:[200,201,204]});
+   let stored=false;
+   for(let attempt=0;attempt<this.maxRetries;attempt++){
+    try{await this.request('PUT',key,{file:tmp,metadata,expectedCode:[200,201,204]});stored=true;break;}
+    catch{
+     // A prior attempt can succeed even when its ACK is lost. The exact
+     // ciphertext is staged once, so compare remote hash before retry.
+     try{
+      const found=await this.remoteCipherDigest(key);
+      if(found.sha256===encrypted.sha256&&found.bytes===encrypted.bytes){stored=true;break;}
+      throw Error('remote immutable object conflicts with staged ciphertext');
+     }catch(err){
+      if(/conflicts/.test(err.message))throw err;
+      if(attempt===this.maxRetries-1)throw Error('private S3 immutable upload not verified');
+     }
+    }
+   }
+   if(!stored)throw Error('private S3 upload not verified');
    return Object.freeze({key,keyId:this.keyId,plainSha256:plaintextSha256,plainBytes:expectedSize,
     cipherSha256:encrypted.sha256,cipherBytes:encrypted.bytes});
   }finally{rmSync(dir,{recursive:true,force:true});}
