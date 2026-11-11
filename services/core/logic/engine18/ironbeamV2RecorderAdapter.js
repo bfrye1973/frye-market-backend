@@ -107,21 +107,25 @@ export class SyntheticIronbeamRecorderTap {
   if(!recorder||typeof recorder.offer!=='function')throw Error('synthetic recorder required');
   this.recorder=recorder;this.diagnostics=diagnostics;this.generation=0;this.connected=false;
  }
- onFrame(frame,{at}={}){
-  // Stamp the untouched source frame BEFORE classification, parsing, queueing or disk work.
+ captureSource(frame,{at}={}){
+  // Timestamp and snapshot source bytes, no JSON parsing, no disk operations.
   const source=frameShape(frame);
   const receipt=this.recorder.capture({raw:source.raw,rawEncoding:source.rawEncoding,
     msgClass:'unknown',streamGeneration:this.generation,at});
-  const parsed=classifyIronbeamRawFrame(frame,{streamGeneration:this.generation});
+  return {source,receipt};
+ }
+ persistCaptured({source,receipt}){
+  // Classification after the reader has received the original event; preserve
+  // receipt clock/generation even when processing is deferred.
+  const parsed=classifyIronbeamRawFrame(source.raw,{streamGeneration:receipt.streamGeneration});
   const classified=Object.freeze({...receipt,msgClass:parsed.capture.msgClass,
     statusCode:parsed.capture.statusCode});
-  const receiptPromise=this.recorder.offerCaptured(classified);
-  // Diagnostics are never permitted to convert an unsuccessful write into an ACK.
-  return receiptPromise.then(ack=>{
+  return this.recorder.offerCaptured(classified).then(ack=>{
    this.diagnostics.observe(parsed,{receivedWallNs:ack.receivedWallNs,receivedMonoNs:ack.receivedMonoNs});
    return ack;
   });
  }
+ onFrame(frame,{at}={}){return this.persistCaptured(this.captureSource(frame,{at}));}
  async onControl(code,{at}={}){
   if(code==='CONNECTED'||code==='RECONNECT'){this.generation++;this.connected=true;}
   if(code==='DISCONNECTED')this.connected=false;
@@ -157,22 +161,18 @@ export function createSyntheticRecorderWebSocketImpl(BaseWebSocket,{tap,maxInbou
    this.inner.addEventListener('close',()=>this.recordControl('DISCONNECTED'));
    this.inner.addEventListener('error',()=>this.recordControl('GAP'));
    this.inner.addEventListener('message',e=>{
-    // The raw callback is invoked synchronously and capture() stamps receipt
-    // before classification. No disk wait blocks any existing market reader.
-    if(!this.failed){
-     if(this.pending>=maxInbound)this.abort('RECORDER_INGRESS_OVERFLOW');
-     else{
-      this.pending++;
-      let result;
-      try{result=tap.onFrame(e.data);}
-      catch{this.abort('RECORDER_CAPTURE_FAILED');}
-      if(result){
-       const tracked=Promise.resolve(result).catch(()=>this.abort('RECORDER_WRITE_FAILED'))
-         .finally(()=>{this.pending--;});
-       this.queue=Promise.allSettled([this.queue,tracked]).then(()=>{});
-      }else if(!this.failed)this.pending--;
-     }
-    }
+    // Only a small, synchronous receipt stamp + copy precedes the existing
+    // reader callback. JSON classification, queueing and disk happen later.
+    if(this.failed)return;
+    if(this.pending>=maxInbound){this.abort('RECORDER_INGRESS_OVERFLOW');return;}
+    let captured;
+    try{captured=tap.captureSource(e.data);}catch{this.abort('RECORDER_CAPTURE_FAILED');return;}
+    this.pending++;
+    // Preserve receipt order without requiring reader to await durable writes.
+    const recording=this.queue.then(()=>tap.persistCaptured(captured))
+      .catch(()=>this.abort('RECORDER_WRITE_FAILED'))
+      .finally(()=>{this.pending--;});
+    this.queue=recording.then(()=>{});
    });
   }
   recordControl(code){
