@@ -113,7 +113,11 @@ export async function runEngine18ControlledRecording({env=process.env,
     clockQuality:'VERIFIED',calendarQuality:'VERIFIED',
     gaps:h.gapCount,rejected:h.rejected,writeFailures:h.failedClosed?1:0
    });
-   if(flags.shouldHalt||!s.active||!s.connected){onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));}
+   const reconnectExceeded=!s.connected&&s.disconnectedSinceMs!==null&&
+    Date.now()-s.disconnectedSinceMs>30000;
+   if(flags.shouldHalt||!s.active||reconnectExceeded){
+    onAlert('LIVE_RECORDER_HEALTH_STOP');void stop().catch(()=>onAlert('SHUTDOWN_INCOMPLETE'));
+   }else if(!s.connected)onAlert('IRONBEAM_SOURCE_RECONNECTING');
   },5000);
   return {source,writer,backup,scheduler,stop};
  }catch{
