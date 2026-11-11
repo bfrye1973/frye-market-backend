@@ -82,8 +82,8 @@ export class Engine18S3ArchiveCoordinator {
    const manifestPath=path+'.manifest.json',manifestHash=await fileHash(manifestPath);
    if(manifest.lastSeq<=inventory.lastSeq){
     const recorded=inventory.entries.find(e=>e.firstSeq===manifest.firstSeq&&e.lastSeq===manifest.lastSeq);
-    if(!recorded||recorded.archive.sha256!==sourceHash.sha256||
-       recorded.manifest.sha256!==manifestHash.sha256)throw Error('acknowledged remote archive immutability violated');
+    if(!recorded||recorded.archive.plainSha256!==sourceHash.sha256||
+       recorded.manifest.plainSha256!==manifestHash.sha256)throw Error('acknowledged remote archive immutability violated');
     continue;
    }
    if(manifest.firstSeq!==inventory.lastSeq+1)throw Error('archive sequence not contiguous with remote inventory');
@@ -119,6 +119,7 @@ export class Engine18S3ArchiveCoordinator {
   if(existsSync(dest)&&readdirSync(dest).length)throw Error('restore requires empty private destination');
   mkdirSync(dest,{recursive:true,mode:0o700});
   for(const entry of state.entries){
+   if(!entry.archive.key.startsWith('engine18/archives/'))throw Error('invalid remote archive source');
    const archiveId=entry.archive.key.replace(/^engine18\/archives\//,'');
    if(archiveId.includes('..')||archiveId.startsWith('/')||!/^[-A-Za-z0-9_.\/]+$/.test(archiveId))
     throw Error('unsafe restore target');
