@@ -83,7 +83,7 @@ async function verifyGzip(path){
   scan.lastSeq!==manifest.lastSeq)throw Error('archive manifest record mismatch');
  return scan;
 }
-async function finalizeOpen(path,summary,calendarVersion){
+async function finalizeOpen(path,summary,calendarVersion,testFault=null){
  const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
  if(existsSync(dest)){
   const a=await scanLines(dest,{compressed:true}),b=summary;
@@ -92,6 +92,23 @@ async function finalizeOpen(path,summary,calendarVersion){
   const decompressedHash=createHash('sha256');
   for await(const chunk of createReadStream(dest).pipe(createGunzip()))decompressedHash.update(chunk);
   if(openHash.sha256!==decompressedHash.digest('hex'))throw Error('conflicting archive bytes');
+  // A gzip renamed before its manifest is not automatically corrupt when
+  // its intact original .open remains a byte-identical source of truth.
+  if(!existsSync(dest+'.manifest.json')){
+   const hash=await fileHash(dest);
+   atomic(dest+'.manifest.json',JSON.stringify({
+    schemaVersion:'engine18.manifest.v1',...hash,count:summary.count,
+    firstSeq:summary.firstSeq,lastSeq:summary.lastSeq,
+    firstWallNs:summary.firstWallNs,lastWallNs:summary.lastWallNs,calendarVersion
+   })+'\n');
+  }
+  await verifyGzip(dest);
+  const marker=dest+'.integrity-unverified.json';
+  if(existsSync(marker)){
+   const data=JSON.parse(readFileSync(marker,'utf8'));
+   if(data.reason!=='ORIGINAL_MANIFEST_MISSING')throw Error('unrelated integrity marker requires inspection');
+   remove(marker);
+  }
   remove(path);return;
  }
  if(summary.count===0){remove(path);return;}
@@ -100,6 +117,7 @@ async function finalizeOpen(path,summary,calendarVersion){
  await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
  const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
  renameSync(tmp,dest);syncDirectory(dest);
+ testFault?.('AFTER_ARCHIVE_RENAME_BEFORE_MANIFEST',{source:path,archive:dest});
  const hash=await fileHash(dest);
  atomic(dest+'.manifest.json',JSON.stringify({
   schemaVersion:'engine18.manifest.v1',...hash,count:summary.count,
@@ -108,9 +126,18 @@ async function finalizeOpen(path,summary,calendarVersion){
  })+'\n');
  remove(path);
 }
-export async function recoverEngine18Bounded({root,calendarVersion='cme-eth-provisional-v1'}={}){
+export async function recoverEngine18Bounded({root,calendarVersion='cme-eth-provisional-v1',testFault=null}={}){
  const base=resolve(root),paths=walk(base);
- if(paths.some(p=>p.endsWith('.integrity-unverified.json')))throw Error('integrity UNVERIFIED');
+ // Reconcile interrupted rename-before-manifest FIRST, before treating a
+ // previous unverified marker as permanent. No original source => fail closed.
+ for(const gz of walk(base).filter(p=>p.endsWith('.jsonl.gz')&&!existsSync(p+'.manifest.json'))){
+  const source=gz.replace(/\.jsonl\.gz$/,'.jsonl.open');
+  if(!existsSync(source))continue; // verifyGzip below creates a fail-closed marker
+  const summary=await scanLines(source,{allowTail:false});
+  if(!summary.count)throw Error('empty original source cannot certify orphan gzip');
+  await finalizeOpen(source,summary,calendarVersion,testFault);
+ }
+ if(walk(base).some(p=>p.endsWith('.integrity-unverified.json')))throw Error('integrity UNVERIFIED');
  const cp=join(base,'.engine18-highwater.json');
  if(existsSync(cp+'.tmp')){
   if(!existsSync(cp))throw Error('orphan checkpoint requires manual inspection');
@@ -135,7 +162,7 @@ export async function recoverEngine18Bounded({root,calendarVersion='cme-eth-prov
    try{ftruncateSync(fd,scan.validBytes);fsyncSync(fd);}finally{closeSync(fd);}
    truncatedBytes+=scan.truncatedBytes;
   }
-  await finalizeOpen(path,scan,calendarVersion);recoveredOpen++;
+  await finalizeOpen(path,scan,calendarVersion,testFault);recoveredOpen++;
  }
  // Archive filenames are not a source of event ordering: use localSeq ranges.
  const items=[];
