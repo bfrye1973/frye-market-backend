@@ -10,6 +10,8 @@ on:
       - 'services/core/logic/engine18/engine18Phase4Backup.js'
       - 'services/core/logic/engine18/engine18Phase4SyntheticWorker.js'
       - 'services/core/logic/engine18/engine18Phase4WorkerBridge.js'
+      - 'services/core/logic/engine18/engine18Phase4HealthPolicy.js'
+      - 'services/core/logic/engine18/engine18Phase4DeploymentGuard.js'
       - 'services/core/tests/engine18Phase4Readiness.test.js'
       - '.github/workflows/engine18b-gate1-phase4.yml'
 jobs:
@@ -25,4 +27,6 @@ jobs:
       - run: node --check services/core/logic/engine18/engine18Phase4Backup.js
       - run: node --check services/core/logic/engine18/engine18Phase4SyntheticWorker.js
       - run: node --check services/core/logic/engine18/engine18Phase4WorkerBridge.js
+      - run: node --check services/core/logic/engine18/engine18Phase4HealthPolicy.js
+      - run: node --check services/core/logic/engine18/engine18Phase4DeploymentGuard.js
       - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js
