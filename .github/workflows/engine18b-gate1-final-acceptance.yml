@@ -44,19 +44,28 @@ jobs:
         with: {node-version: '22'}
       - name: Install independent AWS Smithy reference signer (CI only)
         run: npm install --no-save --package-lock=false @smithy/signature-v4 @smithy/protocol-http @smithy/hash-node
-      - name: Start temporary local MinIO (no paid cloud)
+      - name: Start pinned historical MinIO from verified upstream GitHub release asset (CI only)
         run: |
-          docker run -d --name engine18-minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=engine18-minio-test \
-            -e MINIO_ROOT_PASSWORD=engine18-minio-test-secret \
-            quay.io/minio/minio:latest server /data
+          set -euo pipefail
+          mkdir -p /tmp/engine18-minio
+          cd /tmp/engine18-minio
+          release=RELEASE.2025-09-07T16-13-09Z
+          asset=minio.linux-amd64.${release}
+          base=https://github.com/minio/minio/releases/download/${release}
+          curl -fL --retry 3 --output "${asset}" "${base}/${asset}"
+          curl -fL --retry 3 --output "${asset}.sha256sum" "${base}/${asset}.sha256sum"
+          sha256sum -c "${asset}.sha256sum"
+          chmod +x "${asset}"
+          MINIO_ROOT_USER=engine18-minio-test \
+          MINIO_ROOT_PASSWORD=engine18-minio-test-secret \
+            nohup "./${asset}" server /tmp/engine18-minio-data > /tmp/engine18-minio.log 2>&1 &
           for i in $(seq 1 45); do
             if curl --fail --silent http://127.0.0.1:9000/minio/health/ready >/dev/null; then exit 0; fi
             sleep 2
           done
-          docker logs engine18-minio
+          cat /tmp/engine18-minio.log
           exit 1
       - name: Independent signer plus real local S3 protocol
         run: node --test services/core/tests/engine18S3ExternalCompatibility.test.js
       - if: always()
-        run: docker rm -f engine18-minio || true
+        run: pkill -f 'minio.linux-amd64.RELEASE.2025-09-07' || true
