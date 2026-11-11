@@ -1,3 +1,9 @@
+
+## Owner budget approval — November 10, 2026
+- Owner explicitly approved an **estimated ~$22/month incremental budget** for a dedicated Engine18 Render recorder worker, **new 50 GB persistent disk**, and private backups. **Approval is conditional: finish technical checks BEFORE provisioning**. This is not permission to deploy/turn on continuous recording or change the existing 100 GB main-backend disk.
+- Preserve an estimated incremental cap of ~$22/month; actual billing and feature costs must be checked before creation. If the proposed configuration exceeds the estimate or has variable usage charges that cannot be capped, return with a priced alternative for owner authorization.
+- Gate 1 Phase4 must complete bounded-memory crash recovery, separate-worker capture/lag isolation, backup upload/inventory/restore verification, credential-safe and clock/session tests, plus manager/Claude review. Only then plan provisioning. No paid resources created as of this update.
+
 # START HERE — Engine 18 Successor Teammate Handoff
 
 **Owner requested durable handoff on November 10, 2026.**
