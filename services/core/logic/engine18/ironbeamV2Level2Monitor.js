@@ -20,8 +20,11 @@ export function startEngine18IronbeamLevel2Monitor({
  const stats={mode:"DEMO_RESEARCH",state:"STARTING",connected:false,
    subscriptions:{quotes:false,depth:false,trades:false},frames:{q:0,d:0,tr:0},
    reconnects:0,authenticated:false,lastErrorCode:null,streamEstablishedAt:null,
-   lastFrameReceivedAt:null,level3:false,tradingEnabled:false};
+   lastFrameReceivedAt:null,level3:false,tradingEnabled:false,
+   depthCoverage:{validSamples:0,bidLevelsMin:null,bidLevelsMax:null,
+     askLevelsMin:null,askLevelsMax:null,latestBidLevels:null,latestAskLevels:null}};
  const safeStatus=()=>({...stats,frames:{...stats.frames},
+   depthCoverage:{...stats.depthCoverage},
    subscriptions:{...stats.subscriptions},
    zoneSummary:(()=>{const s=zoneReader.snapshot({feedTier:"UNVERIFIED"});
      return {usable:s.usable,reason:s.reason,images:s.images,
@@ -83,7 +86,19 @@ export function startEngine18IronbeamLevel2Monitor({
          const p=JSON.parse(typeof event.data==="string"?event.data:String(event.data));
          if(p?.q!=null)stats.frames.q++;
          if(p?.tr!=null)stats.frames.tr++;
-         if(p?.d!=null){stats.frames.d++;zoneReader.observe(p,{receivedAtMs:lastMessageAt});}
+         if(p?.d!=null){
+           stats.frames.d++;
+           const observed=zoneReader.observe(p,{receivedAtMs:lastMessageAt});
+           if(observed.accepted){
+             const coverage=stats.depthCoverage,b=observed.bidLevels,a=observed.askLevels;
+             coverage.validSamples++;
+             coverage.latestBidLevels=b;coverage.latestAskLevels=a;
+             coverage.bidLevelsMin=coverage.bidLevelsMin===null?b:Math.min(coverage.bidLevelsMin,b);
+             coverage.bidLevelsMax=coverage.bidLevelsMax===null?b:Math.max(coverage.bidLevelsMax,b);
+             coverage.askLevelsMin=coverage.askLevelsMin===null?a:Math.min(coverage.askLevelsMin,a);
+             coverage.askLevelsMax=coverage.askLevelsMax===null?a:Math.max(coverage.askLevelsMax,a);
+           }
+         }
        }catch{stats.lastErrorCode="MALFORMED_FRAME";}
      });
      socket.addEventListener("close",()=>{if(!stopped&&myGeneration===generation)schedule("WS_CLOSED");});
