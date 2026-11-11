@@ -1,0 +1,47 @@
+// Isolated synthetic recorder child: no real source socket and no trading APIs.
+// Run only as a child_process.fork with ENGINE18_SYNTHETIC_WORKER=1.
+import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
+if(process.env.ENGINE18_SYNTHETIC_WORKER!=='1'||typeof process.send!=='function')
+ throw Error('isolated synthetic worker disabled');
+let recorder=null,queue=Promise.resolve(),faulted=false;
+const clock={wallNs:()=>String(BigInt(Date.now())*1000000n),monoNs:()=>String(process.hrtime.bigint())};
+function safeSend(item){try{process.send(item);}catch{}}
+async function dispatch(message){
+ if(!message||typeof message!=='object')throw Error('invalid worker command');
+ if(message.type==='INIT'){
+  if(recorder)throw Error('worker already initialized');
+  if(typeof message.root!=='string'||!message.root.startsWith('/tmp/'))throw Error('synthetic tmp root only');
+  recorder=await Engine18BufferedRecorder.openBounded({root:message.root,clock,batchSize:32,flushDelayMs:0});
+  safeSend({type:'READY',runId:recorder.writer.runId});return;
+ }
+ if(!recorder)throw Error('worker not initialized');
+ if(message.type==='FRAME'){
+  const r=message.receipt;
+  if(typeof r?.raw!=='string'||!['utf8','base64'].includes(r.rawEncoding)||
+   typeof r.receivedWallNs!=='string'||typeof r.receivedMonoNs!=='string'||
+   !Number.isSafeInteger(r.streamGeneration))throw Error('bad synthetic receipt');
+  const receipt=Object.freeze({...r,receiptDate:new Date(Number(BigInt(r.receivedWallNs)/1000000n))});
+  const ack=await recorder.offerCaptured(receipt);
+  safeSend({type:'ACK',id:message.id,seq:ack.localSeq});return;
+ }
+ if(message.type==='HEALTH'){
+  const h=recorder.health();
+  safeSend({type:'HEALTH',id:message.id,received:h.received,recorded:h.recorded,failedClosed:h.failedClosed});return;
+ }
+ if(message.type==='CLOSE'){
+  await recorder.close();safeSend({type:'CLOSED',lastSeq:recorder.writer.seq});
+  process.exitCode=0;return;
+ }
+ if(message.type==='FAIL'){
+  recorder.fail('IPC_TRANSPORT_FAILURE');faulted=true;
+  safeSend({type:'FAILED',reason:'IPC_TRANSPORT_FAILURE'});return;
+ }
+ throw Error('unsupported synthetic worker command');
+}
+process.on('message',message=>{
+ queue=queue.then(()=>dispatch(message)).catch(()=>{
+  faulted=true;
+  recorder?.fail('WORKER_RECORDING_FAILED');
+  safeSend({type:'FAILED',reason:'WORKER_RECORDING_FAILED',id:message?.id});
+ });
+});
