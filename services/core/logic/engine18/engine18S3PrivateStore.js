@@ -4,7 +4,7 @@
 // Explicit credentials and endpoint injected; NO env credentials, paid calls, or defaults.
 import {createHash,createHmac,createCipheriv,createDecipheriv,randomBytes} from 'node:crypto';
 import {createReadStream,createWriteStream,mkdtempSync,readFileSync,writeFileSync,appendFileSync,
- statSync,rmSync,openSync,closeSync,fsyncSync,readSync} from 'node:fs';
+ statSync,rmSync,existsSync,openSync,closeSync,fsyncSync,readSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {pipeline,finished} from 'node:stream/promises';
@@ -251,12 +251,19 @@ export class Engine18S3PrivateStore {
    const decipher=createDecipheriv('aes-256-gcm',this.key,header.subarray(8,20));
    decipher.setAuthTag(tag);
    const output=destination+'.restore.tmp';
-   await pipeline(createReadStream(tmp,{start:20,end:size-17}),decipher,
-    createWriteStream(output,{flags:'wx',mode:0o600}));
-   const plain=await hashFile(output);
-   if(plain.sha256!==expected.plainSha256||plain.bytes!==expected.plainBytes)
-    throw Error('restored plaintext SHA256 mismatch');
-   return {tempPath:output,keyId:this.keyId,sha256:plain.sha256,bytes:plain.bytes};
+   if(existsSync(output))throw Error('restore staging already exists');
+   try{
+    await pipeline(createReadStream(tmp,{start:20,end:size-17}),decipher,
+     createWriteStream(output,{flags:'wx',mode:0o600}));
+    const plain=await hashFile(output);
+    if(plain.sha256!==expected.plainSha256||plain.bytes!==expected.plainBytes)
+     throw Error('restored plaintext SHA256 mismatch');
+    return {tempPath:output,keyId:this.keyId,sha256:plain.sha256,bytes:plain.bytes};
+   }catch{
+    // Never leave a partial or unauthenticated plaintext file on disk.
+    rmSync(output,{force:true});
+    throw Error('encrypted restore authentication or checksum failed');
+   }
   }finally{rmSync(dir,{recursive:true,force:true});}
  }
 }
