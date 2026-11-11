@@ -89,3 +89,10 @@ I. Existing LIVE chart as a read-only consumer with max 2 BUY and 2 SELL **displ
 
 ## New teammate instruction
 **Read these three markdown files, inspect branch code and PR #283 directly, check current Render status, and continue from Gate 1. Do not restart Engine 18 from scratch or repeat the 38-contract-line experiments.** Report exactly what is verified vs hypothesized; ask owner only for genuine permissions or essential personal trading thresholds.
+
+## Gate 1 PR #291 manager and Claude review update (2026-11-10)
+- [Isolated synthetic recorder PR #291](https://github.com/bfrye1973/frye-market-backend/pull/291) remains **DRAFT, UNMERGED and UNDEPLOYED** at head `be166d95ab6ef5228e7a240f02464835c5e7748e` pending corrections.
+- Engine 18B corrected the original manager's four recorder integrity/recovery findings. Recorder GitHub Actions run #42943116147 **16/16 PASS** and Engine18 baseline #42943116196 PASS. Those tests do not establish licensed recording readiness.
+- Claude independently reviewed and returned **APPROVE WITH CORRECTIONS**. He identified four **NEW schema blockers BEFORE synthetic merge**: (B1) durable RECORDER_START/RECORDER_STOP and crash GAP even without an open file, (B2) unique per-process runId on every record, (B3) distinct actual receive-wall/monotonic timestamps versus writer time and receive-time-based partition, (B4) rawEncoding utf8/base64 with lossless binary payloads. Minor gap counter fix also requested.
+- Manager sent exact implementation/test requirements directly on PR #291 (comment #6784940681). **DO NOT MERGE** until Engine18B implements, tests, and receives manager re-review. Previous four original blockers remain closed.
+- Additional before-live gates: throughput and group commit, structured GAP reasons, lifecycle/run headers, NTP-clock health, Render overlap behavior, remote protected retention and market-data licensing, contract/session calendar, five-session collection, Gate1 I1–I8/T1–T12 tests. No chart/trading changes.
