@@ -288,3 +288,17 @@ test('disk-full and partial write tests retain exact binary bytes and original f
  assert.deepEqual(Buffer.from(payloads[0].raw,'base64'),raw);
  assert.equal(payloads[1].localSeq,payloads[0].localSeq+1);
 }));
+
+test('streaming archive validation crosses read-chunk boundaries with exact raw bytes',()=>dir(async root=>{
+ const r=recorder(root),large='LEAD:'+('a'.repeat(240000))+':TRAIL';
+ await r.offer({raw:large,msgClass:'market',at:new Date('2026-11-10T21:59:59Z')});
+ await r.offer({raw:'next-hour',msgClass:'market',at:new Date('2026-11-10T22:00:00Z')});
+ await r.close();
+ const events=market(replayRaw(root));
+ assert.equal(events.length,2);assert.equal(events[0].raw,large);assert.equal(events[1].raw,'next-hour');
+ const archives=files(root).filter(x=>x.endsWith('.jsonl.gz'));
+ for(const archive of archives){
+  const manifest=JSON.parse(readFileSync(archive+'.manifest.json','utf8'));
+  assert.equal(manifest.sha256,createHash('sha256').update(readFileSync(archive)).digest('hex'));
+ }
+}));
