@@ -86,7 +86,8 @@ export function createEngine18Level2ZoneReader({
   history.push({eventTimeMs:parsed.eventTimeMs,receivedAtMs,
     levels:[...parsed.bids,...parsed.asks]});
   if(history.length>maxHistory)history.shift();
-  return {accepted:true,images,depthLevels:parsed.bids.length+parsed.asks.length};
+  return {accepted:true,images,depthLevels:parsed.bids.length+parsed.asks.length,
+    bidLevels:parsed.bids.length,askLevels:parsed.asks.length};
  }
  function snapshot({nowMs=Date.now(),maxAgeMs=5000,feedTier="UNVERIFIED"}={}){
   if(!Number.isSafeInteger(nowMs)||nowMs<=0)throw Error("ENGINE18_BAD_CLOCK");
