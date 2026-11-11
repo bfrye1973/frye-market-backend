@@ -80,3 +80,16 @@ test('orphan manifest temp is recovered without data loss',()=>withDir(root=>{
  const b=new Engine18RawRecorder({root,clock});b.close();
  assert.equal(replayRaw(root)[0].raw,'safe');
 }));
+
+test('replay fails closed while open segment is unfinalized',()=>withDir(root=>{
+ const r=new Engine18RawRecorder({root,clock});r.append({raw:'open'});
+ assert.throws(()=>replayRaw(root),/unfinalized/);r.close();
+}));
+test('replay rejects missing initial archive',()=>withDir(root=>{
+ const a=new Engine18RawRecorder({root,clock});
+ a.append({raw:'first',at:new Date('2026-11-10T21:00:00Z')});
+ a.append({raw:'second',at:new Date('2026-11-10T22:00:00Z')});a.close();
+ const gz=files(root).filter(x=>x.endsWith('.jsonl.gz')).sort();
+ unlinkSync(gz[0]);unlinkSync(gz[0]+'.manifest.json');
+ assert.throws(()=>replayRaw(root),/missing initial/);
+}));
