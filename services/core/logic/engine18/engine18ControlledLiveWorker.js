@@ -1,7 +1,7 @@
 // Engine 18 LIMITED independent read-only Ironbeam recorder entrypoint.
 // Completely separate from existing chart/monitor/trading services.
 // Hard disabled until manager approves private deployment and trial credentials.
-import {statSync,existsSync} from 'node:fs';
+import {statSync,existsSync,readFileSync} from 'node:fs';
 import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 import {Engine18IronbeamLiveRecorderSource} from './engine18IronbeamLiveRecorderSource.js';
 import {createEngine18ReceiptClock} from './engine18ReceiptClock.js';
@@ -28,6 +28,11 @@ export function verifyEngine18LiveEnvironment(env,stat=statSync){
     disk.startsWith('/var/data/replay'))
   throw Error('refusing shared or non-private recorder mount');
  if(!existsSync(disk)||!stat(disk).isDirectory())throw Error('dedicated recorder directory absent');
+ // Avoid silently using Render's ephemeral root filesystem. The worker must
+ // actually have the dedicated disk mounted at the proposed private mount.
+ let mounts='';try{mounts=readFileSync('/proc/self/mountinfo','utf8');}catch{}
+ if(!mounts.split('\n').some(line=>line.split(' - ')[0]?.split(' ').at(-1)==='/var/data/engine18-recorder'))
+  throw Error('dedicated private persistent disk mount not verified');
  if(!/^[a-fA-F0-9]{64}$/.test(env.ENGINE18_R2_ENCRYPTION_KEY_HEX))
   throw Error('private backup encryption key invalid');
  const pin=Number(env.ENGINE18_INDEPENDENT_INVENTORY_PIN);
