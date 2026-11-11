@@ -66,8 +66,19 @@ test('MinIO real S3 PUT/GET, conditional 412, paginated listing and AES-256 rest
   const duplicate=await store.uploadClosed({path,key:receipt.key,
    plaintextSha256:sha(content),expectedSize:content.length});
   assert.equal(duplicate.plainSha256,receipt.plainSha256);
-  const list=await store.listObjectKeys('engine18/archive/');
-  assert.deepEqual(list,['engine18/archive/test-0001.jsonl.gz']);
+  for(let i=2;i<=3;i++){
+   const nextPath=join(directory,'extra-'+i+'.gz');
+   const raw=Buffer.from('synthetic segmented data '+i);
+   writeFileSync(nextPath,raw);
+   await store.uploadClosed({path:nextPath,key:'engine18/archive/test-000'+i+'.jsonl.gz',
+    plaintextSha256:sha(raw),expectedSize:raw.length});
+  }
+  const list=await store.listObjectKeys('engine18/archive/',{pageSize:2});
+  assert.deepEqual(list,[
+   'engine18/archive/test-0001.jsonl.gz',
+   'engine18/archive/test-0002.jsonl.gz',
+   'engine18/archive/test-0003.jsonl.gz'
+  ]);
   const restore=await store.restoreClosed({key:receipt.key,
    destination:join(directory,'restore'),expected:receipt});
   assert.deepEqual(readFileSync(restore.tempPath),content);
