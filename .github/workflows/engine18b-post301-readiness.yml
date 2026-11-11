@@ -8,6 +8,7 @@ on:
       - 'services/core/tests/engine18Post301Readiness.test.js'
       - 'services/core/logic/engine18/engine18IronbeamV2RecorderRehearsal.js'
       - 'services/core/logic/engine18/engine18ReadOnlyResearchContext.js'
+      - 'services/core/logic/engine18/engine18ControlledTrialReadiness.js'
       - '.github/workflows/engine18b-post301-readiness.yml'
 concurrency:
   group: engine18-post301-${{ github.ref }}
@@ -30,6 +31,7 @@ jobs:
       - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
       - run: node --check services/core/logic/engine18/engine18IronbeamV2RecorderRehearsal.js
       - run: node --check services/core/logic/engine18/engine18ReadOnlyResearchContext.js
+      - run: node --check services/core/logic/engine18/engine18ControlledTrialReadiness.js
       - run: node --test services/core/tests/engine18Post301Readiness.test.js
       - run: node --test services/core/tests/engine18Issue300Acceptance.test.js
       - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js services/core/tests/engine18Phase4Readiness.test.js services/core/tests/engine18MergeBlockersR1R3.test.js services/core/tests/engine18Phase5Operations.test.js
