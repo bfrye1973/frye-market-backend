@@ -94,14 +94,13 @@ test('Node child.send false is queued pressure, not automatically lost, when cal
 }));
 
 test('worker whose parent dies exits instead of collecting orphaned frames; restart emits GAP',()=>withRoot(async root=>{
- const moduleUrl=new URL('../logic/engine18/engine18Phase4WorkerBridge.js',import.meta.url).href;
- const code="import{Engine18SyntheticWorkerBridge}from "+JSON.stringify(moduleUrl)+
-  ";const b=new Engine18SyntheticWorkerBridge({root:process.argv[1]});await b.start();await b.submit('BEFORE_PARENT_DEATH',{msgClass:'market'});process.stdout.write('PID '+b.child.pid+'\\n');setInterval(()=>{},1000);";
- const parent=spawn(process.execPath,['--input-type=module','-e',code,root],{stdio:['ignore','pipe','pipe']});
- let pid=null,output='';
+ const fixture=new URL('./fixtures/engine18Phase5Parent.js',import.meta.url);
+ const parent=spawn(process.execPath,[fixture.pathname,root],{stdio:['ignore','pipe','pipe']});
+ let pid=null,output='',stderr='';
+ parent.stderr.on('data',b=>{stderr+=b.toString();});
  await new Promise((resolve,reject)=>{
   parent.stdout.on('data',b=>{output+=b.toString();const m=output.match(/PID (\d+)/);if(m){pid=+m[1];resolve();}});
-  parent.on('error',reject);parent.on('exit',()=>reject(Error('parent exited before READY')));
+  parent.on('error',reject);parent.on('exit',(code)=>reject(Error('parent exited before READY, exit '+code+', stderr '+stderr.slice(0,300))));
  });
  parent.kill('SIGKILL');await once(parent,'exit');
  // Worker must die on IPC disconnect; do not leave an orphan.
