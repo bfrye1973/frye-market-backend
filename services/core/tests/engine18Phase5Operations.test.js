@@ -296,7 +296,10 @@ test('mock S3 lifecycle: independent encrypted inventory, current-hour concurren
   accessKeyId:'synthetic-access',secretAccessKey:'synthetic-secret-for-tests',
   keyId:'synthetic-key-v1',encryptionKey:randomBytes(32),fetchImpl:fakeS3});
  const coordinator=new Engine18S3ArchiveCoordinator({root,store:s3});
- const w=writer(root);
+ let nowNs=BigInt(Date.parse('2026-11-10T21:59:50Z'))*1000000n,mono=0n;
+ const w=new Engine18BufferedRecorder({root,clock:{
+  wallNs:()=>String(nowNs),monoNs:()=>String(++mono)
+ },batchSize:16,flushDelayMs:0});
  await w.offer({raw:'{"d":{"sz":0,"l":1},"original":7500.2500}',msgClass:'market',at:new Date('2026-11-10T21:59:50Z')});
  await w.offer({raw:'{"q":{"seq":2}}',msgClass:'market',at:new Date('2026-11-10T22:00:00Z')});
  assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
@@ -305,6 +308,7 @@ test('mock S3 lifecycle: independent encrypted inventory, current-hour concurren
  assert.equal(backup.added,1);assert.ok(receipt.localSeq>=4);
  assert.equal((await coordinator.inventory()).entries.length,1);
  assert.ok(files(root).some(x=>x.endsWith('.jsonl.open')));
+ nowNs=BigInt(Date.parse('2026-11-10T22:00:05Z'))*1000000n; // clean STOP belongs to current receipt hour
  await w.close();
  const completed=await coordinator.syncClosed();
  assert.equal(completed.added,1);
