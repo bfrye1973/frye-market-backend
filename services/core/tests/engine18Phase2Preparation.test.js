@@ -1,0 +1,133 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync,readdirSync,closeSync,readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {spawn,spawnSync} from 'node:child_process';
+import {once} from 'node:events';
+import {createHash} from 'node:crypto';
+import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
+import {classifyIronbeamRawFrame,IronbeamFrameShapeDiagnostics,SyntheticIronbeamRecorderTap} from '../logic/engine18/ironbeamV2RecorderAdapter.js';
+import {replayRaw,deterministicReplayBytes} from '../logic/engine18/gate1RawRecorder.js';
+const dir=fn=>{const root=mkdtempSync(join(tmpdir(),'e18-phase2-'));return Promise.resolve().then(()=>fn(root)).finally(()=>rmSync(root,{recursive:true,force:true}));};
+const clock=()=>({wallNs:()=>String(BigInt(Date.parse('2026-11-10T21:10:00Z'))*1000000n),monoNs:(()=>{let i=0n;return ()=>String(++i)})()});
+const files=root=>readdirSync(root,{recursive:true}).map(x=>join(root,x));
+const recorder=root=>new Engine18BufferedRecorder({root,clock:clock(),batchSize:32,flushDelayMs:0});
+const market=all=>all.filter(e=>e.msgClass==='market'||e.msgClass==='unknown');
+test('synthetic depth quote trade retain identical raw frames and ordering',()=>dir(async root=>{
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const frames=[
+ '{"d":{"bids":[{"p":7500,"sz":0,"l":1},{"p":7499.75,"sz":10,"l":2}],"asks":[{"p":7500.25,"sz":3,"l":1}]}}',
+ '{"q":{"bp":7500,"ap":7500.25}}',
+ '{"tr":[{"p":7500.25,"sz":2}]}',
+ '{"d":{"bids":[],"asks":[{"p":7500.5,"sz":0}]}}',
+ 'not-json', '{"unexpected":true}'
+ ];
+ const acknowledgments=await Promise.all(frames.map(f=>tap.onFrame(f)));
+ assert.equal(new Set(acknowledgments.map(x=>x.localSeq)).size,frames.length);
+ await r.close();
+ const all=replayRaw(root);
+ assert.deepEqual(all.filter(e=>e.msgClass!=='control').map(e=>e.raw),frames);
+ assert.deepEqual(all.filter(e=>e.msgClass!=='control').map(e=>e.localSeq),[2,3,4,5,6,7]);
+ const stats=tap.safeDiagnostics();
+ assert.equal(stats.counts.depth,2);assert.equal(stats.counts.zeroSize,2);
+ assert.equal(stats.counts.malformed,1);assert.equal(stats.counts.unknown,1);
+ assert.equal(stats.counts.levelIndexCount,3);assert.equal(stats.counts.missingIndex,1);
+ assert.ok(!JSON.stringify(stats).includes('7500'));
+}));
+test('control and reconnect statuses recorded without token or raw source URL',()=>dir(async root=>{
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ await tap.onControl('CONNECTED');await tap.onControl('SUBSCRIBED');await tap.onControl('DISCONNECTED');await tap.onControl('RECONNECT');
+ await tap.onFrame('{"q":{"x":1}}');await r.close();
+ const all=replayRaw(root);
+ assert.deepEqual(all.map(e=>e.statusCode).filter(Boolean),['RECORDER_START','CONNECTED','SUBSCRIBED','DISCONNECTED','RECONNECT','RECORDER_STOP']);
+ assert.equal(all.find(e=>e.raw.includes('"q"')).streamGeneration,2);
+ assert.equal(tap.safeDiagnostics().counts.reconnects,1);
+}));
+test('binary and malformed frames remain unchanged',()=>dir(async root=>{
+ const r=recorder(root),tap=new SyntheticIronbeamRecorderTap({recorder:r});
+ const bytes=Buffer.from([0,1,255,10,128,0,254]);
+ await tap.onFrame(bytes);await tap.onFrame('{nope');
+ await r.close();
+ const e=replayRaw(root);
+ assert.deepEqual(Buffer.from(e.find(x=>x.rawEncoding==='base64').raw,'base64'),bytes);
+ assert.equal(e.find(x=>x.raw==='{nope').msgClass,'unknown');
+}));
+test('diagnostics include prefilter counts and reject malformed depth shapes',()=>{
+ const d=new IronbeamFrameShapeDiagnostics();
+ for(const raw of ['{"d":{"bids":[{"sz":0,"l":0}],"asks":[{"sz":2}]}}','{"d":{"bids":"bad","asks":[]}}','{"d":{"bids":[],"asks":[]}}']){
+  d.observe(classifyIronbeamRawFrame(raw));
+ }
+ const s=d.summary();
+ assert.equal(s.counts.total,3);assert.equal(s.counts.depth,3);
+ assert.equal(s.counts.acceptedDepth,2);assert.equal(s.counts.rejectedDepth,1);
+ assert.equal(s.counts.zeroSize,1);assert.equal(s.counts.levelIndexCount,1);
+ assert.equal(s.bidLevelHistogram['1'],1);
+ assert.equal(s.feedSemantics,'UNVERIFIED');assert.equal(s.conflation,'UNVERIFIED');
+});
+test('recording remains inaccessible without synthetic-only authorization',()=>dir(async root=>{
+ const r=recorder(root);
+ assert.throws(()=>new SyntheticIronbeamRecorderTap({recorder:r,authorized:true}),/NOT AUTHORIZED/);
+ assert.throws(()=>classifyIronbeamRawFrame({q:1}),/TYPE/);
+ await r.close();
+}));
+test('high-load simulated open 20000 raw messages, bounded in-flight groups, replay hashes equal',()=>dir(async root=>{
+ const r=new Engine18BufferedRecorder({root,clock:clock(),maxQueued:512,batchSize:128,flushDelayMs:0});
+ const n=20000,begin=performance.now();
+ let ack=0;
+ for(let batch=0;batch<n/128;batch++){
+  const promises=[];
+  for(let j=0;j<128&&ack+j<n;j++){
+   const seq=batch*128+j;
+   if(seq>=n)break;
+   promises.push(r.offer({raw:JSON.stringify({d:{bids:[{p:7500,sz:seq%8}],asks:[{p:7501,sz:seq%4}]}}),msgClass:'market'}));
+  }
+  ack+=(await Promise.all(promises)).length;
+ }
+ await r.close();const elapsed=performance.now()-begin;
+ assert.equal(ack,n);assert.equal(r.health().recorded,n);
+ const all=replayRaw(root);assert.equal(market(all).length,n);
+ assert.deepEqual([...all].map(e=>e.localSeq),Array.from({length:n+2},(_,i)=>i+1));
+ const hash=()=>createHash('sha256').update(deterministicReplayBytes(root)).digest('hex');
+ assert.equal(hash(),hash());
+ const mbps=(r.health().bytesWritten/1e6)/(elapsed/1000);
+ console.log(JSON.stringify({syntheticBenchmark:{messages:n,elapsedMs:+elapsed.toFixed(1),framesPerSecond:+(n/(elapsed/1000)).toFixed(0),MBps:+mbps.toFixed(2),kind:'LOCAL_GITHUB_ACTIONS_SYNTHETIC_ONLY'}}));
+}));
+test('queue overflow fails closed, rejects unacknowledged pending messages; restart writes GAP',()=>dir(async root=>{
+ const r=new Engine18BufferedRecorder({root,clock:clock(),maxQueued:2,batchSize:100,flushDelayMs:10000});
+ const first=r.offer({raw:'one'}),second=r.offer({raw:'two'});
+ await assert.rejects(r.offer({raw:'three'}),/backpressure/);
+ await assert.rejects(first,/failed closed/);await assert.rejects(second,/failed closed/);
+ assert.equal(r.health().recordingActive,false);assert.equal(r.health().rejected,1);
+ r.writer.rotate();r.writer.releaseLock();
+ const b=recorder(root);await b.close();
+ assert.equal(replayRaw(root).filter(e=>e.statusCode==='GAP').length,1);
+}));
+test('streaming compression at hour crossing; SHA-256 manifests verified',()=>dir(async root=>{
+ const r=recorder(root);
+ await r.offer({raw:'hourOne',at:new Date('2026-11-10T21:59:59Z')});
+ await r.offer({raw:'hourTwo',at:new Date('2026-11-10T22:00:00Z')});
+ await r.close();
+ const compressed=files(root).filter(x=>x.endsWith('.jsonl.gz'));
+ assert.ok(compressed.length>=2);
+ for(const p of compressed){
+  const manifest=JSON.parse(readFileSync(p+'.manifest.json','utf8'));
+  assert.equal(manifest.sha256,createHash('sha256').update(readFileSync(p)).digest('hex'));
+ }
+ assert.deepEqual(market(replayRaw(root)).map(e=>e.raw),['hourOne','hourTwo']);
+}));
+test('real SIGKILL buffered group acknowledgments, recovery + deterministic replay',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'e18-phase2-kill-'));
+ try{
+  const url=new URL('../logic/engine18/engine18BufferedRecorder.js',import.meta.url).href;
+  const script="import{Engine18BufferedRecorder}from "+JSON.stringify(url)+";let n=0n;const r=new Engine18BufferedRecorder({root:process.argv[1],clock:{wallNs:()=> '1794350000000000000',monoNs:()=>String(++n)},batchSize:8,flushDelayMs:0});await Promise.all(Array.from({length:128},(_,i)=>r.offer({raw:'ACK'+i,msgClass:'market'})));process.stdout.write('READY\\n');setInterval(()=>{},1000);";
+  const child=spawn(process.execPath,['--input-type=module','-e',script,root],{stdio:['ignore','pipe','pipe']});
+  await new Promise((resolve,reject)=>{child.stdout.on('data',data=>{if(data.toString().includes('READY'))resolve();});child.once('error',reject);child.once('exit',code=>reject(Error('child exited early '+code)));});
+  child.kill('SIGKILL');await once(child,'exit');
+  const b=recorder(root);await b.offer({raw:'AFTER',msgClass:'market'});await b.close();
+  const all=market(replayRaw(root));assert.equal(all.length,129);
+  assert.deepEqual(all.map(e=>e.raw),[...Array.from({length:128},(_,i)=>'ACK'+i),'AFTER']);
+  assert.equal(replayRaw(root).filter(e=>e.statusCode==='GAP').length,1);
+  assert.deepEqual(deterministicReplayBytes(root),deterministicReplayBytes(root));
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
