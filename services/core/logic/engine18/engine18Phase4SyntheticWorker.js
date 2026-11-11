@@ -21,8 +21,13 @@ async function dispatch(message){
    typeof r.receivedWallNs!=='string'||typeof r.receivedMonoNs!=='string'||
    !Number.isSafeInteger(r.streamGeneration))throw Error('bad synthetic receipt');
   const receipt=Object.freeze({...r,receiptDate:new Date(Number(BigInt(r.receivedWallNs)/1000000n))});
-  const ack=await recorder.offerCaptured(receipt);
-  safeSend({type:'ACK',id:message.id,seq:ack.localSeq});return;
+  // Queue without awaiting each ACK; waiting here would serialize fsync per
+  // frame and defeat group commits under high-volume input. ACK only after commit.
+  recorder.offerCaptured(receipt).then(
+   ack=>safeSend({type:'ACK',id:message.id,seq:ack.localSeq}),
+   ()=>{recorder.fail('GROUP_COMMIT_FAILED');safeSend({type:'FAILED',reason:'GROUP_COMMIT_FAILED',id:message.id});}
+  );
+  return;
  }
  if(message.type==='HEALTH'){
   const h=recorder.health();
