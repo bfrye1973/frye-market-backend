@@ -66,7 +66,7 @@ export class Engine18SyntheticReadinessSupervisor{
   if(clockSampler!==null&&typeof clockSampler!=='function')throw Error('clock sampler must be a function');
   this.clockSampler=clockSampler;
   this.writer=new Engine18BufferedRecorder({root,clock,maxQueued,batchSize,flushDelayMs});
-  this.generation=0;this.sockets=new Map();this.sourceGapMarked=new Set();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;this.clockTimer=null;
+  this.generation=0;this.sockets=new Map();this.sourceGapMarked=new Set();this.deferredOpen=new Set();this.chain=Promise.resolve();this.failed=false;this.started=false;this.sampleCount=0;this.clockTimer=null;
  }
  enqueue(fn){
   const p=this.chain.then(fn);
@@ -91,16 +91,29 @@ export class Engine18SyntheticReadinessSupervisor{
   const payload=safeJSON(data);
   return this.writer.offerCaptured(Object.freeze({...stamp,msgClass:'control',statusCode,streamGeneration,raw:payload,rawEncoding:'utf8'}));
  }
- open({connectionId=randomUUID()}={}){
+ open({connectionId=randomUUID(),deferConnected=false}={}){
   if(!this.started||this.failed)throw Error('supervisor unavailable');
   safe(connectionId,SAFE_ID,'invalid connection id');
   if([...this.sockets.values()].some(x=>x.connectionId===connectionId))throw Error('connection id already used');
   const stamp=this.snapshotReceipt(),generation=++this.generation;
   const socket=Object.freeze({generation,connectionId,runId:this.writer.writer.runId});
   this.sockets.set(generation,socket);
+  if(deferConnected===true){
+   this.deferredOpen.add(generation);
+   return {socket,ack:Promise.resolve({reserved:true})};
+  }
   const status=generation===1?'CONNECTED':'RECONNECT';
   const ack=this.enqueue(()=>this.controlRecord(status,generation,{connectionId,reason:'CONNECTION_OPEN'},stamp));
   return {socket,ack};
+ }
+ confirmOpen(socket){
+  const known=this.validateSocket(socket);
+  if(!this.deferredOpen.delete(known.generation))throw Error('socket was not awaiting OPEN confirmation');
+  const stamp=this.snapshotReceipt();
+  const status=known.generation===1?'CONNECTED':'RECONNECT';
+  return this.enqueue(()=>this.controlRecord(status,known.generation,{
+   connectionId:known.connectionId,reason:'WEBSOCKET_OPEN_CONFIRMED'
+  },stamp));
  }
  socketEvent(socket,event,{reason='UNSPECIFIED',closeCode=null}={}){
   const known=this.validateSocket(socket);
