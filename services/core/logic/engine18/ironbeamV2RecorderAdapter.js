@@ -131,3 +131,49 @@ export class SyntheticIronbeamRecorderTap {
  }
  safeDiagnostics(){return this.diagnostics.summary();}
 }
+
+/**
+ * An injectable synthetic WebSocket constructor for the existing Engine 18
+ * monitor's WebSocketImpl seam. No edits to the production monitor are needed.
+ * It never creates a connection itself; a synthetic BaseWebSocket is required.
+ * Message handlers run only after the raw frame has been durably acknowledged.
+ * Licensed use requires a separate manager-authorized integration/security gate.
+ */
+export function createSyntheticRecorderWebSocketImpl(BaseWebSocket,{tap,maxInbound=1024,onFailure=()=>{}}={}){
+ if(typeof BaseWebSocket!=='function'||!(tap instanceof SyntheticIronbeamRecorderTap))throw Error('synthetic transport and recorder tap required');
+ if(!Number.isInteger(maxInbound)||maxInbound<1)throw Error('invalid synthetic ingress cap');
+ return class SyntheticRecordingWebSocket{
+  constructor(...args){
+   this.inner=new BaseWebSocket(...args);
+   this.handlers=[];this.pending=0;this.failed=false;this.queue=Promise.resolve();
+   this.inner.addEventListener('message',e=>{
+    if(this.failed)return;
+    if(this.pending>=maxInbound){this.abort();return;}
+    this.pending++;
+    const source=e.data;
+    this.queue=this.queue.then(()=>tap.onFrame(source))
+      .then(()=>{if(!this.failed)for(const fn of this.handlers)fn(e);})
+      .catch(()=>this.abort())
+      .finally(()=>{this.pending--;});
+   });
+  }
+  abort(){
+   if(this.failed)return;
+   this.failed=true;
+   try{this.inner.close();}catch{}
+   try{onFailure('RECORDER_CAPTURE_FAILED');}catch{}
+  }
+  addEventListener(type,handler,options){
+   if(type==='message'){this.handlers.push(handler);return;}
+   this.inner.addEventListener(type,handler,options);
+  }
+  removeEventListener(type,handler,options){
+   if(type==='message'){this.handlers=this.handlers.filter(fn=>fn!==handler);return;}
+   this.inner.removeEventListener?.(type,handler,options);
+  }
+  send(...args){return this.inner.send(...args);}
+  close(...args){return this.inner.close(...args);}
+  get readyState(){return this.inner.readyState;}
+  get bufferedAmount(){return this.inner.bufferedAmount;}
+ };
+}
