@@ -113,8 +113,7 @@ export class SyntheticIronbeamRecorderTap {
   const receiptPromise=this.recorder.offer({...parsed.capture,at});
   // Diagnostics are never permitted to convert an unsuccessful write into an ACK.
   return receiptPromise.then(ack=>{
-   const eventClock=this.recorder.lastReceiptWallNs;
-   this.diagnostics.observe(parsed,{receivedWallNs:eventClock});
+   this.diagnostics.observe(parsed,{receivedWallNs:ack.receivedWallNs,receivedMonoNs:ack.receivedMonoNs});
    return ack;
   });
  }
