@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const DATE=/^\\d{4}-\\d{2}-\\d{2}$/;
+const DATE=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
 export const DEFAULT_FUNNEL_ROOT="/var/data/replay/funnel/es";
 export function validFunnelDate(date) {
   if(typeof date!=="string" || !DATE.test(date)) return false;
