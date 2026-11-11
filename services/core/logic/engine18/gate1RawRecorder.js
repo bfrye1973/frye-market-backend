@@ -68,7 +68,7 @@ export class Engine18RawRecorder{
   if(!root||!clock||typeof clock.wallNs!=='function'||typeof clock.monoNs!=='function')throw Error('root and clock required');
   this.root=resolve(root);this.provider=ident(provider);this.contract=ident(physicalContract);
   if(provider!=='SYNTHETIC')throw Error('live raw collection disabled pending owner authorization');
-  this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;
+  this.clock=clock;this.calendarVersion=calendarVersion;this.path=null;this.fd=null;this.seq=0;this.frames=0;this.bytes=0;this.gaps=0;this.writeErrors=0;this.lastMono=null;this.faulted=false;
   mkdirSync(this.root,{recursive:true,mode:0o700});
   this.lockPath=lockRoot(this.root);this.recoveredOpen=0;
   try{this.recover();if(this.recoveredOpen)this.append({raw:'',msgClass:'control',streamGeneration:0,statusCode:'GAP',at:new Date()});}
@@ -107,6 +107,7 @@ export class Engine18RawRecorder{
     last=Math.max(last,p.entries.at(-1)?.localSeq??0);this.recoveredOpen++;
   }
   this.seq=last;this.gaps+=this.recoveredOpen;
+  replayRaw(this.root); // fail closed if a partition was lost, duplicated or reordered
  }
  finish(path,entries){
   const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz');
@@ -125,6 +126,7 @@ export class Engine18RawRecorder{
   if(p.entries.length)this.finish(path,p.entries);else unlinkDurably(path);
  }
  append({raw,msgClass='unknown',streamGeneration=0,at=new Date(),statusCode=null}={}){
+  if(this.faulted)throw Error('recorder faulted; restart and recover before new writes');
   if(typeof raw!=='string'||!classes.has(msgClass)||!Number.isSafeInteger(streamGeneration)||streamGeneration<0)throw Error('invalid frame');
   if(!(at instanceof Date)||!Number.isFinite(at.getTime()))throw Error('invalid date');
   if(statusCode!==null&&!/^[A-Z_]{1,40}$/.test(statusCode))throw Error('unsafe status code');
@@ -137,7 +139,7 @@ export class Engine18RawRecorder{
   if(!/^\d+$/.test(wall)||!/^\d+$/.test(mono)||this.lastMono!==null&&BigInt(mono)<BigInt(this.lastMono))throw Error('invalid monotonic or wall clock');
   const item={schemaVersion:SCHEMA,localSeq:this.seq+1,tLocalWallNs:wall,tLocalMonoNs:mono,streamGeneration,msgClass,statusCode,raw};
   const line=Buffer.from(JSON.stringify(item)+'\n');
-  try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;throw Error('recorder write failed');}
+  try{let offset=0;while(offset<line.length){const n=writeSync(this.fd,line,offset,line.length-offset);if(n<=0)throw Error('short write');offset+=n;}fsyncSync(this.fd);}catch{this.writeErrors++;this.faulted=true;throw Error('recorder write failed; recovery required');}
   this.seq++;this.frames++;this.bytes+=line.length;this.lastMono=mono;if(statusCode==='GAP'&&!this.recoveredOpen)this.gaps++;
   return {localSeq:this.seq};
  }
@@ -146,7 +148,10 @@ export class Engine18RawRecorder{
  close(){try{this.rotate();}finally{this.releaseLock();}}
 }
 export function replayRaw(root){
- const all=walk(resolve(root)).filter(p=>p.endsWith('.jsonl.gz')).sort().flatMap(verify).sort((a,b)=>a.localSeq-b.localSeq);
+ const paths=walk(resolve(root));
+ if(paths.some(p=>p.endsWith('.jsonl.open')))throw Error('unfinalized open archive; recover before replay');
+ const all=paths.filter(p=>p.endsWith('.jsonl.gz')).sort().flatMap(verify).sort((a,b)=>a.localSeq-b.localSeq);
+ if(all.length&&all[0].localSeq!==1)throw Error('missing initial recorder sequence');
  for(let i=1;i<all.length;i++)if(all[i].localSeq!==all[i-1].localSeq+1)throw Error('replay sequence gap or duplicate');
  return all;
 }
