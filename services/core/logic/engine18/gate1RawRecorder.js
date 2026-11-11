@@ -80,11 +80,11 @@ export class Engine18RawRecorder{
   // the source .open file or completed archive can independently be verified.
   for(const temp of walk(this.root).filter(x=>x.endsWith('.jsonl.gz.tmp')||x.endsWith('.manifest.json.tmp'))){
     if(temp.endsWith('.jsonl.gz.tmp')){
-      const source=temp.replace(/\\.jsonl\\.gz\\.tmp$/,'.jsonl.open');
+      const source=temp.replace(/\.jsonl\.gz\.tmp$/,'.jsonl.open');
       const archive=temp.slice(0,-4);
       if(!existsSync(source)&&!existsSync(archive))throw Error('orphan compressed temp requires operator inspection');
     }else{
-      const archive=temp.replace(/\\.manifest\\.json\\.tmp$/,'.gz');
+      const archive=temp.replace(/\.manifest\.json\.tmp$/,'');
       if(!existsSync(archive))throw Error('orphan manifest temp requires operator inspection');
     }
     unlinkDurably(temp);
