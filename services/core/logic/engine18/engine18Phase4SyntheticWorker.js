@@ -37,7 +37,10 @@ async function dispatch(message){
  }
  if(message.type==='HEALTH'){
   const h=recorder.health();
-  safeSend({type:'HEALTH',id:message.id,received:h.received,recorded:h.recorded,failedClosed:h.failedClosed});return;
+  safeSend({type:'HEALTH',id:message.id,received:h.received,recorded:h.recorded,failedClosed:h.failedClosed,
+   commitLatencyUsP999:h.commitLatencyUsP999,batchCommitCount:h.batchCommitCount,
+   maxQueueDepth:h.maxQueueDepth,workerRssBytes:h.workerRssBytes,
+   workerCpuUserUs:h.workerCpuUserUs,workerCpuSystemUs:h.workerCpuSystemUs});return;
  }
  if(message.type==='CLOSE'){
   await recorder.close();cleanExit=true;safeSend({type:'CLOSED',lastSeq:recorder.writer.seq});
