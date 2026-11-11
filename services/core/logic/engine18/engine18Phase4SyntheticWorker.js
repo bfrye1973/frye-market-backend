@@ -4,6 +4,9 @@ import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 if(process.env.ENGINE18_SYNTHETIC_WORKER!=='1'||typeof process.send!=='function')
  throw Error('isolated synthetic worker disabled');
 let recorder=null,queue=Promise.resolve(),faulted=false,cleanExit=false;
+const syntheticSlowDiskMs=Number(process.env.ENGINE18_SYNTHETIC_SLOW_DISK_MS||0);
+if(!Number.isInteger(syntheticSlowDiskMs)||syntheticSlowDiskMs<0||syntheticSlowDiskMs>100)throw Error('invalid synthetic disk delay');
+const sleepWord=new Int32Array(new SharedArrayBuffer(4));
 const clock={wallNs:()=>String(BigInt(Date.now())*1000000n),monoNs:()=>String(process.hrtime.bigint())};
 function safeSend(item){try{process.send(item);}catch{}}
 async function dispatch(message){
@@ -11,7 +14,10 @@ async function dispatch(message){
  if(message.type==='INIT'){
   if(recorder)throw Error('worker already initialized');
   if(typeof message.root!=='string'||!message.root.startsWith('/tmp/'))throw Error('synthetic tmp root only');
-  recorder=await Engine18BufferedRecorder.openBounded({root:message.root,clock,batchSize:32,flushDelayMs:0});
+  recorder=await Engine18BufferedRecorder.openBounded({root:message.root,clock,batchSize:32,flushDelayMs:0,
+   testFault:syntheticSlowDiskMs?stage=>{
+    if(stage==='BEFORE_FSYNC')Atomics.wait(sleepWord,0,0,syntheticSlowDiskMs);
+   }:null});
   safeSend({type:'READY',runId:recorder.writer.runId});return;
  }
  if(!recorder)throw Error('worker not initialized');
