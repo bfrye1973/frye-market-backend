@@ -5,6 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {createEngine18ReceiptClock} from './engine18ReceiptClock.js';
 
 const CHILD=fileURLToPath(new URL('./engine18Phase4SyntheticWorker.js',import.meta.url));
+export function recommendEngine18MaxInflight({peakFramesPerSecond,diskCommitP999Us,safetyFactor=2}={}){
+ if(!Number.isFinite(peakFramesPerSecond)||peakFramesPerSecond<=0||
+    !Number.isFinite(diskCommitP999Us)||diskCommitP999Us<=0||
+    !Number.isFinite(safetyFactor)||safetyFactor<1)throw Error('measured capacity inputs required');
+ // Little's law approximation with safety factor, not a validated live feed size.
+ return Math.max(32,Math.ceil(peakFramesPerSecond*(diskCommitP999Us/1000000)*safetyFactor));
+}
 function quantile(a,q){
  if(!a.length)return null;
  const s=[...a].sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.ceil(q*s.length)-1)];
@@ -19,6 +26,7 @@ export class Engine18SyntheticWorkerBridge{
   this.pending=new Map();this.child=null;this.nextId=1;this.failed=false;
   this.accepted=0;this.acked=0;this.rejected=0;this.latencyUs=[];this.closed=false;
   this.clock=createEngine18ReceiptClock();this.ipcQueuedSignals=0;this.ipcSendErrors=0;
+  this.workerHealth=null;this.healthRequests=new Map();
  }
  async start(){
   if(this.child)throw Error('already started');
@@ -30,6 +38,10 @@ export class Engine18SyntheticWorkerBridge{
    if(message?.type==='ACK'){
     const p=this.pending.get(message.id);
     if(p){this.pending.delete(message.id);this.acked++;p.resolve(message.seq);}
+   }
+   if(message?.type==='HEALTH'){
+    this.workerHealth=Object.freeze({...message});
+    const p=this.healthRequests.get(message.id);if(p){this.healthRequests.delete(message.id);p.resolve(this.workerHealth);}
    }
    if(message?.type==='FAILED')this.fail('CHILD_RECORDING_FAILED');
   });
@@ -50,6 +62,8 @@ export class Engine18SyntheticWorkerBridge{
   this.failed=true;this.failureReason=reason;
   for(const pending of this.pending.values())pending.reject(Error('unacknowledged after recorder failure'));
   this.pending.clear();
+  for(const r of this.healthRequests.values())r.reject(Error('worker stopped before health report'));
+  this.healthRequests.clear();
   try{this.child?.send({type:'FAIL'});}catch{}
   try{this.onFailure(reason);}catch{}
  }
@@ -86,12 +100,28 @@ export class Engine18SyntheticWorkerBridge{
   if(this.latencyUs.length>10000)this.latencyUs.shift();
   return result;
  }
+ async requestWorkerHealth(){
+  if(!this.child||this.failed||this.closed)throw Error('worker health unavailable');
+  const id=this.nextId++;
+  return new Promise((resolve,reject)=>{
+   this.healthRequests.set(id,{resolve,reject});
+   this.child.send({type:'HEALTH',id},err=>{
+    if(err){this.healthRequests.delete(id);reject(Error('worker health IPC failed'));}
+   });
+  });
+ }
  health(){
   return Object.freeze({schema:'engine18.workerBridge.health.v1',active:!this.failed&&!this.closed,
    accepted:this.accepted,acked:this.acked,inflight:this.pending.size,rejected:this.rejected,
    callbackUsP95:quantile(this.latencyUs,.95),callbackUsP99:quantile(this.latencyUs,.99),
    ipcQueuedSignals:this.ipcQueuedSignals,ipcSendErrors:this.ipcSendErrors,
-   receiptClock:this.clock.diagnostics(),clockQuality:'UNVERIFIED',failure:this.failureReason??null});
+   receiptClock:this.clock.diagnostics(),clockQuality:'UNVERIFIED',
+   workerCommitLatencyUsP999:this.workerHealth?.commitLatencyUsP999??null,
+   workerMaxQueueDepth:this.workerHealth?.maxQueueDepth??null,
+   workerRssBytes:this.workerHealth?.workerRssBytes??null,
+   workerCpuUserUs:this.workerHealth?.workerCpuUserUs??null,
+   workerCpuSystemUs:this.workerHealth?.workerCpuSystemUs??null,
+   failure:this.failureReason??null});
  }
  async close(){
   if(!this.child||this.closed)return;
