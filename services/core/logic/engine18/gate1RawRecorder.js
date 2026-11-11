@@ -251,13 +251,13 @@ export class Engine18RawRecorder{
   const plain=readFileSync(path),parsed=parse(plain);
   if(parsed.bytes!==plain.length)throw Error('incomplete streaming source');
   if(!parsed.entries.length){unlinkDurably(path);return;}
-  const dest=path.replace(/\\.jsonl\\.open$/,'.jsonl.gz'),tmp=dest+'.tmp';
+  const dest=path.replace(/\.jsonl\.open$/,'.jsonl.gz'),tmp=dest+'.tmp';
   if(existsSync(dest)||existsSync(tmp))throw Error('archive collision');
   await pipeline(createReadStream(path),createGzip({mtime:0}),createWriteStream(tmp,{flags:'wx',mode:0o600}));
   const fd=openSync(tmp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}
   renameSync(tmp,dest);syncDir(dest);
   const gzip=readFileSync(dest);
-  atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\\n');
+  atomic(dest+'.manifest.json',JSON.stringify(manifestFor(gzip,parsed.entries,this.calendarVersion))+'\n');
   unlinkDurably(path);
  }
  async closeStreaming(){
