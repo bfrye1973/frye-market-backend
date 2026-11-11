@@ -133,9 +133,6 @@ export class Engine18SyntheticArchiveBackup{
    ]){
     const tmp=target+'.restore.tmp';
     const hash=createHash('sha256');let bytes=0;
-    await pipeline(Readable.from(this.store.getStream(id)),new Writable({
-     write:()=>{} // placeholder replaced below; guard avoids mistaken silent restoration
-    })).catch(()=>{});
     // Write encrypted object through verified streaming and atomic local rename.
     const file=createWriteStream(tmp,{flags:'wx',mode:0o600});
     try{
