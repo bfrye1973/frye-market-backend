@@ -95,6 +95,9 @@ async function finalizeOpen(path,summary,calendarVersion,testFault=null){
   // A gzip renamed before its manifest is not automatically corrupt when
   // its intact original .open remains a byte-identical source of truth.
   if(!existsSync(dest+'.manifest.json')){
+   // Interrupted atomic manifest write may leave a .tmp. We may discard it
+   // ONLY after the intact original has verified equal to decompressed gzip.
+   if(existsSync(dest+'.manifest.json.tmp'))remove(dest+'.manifest.json.tmp');
    const hash=await fileHash(dest);
    atomic(dest+'.manifest.json',JSON.stringify({
     schemaVersion:'engine18.manifest.v1',...hash,count:summary.count,
