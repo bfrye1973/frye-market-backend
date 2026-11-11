@@ -179,3 +179,23 @@ test('private end-of-trial full backup restore matches source byte-for-byte and 
  }),/independently pinned/);
  rmSync(root+'-wrong-restore',{recursive:true,force:true});
 }));
+
+test('silent ES feed triggers supervised reconnect, private alert, and uncertain FEED_GAP',()=>temp(async root=>{
+ const io=fixture(),writer=await Engine18BufferedRecorder.openBounded({root,clock:clock(),
+  provider:'IRONBEAM_V2',allowLiveProvider:true,batchSize:8,flushDelayMs:0});
+ const alerts=[];
+ const source=new Engine18IronbeamLiveRecorderSource({
+  recorder:writer,fetchImpl:io.fetchImpl,WebSocketImpl:io.WebSocketImpl,
+  credentials:{username:'MOCK',password:'MOCK',apiKey:'MOCK'},
+  heartbeatTimeoutMs:20,retryMs:2,maxRetryMs:10,onAlert:c=>alerts.push(c)
+ });
+ assert.equal(await source.start(),true);
+ for(let i=0;i<70&&io.sockets.length<2;i++)await new Promise(r=>setTimeout(r,5));
+ assert.ok(io.sockets.length>=2,'silent source must reconnect');
+ await source.stop();await writer.close();
+ const events=replayRaw(root);
+ assert.ok(events.some(x=>x.statusCode==='FEED_GAP'));
+ assert.ok(alerts.includes('IRONBEAM_SOURCE_STALE'));
+ assert.ok(alerts.includes('IRONBEAM_SOURCE_INTERRUPTED'));
+ assert.ok(events.every(x=>!x.raw.includes('SENSITIVE_TEST_TOKEN')));
+}));
