@@ -67,15 +67,23 @@ export function createEngine18IronbeamV2RecorderRehearsal({
   attachFrame(ws,ticket);
   current={socket:ws,ticket,streamId};lastGeneration=ticket.generation;
   // Subscription receipts are local controls and never include Bearer tokens.
-  for(const type of SUBS){
-   let status='FAILED';
-   try{
-    await request('/v2/market/'+type+'/subscribe/'+encodeURIComponent(streamId)+
-     '?symbols='+encodeURIComponent(physicalContract),auth.token);
-    status='SUCCESS';
-   }finally{
-    await supervisor.subscription(ticket,{feedType:type,physicalContract,streamId,status});
+  try{
+   for(const type of SUBS){
+    let status='FAILED';
+    try{
+     await request('/v2/market/'+type+'/subscribe/'+encodeURIComponent(streamId)+
+      '?symbols='+encodeURIComponent(physicalContract),auth.token);
+     status='SUCCESS';
+    }finally{
+     await supervisor.subscription(ticket,{feedType:type,physicalContract,streamId,status});
+    }
    }
+  }catch{
+   // A failed subscription must never leave a silently receiving session.
+   // Preserve failure evidence first, then explicitly mark source uncertain.
+   recordWork(supervisor.socketEvent(ticket,'WS_ERROR',{reason:'SUBSCRIPTION_FAILURE'}));
+   try{ws.close();}catch{}
+   throw Error('synthetic subscription failed; source coverage unverified');
   }
   return Object.freeze({streamId,generation:ticket.generation,socket:ws,ticket});
  }
