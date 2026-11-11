@@ -108,9 +108,14 @@ export class SyntheticIronbeamRecorderTap {
   this.recorder=recorder;this.diagnostics=diagnostics;this.generation=0;this.connected=false;
  }
  onFrame(frame,{at}={}){
-  // classify synchronously, raw remains exact, and recorder captures receipt before queue delay.
-  const parsed=classifyIronbeamRawFrame(frame,{streamGeneration:this.generation,receivedAt:at});
-  const receiptPromise=this.recorder.offer({...parsed.capture,at});
+  // Stamp the untouched source frame BEFORE classification, parsing, queueing or disk work.
+  const source=frameShape(frame);
+  const receipt=this.recorder.capture({raw:source.raw,rawEncoding:source.rawEncoding,
+    msgClass:'unknown',streamGeneration:this.generation,at});
+  const parsed=classifyIronbeamRawFrame(frame,{streamGeneration:this.generation});
+  const classified=Object.freeze({...receipt,msgClass:parsed.capture.msgClass,
+    statusCode:parsed.capture.statusCode});
+  const receiptPromise=this.recorder.offerCaptured(classified);
   // Diagnostics are never permitted to convert an unsuccessful write into an ACK.
   return receiptPromise.then(ack=>{
    this.diagnostics.observe(parsed,{receivedWallNs:ack.receivedWallNs,receivedMonoNs:ack.receivedMonoNs});
@@ -122,7 +127,7 @@ export class SyntheticIronbeamRecorderTap {
   if(code==='DISCONNECTED')this.connected=false;
   const safe=sanitizedRecorderControl(code,this.generation);
   const ack=await this.recorder.offer({...safe,at});
-  this.diagnostics.event(code);return ack;
+  this.diagnostics.event(code);if(code==='RECONNECT')this.recorder.onReconnect?.();return ack;
  }
  safeDiagnostics(){return this.diagnostics.summary();}
 }
