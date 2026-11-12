@@ -481,7 +481,7 @@ test(
     );
     assert.equal(
       third.trade.summary.realizedR,
-      1.6667
+      1.67
     );
     assert.ok(third.trade.summary.closeTime);
     assert.equal(
@@ -645,7 +645,7 @@ test(
     );
     assert.equal(
       replayTrade.summary.realizedR,
-      1.6667
+      1.67
     );
   }
 );
