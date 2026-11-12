@@ -1,9 +1,8 @@
 // services/core/jobs/buildAllStrategySnapshots.js
 // -----------------------------------------------------------------------------
-// Builds strategy snapshots for all active dashboard symbols.
-//
-// SPY -> data/strategy-snapshot.json
-// ES  -> data/strategy-snapshot-es.json
+// Builds only the owner-used ES futures strategy snapshot.
+// SPY generation has been explicitly retired; do not recreate its snapshot.
+// ES -> data/strategy-snapshot-es.json
 //
 // This wrapper runs snapshots sequentially, not in parallel, to avoid load spikes.
 // -----------------------------------------------------------------------------
@@ -16,7 +15,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
 
-const SYMBOLS = ["SPY", "ES"];
+const SYMBOLS = ["ES"];
 
 function nowIso() {
   return new Date().toISOString();
