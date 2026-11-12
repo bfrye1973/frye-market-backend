@@ -24,7 +24,7 @@ jobs:
         run: node --check jobs/buildStrategySnapshot.js && node --check routes/runAllEngines.js && node --check server.js && node --check jobs/replayEngine6ENoTradeFunnel.js
       - name: Run read-only funnel tests
         working-directory: services/core
-        run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js tests/engine6EAdvisoryContext.test.js tests/engine6EHistoricalReplay.test.js tests/engine6EFrozenExitLifecycle.test.js tests/engine6EEngine8CandidateReset.test.js
+        run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js tests/engine6EAdvisoryContext.test.js tests/engine6EHistoricalReplay.test.js tests/engine6EFrozenExitLifecycle.test.js tests/engine6EEngine8CandidateReset.test.js tests/engine6ECanonicalExecutorPreparation.test.js
 
   downstream-paper-regressions:
     runs-on: ubuntu-latest
