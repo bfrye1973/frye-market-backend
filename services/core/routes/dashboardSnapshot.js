@@ -3,8 +3,8 @@
 // Reads prebuilt snapshot file instead of recomputing engines
 //
 // Symbol-aware:
-// SPY/default -> data/strategy-snapshot.json
-// ES          -> data/strategy-snapshot-es.json
+// ES/default -> data/strategy-snapshot-es.json
+// SPY retired by owner; never serve or regenerate its old snapshot.
 
 import express from "express";
 import fs from "fs";
@@ -16,10 +16,7 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SNAPSHOT_FILES = {
-  SPY: path.resolve(__dirname, "../data/strategy-snapshot.json"),
-  ES: path.resolve(__dirname, "../data/strategy-snapshot-es.json"),
-};
+const ES_SNAPSHOT_FILE = path.resolve(__dirname, "../data/strategy-snapshot-es.json");
 
 const NEWS_RISK_FILE = path.resolve(
   __dirname,
@@ -27,18 +24,13 @@ const NEWS_RISK_FILE = path.resolve(
 );
 
 function normalizeSymbol(v) {
-  const s = String(v || "SPY").trim().toUpperCase();
-  return s || "SPY";
+  const s = String(v || "ES").trim().toUpperCase();
+  return s || "ES";
 }
 
 function getSnapshotFile(symbol) {
   const clean = normalizeSymbol(symbol);
-
-  if (clean === "ES") {
-    return SNAPSHOT_FILES.ES;
-  }
-
-  return SNAPSHOT_FILES.SPY;
+  return clean === "ES" ? ES_SNAPSHOT_FILE : null;
 }
 
 /* -----------------------------
@@ -47,6 +39,10 @@ function getSnapshotFile(symbol) {
 function readSnapshot(symbol = "SPY") {
   const file = getSnapshotFile(symbol);
   const cleanSymbol = normalizeSymbol(symbol);
+
+  if (file === null) return {
+    ok:false,error:"SYMBOL_NOT_SUPPORTED",symbol:cleanSymbol
+  };
 
   try {
     if (!fs.existsSync(file)) {
@@ -155,7 +151,8 @@ function readNewsRiskSnapshot() {
 ------------------------------*/
 router.get("/dashboard-snapshot", async (req, res) => {
   try {
-    const symbol = normalizeSymbol(req.query.symbol || "SPY");
+    const symbol = normalizeSymbol(req.query.symbol || "ES");
+    if(symbol !== "ES") return res.status(410).json({ok:false,error:"SPY_AND_OTHER_SYMBOL_SNAPSHOTS_RETIRED",symbol});
     const snapshot = readSnapshot(symbol);
 
     if (!snapshot || snapshot.ok === false) {
@@ -169,10 +166,7 @@ router.get("/dashboard-snapshot", async (req, res) => {
     // Debug metadata for route verification.
     snapshot.snapshotSource = {
       requestedSymbol: symbol,
-      file:
-        symbol === "ES"
-          ? "strategy-snapshot-es.json"
-          : "strategy-snapshot.json",
+      file: "strategy-snapshot-es.json",
     };
 
     return res.json(snapshot);

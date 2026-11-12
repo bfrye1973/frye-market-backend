@@ -1,9 +1,8 @@
 // services/core/jobs/buildAllStrategySnapshots.js
 // -----------------------------------------------------------------------------
-// Builds strategy snapshots for all active dashboard symbols.
-//
-// SPY -> data/strategy-snapshot.json
-// ES  -> data/strategy-snapshot-es.json
+// Builds only the owner-used ES futures strategy snapshot.
+// SPY generation has been explicitly retired; do not recreate its snapshot.
+// ES -> data/strategy-snapshot-es.json
 //
 // This wrapper runs snapshots sequentially, not in parallel, to avoid load spikes.
 // -----------------------------------------------------------------------------
@@ -11,12 +10,13 @@
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
+import {removeUnusedSpySnapshots} from "../scripts/removeUnusedSpySnapshots.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
 
-const SYMBOLS = ["SPY", "ES"];
+const SYMBOLS = ["ES"];
 
 function nowIso() {
   return new Date().toISOString();
@@ -94,6 +94,11 @@ async function main() {
   console.log(`[buildAllStrategySnapshots] CORE_DIR=${CORE_DIR}`);
   console.log(`[buildAllStrategySnapshots] SYMBOLS=${SYMBOLS.join(", ")}`);
   console.log("============================================================");
+
+  // Owner has retired SPY. Clean only the known SPY strategy snapshot files
+  // before rebuilding ES; never touch the separate ES/journal/replay stores.
+  const retired=removeUnusedSpySnapshots({apply:true});
+  console.log(`[buildAllStrategySnapshots] retired SPY snapshot files: ${retired.deleted}`);
 
   const results = [];
 
