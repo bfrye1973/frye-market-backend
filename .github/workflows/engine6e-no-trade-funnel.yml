@@ -46,3 +46,9 @@ jobs:
           ENGINE8_LIVE_TRADING_ENABLED: '0'
           ENGINE8_ALLOW_LIVE_FUTURES: '0'
         run: node --test services/core/tests/engine8Engine10Strategy1LifecycleReplay.test.js
+      - name: Frozen boundary and midpoint Engine 8 to 10 journal replay
+        env:
+          TRADE_JOURNAL_DIR: ${{ github.workspace }}/services/core/data
+          ENGINE8_LIVE_TRADING_ENABLED: "0"
+          ENGINE8_ALLOW_LIVE_FUTURES: "0"
+        run: node --test services/core/tests/engine6EFrozenEngine8Engine10Journal.test.js
