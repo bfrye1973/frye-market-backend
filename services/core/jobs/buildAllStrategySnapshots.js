@@ -10,6 +10,7 @@
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
+import {removeUnusedSpySnapshots} from "../scripts/removeUnusedSpySnapshots.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,6 +94,11 @@ async function main() {
   console.log(`[buildAllStrategySnapshots] CORE_DIR=${CORE_DIR}`);
   console.log(`[buildAllStrategySnapshots] SYMBOLS=${SYMBOLS.join(", ")}`);
   console.log("============================================================");
+
+  // Owner has retired SPY. Clean only the known SPY strategy snapshot files
+  // before rebuilding ES; never touch the separate ES/journal/replay stores.
+  const retired=removeUnusedSpySnapshots({apply:true});
+  console.log(`[buildAllStrategySnapshots] retired SPY snapshot files: ${retired.deleted}`);
 
   const results = [];
 
