@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-13T02:30:39.730686+00:00",
+  "updated_at_utc": "2026-11-13T19:01:57.893440+00:00",
   "completedSessionDate": "2026-11-12",
   "score": 49.3,
   "state": "MIXED",
@@ -101,10 +101,10 @@
     },
     {
       "sector": "tech",
-      "breadth_pct": 52.43,
+      "breadth_pct": 52.17,
       "momentum_pct": 51.61,
       "nh": 108,
-      "nl": 98,
+      "nl": 99,
       "up": 16,
       "down": 15
     }
@@ -203,14 +203,14 @@
     "ES": {
       "symbol": "ES",
       "available": true,
-      "state": "YELLOW",
+      "state": "RED",
       "sessionDate": "2026-11-12",
-      "close": 7639.75,
-      "ma10": 7572.675,
-      "ma20": 7649.225,
+      "close": 7569.5,
+      "ma10": 7565.65,
+      "ma20": 7645.7125,
       "ma10Prior": 7570.15,
       "ma20Prior": 7652.3875,
-      "ma10Upsloping": true,
+      "ma10Upsloping": false,
       "ma20Upsloping": false
     },
     "QQQ": {
@@ -257,10 +257,10 @@
     "all": {
       "members": 5470,
       "nh": 747,
-      "nl": 825,
+      "nl": 826,
       "up": 117,
       "down": 113,
-      "breadth_pct": 47.52,
+      "breadth_pct": 47.49,
       "momentum_pct": 50.87,
       "prior": {
         "nh": 772,
@@ -272,54 +272,54 @@
       }
     },
     "large": {
-      "members": 909,
-      "nh": 133,
-      "nl": 39,
+      "members": 900,
+      "nh": 132,
+      "nl": 38,
       "up": 8,
       "down": 10,
-      "breadth_pct": 77.33,
+      "breadth_pct": 77.65,
       "momentum_pct": 44.44,
       "prior": {
-        "nh": 122,
-        "nl": 69,
-        "up": 59,
+        "nh": 121,
+        "nl": 68,
+        "up": 58,
         "down": 7,
-        "breadth_pct": 63.87,
-        "momentum_pct": 89.39
+        "breadth_pct": 64.02,
+        "momentum_pct": 89.23
       }
     },
     "mid": {
-      "members": 1106,
-      "nh": 160,
+      "members": 1108,
+      "nh": 158,
       "nl": 99,
       "up": 12,
       "down": 19,
-      "breadth_pct": 61.78,
+      "breadth_pct": 61.48,
       "momentum_pct": 38.71,
       "prior": {
-        "nh": 182,
-        "nl": 118,
-        "up": 66,
+        "nh": 180,
+        "nl": 119,
+        "up": 65,
         "down": 11,
-        "breadth_pct": 60.67,
-        "momentum_pct": 85.71
+        "breadth_pct": 60.2,
+        "momentum_pct": 85.53
       }
     },
     "small": {
-      "members": 3436,
-      "nh": 451,
-      "nl": 684,
+      "members": 3443,
+      "nh": 454,
+      "nl": 686,
       "up": 96,
       "down": 84,
-      "breadth_pct": 39.74,
+      "breadth_pct": 39.82,
       "momentum_pct": 53.33,
       "prior": {
-        "nh": 465,
+        "nh": 468,
         "nl": 637,
-        "up": 169,
+        "up": 171,
         "down": 87,
-        "breadth_pct": 42.2,
-        "momentum_pct": 66.02
+        "breadth_pct": 42.35,
+        "momentum_pct": 66.28
       }
     },
     "unknown": {
