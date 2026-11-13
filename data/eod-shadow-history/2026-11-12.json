@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-12T22:51:34.670889+00:00",
+  "updated_at_utc": "2026-11-13T00:54:08.984388+00:00",
   "completedSessionDate": "2026-11-12",
   "score": 49.3,
   "state": "MIXED",
@@ -143,11 +143,11 @@
       "momentum_pct": 87.5
     },
     "Financials": {
-      "nh": 113,
+      "nh": 112,
       "nl": 96,
       "up": 31,
       "down": 18,
-      "breadth_pct": 54.07,
+      "breadth_pct": 53.85,
       "momentum_pct": 63.27
     },
     "Healthcare": {
@@ -160,10 +160,10 @@
     },
     "Industrials": {
       "nh": 115,
-      "nl": 84,
+      "nl": 83,
       "up": 53,
       "down": 11,
-      "breadth_pct": 57.79,
+      "breadth_pct": 58.08,
       "momentum_pct": 82.81
     },
     "Materials": {
@@ -203,14 +203,14 @@
     "ES": {
       "symbol": "ES",
       "available": true,
-      "state": "RED",
-      "sessionDate": "2026-11-11",
-      "close": 7621.75,
-      "ma10": 7570.15,
-      "ma20": 7652.3875,
-      "ma10Prior": 7579.0,
-      "ma20Prior": 7660.6,
-      "ma10Upsloping": false,
+      "state": "YELLOW",
+      "sessionDate": "2026-11-12",
+      "close": 7634.25,
+      "ma10": 7572.125,
+      "ma20": 7648.95,
+      "ma10Prior": 7570.15,
+      "ma20Prior": 7652.3875,
+      "ma10Upsloping": true,
       "ma20Upsloping": false
     },
     "QQQ": {
@@ -263,8 +263,8 @@
       "breadth_pct": 47.52,
       "momentum_pct": 50.87,
       "prior": {
-        "nh": 773,
-        "nl": 827,
+        "nh": 772,
+        "nl": 826,
         "up": 295,
         "down": 106,
         "breadth_pct": 48.31,
@@ -314,11 +314,11 @@
       "breadth_pct": 39.74,
       "momentum_pct": 53.33,
       "prior": {
-        "nh": 466,
-        "nl": 638,
+        "nh": 465,
+        "nl": 637,
         "up": 169,
         "down": 87,
-        "breadth_pct": 42.21,
+        "breadth_pct": 42.2,
         "momentum_pct": 66.02
       }
     },
