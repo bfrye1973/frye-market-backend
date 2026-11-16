@@ -41,8 +41,13 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
   assert.ok([...micro,...submicro].every(n=>n.presentationAllowed===true));
   assert.equal(submicro.filter(n=>n.price===7492.25&&n.marketAtUtc==="2026-11-10T17:40:00.000Z").length,1,"C low and new W1 start are one chart dot");
   assert.equal(packet.degrees.primary.nodes.length,0);
-  assert.equal(packet.degrees.minute.nodes.length,0,
-    "Minute research/Fib references must not be converted into current chart nodes");
+  assert.deepEqual(packet.degrees.minute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
+    ["W1 ending high",7671,"2026-11-11T15:00:00.000Z"]
+  ]);
+  assert.equal(packet.degrees.minute.nodes[0].ownerArizonaTime,"2026-11-11 08:00 AZ");
+  assert.equal(packet.degrees.minute.nodes[0].noExecution,true);
+  assert.equal(packet.degrees.minute.nodes[0].waveCompletionConfirmed,false,
+    "Owner-marked research must not silently promote canonical count");
   assert.equal(packet.degrees.subminute.nodes.length,0,
     "Subminute research/Fib references must not be converted into current chart nodes");
 });
