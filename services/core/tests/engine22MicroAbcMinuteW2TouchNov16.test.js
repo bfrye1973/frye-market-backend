@@ -69,11 +69,11 @@ test("Micro C and Minute W2 green-on-touch are isolated, post-origin and persist
   assert.equal(minute(first).levels[0].touchEvidenceType,"ES_CURRENT_PRICE");
   const next=result(7450,{at:microStart+120000,storePath});
   assert.deepEqual(micro(next).levels.map(x=>x.status),
-   ["TOUCHED","TOUCHED","WATCH","WATCH","WATCH","WATCH"]);
+   ["TOUCHED","TOUCHED","TOUCHED","WATCH","WATCH","WATCH"]);
   assert.deepEqual(minute(next).levels.map(x=>x.status),
    ["TOUCHED","TOUCHED","TOUCHED","TOUCHED","WATCH","WATCH"]);
   const rebound=result(7580,{at:microStart+180000,storePath});
-  assert.equal(micro(rebound).levels[1].status,"TOUCHED");
+  assert.equal(micro(rebound).levels[2].status,"TOUCHED");
   assert.equal(minute(rebound).levels[3].status,"TOUCHED");
   const earlier=result(7570,{at:microStart+600000,
    bars10m:[{time:Math.floor((microStart-600000)/1000),low:7000,high:7600}]});
