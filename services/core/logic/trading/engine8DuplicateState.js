@@ -23,7 +23,8 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
+import { readPaperStore, writePaperStore, paperStorePath } from "./engine8PaperDurableStore.js";
+import { resolveEngine8PaperAcceptanceEligibility } from "./engine8PaperAcceptanceEligibility.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,8 +42,11 @@ const LEDGER_FILE = path.join(
   "paper-idempotency-ledger.json"
 );
 
-const JOURNAL_FILE = path.join(
-  DATA_DIR,
+// The official Engine 10 Journal is persisted on its own durable disk.
+// Never infer PAPER position availability from the old services/core/data
+// file; that can be stale while a real PAPER position is still OPEN.
+const JOURNAL_FILE = path.resolve(
+  process.env.TRADE_JOURNAL_DIR || "/var/data/replay/journal",
   "trade-journal.json"
 );
 
@@ -261,9 +265,10 @@ function orderIsOpen(order) {
 }
 
 function tradeIsOpen(trade) {
+  // REAL trades must never be treated as PAPER open-position conflicts.
   return (
-    upper(trade?.status) ===
-    "OPEN"
+    upper(trade?.status) === "OPEN" &&
+    upper(trade?.accountMode) !== "REAL"
   );
 }
 
@@ -888,10 +893,18 @@ export function markEngine8AcceptanceTradeCompleted({
       "ENGINE10_CLOSED_ACKNOWLEDGED",
   };
 
-  writeJson(
-    ACCEPTANCE_FILE,
-    state
-  );
+  // A one-time acceptance receipt is immutable historical evidence.
+  // A later distinct candidate's final CLOSE still receives a durable
+  // execution/Journal link below, but must not overwrite the first trial.
+  // Likewise an explicit disabled state must not be silently reset by EXIT.
+  const priorAcceptanceState = getEngine8AcceptanceState();
+  const recordFirstTrial =
+    priorAcceptanceState.acceptanceTradeCompleted !== true &&
+    priorAcceptanceState.newPaperOrdersAllowed === true;
+
+  if (recordFirstTrial) {
+    writeJson(ACCEPTANCE_FILE, state);
+  }
 
   recordEngine8ExecutionLink({
     executionId:
@@ -940,24 +953,34 @@ export function markEngine8AcceptanceTradeCompleted({
 
   return {
     ok: true,
-    updated: true,
+    updated: recordFirstTrial,
 
     acceptanceTradeCompleted:
-      true,
+      recordFirstTrial ||
+      priorAcceptanceState.acceptanceTradeCompleted === true,
 
     newPaperOrdersAllowed:
-      false,
+      recordFirstTrial
+        ? false
+        : priorAcceptanceState.newPaperOrdersAllowed,
 
     tradeId:
-      normalizedTradeId,
+      recordFirstTrial
+        ? normalizedTradeId
+        : priorAcceptanceState.tradeId,
 
     executionId:
-      normalizedExecutionId,
+      recordFirstTrial
+        ? normalizedExecutionId
+        : priorAcceptanceState.executionId,
 
     closedAt:
-      state.closedAt,
+      recordFirstTrial
+        ? state.closedAt
+        : priorAcceptanceState.closedAt,
 
-    state,
+    state: recordFirstTrial ? state : priorAcceptanceState,
+    auditPreserved: !recordFirstTrial,
   };
 }
 
@@ -1081,19 +1104,37 @@ export function getEngine8DuplicateState({
       ? ledgerRaw
       : {};
 
-  const journalRaw =
-    readJson(
-      JOURNAL_FILE,
-      []
-    );
-
-  const trades =
-    Array.isArray(journalRaw)
-      ? journalRaw
-      : [];
+  // Corrupt or schema-invalid official Journal must fail CLOSED rather
+  // than be mistaken for zero open positions. A new empty journal is
+  // allowed only when the file has not yet been created.
+  const journalRaw = fs.existsSync(JOURNAL_FILE)
+    ? JSON.parse(fs.readFileSync(JOURNAL_FILE, "utf8"))
+    : [];
+  if (!Array.isArray(journalRaw)) {
+    throw new Error("ENGINE10_OFFICIAL_JOURNAL_INVALID");
+  }
+  const trades = journalRaw;
 
   const acceptanceState =
     getEngine8AcceptanceState();
+
+  // Do not allow a missing, corrupt, ambiguous, or explicitly disabled
+  // authorization record to masquerade as an ordinary open test state.
+  // This reads only the dedicated durable PAPER authority; the legacy
+  // completion file is retained for audit and is NOT merged or rewritten.
+  const acceptanceEligibility =
+    resolveEngine8PaperAcceptanceEligibility({
+      state: readJson(ACCEPTANCE_FILE, null),
+      storePresent: fs.existsSync(
+        paperStorePath("engine8-paper-acceptance-state.json")
+      ),
+      candidateId: normalizedCandidateId,
+      planId: normalizedPlanId,
+      continuousPaperAuthorized:
+        process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED === "1",
+      operatorPaperDisabled:
+        process.env.ENGINE8_PAPER_OPERATOR_DISABLED === "1",
+    });
 
   const lifecycleState =
     getEngine8ExecutionState();
@@ -1114,6 +1155,21 @@ export function getEngine8DuplicateState({
               ?.candidateId
           ) ===
           normalizedCandidateId
+      ) ||
+      lifecycleRecords.some(
+        (record) =>
+          text(record?.candidateId) === normalizedCandidateId &&
+          (
+            record?.executionSuccessful === true ||
+            record?.orderCreated === true ||
+            record?.fillCreated === true ||
+            record?.journalPending === true ||
+            lifecycleRecordIsBlocking(record)
+          )
+      ) ||
+      trades.some(
+        (trade) =>
+          text(trade?.candidateId) === normalizedCandidateId
       )
     );
 
@@ -1252,6 +1308,10 @@ export function getEngine8DuplicateState({
     acceptanceTradeCompleted,
 
     newPaperOrdersAllowed,
+
+    // Effective continuous-PAPER authorization is separate from the
+    // historical one-time acceptance trial audit flags above.
+    acceptanceEligibility,
 
     journalPendingExecution,
 

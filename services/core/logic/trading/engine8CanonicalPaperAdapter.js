@@ -410,6 +410,10 @@ function buildBaseOutput({
 
       newPaperOrdersAllowed:
         duplicateState?.newPaperOrdersAllowed !== false,
+      journalPendingExecution:
+        duplicateState?.journalPendingExecution === true,
+      acceptanceEligibility:
+        duplicateState?.acceptanceEligibility || null,
     },
 
     identityMatched: false,
@@ -641,16 +645,28 @@ function duplicateBlockers(duplicateState) {
     blockers.push("ORDER_ALREADY_EXISTS_FOR_PLAN_ID");
   }
 
-  if (
-    duplicateState?.acceptanceTradeCompleted === true
-  ) {
-    blockers.push("ACCEPTANCE_TRADE_ALREADY_COMPLETED");
+  if (duplicateState?.journalPendingExecution === true) {
+    blockers.push("ENGINE10_JOURNAL_PENDING");
   }
 
-  if (
-    duplicateState?.newPaperOrdersAllowed === false
-  ) {
-    blockers.push("NEW_PAPER_ORDERS_DISABLED");
+  // Only the durable Engine 8 reader may authenticate that a legacy
+  // one-time trial has valid provenance and an independent opt-in.
+  // External/test callers without that evidence retain legacy fail-closed
+  // behavior; the trial completion alone is never a market veto.
+  if (duplicateState?.acceptanceEligibility) {
+    if (duplicateState.acceptanceEligibility.allowed !== true) {
+      blockers.push(
+        duplicateState.acceptanceEligibility.reason ||
+        "PAPER_ACCEPTANCE_AUTHORIZATION_UNVERIFIED"
+      );
+    }
+  } else {
+    if (duplicateState?.acceptanceTradeCompleted === true) {
+      blockers.push("ACCEPTANCE_TRADE_ALREADY_COMPLETED");
+    }
+    if (duplicateState?.newPaperOrdersAllowed === false) {
+      blockers.push("NEW_PAPER_ORDERS_DISABLED");
+    }
   }
 
   return blockers;
