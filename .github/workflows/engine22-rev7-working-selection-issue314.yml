@@ -1,0 +1,26 @@
+name: Engine22 Issue314 Working Selection Rev7 Review
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV1.js'
+      - 'services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js'
+      - 'services/core/tests/engine22Rev7WorkingSelectionIssue314.test.js'
+      - 'services/core/tests/engine22OwnerSelectionRegistryV1.test.js'
+      - '.github/workflows/engine22-rev7-working-selection-issue314.yml'
+permissions:
+  contents: read
+jobs:
+  review-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate revision 7 working authorization and parent fail-closed
+        run: |
+          node --check services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV1.js
+          node --check services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js
+          node --test services/core/tests/engine22Rev7WorkingSelectionIssue314.test.js services/core/tests/engine22OwnerSelectionRegistryV1.test.js
