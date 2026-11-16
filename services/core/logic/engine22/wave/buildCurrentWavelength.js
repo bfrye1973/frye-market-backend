@@ -579,7 +579,7 @@ export function buildCurrentWavelength({
         version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
         activeWave:"W2",direction:"DOWN",stage:"W2_DOWN_DEVELOPING_OWNER_RESEARCH",
-        parentDegree:"micro",parentWave:"W5_RESEARCH",
+        parentDegree:"micro",parentWave:"C",
         anchors:{
           w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
           w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
@@ -753,7 +753,7 @@ export function buildCurrentWavelength({
         version:"engine22.ownerMicroAbcDownNov16Research.v1",
         selectionStatus:"RESEARCH_ONLY",degree:"micro",
         activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
-        parentDegree:"subminute",parentWave:"C_RESEARCH",
+        parentDegree:"subminute",parentWave:"C",
         anchors:{
           aHigh:7614.75,aHighLocalTime:"2026-11-15 16:40 AZ",
           aHighAtUtc:"2026-11-15T23:40:00Z",
@@ -914,7 +914,7 @@ export function buildCurrentWavelength({
         version:"engine22.ownerSubminuteAbcDownNov16Research.v1",
         selectionStatus:"RESEARCH_ONLY",degree:"subminute",
         activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
-        parentDegree:"minute",parentWave:"W2_RESEARCH",
+        parentDegree:"minute",parentWave:"W2",
         anchors:{
           aHigh:7675.75,aHighLocalTime:"2026-11-12 09:00 AZ",
           aHighAtUtc:"2026-11-12T16:00:00Z",

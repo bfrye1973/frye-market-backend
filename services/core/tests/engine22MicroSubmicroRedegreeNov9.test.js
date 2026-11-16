@@ -135,9 +135,9 @@ test("new Submicro W2 retracement touches are downside-only, after W1 high, and 
 });
 test("Old scenarios and canonical owner selection revision 6 untouched",()=>{
  const w=base(7540);
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
- assert.equal(ownerApprovedWorkingSelection.degrees.micro.key,"ownerMicroCDownOct31");
- assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroCDownNov2");
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
+ assert.equal(ownerApprovedWorkingSelection.degrees.micro.key,"ownerMicroAbcDownNov16Research");
+ assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroW3Nov9InternalResearch");
  assert.equal(w.degrees.submicro.ownerSubmicroW3Nov9Research.version,"engine22.submicroW3Nov9Research.v1");
  assert.equal(w.degrees.micro.ownerMicroW2Nov6Research.version,"engine22.microW2Nov6Research.v1");
  assert.equal(w.degrees.minor.ownerMinorW3Nov9Research.version,"engine22.minorW3Nov9Research.v1");
