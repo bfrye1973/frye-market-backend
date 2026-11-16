@@ -142,6 +142,14 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
    operatorRestoreReceipt:env.ENGINE18_RAW_DIAGNOSTIC_RESTORE_RECEIPT,
    trialMinutes:config.minutes}),msgClass:'control',statusCode:'DIAGNOSTIC_START'});
   await scheduler.tick();
+  // Refuse vendor connection when disk or queue capacity is already unsafe.
+  const initial=writer.health();
+  const free=Number(initial.diskFreeBytes),total=Number(initial.diskTotalBytes);
+  if(initial.failedClosed||initial.rejected>0||initial.gapCount>0||
+     !Number.isFinite(free)||!Number.isFinite(total)||
+     total<=0||free/total<=0.2||
+     initial.unacknowledged>=3686)
+   throw Error('raw-only preflight disk or queue unsafe');
   if(operatorSignal.aborted)throw Error('operator stopped before source connection');
   // Session deadline is measured from BEFORE connection, never extended by retry.
   started=true;operatorSignal.addEventListener('abort',operatorStop,{once:true});
