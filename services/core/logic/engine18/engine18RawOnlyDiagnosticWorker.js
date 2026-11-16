@@ -60,7 +60,7 @@ export function verifyEngine18RawOnlyEnvironment(env,{stat=statSync,mountTable=(
 const alertDefault=code=>{process.stderr.write('ENGINE18_RAW_PRIVATE_ALERT '+code+'\n');};
 const safeAlert=(fn,code)=>{try{fn(code);}catch{}};
 export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fetch,
- WebSocketImpl,onAlert=alertDefault,dependencies={},operatorSignal}={}){
+ WebSocketImpl,onAlert=alertDefault,onResult=()=>{},dependencies={},operatorSignal}={}){
  if(typeof WebSocketImpl!=='function')throw Error('private WebSocket transport required');
  if(!operatorSignal||typeof operatorSignal.addEventListener!=='function'||
    typeof operatorSignal.aborted!=='boolean')throw Error('manual operator stop signal required');
@@ -119,10 +119,12 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
     safeAlert(onAlert,'PRIVATE_BACKUP_FINAL_INVENTORY_FAILED');
     throw Error('remote final inventory verification failed');
    }
-   return Object.freeze({mode:'RAW_FRAMES_ONLY',clockQuality:'UNVERIFIED',
+   const report=Object.freeze({mode:'RAW_FRAMES_ONLY',clockQuality:'UNVERIFIED',
     frames:source?.health?.().framesReceived??null,recorded:writer.health().recorded,
     remoteLastSeq:remote.lastSeq,remoteArchiveVerified:true,
     postTrialIndependentRestoreVerified:false,reason});
+   try{onResult(report);}catch{}
+   return report;
   })();
   return ending;
  };
@@ -146,8 +148,10 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
   timeout=setTimeout(()=>{void stop('TIME_LIMIT').catch(()=>safeAlert(onAlert,'RAW_ONLY_STOP_FAILED'));},config.minutes*60000);
   scheduler.start();
   const connected=await source.start();
-  if(connected!==true||faultCode||ended||operatorSignal.aborted)
+  if(connected!==true||faultCode||ended||operatorSignal.aborted){
+   faultCode||='SOURCE_NOT_READY';
    throw Error('Ironbeam source refused, disconnected or exceeded bounded session');
+  }
   monitor=setInterval(()=>{
    const h=writer.health(),s=source.health(),b=scheduler.health();
    const free=Number(h.diskFreeBytes),total=Number(h.diskTotalBytes);
