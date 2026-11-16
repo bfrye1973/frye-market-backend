@@ -45,6 +45,12 @@ jobs:
         run: node --test services/core/tests/engine8DCrashStages.test.js
       - name: Simulated Engine 10 outage, lost ack, restart and duplicate prevention
         run: node --test services/core/tests/engine8DJournalRecovery.test.js
+      - name: Isolate PAPER authorization for canonical fixture (never production)
+        run: |
+          PAPER_CI_DIR="/tmp/engine8d-provenance-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          mkdir -p "$PAPER_CI_DIR"
+          echo "ENGINE8_PAPER_DATA_DIR=$PAPER_CI_DIR" >> "$GITHUB_ENV"
+          printf '%s\\n' '{"version":"engine8.paperAcceptanceState.v1","acceptanceTradeCompleted":false,"newPaperOrdersAllowed":true}' > "$PAPER_CI_DIR/engine8-paper-acceptance-state.json"
       - name: Canonical Engine 7 and Engine 10 provenance
         run: node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
       - name: Lifecycle replay
