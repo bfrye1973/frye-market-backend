@@ -1473,7 +1473,10 @@ function buildStrategy1Phase8APlan({
 
   const targetsValid =
     officialTargets.length === 3 &&
-    officialTargets.every((target) => target.price != null);
+    officialTargets.every((target) => target.price != null) &&
+    target1Valid &&
+    target2Valid &&
+    target3Valid;
 
   const openingManagementPlan = {
     planType: "OPENING_OFFICIAL_MANAGEMENT_PLAN",
