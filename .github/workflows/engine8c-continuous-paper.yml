@@ -19,6 +19,7 @@ jobs:
     timeout-minutes: 15
     env:
       ENGINE8_PAPER_DATA_DIR: /tmp/engine8c-paper-${{ github.run_id }}
+      TRADE_JOURNAL_DIR: /tmp/engine8c-journal-${{ github.run_id }}
       ENGINE8_PAPER_ONLY: "1"
       ENGINE8_LIVE_TRADING_ENABLED: "0"
       ENGINE8_ALLOW_LIVE_FUTURES: "0"
