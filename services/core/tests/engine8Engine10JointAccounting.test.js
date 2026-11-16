@@ -108,6 +108,32 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
  assert.equal(evidence.journalFeeReceipt,"NOT_PUBLISHED");
  assert.equal(evidence.journalNetReceipt,"NOT_PUBLISHED");
  assert.equal(extraRunnerEvents,0,"no-runner plan must never produce RUNNER_ARMED");
+
+ // A Journal delivery receipt and the actual persisted durable record must
+ // reflect the SAME single qty-2 fill with two independently audited blocks.
+ // This is not a second broker/PAPER execution or a newly invented fill.
+ const durableTrades=JSON.parse(fs.readFileSync(path.join(dir,"trade-journal.json"),"utf8"));
+ const persistedTrade=durableTrades.find(t=>t.tradeId===open.tradeId);
+ assert.ok(persistedTrade,"authoritative Engine10 trade must persist");
+ const persistedCombined=persistedTrade.events.filter(e=>e.qtyClosed===2);
+ assert.equal(persistedCombined.length,1,"one combined exit event, not two synthetic fills");
+ assert.deepEqual(persistedCombined[0].contractAllocations,exitEvents[1].contractAllocations,
+  "execution Journal receipt contract allocations must equal persisted audit allocations");
+ assert.equal(persistedCombined[0].eventRealizedPnL,exitEvents[1].eventRealizedPnL);
+ assert.equal(persistedTrade.qty.cumulativeExitQuantity,3);
+ assert.equal(persistedTrade.qty.remainingQty,0);
+ assert.equal(persistedTrade.status,"CLOSED");
+ assert.deepEqual(persistedTrade.summary.paperFeeEstimate,final.trade.summary.paperFeeEstimate);
+ assert.equal(persistedTrade.events.filter(e=>e.eventType==="RUNNER_ARMED").length,0);
+ console.log("ENGINE8_ENGINE10_RECEIPT_PERSISTENCE",JSON.stringify({
+  tradeId:open.tradeId,combinedFillEvents:persistedCombined.length,
+  allocatedBlocks:persistedCombined[0].contractAllocations.map(c=>c.blockId),
+  allocatedQuantities:persistedCombined[0].contractAllocations.map(c=>c.allocatedQuantity),
+  grossJournal:persistedTrade.summary.realizedPnL,
+  estimatedFees:persistedTrade.summary.paperFeeEstimate.estimatedFees,
+  estimatedNet:persistedTrade.summary.paperFeeEstimate.estimatedNetRealizedPnL,
+  authoritativeBrokerFees:false
+ }));
  console.log("ENGINE8_ENGINE10_CONTRACT_ACCOUNTING",JSON.stringify(evidence));
  const before=fs.readFileSync(path.join(dir,"trade-journal.json"),"utf8");
  const duplicate=await send(lifecycle({...ticket,tradeId:open.tradeId},"P2P3",2,0,102,"EXIT","BLOCK_2","2026-11-16T15:02:00Z"));
