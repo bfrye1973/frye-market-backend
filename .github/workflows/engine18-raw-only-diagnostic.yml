@@ -1,0 +1,28 @@
+name: Engine18 Raw Only Diagnostic Gate (No Capture)
+on:
+  push:
+    branches: [engine18b-raw-only-diagnostic-trial-20261116]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18RawOnlyDiagnosticWorker.js'
+      - 'services/core/logic/engine18/engine18RawOnlyDiagnosticEntrypoint.js'
+      - 'services/core/tests/engine18RawOnlyDiagnostic.test.js'
+      - '.github/workflows/engine18-raw-only-diagnostic.yml'
+jobs:
+  raw-only-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18RawOnlyDiagnosticWorker.js
+      - run: node --check services/core/logic/engine18/engine18RawOnlyDiagnosticEntrypoint.js
+      - run: node --test services/core/tests/engine18RawOnlyDiagnostic.test.js
