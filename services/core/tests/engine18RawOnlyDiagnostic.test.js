@@ -2,6 +2,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
+import {createEngine18ReceiptClock} from '../logic/engine18/engine18ReceiptClock.js';
+import {replayRaw} from '../logic/engine18/gate1RawRecorder.js';
 import {verifyEngine18RawOnlyEnvironment,runEngine18RawOnlyDiagnostic} from '../logic/engine18/engine18RawOnlyDiagnosticWorker.js';
 const m='/var/data/engine18-recorder',root=m+'/records';
 const env=()=>({
@@ -132,4 +136,41 @@ test('existing clock-verified recording code and original 5ms gate remain unmodi
  assert.doesNotMatch(code,/ENGINE18_RAW_DIAGNOSTIC_OWNER_APPROVED/);
  const standby=fs.readFileSync(path.resolve(import.meta.dirname,'../logic/engine18/engine18PrivateStandby.js'),'utf8');
  assert.doesNotMatch(standby,/engine18RawOnlyDiagnosticEntrypoint/);
+});
+
+test('existing recorder preserves exact raw vendor bytes, vendor time strings, wall/mono receipt and UNVERIFIED quality',async()=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'e18-raw-only-record-'));
+ try{
+  const writer=await Engine18BufferedRecorder.openBounded({
+   root:dir,clock:createEngine18ReceiptClock(),provider:'SYNTHETIC',
+   batchSize:2,flushDelayMs:1
+  });
+  const vendor='{"message":"depth","time":"2026-11-16T17:00:00.123456Z","bids":[[7500.25,10]]}\n';
+  const binary=Buffer.from([0,255,0,12,10,255,42]);
+  await Promise.all([
+   writer.offer({raw:vendor,rawEncoding:'utf8',msgClass:'market'}),
+   writer.offer({raw:binary,rawEncoding:'base64',msgClass:'market'})
+  ]);
+  await writer.close();
+  const list=replayRaw(dir).filter(x=>x.msgClass==='market');
+  assert.equal(list.length,2);
+  assert.equal(list[0].raw,vendor);
+  assert.deepEqual(Buffer.from(list[1].raw,'base64'),binary);
+  for(const record of list){
+   assert.match(record.receivedWallNs,/^\d+$/);
+   assert.match(record.receivedMonoNs,/^\d+$/);
+   assert.match(record.rawHostWallObservedNs,/^\d+$/);
+   assert.equal(record.clockQuality,'UNVERIFIED');
+   assert.equal(record.receiptClockSource,'HOST_WALL_ANCHORED_MONOTONIC');
+  }
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+test('manual AbortSignal leads to clean source stop and sealed-archive remote inventory',async()=>{
+ const setup=mockComponents(),abort=new AbortController();
+ const session=await runEngine18RawOnlyDiagnostic({env:env(),WebSocketImpl:class Dummy{},
+  operatorSignal:abort.signal,dependencies:setup.parts});
+ abort.abort();
+ const outcome=await session.stop('OPERATOR_STOP');
+ assert.equal(outcome.reason,'OPERATOR_STOP');
+ assert.equal(setup.state().recorderClosed,true);
 });
