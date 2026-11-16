@@ -1,0 +1,27 @@
+name: Engine18 Private Standby Clock Probe (No Capture)
+on:
+  push:
+    branches: [engine18b-private-recorder-standby-20261111]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18NtpDiagnostic.js'
+      - 'services/core/logic/engine18/engine18PrivateStandby.js'
+      - 'services/core/tests/engine18NtpDiagnostic.test.js'
+      - '.github/workflows/engine18-private-clock-probe.yml'
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {contents: read}
+    strategy:
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18NtpDiagnostic.js
+      - run: node --check services/core/logic/engine18/engine18PrivateStandby.js
+      - run: node --test services/core/tests/engine18NtpDiagnostic.test.js
