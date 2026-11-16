@@ -3,7 +3,7 @@
  // No Ironbeam auth, source socket, R2 upload, chart, trading or HTTP listener.
 import {existsSync,mkdirSync,readFileSync,statSync,statfsSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
-import {diagnoseEngine18HostClock} from './engine18NtpDiagnostic.js';
+import {diagnoseEngine18ClockSeries} from './engine18NtpDiagnostic.js';
 const MOUNT='/var/data/engine18-recorder';
 const authorized=process.env.ENGINE18_LIVE_CAPTURE_APPROVED==='YES' ||
  process.env.ENGINE18_MANAGER_TRIAL_ACCEPTED==='YES';
@@ -62,8 +62,8 @@ if(!existsSync(MOUNT))process.stderr.write('ENGINE18_PRIVATE_STANDBY_DISK_NOT_PR
 process.stdout.write('ENGINE18_PRIVATE_HOST_CHECK '+JSON.stringify(snapshot())+'\n');
 async function clockDiagnostic(){
  try{
-  const evidence=await diagnoseEngine18HostClock();
-  process.stdout.write('ENGINE18_PRIVATE_NTP_DIAGNOSTIC '+JSON.stringify(evidence)+'\n');
+  const evidence=await diagnoseEngine18ClockSeries({samples:5,intervalMs:750});
+  process.stdout.write('ENGINE18_PRIVATE_CLOCK_SERIES '+JSON.stringify(evidence)+'\n');
  }catch{
   process.stderr.write('ENGINE18_PRIVATE_NTP_DIAGNOSTIC_UNAVAILABLE\n');
  }
