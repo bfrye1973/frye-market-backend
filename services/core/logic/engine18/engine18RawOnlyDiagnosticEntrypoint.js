@@ -11,7 +11,8 @@ try{
   throw Error('operator did not explicitly request raw diagnostic');
  const {WebSocket}=await import('ws');
  session=await runEngine18RawOnlyDiagnostic({
-  env:process.env,WebSocketImpl:WebSocket,operatorSignal:controller.signal
+  env:process.env,WebSocketImpl:WebSocket,operatorSignal:controller.signal,
+  onResult:report=>process.stdout.write('ENGINE18_RAW_DIAGNOSTIC_SUMMARY '+JSON.stringify(report)+'\n')
  });
  process.stdout.write('ENGINE18_RAW_DIAGNOSTIC_ACTIVE '+JSON.stringify({
   mode:'RAW_FRAMES_ONLY',clockQuality:'UNVERIFIED',timingInferenceAllowed:false
