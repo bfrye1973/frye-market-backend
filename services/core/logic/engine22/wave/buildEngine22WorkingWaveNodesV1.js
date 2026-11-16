@@ -24,15 +24,18 @@ export function arizonaMarketTimeUtc(raw){
 // Explicit Engine22 strategy model selections; no inference from nested objects.
 // Old count identities remain present as research *alternatives*, not auto-promoted.
 export const REVIEW_SOURCES=Object.freeze([
-  Object.freeze({degree:"micro",key:"ownerMicroW3Nov9ReclassifiedResearch",display:true}),
+  Object.freeze({degree:"micro",key:"ownerMicroAbcDownNov16Research",display:true}),
+  Object.freeze({degree:"micro",key:"ownerMicroW3Nov9ReclassifiedResearch",display:false}),
   Object.freeze({degree:"micro",key:"ownerMicroW2Nov6Research",display:false}),
   Object.freeze({degree:"submicro",key:"ownerSubmicroW3Nov9InternalResearch",display:true}),
   Object.freeze({degree:"submicro",key:"ownerSubmicroW3Nov9Research",display:false}),
+  Object.freeze({degree:"minute",key:"ownerMinuteW1FormingNov9Research",display:true}),
+  Object.freeze({degree:"subminute",key:"ownerSubminuteAbcDownNov16Research",display:true}),
 ]);
 // These are observation labels, not a statement that a wave ended.
 const FIELD_LABELS=Object.freeze([
   ["w1Low","W1 Low"],["w1High","W1 High"],["w2Low","W2 research anchor"],
-  ["w3High","W3 ending high"],["w4Low","W4 ending low"],["aHigh","A starting high"],["aLow","A ending low"],["bHigh","B ending high"],["cLow","C ending low / W1 start"],["newW1High","W1 ending high"],
+  ["w3High","W3 ending high"],["w4Low","W4 ending low"],["aHigh","A starting high"],["aLow","A ending low"],["bHigh","B ending high"],["cLow","C ending low / W1 start"],["newW1High","W1 ending high"],["w1EndingHigh","W1 ending high"],
 ]);
 function fromModel(root,rule){
   const model=root?.degrees?.[rule.degree]?.[rule.key];

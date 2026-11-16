@@ -24,7 +24,7 @@ test("Subminute research-only ABC C extensions use 315 A points and 7542 B high"
  assert.equal(m.completionConfirmed,false);
  assert.equal(m.anchors.cLowAnchorApproved,false);
  assert.equal(m.noExecution,true);
- assert.equal(ownerApprovedWorkingSelection.degrees.subminute.key,"ownerSubminuteCDownOct31");
+ assert.equal(ownerApprovedWorkingSelection.degrees.subminute.key,"ownerSubminuteAbcDownNov16Research");
  assert.equal(w.ownerSubminuteCDownOct31.version,"engine22.subminuteCDownOct31OwnerWorking.v1");
 });
 test("cross-degree chart low only supports first touch after B, not C completion",()=>{

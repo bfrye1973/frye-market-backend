@@ -57,8 +57,8 @@ test("10m completed candle touch stays green after quote falls back, separate ol
 });
 test("Canonical Submicro C selection, Oct/Nov ABC, Micro and higher waves not replaced",()=>{
  const w=base(7400);
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
- assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroCDownNov2");
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
+ assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroW3Nov9InternalResearch");
  assert.equal(w.degrees.submicro.ownerSubmicroCDownNov2.version,"engine22.submicroCDownNov2OwnerWorking.v1");
  assert.equal(w.degrees.submicro.ownerSubmicroNov6AbcResearch.version,"engine22.submicroNov6AbcResearch.v1");
  assert.equal(w.degrees.micro.ownerMicroW2Nov6Research.version,"engine22.microW2Nov6Research.v1");

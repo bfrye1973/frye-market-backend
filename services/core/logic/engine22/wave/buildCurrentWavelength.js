@@ -579,7 +579,7 @@ export function buildCurrentWavelength({
         version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
         activeWave:"W2",direction:"DOWN",stage:"W2_DOWN_DEVELOPING_OWNER_RESEARCH",
-        parentDegree:"micro",parentWave:"W5_RESEARCH",
+        parentDegree:"micro",parentWave:"C",
         anchors:{
           w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
           w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
@@ -747,6 +747,36 @@ export function buildCurrentWavelength({
       // Owner Nov 5→6 Micro W1/W2 blue research scenario. Does not promote
       // away from current Oct31 Micro C DOWN owner-selected count.
       // Owner reclassified earlier blue W1/W2 from Submicro to Micro.
+      // Owner-marked NEW Micro ABC (Nov 15-16). Separate from historical
+      // Micro W5-UP and older October ABC interpretations; C still forming.
+      ownerMicroAbcDownNov16Research:{
+        version:"engine22.ownerMicroAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"subminute",parentWave:"C",
+        anchors:{
+          aHigh:7614.75,aHighLocalTime:"2026-11-15 16:40 AZ",
+          aHighAtUtc:"2026-11-15T23:40:00Z",
+          aLow:7537.25,aLowLocalTime:"2026-11-15 23:20 AZ",
+          aLowAtUtc:"2026-11-16T06:20:00Z",
+          bHigh:7570.75,bHighLocalTime:"2026-11-16 01:40 AZ",
+          bHighAtUtc:"2026-11-16T08:40:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_MICRO_ABC_DOWN",
+        },
+        aLength:77.50,
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7570.75-(7614.75-7537.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"MICRO_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalMicroModelsPreserved:true,priceBasisReconciliation:"PENDING",
+      },
       ownerMicroW3Nov9ReclassifiedResearch:{
         version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
@@ -877,6 +907,38 @@ export function buildCurrentWavelength({
         oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
         noExecution:true,noPermissionCreated:true,
       },
+      // Owner 2026-11-16: NEW November 12-15 Subminute ABC, independent of
+      // archived Nov 5 ABC and W1-forming interpretations. C down is
+      // developing research only; never manufacture a C ending low.
+      ownerSubminuteAbcDownNov16Research:{
+        version:"engine22.ownerSubminuteAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"subminute",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"minute",parentWave:"W2",
+        anchors:{
+          aHigh:7675.75,aHighLocalTime:"2026-11-12 09:00 AZ",
+          aHighAtUtc:"2026-11-12T16:00:00Z",
+          aLow:7516,aLowLocalTime:"2026-11-13 08:00 AZ",
+          aLowAtUtc:"2026-11-13T15:00:00Z",
+          bHigh:7614,bHighLocalTime:"2026-11-15 16:30 AZ",
+          bHighAtUtc:"2026-11-15T23:30:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_SUBMINUTE_ABC_DOWN",
+        },
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        aLength:159.75,
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7614-(7675.75-7516)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"SUBMINUTE_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalSubminuteModelsPreserved:true,
+        priceBasisReconciliation:"PENDING",
+      },
       // New November 5 owner-marked ABC is a research-only card overlay.
       // Do not promote it into current seven-degree selection or overwrite
       // the October 31 wick/body models and their historical touches.
@@ -1006,7 +1068,7 @@ export function buildCurrentWavelength({
       ownerMinuteW1FormingNov9Research:{
         version:"engine22.minuteW1FormingNov9Research.v1",
         degree:"minute",selectionStatus:"RESEARCH_ONLY",
-        activeWave:"W1",direction:"UP",stage:"W1_UP_FORMING",
+        activeWave:"W2",direction:"DOWN",stage:"W2_DOWN_DEVELOPING_OWNER_RESEARCH",
         parentDegree:"minor",parentWave:"W3_OWNER_WORKING_RESEARCH",
         anchors:{
           w1StartReference:7322.25,
@@ -1014,17 +1076,27 @@ export function buildCurrentWavelength({
           w1StartReferenceAtUtc:"2026-11-05T23:00:00Z",
           w1StartIsProposedParentReference:true,
           w1StartIndependentlyConfirmed:false,
-          w1EndingHigh:null,w1EndingLocalTime:null,
+          w1EndingHigh:7671,w1EndingHighLocalTime:"2026-11-11 08:00 AZ",
+          w1EndingHighAtUtc:"2026-11-11T15:00:00Z",
+          w1EndingLocalTime:"2026-11-11 08:00 AZ",
+          w1EndingOwnerMarked:true,
           w2EndingLow:null,w2EndingLocalTime:null,
           provenance:"OWNER_20261109_MINUTE_SUBMINUTE_W1_FORMING",
         },
         childDegree:"subminute",childWaveSequence:"SUBMINUTE_W1_TO_W5_BUILDING",
-        w1CompletionConfirmed:false,nextWave:"W2",
+        w1CompletionConfirmed:true,nextWave:"W2",
         nextWaveStarted:false,completionConfirmed:false,
         microVsParentStartTimeReviewPending:true,
         timestampConflictNote:"MICRO_BLUE_W1_LOW_2026_11_05_15_20_AZ_PRECEDES_PARENT_REFERENCE_16_00_AZ",
-        fibMethod:"PENDING_W1_AND_W2_ENDING_ANCHORS",
-        levels:[],reviewReference:7322.25,reviewOnly:true,
+        fibMethod:"W2_DOWN_RETRACEMENT_OF_OWNER_W1_HIGH_AND_PROPOSED_START_REFERENCE",
+        w1ReferenceLength:348.75,
+        levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7671-(7671-7322.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MINUTE_W2_DOWN_RETRACEMENT_PROVISIONAL_W1_START",
+        })),reviewReference:7322.25,reviewOnly:true,
         officialInvalidation:null,earlyWarning:null,
         priceBasisReconciliation:"PENDING",
         oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,

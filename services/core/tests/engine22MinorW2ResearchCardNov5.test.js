@@ -23,7 +23,7 @@ test("Old W5 data and high-degree selection are not silently changed",()=>{
   assert.equal(m.degrees.minor.activeWave,"W5");
   assert.equal(m.degrees.minor.state,"MINOR_W5_ACTIVE_CANDIDATE");
   assert.equal(m.degrees.minor.ownerW5StructuralReference.price,7398);
-  assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
+  assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
   assert.equal(ownerApprovedWorkingSelection.degrees.minor.source,"degreeStates");
   assert.equal(m.degrees.minor.ownerMinorW2Research.nextWaveStarted,false);
 });
