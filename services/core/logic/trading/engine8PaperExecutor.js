@@ -800,11 +800,12 @@ export async function prepareEngine8PaperExecution({
       ?.orderExistsForPlanId ===
       true ||
     duplicateState
-      ?.acceptanceTradeCompleted ===
+      ?.journalPendingExecution ===
       true ||
-    duplicateState
-      ?.newPaperOrdersAllowed ===
-      false;
+    (duplicateState?.acceptanceEligibility
+      ? duplicateState.acceptanceEligibility.allowed !== true
+      : duplicateState?.acceptanceTradeCompleted === true ||
+        duplicateState?.newPaperOrdersAllowed === false);
 
   if (duplicateBlocked) {
     return {
