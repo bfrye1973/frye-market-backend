@@ -46,9 +46,9 @@ test("Owner Subminute W1 forming points to Micro child W1–W5 and retains unres
 });
 test("Canonical counts, older A-B-C research and all five other degree packets untouched",()=>{
  const w=wave();
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
- assert.equal(ownerApprovedWorkingSelection.degrees.minute.key,"ownerMinuteW2Retracement");
- assert.equal(ownerApprovedWorkingSelection.degrees.subminute.key,"ownerSubminuteCDownOct31");
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
+ assert.equal(ownerApprovedWorkingSelection.degrees.minute.key,"ownerMinuteW1FormingNov9Research");
+ assert.equal(ownerApprovedWorkingSelection.degrees.subminute.key,"ownerSubminuteAbcDownNov16Research");
  assert.equal(w.degrees.minute.ownerMinuteAbcResearch.version,"engine22.minuteAbcDownNov5Research.v1");
  assert.equal(w.degrees.subminute.ownerSubminuteNov5AbcResearch.version,"engine22.subminuteNov5AbcResearch.v1");
  assert.equal(w.degrees.minor.ownerMinorW3Nov9Research.version,"engine22.minorW3Nov9Research.v1");
