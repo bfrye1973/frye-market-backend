@@ -1,0 +1,92 @@
+name: Engine 6E final current-main cross-engine readiness (test only)
+on:
+  push:
+    branches: [engine6e-final-crossengine-isolated-nov16]
+  pull_request:
+    paths:
+      - ".github/workflows/engine6e-final-crossengine-isolated.yml"
+      - "services/core/tests/engine6ECrossEngineReadiness.test.js"
+permissions:
+  contents: read
+jobs:
+  engine6-phase4-funnel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ENGINE8_LIVE_TRADING_ENABLED: "0"
+      ENGINE8_ALLOW_LIVE_FUTURES: "0"
+      ENGINE8_PAPER_ONLY: "1"
+      ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install deps (no lifecycle hooks)
+        run: npm install --ignore-scripts
+      - name: Syntax and no-trade funnel / all advisory and wave contracts
+        run: |
+          node --check services/core/jobs/buildStrategySnapshot.js
+          node --check services/core/routes/runAllEngines.js
+          node --check services/core/logic/engine6/6e-funnel/buildNoTradeFunnel.js
+          node --test services/core/tests/engine6ENoTradeFunnel.test.js services/core/tests/engine6ENoTradeFunnelGates.test.js services/core/tests/engine6ENoTradeFunnelStore.test.js services/core/tests/engine6ENoTradeFunnelJob.test.js services/core/tests/engine6EAdvisoryContext.test.js services/core/tests/engine6ECrossEngineReadiness.test.js services/core/tests/engine6EAcceptedExecutorReceipt.test.js services/core/tests/engine6EHistoricalReplay.test.js services/core/tests/engine6EEngine8CandidateReset.test.js services/core/tests/engine6ECanonicalExecutorPreparation.test.js services/core/tests/engine6EFrozenExitLifecycle.test.js
+      - name: Official Engine9 plan and frozen Engine8/10 replay
+        run: |
+          node --test services/core/tests/engine9Strategy1Phase8.test.js
+          node --test services/core/tests/engine6EFrozenEngine8Engine10Journal.test.js
+  accepted-engine8-engine10-joint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      ENGINE8_PAPER_DATA_DIR: /tmp/e6e-e8-joint-paper-${{ github.run_id }}
+      TRADE_JOURNAL_DIR: /tmp/e6e-e10-joint-journal-${{ github.run_id }}
+      ENGINE8_PAPER_ONLY: "1"
+      ENGINE8_LIVE_TRADING_ENABLED: "0"
+      ENGINE8_ALLOW_LIVE_FUTURES: "0"
+      ENGINE8_KILL_SWITCH: "0"
+      REPLAY_MODE: "0"
+      ENGINE12_REPLAY_MODE: "0"
+      ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install deps (no lifecycle hooks)
+        run: npm install --ignore-scripts
+      - name: Protected HTTP live-code PAPER entry A and B and frozen lifecycle
+        run: node --test services/core/tests/engine8ContinuousPaperHttp.test.js
+      - name: Delayed actual Journal ACK and safe retry
+        run: node --test services/core/tests/engine8Engine10JointLostAck.test.js
+      - name: Midpoint exit contract allocation / gross and fee provenance
+        run: node --test services/core/tests/engine8Engine10JointAccounting.test.js
+      - name: Engine8 continuous permissions / identity and Engine10 persistence
+        run: |
+          node --test services/core/tests/engine8ContinuousPaperAcceptance.test.js
+          node --test services/core/tests/engine8ContinuousPaperDurable.test.js
+          node --test services/core/tests/engine10ContinuousPaperLifecycle.test.js
+      - name: REAL broker accounting regressions without broker access
+        run: |
+          node --test services/core/tests/engine10RealContractIdentity.test.js
+          node --test services/core/tests/engine10RealMultiCampaignFifo.test.js
+      - name: No real-money or diagnostic recording
+        run: |
+          test "$ENGINE8_LIVE_TRADING_ENABLED" = "0"
+          test "$ENGINE8_ALLOW_LIVE_FUTURES" = "0"
+          test "$ENGINE8_PAPER_ONLY" = "1"
+          test "$ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED" = "0"
+  current-main-spy-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install deps (no lifecycle hooks)
+        run: npm install --ignore-scripts
+      - name: Preserve current-main ES-only SPY snapshot retirement
+        run: |
+          node --test services/core/tests/retireSpyStrategySnapshots.test.js
+          node --test services/core/tests/startupEsSnapshotReady.test.js
