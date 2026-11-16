@@ -245,12 +245,53 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.notEqual(b.payload.execution.tradeId,tradeId);
     assert.equal(durable.readPaperStore("paper-orders.json",[]).length,5,
       "A entry/3 exits then B entry must persist unique orders");
+
+    // Combined final midpoint: both remaining one-contract blocks may close
+    // together at the exact same destination midpoint with a single
+    // two-contract EXIT receipt, while preserving block and trade identity.
+    const bTradeId=b.payload.execution.tradeId;
+    const commonB={
+      tradeId:bTradeId,planId:"PLAN-CAND-B",candidateId:"CAND-B",
+      zoneId:"ZONE-CAND-B",strategyId:"intraday_scalp@10m",
+      symbol:"ES",direction:"LONG",
+      setupType:"NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION",
+      source:"CANONICAL_PAPER_LIFECYCLE_ROUTE",
+    };
+    const bP1=await lifecycle.runEngine8PaperLifecycleExecution({
+      ...commonB,action:"REDUCE",lifecycleEventId:"B-P1",
+      fillQuantity:1,fillPrice:7700,remainingQuantity:2,
+      targetId:"T1",blockId:"BLOCK_1",
+      managementAction:"TAKE_TARGET_1",exitReason:"TARGET_EXIT",
+    });
+    assert.equal(bP1.journalCompleted,true,JSON.stringify(bP1));
+    assert.equal(bP1.remainingQty,2,JSON.stringify(bP1));
+    const bMidpoint=await lifecycle.runEngine8PaperLifecycleExecution({
+      ...commonB,action:"EXIT",lifecycleEventId:"B-P2P3-COMBINED",
+      fillQuantity:2,fillPrice:7710,remainingQuantity:0,
+      targetId:"T2",blockId:"BLOCK_2",
+      managementAction:"TAKE_TARGET_2_AND_3",
+      exitReason:"FINAL_EXIT",
+    });
+    assert.equal(bMidpoint.journalCompleted,true,JSON.stringify(bMidpoint));
+    assert.equal(bMidpoint.remainingQty,0,JSON.stringify(bMidpoint));
+    assert.equal(bMidpoint.engine10Status,"CLOSED",JSON.stringify(bMidpoint));
+    assert.equal((await journal.getTradeById(bTradeId)).trade.status,"CLOSED");
+    assert.equal(durable.readPaperStore("engine8-paper-acceptance-state.json",{}).candidateId,
+      "CAND-A","later B close must preserve the first acceptance trial record");
+    writeSnapshot("CAND-B");
+    const repeatedB=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.notEqual(repeatedB.code,0);
+
     console.log("P0_HTTP_ACCEPTANCE",JSON.stringify({
       a:{candidateId:"CAND-A",orderId:a.payload.execution.orderId,
         executionId:a.payload.execution.executionId,tradeId,
         originalQty:3,afterP1:p1.remainingQty,afterP2:p2.remainingQty,final:p3.remainingQty},
       b:{candidateId:"CAND-B",orderId:b.payload.execution.orderId,
-        executionId:b.payload.execution.executionId,tradeId:b.payload.execution.tradeId},
+        executionId:b.payload.execution.executionId,tradeId:b.payload.execution.tradeId,
+        originalQty:3,afterP1:bP1.remainingQty,combinedMidpointExitQty:2,
+        final:bMidpoint.remainingQty},
+      combinedMidpointVerified:true,
+      repeatedBBlocked:repeatedB.code!==0,
       duplicateDenied:duplicate.code!==0,
       openPositionDenied:activeConflict.code!==0,
       closedCandidateDenied:repeatedClosed.code!==0,
