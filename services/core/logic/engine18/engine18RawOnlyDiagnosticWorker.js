@@ -21,6 +21,7 @@ const keys=['IRONBEAM_USERNAME','IRONBEAM_PASSWORD','IRONBEAM_API_KEY',
  'ENGINE18_RAW_DIAGNOSTIC_MANAGER_APPROVED',
  'ENGINE18_RAW_DIAGNOSTIC_RESTORE_VERIFIED',
  'ENGINE18_RAW_DIAGNOSTIC_COST_APPROVED',
+ 'ENGINE18_RAW_DIAGNOSTIC_OPERATOR_START',
  'ENGINE18_IRONBEAM_ES_DEMO_ENTITLED',
  'ENGINE18_CME_CALENDAR_VERIFIED'];
 const approved=k=>k==='YES';
@@ -31,6 +32,7 @@ export function verifyEngine18RawOnlyEnvironment(env,{stat=statSync,mountTable=(
  for(const k of keys.filter(k=>k.startsWith('ENGINE18_RAW_DIAGNOSTIC_')||
   k==='ENGINE18_IRONBEAM_ES_DEMO_ENTITLED'||k==='ENGINE18_CME_CALENDAR_VERIFIED'))
   if(!approved(env[k]))throw Error('raw diagnostic gate closed: '+k);
+ if(env.ENGINE18_PRIVATE_STANDBY==='YES')throw Error('must not start raw diagnostic in existing standby mode');
  if(env.ENGINE18_LIVE_CAPTURE_APPROVED==='YES'||env.ENGINE18_MANAGER_TRIAL_ACCEPTED==='YES')
   throw Error('raw diagnostic must not share timing-sensitive live authorization');
  if(env.ENGINE18_RECORDER_DISK!==DISK||env.ENGINE18_RAW_DIAGNOSTIC_CONTRACT!==CONTRACT)
