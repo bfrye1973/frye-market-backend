@@ -110,11 +110,19 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
     reason,clockQuality:'UNVERIFIED',timingInferenceAllowed:false,
     vendorSequenceCompleteness:'UNVERIFIED'}),msgClass:'control',statusCode:'DIAGNOSTIC_STOP'});
    await writer.close(); // Seal even a sub-hour bounded recording and its manifest.
-   await backup.syncClosed(); // Fail if private encrypted upload does not finish.
-   const remote=await backup.inventory({forceFull:true});
+   try{await backup.syncClosed();}catch{
+    safeAlert(onAlert,'PRIVATE_BACKUP_FINAL_SYNC_FAILED');
+    throw Error('private encrypted final archive upload failed');
+   }
+   let remote;
+   try{remote=await backup.inventory({forceFull:true});}catch{
+    safeAlert(onAlert,'PRIVATE_BACKUP_FINAL_INVENTORY_FAILED');
+    throw Error('remote final inventory verification failed');
+   }
    return Object.freeze({mode:'RAW_FRAMES_ONLY',clockQuality:'UNVERIFIED',
     frames:source?.health?.().framesReceived??null,recorded:writer.health().recorded,
-    remoteLastSeq:remote.lastSeq,backupVerified:true,reason});
+    remoteLastSeq:remote.lastSeq,remoteArchiveVerified:true,
+    postTrialIndependentRestoreVerified:false,reason});
   })();
   return ending;
  };
@@ -138,7 +146,8 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
   timeout=setTimeout(()=>{void stop('TIME_LIMIT').catch(()=>safeAlert(onAlert,'RAW_ONLY_STOP_FAILED'));},config.minutes*60000);
   scheduler.start();
   const connected=await source.start();
-  if(connected!==true||faultCode)throw Error('Ironbeam source refused or disconnected');
+  if(connected!==true||faultCode||ended||operatorSignal.aborted)
+   throw Error('Ironbeam source refused, disconnected or exceeded bounded session');
   monitor=setInterval(()=>{
    const h=writer.health(),s=source.health(),b=scheduler.health();
    const free=Number(h.diskFreeBytes),total=Number(h.diskTotalBytes);
