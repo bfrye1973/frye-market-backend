@@ -92,6 +92,7 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
    exactCombinedExitQuantity:2,runnerExpected:false,extraRunnerEvents};
  assert.equal(evidence.journalFeeReceipt,"NOT_PUBLISHED");
  assert.equal(evidence.journalNetReceipt,"NOT_PUBLISHED");
+ assert.equal(extraRunnerEvents,0,"no-runner plan must never produce RUNNER_ARMED");
  console.log("ENGINE8_ENGINE10_CONTRACT_ACCOUNTING",JSON.stringify(evidence));
  const before=fs.readFileSync(path.join(dir,"trade-journal.json"),"utf8");
  const duplicate=await send(lifecycle({...ticket,tradeId:open.tradeId},"P2P3",2,0,102,"EXIT","BLOCK_2","2026-11-16T15:02:00Z"));
