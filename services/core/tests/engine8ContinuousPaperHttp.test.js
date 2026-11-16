@@ -181,9 +181,9 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(firstOrders[0].sourceSignal.candidateId,"CAND-A");
     assert.equal(firstOrders[0].qty,3);
     const opened=await journal.getTradeById(tradeId);
-    assert.equal(opened.status,"OPEN");
-    assert.equal(opened.qty.originalQty,3);
-    assert.equal(opened.qty.remainingQty,3);
+    assert.equal(opened.trade.status,"OPEN");
+    assert.equal(opened.trade.qty.originalQty,3);
+    assert.equal(opened.trade.qty.remainingQty,3);
 
     const duplicate=await runBridge({...flags,CORE_BASE_URL:base});
     assert.notEqual(duplicate.code,0);
@@ -229,7 +229,7 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(p3.journalCompleted,true,JSON.stringify(p3));
     assert.equal(p3.remainingQty,0,JSON.stringify(p3));
     assert.equal(p3.engine10Status,"CLOSED",JSON.stringify(p3));
-    assert.equal((await journal.getTradeById(tradeId)).status,"CLOSED");
+    assert.equal((await journal.getTradeById(tradeId)).trade.status,"CLOSED");
     const audit=durable.readPaperStore("engine8-paper-acceptance-state.json",{});
     assert.equal(audit.acceptanceTradeCompleted,true);
     assert.equal(audit.candidateId,"CAND-A");
