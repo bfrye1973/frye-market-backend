@@ -25,12 +25,17 @@ export function inspectNtpReply(message,{request,sendWallMs,receiveWallMs}={}){
  if(mode!==4||version<3||version>4||leap===3||stratum<1||stratum>15)return null;
  if(!message.subarray(24,32).equals(request.subarray(40,48)))return null;
  const t2=readStamp(message,32),t3=readStamp(message,40);
+ const referenceRaw=message.subarray(16,24);
+ const referenceMs=referenceRaw.equals(Buffer.alloc(8))?null:readStamp(message,16);
+ const referenceAgeMs=referenceMs===null?null:receiveWallMs-referenceMs;
+ const staleReference=referenceAgeMs===null||referenceAgeMs<0||referenceAgeMs>120000;
+
  const dispersionMs=message.readUInt32BE(8)*1000/65536;
  const offsetMs=((t2-sendWallMs)+(t3-receiveWallMs))/2;
  const delayMs=(receiveWallMs-sendWallMs)-(t3-t2);
  if(![t2,t3,dispersionMs,offsetMs,delayMs].every(Number.isFinite)||
     t3<t2||delayMs<0||delayMs>1000||dispersionMs>1000)return null;
- return Object.freeze({stratum,offsetMs:Math.round(offsetMs*1000)/1000,
+ return Object.freeze({stratum,staleReference,referenceAgeMs:referenceAgeMs===null?null:Math.round(referenceAgeMs),offsetMs:Math.round(offsetMs*1000)/1000,
   uncertaintyMs:Math.round((delayMs/2+dispersionMs)*1000)/1000,
   roundTripMs:Math.round(delayMs*1000)/1000,referenceType:'REMOTE_NTP_DIAGNOSTIC'});
 }
@@ -103,6 +108,7 @@ export async function diagnoseEngine18ClockSeries({samples=5,intervalMs=750,read
     offsetMs:Number.isFinite(x.offsetMs)?x.offsetMs:null,
     uncertaintyMs:Number.isFinite(x.uncertaintyMs)?x.uncertaintyMs:null,
     stratum:Number.isInteger(x.stratum)?x.stratum:null,
+    staleReference:x.staleReference===true,referenceAgeMs:Number.isFinite(x.referenceAgeMs)?x.referenceAgeMs:null,
     reason:x.reachable?'OBSERVED':x.reason||'UNAVAILABLE'})),
    interSourceDisagreementMs:sourceDifferenceMs,
    // Conservative reporting: uncertainty is not proof, even when low.
