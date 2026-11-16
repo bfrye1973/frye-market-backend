@@ -147,7 +147,7 @@ import {
    Absolute paths / constants
 ------------------------------*/
 const DATA_DIR = "/opt/render/project/src/services/core/data";
-const SNAPSHOT_SYMBOL = String(process.env.SYMBOL || "SPY").toUpperCase();
+const SNAPSHOT_SYMBOL = String(process.env.SYMBOL || "ES").toUpperCase();
 
 const SNAPSHOT_FILE =
   SNAPSHOT_SYMBOL === "SPY"
@@ -156,7 +156,7 @@ const SNAPSHOT_FILE =
 
 const CORE_BASE = process.env.CORE_BASE || "http://127.0.0.1:10000";
 
-const symbol = process.env.SYMBOL || "SPY";
+const symbol = SNAPSHOT_SYMBOL;
 
 const STRATEGIES = [
   { strategyId: "intraday_scalp@10m", tf: "10m", degree: "minute", wave: "W1" },
@@ -11768,7 +11768,9 @@ if (String(symbol || "").toUpperCase() === "ES") {
 /* -----------------------------
    Run builder
 ------------------------------*/
-buildSnapshot()
+(SNAPSHOT_SYMBOL === "SPY"
+  ? Promise.resolve(console.log("[snapshot] SPY retired; no file generated"))
+  : buildSnapshot())
   .then(() => {
     console.log("Snapshot build completed successfully");
   })

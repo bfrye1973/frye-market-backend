@@ -274,7 +274,7 @@ function runStartupSnapshotBuild() {
 
   child.on("close", (code) => {
     if (code === 0) {
-      console.log(`[startup-snapshot] SUCCESS SPY+ES @ ${new Date().toISOString()}`);
+      console.log(`[startup-snapshot] SUCCESS ES ONLY @ ${new Date().toISOString()}`);
       if (stdout.trim()) {
         console.log(stdout.trim());
       }

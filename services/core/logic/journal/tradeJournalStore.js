@@ -674,8 +674,15 @@ function getStrategy1Provenance(ticket, order, result) {
   return clone(source);
 }
 
-function readStrategySnapshot() {
-  return readJson(SNAPSHOT_FILE, {
+function readStrategySnapshot(symbol = null) {
+  const normalized = normalizeSymbol(symbol);
+  // ES/MES execution provenance must come from ES strategy truth, never a
+  // retired SPY snapshot or stale historical fallback.
+  const target =
+    normalized === "ES" || normalized === "MES"
+      ? ES_SNAPSHOT_FILE
+      : SNAPSHOT_FILE;
+  return readJson(target, {
     ok: false,
     now: nowIso(),
     strategies: {},
@@ -702,17 +709,18 @@ function readStructuralEntrySnapshot(symbol = null) {
     return snapshot;
   }
 
+  // Owner retired SPY snapshots. Never substitute stale SPY strategy
+  // context for an ES/MES trade when the ES snapshot is unavailable.
+  // Return explicit unavailability instead; historical trade journal is intact.
   if (
     preferred !== SNAPSHOT_FILE
   ) {
-    return readJson(
-      SNAPSHOT_FILE,
-      {
-        ok: false,
-        now: null,
-        strategies: {},
-      }
-    );
+    return {
+      ok: false,
+      now: null,
+      strategies: {},
+      reason: "ES_SNAPSHOT_UNAVAILABLE",
+    };
   }
 
   return {
@@ -5578,7 +5586,7 @@ export async function createTradeJournalEntryFromEngine8Fill({
   }
 
   const snapshot =
-    readStrategySnapshot();
+    readStrategySnapshot(identity.symbol);
 
   const strategyNode =
     snapshot?.strategies?.[

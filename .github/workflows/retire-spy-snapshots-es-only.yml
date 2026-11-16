@@ -1,0 +1,36 @@
+name: Retire SPY strategy snapshots — ES only
+on:
+  push:
+    branches: [remove-spy-strategy-snapshots-es-only-20261111]
+  pull_request:
+    paths:
+      - 'services/core/jobs/buildAllStrategySnapshots.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - 'services/core/routes/dashboardSnapshot.js'
+      - 'services/core/scripts/removeUnusedSpySnapshots.js'
+      - 'services/core/tests/retireSpyStrategySnapshots.test.js'
+      - 'services/core/tests/startupEsSnapshotReady.test.js'
+      - '.github/workflows/retire-spy-snapshots-es-only.yml'
+concurrency:
+  group: retire-spy-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  es-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/jobs/buildAllStrategySnapshots.js
+      - run: node --check services/core/jobs/buildStrategySnapshot.js
+      - run: node --check services/core/routes/dashboardSnapshot.js
+      - run: node --check services/core/scripts/removeUnusedSpySnapshots.js
+      - run: node --test services/core/tests/retireSpyStrategySnapshots.test.js services/core/tests/startupEsSnapshotReady.test.js
