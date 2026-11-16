@@ -44,7 +44,7 @@ test("Upward completed candle touched level remains touched after price retreat"
 });
 test("Minor previous retracements, old W5 selection, other degrees unchanged",()=>{
  const w=wave(7500);
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
  assert.equal(ownerApprovedWorkingSelection.degrees.minor.source,"degreeStates");
  assert.equal(w.degrees.minor.activeWave,"W5");
  assert.equal(w.degrees.minor.ownerMinorW2Research.version,"engine22.minorW2ResearchCardNov5.v1");
