@@ -55,7 +55,7 @@ test("Minute ABC deeper candle-sourced touch persists through restart while orig
  const raw=model(7800);
  assert.equal(raw.degrees.minute.ownerMinuteW2Retracement.version,"engine22.minuteW2RetracementOwner.v1");
  assert.equal(raw.degrees.minute.ownerLargerCDownScenario.version,"engine22.largerCorrectionCDownWatch.v1");
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
- assert.equal(ownerApprovedWorkingSelection.degrees.minute.key,"ownerMinuteW2Retracement");
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
+ assert.equal(ownerApprovedWorkingSelection.degrees.minute.key,"ownerMinuteW1FormingNov9Research");
  assert.equal(raw.degrees.minor.ownerMinorW2Research.version,"engine22.minorW2ResearchCardNov5.v1");
 });
