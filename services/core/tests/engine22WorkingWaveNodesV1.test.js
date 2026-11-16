@@ -139,7 +139,7 @@ test("matching current Strategy-card price and date recovers exact Engine22 hist
     [5620,"2022-01-05 10:00 AZ"],[4306,"2022-10-12 09:00 AZ"]]);
   assert.deepEqual(packet.degrees.intermediate.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
     [7151,"2026-01-28 10:00 AZ"],[6407,"2026-03-30 03:00 AZ"]]);
-  assert.equal(packet.degrees.minute.nodes.length,0);
+  assert.deepEqual(packet.degrees.minute.nodes.map(n=>n.price),[7671]);
   assert.equal(packet.degrees.subminute.nodes.length,0);
 });
 
