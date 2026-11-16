@@ -52,3 +52,13 @@ test("dashboard SPY snapshot retired while ES snapshot is preserved",()=>{
  assert.match(src,/res\.status\(410\)/);
  assert.match(src,/strategy-snapshot-es\.json/);
 });
+
+test("ES/MES journal fill provenance explicitly selects ES strategy snapshot",()=>{
+ const root=path.resolve(import.meta.dirname,"..");
+ const src=fs.readFileSync(path.join(root,"logic/journal/tradeJournalStore.js"),"utf8");
+ const reader=src.match(/function readStrategySnapshot\(symbol = null\) \{[\s\S]*?\n\}/);
+ assert.ok(reader);
+ assert.match(reader[0],/normalized === "ES" \|\| normalized === "MES"/);
+ assert.match(reader[0],/ES_SNAPSHOT_FILE/);
+ assert.match(src,/readStrategySnapshot\(identity\.symbol\)/);
+});
