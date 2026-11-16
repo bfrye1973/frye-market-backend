@@ -14,8 +14,11 @@ function fixture(){
 test("current approval manifest produces existing seven-degree published waves",()=>{
  const a=buildAuthorizedWorkingStructureV1(fixture());
  assert.equal(a.status,"COMPLETE_WORKING_SELECTION");
- assert.equal(a.publicationRevision,6);
- assert.equal(a.degrees.micro.activeWave,"C");
+ assert.equal(a.publicationRevision,7);
+ assert.equal(a.degrees.micro.activeWave,"W5");
+ assert.equal(a.degrees.submicro.activeWave,"W2");
+ assert.equal(a.degrees.micro.direction,"UP");
+ assert.equal(a.degrees.submicro.direction,"DOWN");
  assert.equal(a.degrees.subminute.activeWave,"C");
 });
 test("new owner-approved model selection requires only manifest change, not consumer code",()=>{
@@ -34,7 +37,7 @@ test("new owner-approved model selection requires only manifest change, not cons
 test("unapproved model cannot hijack current selection",()=>{
  const f=fixture(); f.currentWavelength.degrees.micro.ownerMicroW4Up={version:"fake",activeWave:"W4"};
  const a=buildAuthorizedWorkingStructureV1(f);
- assert.equal(a.degrees.micro.activeWave,"C");
+ assert.equal(a.degrees.micro.activeWave,"W5");
 });
 test("missing approval source fails closed",()=>{
  const f=fixture(); const selection=structuredClone(ownerApprovedWorkingSelection);
