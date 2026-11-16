@@ -74,3 +74,54 @@ export async function diagnoseEngine18HostClock(){
   clockQuality:'UNVERIFIED',recordingAuthorization:false
  });
 }
+
+
+// Multiple wall/monotonic receipt pairs, with fail-closed observations.
+// This is evidence of stability and clock steps, NOT clock acceptance.
+export async function diagnoseEngine18ClockSeries({samples=5,intervalMs=750,read=diagnoseEngine18HostClock,
+ wall=()=>Date.now(),mono=()=>process.hrtime.bigint(),sleep=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+ if(!Number.isInteger(samples)||samples<2||samples>12||
+    !Number.isInteger(intervalMs)||intervalMs<0||intervalMs>10000)
+   throw Error('invalid bounded clock diagnostic');
+ const series=[];let prior=null;
+ for(let i=0;i<samples;i++){
+  const wallBefore=wall(),monoBefore=mono();
+  const report=await read();
+  const wallAfter=wall(),monoAfter=mono();
+  const elapsedMonoMs=Number(monoAfter-monoBefore)/1e6;
+  const receiptStepMs=prior===null?null:
+   (wallBefore-prior.wallAfter)-Number(monoBefore-prior.monoAfter)/1e6;
+  const hosts=report?.servers||[];
+  const ready=hosts.length===2&&hosts.every(x=>x.reachable===true);
+  const sourceDifferenceMs=ready?Math.abs(hosts[0].offsetMs-hosts[1].offsetMs):null;
+  const estimatedHostErrorLowerBoundMs=ready?
+   Math.max(...hosts.map(x=>Math.max(0,Math.abs(x.offsetMs)-x.uncertaintyMs))):null;
+  series.push({
+   sample:i+1,atUtc:new Date(wallAfter).toISOString(),
+   sourceCount:hosts.filter(x=>x.reachable===true).length,
+   sources:hosts.map(x=>({host:x.host,reachable:x.reachable===true,
+    offsetMs:Number.isFinite(x.offsetMs)?x.offsetMs:null,
+    uncertaintyMs:Number.isFinite(x.uncertaintyMs)?x.uncertaintyMs:null,
+    stratum:Number.isInteger(x.stratum)?x.stratum:null,
+    reason:x.reachable?'OBSERVED':x.reason||'UNAVAILABLE'})),
+   interSourceDisagreementMs:sourceDifferenceMs,
+   // Conservative reporting: uncertainty is not proof, even when low.
+   estimatedHostErrorLowerBoundMs,
+   wallMinusMonotonicStepMs:Number.isFinite(receiptStepMs)?receiptStepMs:null,
+   receiptElapsedMonotonicMs:elapsedMonoMs,
+   leapStatus:'UNAUTHENTICATED_REMOTE_HEADER_ONLY',
+   clockQuality:'UNVERIFIED'
+  });
+  prior={wallAfter,monoAfter};
+  if(i<samples-1)await sleep(intervalMs);
+ }
+ const largestDisagreementMs=Math.max(0,...series.map(x=>x.interSourceDisagreementMs??0));
+ const maxAbsWallStepMs=Math.max(0,...series.map(x=>Math.abs(x.wallMinusMonotonicStepMs??0)));
+ return Object.freeze({
+  schema:'engine18.clockSeries.v1',samples:series,
+  largestDisagreementMs,maxAbsWallStepMs,
+  allSourcesResponded:series.every(x=>x.sourceCount===2),
+  clockQuality:'UNVERIFIED',authenticatedClockQualityAvailable:false,
+  meetsFiveMsAuthenticatedGate:false,recordingAuthorization:false
+ });
+}
