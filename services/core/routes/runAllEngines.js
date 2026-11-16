@@ -64,6 +64,12 @@ const ENGINE8_AUTO_PAPER_EXECUTOR_JOB = path.resolve(
   "jobs/autoExecuteCanonicalPaperTrade.js"
 );
 
+// Optional Engine 6E diagnostics, isolated from permission and execution.
+const ENGINE6E_FUNNEL_RECORDER_JOB = path.resolve(
+  CORE_DIR,
+  "jobs/recordEngine6ENoTradeFunnel.js"
+);
+
 // Prevent overlapping cron/manual runs
 let IS_RUNNING = false;
 
@@ -411,6 +417,31 @@ async function handle(req, res) {
         args: [ENGINE8_AUTO_PAPER_EXECUTOR_JOB],
         cwd: CORE_DIR,
       });
+    }
+
+    // Optional non-authoritative diagnostic. Never gates or retries execution.
+    if (process.env.ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED === "1" && step3a.code === 0) {
+      let verifiedExecutorEvidence = null;
+      if (step4.code === 0) {
+        try {
+          const parsed = JSON.parse(step4.stdout);
+          if (parsed?.skipped === false && parsed?.execution?.orderCreated === true)
+            verifiedExecutorEvidence = {ok: parsed.ok === true, ...parsed.execution};
+        } catch { /* execution payload unavailable; G11 remains UNAVAILABLE */ }
+      }
+      const diagnostic = await runStep({
+        name: "engine6e_no_trade_funnel_diagnostic",
+        cmd: "node",
+        args: [ENGINE6E_FUNNEL_RECORDER_JOB],
+        cwd: CORE_DIR,
+        env: {
+          ENGINE6E_EXECUTOR_RESULT_JSON: verifiedExecutorEvidence
+            ? JSON.stringify(verifiedExecutorEvidence) : "",
+        },
+      });
+      if (diagnostic.code !== 0) {
+        console.error("[engine6e-funnel] diagnostic-only failure:", tail(diagnostic.stderr,1000));
+      }
     }
 
     const endedAt = nowIso();
