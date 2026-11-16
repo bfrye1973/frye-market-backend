@@ -1158,7 +1158,14 @@ export function getEngine8DuplicateState({
       ) ||
       lifecycleRecords.some(
         (record) =>
-          text(record?.candidateId) === normalizedCandidateId
+          text(record?.candidateId) === normalizedCandidateId &&
+          (
+            record?.executionSuccessful === true ||
+            record?.orderCreated === true ||
+            record?.fillCreated === true ||
+            record?.journalPending === true ||
+            lifecycleRecordIsBlocking(record)
+          )
       ) ||
       trades.some(
         (trade) =>
