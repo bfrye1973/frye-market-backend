@@ -276,7 +276,20 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(bMidpoint.journalCompleted,true,JSON.stringify(bMidpoint));
     assert.equal(bMidpoint.remainingQty,0,JSON.stringify(bMidpoint));
     assert.equal(bMidpoint.engine10Status,"CLOSED",JSON.stringify(bMidpoint));
-    assert.equal((await journal.getTradeById(bTradeId)).trade.status,"CLOSED");
+    assert.equal(bMidpoint.tradeId,bTradeId,"Engine8 lifecycle receipt must preserve Engine10 identity");
+    assert.equal(bMidpoint.fillQuantity,2,"one genuine qty-2 midpoint PAPER fill");
+    const bClosed=(await journal.getTradeById(bTradeId)).trade;
+    assert.equal(bClosed.status,"CLOSED");
+    assert.equal(bClosed.qty.remainingQty,0);
+    assert.equal(bClosed.qty.cumulativeExitQuantity,3);
+    const bCombinedEvents=bClosed.events.filter(e=>e.qtyClosed===2);
+    assert.equal(bCombinedEvents.length,1,"no synthetic second midpoint fill");
+    assert.deepEqual(bCombinedEvents[0].contractAllocations?.map(c=>c.blockId),["BLOCK_2","BLOCK_3"]);
+    assert.deepEqual(bCombinedEvents[0].contractAllocations?.map(c=>c.contractId),["CONTRACT_2","CONTRACT_3"]);
+    assert.deepEqual(bCombinedEvents[0].contractAllocations?.map(c=>c.allocatedQuantity),[1,1]);
+    assert.equal(bCombinedEvents[0].contractAllocations.reduce((v,c)=>v+c.grossRealizedPnL,0),
+      bCombinedEvents[0].eventRealizedPnL);
+    assert.equal(bClosed.events.filter(e=>e.eventType==="RUNNER_ARMED").length,0);
     assert.equal(durable.readPaperStore("engine8-paper-acceptance-state.json",{}).candidateId,
       "CAND-A","later B close must preserve the first acceptance trial record");
     writeSnapshot("CAND-B");
