@@ -36,3 +36,19 @@ test("only ES is scheduled and direct SPY build is retired",()=>{
  assert.match(builder,/SPY retired; no file generated/);
  assert.match(builder,/process\.env\.SYMBOL \|\| "ES"/);
 });
+
+test("ES and MES journal context must never fall back to retired SPY snapshot",()=>{
+ const root=path.resolve(import.meta.dirname,"..");
+ const src=fs.readFileSync(path.join(root,"logic/journal/tradeJournalStore.js"),"utf8");
+ const fn=src.match(/function readStructuralEntrySnapshot\(symbol = null\) \{[\s\S]*?\n\}/);
+ assert.ok(fn,"ES/MES journal context reader must remain present");
+ assert.match(fn[0],/ES_SNAPSHOT_UNAVAILABLE/);
+ assert.doesNotMatch(fn[0],/return readJson\(\s*SNAPSHOT_FILE/);
+});
+test("dashboard SPY snapshot retired while ES snapshot is preserved",()=>{
+ const root=path.resolve(import.meta.dirname,"..");
+ const src=fs.readFileSync(path.join(root,"routes/dashboardSnapshot.js"),"utf8");
+ assert.match(src,/symbol !== "ES"/);
+ assert.match(src,/res\.status\(410\)/);
+ assert.match(src,/strategy-snapshot-es\.json/);
+});
