@@ -75,6 +75,7 @@ function run(dir, extraEnv = {}) {
     env: {
       ...process.env,
       ENGINE8_PAPER_DATA_DIR: dir,
+      TRADE_JOURNAL_DIR: path.join(dir, "journal"),
       ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED: "1",
       ENGINE8_PAPER_OPERATOR_DISABLED: "0",
       ENGINE8_LIVE_TRADING_ENABLED: "0",
@@ -133,4 +134,46 @@ test("isolated durable store: pending Journal blocks fresh B despite valid eligi
     const {b}=run(dir);
     assert.equal(b.journalPendingExecution,true);
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }
+});
+
+test("official Engine 10 PAPER OPEN prevents distinct candidate B", () => {
+  const dir=tempPaperStore();
+  try {
+    const j=path.join(dir,"journal");
+    fs.mkdirSync(j,{recursive:true});
+    fs.writeFileSync(path.join(j,"trade-journal.json"),JSON.stringify([
+      {tradeId:"TRD-OPEN",strategyId:"intraday_scalp@10m",accountMode:"PAPER",status:"OPEN"}
+    ]));
+    const {b}=run(dir);
+    assert.equal(b.openTradeForStrategy,true);
+    assert.equal(b.acceptanceEligibility.allowed,true, "authorization does not replace position lock");
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test("REAL positions never become a separate PAPER market veto", () => {
+  const dir=tempPaperStore();
+  try {
+    const j=path.join(dir,"journal");
+    fs.mkdirSync(j,{recursive:true});
+    fs.writeFileSync(path.join(j,"trade-journal.json"),JSON.stringify([
+      {tradeId:"TRD-REAL",strategyId:"intraday_scalp@10m",accountMode:"REAL",status:"OPEN"}
+    ]));
+    const {b}=run(dir);
+    assert.equal(b.openTradeForStrategy,false);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test("corrupt official Engine 10 Journal never produces false 'no open trades'", () => {
+  const dir=tempPaperStore();
+  try {
+    const j=path.join(dir,"journal");
+    fs.mkdirSync(j,{recursive:true});
+    fs.writeFileSync(path.join(j,"trade-journal.json"),"{BROKEN");
+    const child=spawnSync(process.execPath,["--input-type=module","-e",script],{
+      cwd:repoRoot,encoding:"utf8",timeout:15000,
+      env:{...process.env,ENGINE8_PAPER_DATA_DIR:dir,
+        TRADE_JOURNAL_DIR:j,ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"1"},
+    });
+    assert.notEqual(child.status,0);
+  } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
