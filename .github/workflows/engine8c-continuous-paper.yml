@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      ENGINE8_PAPER_DATA_DIR: ${{ runner.temp }}/engine8c-paper
+      ENGINE8_PAPER_DATA_DIR: /tmp/engine8c-paper-${{ github.run_id }}
       ENGINE8_PAPER_ONLY: "1"
       ENGINE8_LIVE_TRADING_ENABLED: "0"
       ENGINE8_ALLOW_LIVE_FUTURES: "0"
