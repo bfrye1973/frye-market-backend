@@ -101,7 +101,8 @@ test('manual stop seals recorder then verifies encrypted remote inventory; raw-o
  assert.equal(session.health().clockQuality,'UNVERIFIED');
  assert.equal(session.health().timingInferenceAllowed,false);
  const result=await session.stop('OPERATOR_STOP');
- assert.equal(result.backupVerified,true);
+ assert.equal(result.remoteArchiveVerified,true);
+ assert.equal(result.postTrialIndependentRestoreVerified,false);
  assert.equal(result.clockQuality,'UNVERIFIED');
  assert.equal(setup.state().sourceStopped,true);
  assert.equal(setup.state().recorderClosed,true);
@@ -120,7 +121,7 @@ test('backup failures never count as successful clean restore',async()=>{
  const setup=mockComponents({backupFail:true}),signal=new AbortController();
  const session=await runEngine18RawOnlyDiagnostic({env:env(),WebSocketImpl:class Dummy{},
   operatorSignal:signal.signal,dependencies:setup.parts});
- await assert.rejects(session.stop('OPERATOR_STOP'),/private backup failed/);
+ await assert.rejects(session.stop('OPERATOR_STOP'),/private encrypted final archive upload failed/);
  assert.equal(setup.state().backupSyncs,1);
 });
 test('existing clock-verified recording code and original 5ms gate remain unmodified',()=>{
