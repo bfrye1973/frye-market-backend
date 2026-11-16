@@ -274,3 +274,40 @@ test('independent Ironbeam rehearsal fails closed on unopened WebSocket and leav
  assert.equal(events.filter(x=>x.statusCode==='FEED_GAP').length,1);
  assert.ok(!JSON.stringify(events).includes('HIDDEN_TOKEN'));
 }));
+
+test('real-diagnostic namespace preserves existing synthetic chain and restores seq 1 independently',()=>withRoot(async root=>{
+ const {store,objects}=makeStore(root);
+ const syntheticRoot=join(root,'synthetic'),rawRoot=join(root,'raw-only');
+ const first=new Engine18BufferedRecorder({root:syntheticRoot,clock:localClock(),batchSize:2,flushDelayMs:0});
+ await first.offer({raw:'synthetic history',msgClass:'market'});
+ await first.close();
+ const legacy=new Engine18S3ArchiveCoordinator({root:syntheticRoot,store});
+ const legacyResult=await legacy.syncClosed();
+ assert.equal(legacyResult.added,1);
+ const legacyPin=await legacy.inventory({expectedLastSeq:first.writer.seq});
+ assert.ok(legacyPin.headHash);
+ const licensed=new Engine18S3ArchiveCoordinator({root:rawRoot,store,namespace:'engine18/raw-only/v1'});
+ const empty=await licensed.inventory({expectedLastSeq:0});
+ assert.deepEqual({lastSeq:empty.lastSeq,headHash:empty.headHash,entries:empty.entries},
+  {lastSeq:0,headHash:null,entries:[]});
+ const other=new Engine18BufferedRecorder({root:rawRoot,clock:localClock(),batchSize:2,flushDelayMs:0});
+ await other.offer({raw:'nonlicensed isolated fixture',msgClass:'market'});
+ await other.close();
+ assert.equal(other.writer.seq,first.writer.seq,'localSeq collision must be safe in separate namespaces');
+ const uploaded=await licensed.syncClosed();
+ assert.equal(uploaded.added,1);
+ const isolatedPin=await licensed.inventory({expectedLastSeq:other.writer.seq});
+ assert.notEqual(isolatedPin.headHash,legacyPin.headHash);
+ assert.ok(isolatedPin.entries.every(x=>x.key.startsWith('engine18/raw-only/v1/inventory/v1/')));
+ assert.ok(isolatedPin.entries.every(x=>x.archive.key.startsWith('engine18/raw-only/v1/archives/')));
+ assert.equal((await legacy.inventory({expectedLastSeq:first.writer.seq})).headHash,legacyPin.headHash);
+ assert.ok([...objects.keys()].some(k=>k.startsWith('engine18/inventory/v1/')));
+ assert.ok([...objects.keys()].some(k=>k.startsWith('engine18/raw-only/v1/inventory/v1/')));
+ const destination=join(root,'restored-isolated');
+ const restored=await licensed.restore({destination,expectedLastSeq:other.writer.seq});
+ assert.equal(restored.inventoryHead,isolatedPin.headHash);
+ assert.deepEqual(replayRaw(destination),replayRaw(rawRoot));
+ await assert.rejects(licensed.inventory({expectedLastSeq:other.writer.seq+1}),/high-watermark/);
+ assert.throws(()=>new Engine18S3ArchiveCoordinator({root:rawRoot,store,namespace:'engine18/unapproved'}),
+  /unapproved private S3 namespace/);
+}));
