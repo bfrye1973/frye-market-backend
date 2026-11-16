@@ -40,6 +40,8 @@ jobs:
           node --test services/core/tests/engine10ContinuousPaperLifecycle.test.js
       - name: Actual isolated protected HTTP execution and candidate A/B lifecycle
         run: node --test services/core/tests/engine8ContinuousPaperHttp.test.js
+      - name: Delayed real Engine10 Journal acknowledgement and safe Engine8 retry
+        run: node --test services/core/tests/engine8Engine10JointLostAck.test.js
       - name: Combined midpoint contract accounting and fee audit
         run: node --test services/core/tests/engine8Engine10JointAccounting.test.js
       - name: Engine10 REAL broker accounting regressions (no real broker access)
