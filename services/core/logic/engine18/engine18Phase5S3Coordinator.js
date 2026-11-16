@@ -22,9 +22,11 @@ function durablyRename(src,dest){
  const dir=openSync(dirname(dest),'r');try{fsyncSync(dir);}finally{closeSync(dir);}
 }
 export class Engine18S3ArchiveCoordinator {
- constructor({root,store,reconcileIntervalMs=900000,now=()=>Date.now()}={}){
+ constructor({root,store,namespace='engine18',reconcileIntervalMs=900000,now=()=>Date.now()}={}){
   if(typeof root!=='string'||!(store instanceof Engine18S3PrivateStore))throw Error('private S3 store and root required');
-  this.root=resolve(root);this.store=store;this.prefix='engine18/inventory/v1/';
+  if(!['engine18','engine18/raw-only/v1'].includes(namespace))throw Error('unapproved private S3 namespace');
+  this.root=resolve(root);this.store=store;this.namespace=namespace;
+  this.prefix=namespace+'/inventory/v1/';this.archivePrefix=namespace+'/archives/';
   this.inFlight=null;this.failures=0;this.lastSuccessAtMs=null;this.retries=0;
   this.pendingRotation=new Map();this.pendingRotationArchives=0;
   if(!Number.isSafeInteger(reconcileIntervalMs)||reconcileIntervalMs<1000||typeof now!=='function')throw Error('invalid inventory reconciliation policy');
@@ -42,7 +44,8 @@ export class Engine18S3ArchiveCoordinator {
   const keys=await this.store.listObjectKeys(this.prefix);
   const entries=[];
   for(const key of keys){
-   if(!/^engine18\/inventory\/v1\/\d{16}-\d{16}-[a-f0-9]{64}\.json$/.test(key))
+   if(!key.startsWith(this.prefix)||
+      !/^\d{16}-\d{16}-[a-f0-9]{64}\.json$/.test(key.slice(this.prefix.length)))
     throw Error('invalid inventory object key');
    const entry=await this.store.readSmallEncryptedJson(key);
    if(entry.schema!=='engine18.s3.inventory.v1'||entry.keyId!==this.store.keyId||
@@ -132,7 +135,7 @@ export class Engine18S3ArchiveCoordinator {
     continue;
    }
    if(manifest.firstSeq!==inventory.lastSeq+1)throw Error('archive sequence not contiguous with remote inventory');
-   const archiveKey='engine18/archives/'+archiveId;
+   const archiveKey=this.archivePrefix+archiveId;
    const archive=await this.store.uploadClosed({path,key:archiveKey,
     plaintextSha256:sourceHash.sha256,expectedSize:sourceHash.bytes});
    const manifestKey=archiveKey+'.manifest.json';
@@ -174,8 +177,8 @@ export class Engine18S3ArchiveCoordinator {
   if(existsSync(dest)&&readdirSync(dest).length)throw Error('restore requires empty private destination');
   mkdirSync(dest,{recursive:true,mode:0o700});
   for(const entry of state.entries){
-   if(!entry.archive.key.startsWith('engine18/archives/'))throw Error('invalid remote archive source');
-   const archiveId=entry.archive.key.replace(/^engine18\/archives\//,'');
+   if(!entry.archive.key.startsWith(this.archivePrefix))throw Error('invalid remote archive source');
+   const archiveId=entry.archive.key.slice(this.archivePrefix.length);
    if(archiveId.includes('..')||archiveId.startsWith('/')||!/^[-A-Za-z0-9_.\/]+$/.test(archiveId))
     throw Error('unsafe restore target');
    const archivePath=join(dest,archiveId);

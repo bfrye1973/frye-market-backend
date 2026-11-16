@@ -2,7 +2,7 @@
 // Never imported or launched by Render standby or the production backend.
 // Design/test only until independently authorized, credentialed, backed up and restored.
 // All receipt timestamps remain UNVERIFIED and cannot inform models or trading.
-import {statSync,readFileSync} from 'node:fs';
+import {statSync,readFileSync,existsSync,readdirSync} from 'node:fs';
 import {Engine18BufferedRecorder} from './engine18BufferedRecorder.js';
 import {Engine18IronbeamLiveRecorderSource} from './engine18IronbeamLiveRecorderSource.js';
 import {createEngine18ReceiptClock} from './engine18ReceiptClock.js';
@@ -13,6 +13,8 @@ import {Engine18ContinuousBackup} from './engine18ContinuousBackup.js';
 const ROOT='/var/data/engine18-recorder';
 const DISK=ROOT+'/records';
 const CONTRACT='XCME:ES.Z26';
+// Isolate licensed diagnostic seq 1+ from the prior synthetic global R2 inventory 1-4.
+export const RAW_ONLY_R2_NAMESPACE='engine18/raw-only/v1';
 const keys=['IRONBEAM_USERNAME','IRONBEAM_PASSWORD','IRONBEAM_API_KEY',
  'ENGINE18_R2_ENDPOINT','ENGINE18_R2_BUCKET','ENGINE18_R2_ACCESS_KEY',
  'ENGINE18_R2_SECRET_KEY','ENGINE18_R2_ENCRYPTION_KEY_HEX',
@@ -77,9 +79,17 @@ export async function runEngine18RawOnlyDiagnostic({env=process.env,fetchImpl=fe
   encryptionKey:Buffer.from(env.ENGINE18_R2_ENCRYPTION_KEY_HEX,'hex'),
   stagingRoot:config.root,retentionDays:Number(env.ENGINE18_RETENTION_DAYS||30),
   fetchImpl});
- const backup=createCoordinator({root:config.root,store});
- // Independently pinned inventory and previously completed RESTORE are mandatory.
- await backup.inventory({expectedLastSeq:config.lastSeq});
+ const backup=createCoordinator({root:config.root,store,namespace:RAW_ONLY_R2_NAMESPACE});
+ // First trial requires an externally recorded empty-chain pin in its NEW namespace.
+ // No invented pin and no claim that global synthetic seq 1-4 belongs to this namespace.
+ const state=await backup.inventory({expectedLastSeq:config.lastSeq});
+ if(config.lastSeq!==0||state.lastSeq!==0||state.headHash!==null||state.entries?.length!==0)
+  throw Error('first raw-only trial requires verified empty isolated R2 inventory');
+ // Existing local records (including an incomplete prior attempt) must be reviewed,
+ // not reset or overwritten merely to obtain a new localSeq 1.
+ if(existsSync(config.root)&&readdirSync(config.root,{recursive:true}).some(p=>
+   /(?:\.jsonl\.open|\.jsonl\.gz|\.manifest\.json|\.engine18-highwater\.json|\.engine18-recorder\.lock)$/.test(String(p))))
+  throw Error('private real recorder root is not empty; sequence recovery required');
  if(operatorSignal.aborted)throw Error('operator stopped during backup preflight');
  const writer=await openRecorder({root:config.root,clock:createEngine18ReceiptClock(),
   maxQueued:4096,maxQueueBytes:32*1024*1024,batchSize:128,flushDelayMs:2,

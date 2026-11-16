@@ -6,7 +6,7 @@ import os from 'node:os';
 import {Engine18BufferedRecorder} from '../logic/engine18/engine18BufferedRecorder.js';
 import {createEngine18ReceiptClock} from '../logic/engine18/engine18ReceiptClock.js';
 import {replayRaw} from '../logic/engine18/gate1RawRecorder.js';
-import {verifyEngine18RawOnlyEnvironment,runEngine18RawOnlyDiagnostic} from '../logic/engine18/engine18RawOnlyDiagnosticWorker.js';
+import {verifyEngine18RawOnlyEnvironment,runEngine18RawOnlyDiagnostic,RAW_ONLY_R2_NAMESPACE} from '../logic/engine18/engine18RawOnlyDiagnosticWorker.js';
 const m='/var/data/engine18-recorder',root=m+'/records';
 const env=()=>({
  IRONBEAM_USERNAME:'protected-user',IRONBEAM_PASSWORD:'protected-password',
@@ -86,7 +86,7 @@ function mockComponents({disconnect=false,backupFail=false}={}){
   health:()=>({active:true,connected:!disconnect,disconnections:disconnect?1:0,
    reconnects:0,captureUncertain:disconnect,framesReceived:1})
  };
- const backup={inventory:async()=>({lastSeq:0}),syncClosed:async()=>{
+ const backup={inventory:async()=>({lastSeq:0,headHash:null,entries:[]}),syncClosed:async()=>{
   backupSyncs++;if(backupFail)throw Error('private backup failed');
  }};
  const scheduler={tick:async()=>{},start:()=>{},stop:async()=>{},health:()=>({
@@ -173,4 +173,27 @@ test('manual AbortSignal leads to clean source stop and sealed-archive remote in
  const outcome=await session.stop('OPERATOR_STOP');
  assert.equal(outcome.reason,'OPERATOR_STOP');
  assert.equal(setup.state().recorderClosed,true);
+});
+
+test('licensed trial uses only separate raw namespace and rejects synthetic global history',async()=>{
+ const setup=mockComponents(),signal=new AbortController();
+ let namespace=null;
+ const session=await runEngine18RawOnlyDiagnostic({
+  env:env(),operatorSignal:signal.signal,WebSocketImpl:class Dummy{},
+  dependencies:{...setup.parts,createCoordinator:options=>{
+   namespace=options.namespace;
+   return setup.parts.createCoordinator(options);
+  }}
+ });
+ assert.equal(namespace,'engine18/raw-only/v1');
+ assert.equal(namespace,RAW_ONLY_R2_NAMESPACE);
+ await session.stop('OPERATOR_STOP');
+ const contaminated=mockComponents();
+ await assert.rejects(runEngine18RawOnlyDiagnostic({
+  env:env(),operatorSignal:new AbortController().signal,WebSocketImpl:class Dummy{},
+  dependencies:{...contaminated.parts,createCoordinator:()=>({
+   inventory:async()=>({lastSeq:4,headHash:'synthetic-head',entries:[{}]})
+  })}
+ }),/pin|empty isolated/);
+ assert.equal(contaminated.state().sourceStarted,0);
 });
