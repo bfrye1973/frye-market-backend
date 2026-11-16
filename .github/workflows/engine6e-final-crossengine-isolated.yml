@@ -17,6 +17,7 @@ jobs:
       ENGINE8_ALLOW_LIVE_FUTURES: "0"
       ENGINE8_PAPER_ONLY: "1"
       ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED: "0"
+      TRADE_JOURNAL_DIR: ${{ github.workspace }}/services/core/data
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
