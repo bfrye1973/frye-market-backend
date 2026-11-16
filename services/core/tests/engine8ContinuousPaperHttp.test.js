@@ -7,6 +7,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 const repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../../..");
@@ -282,6 +283,65 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     const repeatedB=await runBridge({...flags,CORE_BASE_URL:base});
     assert.notEqual(repeatedB.code,0);
 
+    // Every gate below uses the same actual protected route and isolated
+    // persistent PAPER state. None is a market-opinion veto.
+    writeSnapshot("CAND-C");
+    const ordersBeforeC=durable.readPaperStore("paper-orders.json",[]).length;
+
+    const killed=await runBridge({...flags,CORE_BASE_URL:base,ENGINE8_KILL_SWITCH:"1"});
+    assert.notEqual(killed.code,0);
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,ordersBeforeC);
+
+    process.env.ENGINE8_PAPER_OPERATOR_DISABLED="1";
+    const operatorDisabled=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.notEqual(operatorDisabled.code,0);
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,ordersBeforeC);
+    process.env.ENGINE8_PAPER_OPERATOR_DISABLED="0";
+
+    const life=durable.readPaperStore("engine8-paper-execution-state.json",{
+      version:"engine8.paperExecutionState.v1",executions:{}
+    });
+    life.executions["EXEC-PENDING-CI"]={
+      strategyId:"intraday_scalp@10m",candidateId:"CAND-UNRESOLVED",
+      status:"JOURNAL_PENDING",journalPending:true,executionSuccessful:true,
+    };
+    durable.writePaperStore("engine8-paper-execution-state.json",life);
+    const pending=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.notEqual(pending.code,0);
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,ordersBeforeC);
+    delete life.executions["EXEC-PENDING-CI"];
+    durable.writePaperStore("engine8-paper-execution-state.json",life);
+
+    const locks=path.join(flags.ENGINE8_PAPER_DATA_DIR,".instruction-locks");
+    const lockHash=crypto.createHash("sha256")
+      .update("__ENGINE8_PAPER_GLOBAL_WRITE__").digest("hex");
+    const lock=path.join(locks,lockHash+".lock");
+    fs.mkdirSync(lock,{recursive:true});
+    const stranded=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.notEqual(stranded.code,0);
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,ordersBeforeC);
+    fs.rmSync(lock,{recursive:true,force:true});
+
+    // Two real simultaneous protected HTTP requests must serialize into
+    // ONE opening fill/Journal trade, not create two fresh orders.
+    const req=()=>fetch(base+"/api/trading/paper/execute-canonical",{
+      method:"POST",
+      headers:{"content-type":"application/json",
+        "x-engine8-admin-secret":flags.ENGINE8_ADMIN_SECRET},
+      body:"{}",
+    }).then(async res=>({code:res.status,payload:await res.json()}));
+    const concurrent=await Promise.all([req(),req()]);
+    const afterConcurrent=durable.readPaperStore("paper-orders.json",[]);
+    assert.equal(afterConcurrent.length,ordersBeforeC+1,
+      JSON.stringify(concurrent));
+    assert.equal(concurrent.filter(x=>x.payload.orderCreated===true).length,1,
+      JSON.stringify(concurrent));
+    assert.equal(concurrent.filter(x=>x.payload.journalCompleted===true).length,1,
+      JSON.stringify(concurrent));
+    const cTrades=(await journal.listTrades()).trades.filter(x=>
+      x.identity?.candidateId==="CAND-C");
+    assert.equal(cTrades.length,1);
+
     console.log("P0_HTTP_ACCEPTANCE",JSON.stringify({
       a:{candidateId:"CAND-A",orderId:a.payload.execution.orderId,
         executionId:a.payload.execution.executionId,tradeId,
@@ -292,6 +352,11 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
         final:bMidpoint.remainingQty},
       combinedMidpointVerified:true,
       repeatedBBlocked:repeatedB.code!==0,
+      killSwitchDenied:killed.code!==0,
+      operatorDisabledDenied:operatorDisabled.code!==0,
+      pendingJournalDenied:pending.code!==0,
+      strandedLockDenied:stranded.code!==0,
+      concurrentDuplicateSerialized:true,
       duplicateDenied:duplicate.code!==0,
       openPositionDenied:activeConflict.code!==0,
       closedCandidateDenied:repeatedClosed.code!==0,
