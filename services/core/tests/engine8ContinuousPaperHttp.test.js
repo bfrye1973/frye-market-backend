@@ -9,6 +9,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import {buildNoTradeFunnel} from "../logic/engine6/6e-funnel/buildNoTradeFunnel.js";
 
 const repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),"../../..");
 const coreData=path.join(repoRoot,"services/core/data");
@@ -89,6 +90,27 @@ function fixture(candidateId) {
     engine6:{allowed:true,decision:"FAST_INTRADAY_PAPER_ALLOW"},
     engine7PositionSizing:engine7,engine9OfficialManagementPlan:engine9,
   };
+}
+
+// For the final integration acceptance, join a real Engine8 HTTP receipt to
+// deterministic Phase4 qualified evidence. It never creates permission or orders.
+function phase4FunnelSnapshot(candidateId){
+  const e=fixture(candidateId),direction=e.direction;
+  return {ok:true,symbol:"ES",generatedAt:e.snapshotTime,
+    strategies:{"intraday_scalp@10m":{
+      engine26LocationCandidate:{candidateId,zoneId:e.zoneId,currentPrice:e.officialEntryPrice,
+        evaluationAuthorized:true},
+      confluence:{context:{
+        reaction:{paperScalpReaction:{allowed:true,engine3Strategy1QualifiedForEngine6:true,direction}},
+        volume:{engine4AuthorizedReactionParticipation:{allowed:true,participationConfirmed:true,
+          hardBlocked:false,direction}}
+      }},
+      permission:{paper:{allowed:true,locked:true,decision:"FAST_INTRADAY_PAPER_ALLOW",direction}},
+      engine26ProposedGeometry:{geometryReady:true,geometryFeasible:true},
+      engine9OfficialManagementPlan:{...e.engine9OfficialManagementPlan,managementReady:true},
+      engine7PositionSizing:{...e.engine7PositionSizing,finalSizingReady:true},
+      engine8PaperOrder:e
+    }}};
 }
 
 async function runBridge(env) {
@@ -173,6 +195,20 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(a.payload.execution.journalPending,false);
     assert.equal(a.payload.execution.candidateId,"CAND-A");
     assert.equal(a.payload.execution.planId,"PLAN-CAND-A");
+    // The real protected HTTP order receipt must be recognized by the actual
+    // Engine6E G11 diagnostic for exactly this Phase4-approved identity.
+    const funnelA=buildNoTradeFunnel(phase4FunnelSnapshot("CAND-A"),{
+      executorResult:a.payload
+    });
+    assert.equal(funnelA.firstFailedGate,null,JSON.stringify(funnelA));
+    assert.equal(funnelA.gates[11].state,"PASS");
+    assert.equal(funnelA.executor.orderCreated,true);
+    const wrongForB=buildNoTradeFunnel(phase4FunnelSnapshot("CAND-B"),{
+      executorResult:a.payload
+    });
+    assert.equal(wrongForB.firstFailedGate,"G11");
+    assert.equal(wrongForB.executor.orderCreated,false);
+
     const tradeId=a.payload.execution.tradeId;
     assert.ok(tradeId);
     const firstOrders=durable.readPaperStore("paper-orders.json",[]);
@@ -244,6 +280,12 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(b.payload.execution.journalCompleted,true);
     assert.equal(b.payload.execution.candidateId,"CAND-B");
     assert.notEqual(b.payload.execution.tradeId,tradeId);
+    const funnelB=buildNoTradeFunnel(phase4FunnelSnapshot("CAND-B"),{
+      executorResult:b.payload
+    });
+    assert.equal(funnelB.firstFailedGate,null,JSON.stringify(funnelB));
+    assert.equal(funnelB.gates[11].state,"PASS");
+
     assert.equal(durable.readPaperStore("paper-orders.json",[]).length,5,
       "A entry/3 exits then B entry must persist unique orders");
 
