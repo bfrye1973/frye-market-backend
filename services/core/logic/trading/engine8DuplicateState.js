@@ -42,8 +42,11 @@ const LEDGER_FILE = path.join(
   "paper-idempotency-ledger.json"
 );
 
-const JOURNAL_FILE = path.join(
-  DATA_DIR,
+// The official Engine 10 Journal is persisted on its own durable disk.
+// Never infer PAPER position availability from the old services/core/data
+// file; that can be stale while a real PAPER position is still OPEN.
+const JOURNAL_FILE = path.resolve(
+  process.env.TRADE_JOURNAL_DIR || "/var/data/replay/journal",
   "trade-journal.json"
 );
 
@@ -262,9 +265,10 @@ function orderIsOpen(order) {
 }
 
 function tradeIsOpen(trade) {
+  // REAL trades must never be treated as PAPER open-position conflicts.
   return (
-    upper(trade?.status) ===
-    "OPEN"
+    upper(trade?.status) === "OPEN" &&
+    upper(trade?.accountMode) !== "REAL"
   );
 }
 
@@ -1100,16 +1104,16 @@ export function getEngine8DuplicateState({
       ? ledgerRaw
       : {};
 
-  const journalRaw =
-    readJson(
-      JOURNAL_FILE,
-      []
-    );
-
-  const trades =
-    Array.isArray(journalRaw)
-      ? journalRaw
-      : [];
+  // Corrupt or schema-invalid official Journal must fail CLOSED rather
+  // than be mistaken for zero open positions. A new empty journal is
+  // allowed only when the file has not yet been created.
+  const journalRaw = fs.existsSync(JOURNAL_FILE)
+    ? JSON.parse(fs.readFileSync(JOURNAL_FILE, "utf8"))
+    : [];
+  if (!Array.isArray(journalRaw)) {
+    throw new Error("ENGINE10_OFFICIAL_JOURNAL_INVALID");
+  }
+  const trades = journalRaw;
 
   const acceptanceState =
     getEngine8AcceptanceState();
