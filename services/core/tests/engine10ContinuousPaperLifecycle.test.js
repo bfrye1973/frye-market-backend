@@ -73,6 +73,11 @@ for(const combined of [false,true]){
   assert.equal(final.ok,true);assert.equal(final.status,"CLOSED");
   assert.equal(final.remainingQty,0);assert.equal(final.journalCompleted,true);
   assert.equal(final.trade.qty.cumulativeExitQuantity,3);
+  // These fixtures have no frozen threeBlockManagement.blocks, so never
+  // fabricate contract allocation IDs from a positional guess alone.
+  const eventRows=final.trade.events.filter(e=>e.qtyClosed>0 && e.action!=="NEW_ENTRY");
+  assert.ok(eventRows.every(e=>e.contractAllocations===undefined));
+
   assert.equal(final.trade.summary.realizedPnL,250);
   assert.equal(final.trade.events.filter(e=>e.eventType==="TRADE_CLOSED").length,1);
   assert.equal(final.trade.openingPlan?.runnerPlan?.enabled,false);
