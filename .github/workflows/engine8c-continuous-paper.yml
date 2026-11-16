@@ -1,0 +1,51 @@
+name: Engine 8C P0 Continuous PAPER (isolated only)
+on:
+  push:
+    branches: [engine8c-continuous-paper-candidate-eligibility]
+  pull_request:
+    paths:
+      - "services/core/logic/trading/engine8PaperAcceptanceEligibility.js"
+      - "services/core/logic/trading/engine8DuplicateState.js"
+      - "services/core/logic/trading/engine8CanonicalPaperAdapter.js"
+      - "services/core/logic/trading/engine8PaperExecutor.js"
+      - "services/core/tests/engine8ContinuousPaperAcceptance.test.js"
+      - ".github/workflows/engine8c-continuous-paper.yml"
+permissions:
+  contents: read
+jobs:
+  isolated-safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ENGINE8_PAPER_DATA_DIR: ${{ runner.temp }}/engine8c-paper
+      ENGINE8_PAPER_ONLY: "1"
+      ENGINE8_LIVE_TRADING_ENABLED: "0"
+      ENGINE8_ALLOW_LIVE_FUTURES: "0"
+      ENGINE8_KILL_SWITCH: "0"
+      REPLAY_MODE: "0"
+      ENGINE12_REPLAY_MODE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install test-only dependencies
+        run: npm install --ignore-scripts
+      - name: Syntax and pure fail-closed acceptance matrix
+        run: |
+          node --check services/core/logic/trading/engine8PaperAcceptanceEligibility.js
+          node --check services/core/logic/trading/engine8DuplicateState.js
+          node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
+          node --check services/core/logic/trading/engine8PaperExecutor.js
+          node --test services/core/tests/engine8ContinuousPaperAcceptance.test.js
+      - name: Simulated authorized fresh-store regression
+        run: |
+          mkdir -p "$ENGINE8_PAPER_DATA_DIR"
+          printf '%s\n' '{"version":"engine8.paperAcceptanceState.v1","acceptanceTradeCompleted":false,"newPaperOrdersAllowed":true}' > "$ENGINE8_PAPER_DATA_DIR/engine8-paper-acceptance-state.json"
+          node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
+          node --test services/core/tests/engine8PaperDurableStore.test.js
+      - name: No REAL or production data exposure
+        run: |
+          test "$ENGINE8_LIVE_TRADING_ENABLED" = "0"
+          test "$ENGINE8_ALLOW_LIVE_FUTURES" = "0"
+          test "$ENGINE8_PAPER_ONLY" = "1"
