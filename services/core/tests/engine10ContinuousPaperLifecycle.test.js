@@ -76,6 +76,7 @@ for(const combined of [false,true]){
   assert.equal(final.trade.summary.realizedPnL,250);
   assert.equal(final.trade.events.filter(e=>e.eventType==="TRADE_CLOSED").length,1);
   assert.equal(final.trade.openingPlan?.runnerPlan?.enabled,false);
+  assert.equal(final.trade.events.filter(e=>e.eventType==="RUNNER_ARMED").length,0,"no-runner midpoint must stay free of runner events");
   const frozen=JSON.stringify(snapshot().find(t=>t.tradeId===opened.tradeId));
   const retry=await event(a,opened.tradeId,{id:"P1",action:"REDUCE",quantity:1,
    price:101,remaining:2,block:"BLOCK_1",at:"2026-11-16T15:04:00Z"});
