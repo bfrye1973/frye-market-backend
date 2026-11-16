@@ -889,10 +889,18 @@ export function markEngine8AcceptanceTradeCompleted({
       "ENGINE10_CLOSED_ACKNOWLEDGED",
   };
 
-  writeJson(
-    ACCEPTANCE_FILE,
-    state
-  );
+  // A one-time acceptance receipt is immutable historical evidence.
+  // A later distinct candidate's final CLOSE still receives a durable
+  // execution/Journal link below, but must not overwrite the first trial.
+  // Likewise an explicit disabled state must not be silently reset by EXIT.
+  const priorAcceptanceState = getEngine8AcceptanceState();
+  const recordFirstTrial =
+    priorAcceptanceState.acceptanceTradeCompleted !== true &&
+    priorAcceptanceState.newPaperOrdersAllowed === true;
+
+  if (recordFirstTrial) {
+    writeJson(ACCEPTANCE_FILE, state);
+  }
 
   recordEngine8ExecutionLink({
     executionId:
@@ -941,24 +949,34 @@ export function markEngine8AcceptanceTradeCompleted({
 
   return {
     ok: true,
-    updated: true,
+    updated: recordFirstTrial,
 
     acceptanceTradeCompleted:
-      true,
+      recordFirstTrial ||
+      priorAcceptanceState.acceptanceTradeCompleted === true,
 
     newPaperOrdersAllowed:
-      false,
+      recordFirstTrial
+        ? false
+        : priorAcceptanceState.newPaperOrdersAllowed,
 
     tradeId:
-      normalizedTradeId,
+      recordFirstTrial
+        ? normalizedTradeId
+        : priorAcceptanceState.tradeId,
 
     executionId:
-      normalizedExecutionId,
+      recordFirstTrial
+        ? normalizedExecutionId
+        : priorAcceptanceState.executionId,
 
     closedAt:
-      state.closedAt,
+      recordFirstTrial
+        ? state.closedAt
+        : priorAcceptanceState.closedAt,
 
-    state,
+    state: recordFirstTrial ? state : priorAcceptanceState,
+    auditPreserved: !recordFirstTrial,
   };
 }
 
