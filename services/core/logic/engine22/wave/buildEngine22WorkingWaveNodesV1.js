@@ -24,7 +24,8 @@ export function arizonaMarketTimeUtc(raw){
 // Explicit Engine22 strategy model selections; no inference from nested objects.
 // Old count identities remain present as research *alternatives*, not auto-promoted.
 export const REVIEW_SOURCES=Object.freeze([
-  Object.freeze({degree:"micro",key:"ownerMicroW3Nov9ReclassifiedResearch",display:true}),
+  Object.freeze({degree:"micro",key:"ownerMicroAbcDownNov16Research",display:true}),
+  Object.freeze({degree:"micro",key:"ownerMicroW3Nov9ReclassifiedResearch",display:false}),
   Object.freeze({degree:"micro",key:"ownerMicroW2Nov6Research",display:false}),
   Object.freeze({degree:"submicro",key:"ownerSubmicroW3Nov9InternalResearch",display:true}),
   Object.freeze({degree:"submicro",key:"ownerSubmicroW3Nov9Research",display:false}),

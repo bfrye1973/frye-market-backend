@@ -747,6 +747,36 @@ export function buildCurrentWavelength({
       // Owner Nov 5→6 Micro W1/W2 blue research scenario. Does not promote
       // away from current Oct31 Micro C DOWN owner-selected count.
       // Owner reclassified earlier blue W1/W2 from Submicro to Micro.
+      // Owner-marked NEW Micro ABC (Nov 15-16). Separate from historical
+      // Micro W5-UP and older October ABC interpretations; C still forming.
+      ownerMicroAbcDownNov16Research:{
+        version:"engine22.ownerMicroAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"subminute",parentWave:"C_RESEARCH",
+        anchors:{
+          aHigh:7614.75,aHighLocalTime:"2026-11-15 16:40 AZ",
+          aHighAtUtc:"2026-11-15T23:40:00Z",
+          aLow:7537.25,aLowLocalTime:"2026-11-15 23:20 AZ",
+          aLowAtUtc:"2026-11-16T06:20:00Z",
+          bHigh:7570.75,bHighLocalTime:"2026-11-16 01:40 AZ",
+          bHighAtUtc:"2026-11-16T08:40:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_MICRO_ABC_DOWN",
+        },
+        aLength:77.50,
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7570.75-(7614.75-7537.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"MICRO_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalMicroModelsPreserved:true,priceBasisReconciliation:"PENDING",
+      },
       ownerMicroW3Nov9ReclassifiedResearch:{
         version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
         completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",

@@ -16,11 +16,9 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
   assert.equal(packet.ownerCountPromotion,false);
   const micro=packet.degrees.micro.nodes,submicro=packet.degrees.submicro.nodes;
   assert.deepEqual(micro.map(n=>[n.label,n.price,n.marketAtUtc]),[
-    ["W1 Low",7324,"2026-11-05T22:20:00.000Z"],
-    ["W1 High",7469,"2026-11-06T14:40:00.000Z"],
-    ["W2 research anchor",7362,"2026-11-08T23:00:00.000Z"],
-    ["W3 ending high",7600,"2026-11-09T20:00:00.000Z"],
-    ["W4 ending low",7492.25,"2026-11-10T17:40:00.000Z"],
+    ["A starting high",7614.75,"2026-11-15T23:40:00.000Z"],
+    ["A ending low",7537.25,"2026-11-16T06:20:00.000Z"],
+    ["B ending high",7570.75,"2026-11-16T08:40:00.000Z"],
   ]);
   assert.deepEqual(submicro.map(n=>[n.label,n.price,n.marketAtUtc]),[
     ["W1 Low",7390.25,"2026-11-09T08:00:00.000Z"],
@@ -60,17 +58,17 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
 test("fingerprint remains unchanged on price/touch updates, changes on corrected anchor",()=>{
   const w=source(),original=buildEngine22WorkingWaveNodesV1({currentWavelength:w});
   const updated=structuredClone(w);
-  updated.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.levels[0].status="TOUCHED";
+  updated.degrees.micro.ownerMicroAbcDownNov16Research.levels[0].status="TOUCHED";
   updated.currentPrice=7650;
   assert.equal(buildEngine22WorkingWaveNodesV1({currentWavelength:updated}).fingerprint,
     original.fingerprint,"a Fib touch is not a new wave pivot");
-  updated.degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.anchors.w1High=7468.75;
+  updated.degrees.micro.ownerMicroAbcDownNov16Research.anchors.aLow=7537;
   const revised=buildEngine22WorkingWaveNodesV1({currentWavelength:updated});
   assert.notEqual(revised.fingerprint,original.fingerprint);
   assert.equal(revised.degrees.micro.nodes[1].nodeId,original.degrees.micro.nodes[1].nodeId);
   assert.notEqual(revised.degrees.micro.nodes[1].sourceRevision,
     original.degrees.micro.nodes[1].sourceRevision);
-  assert.equal(original.degrees.micro.nodes[1].price,7469,"no mutation of earlier record");
+  assert.equal(original.degrees.micro.nodes[1].price,7537.25,"no mutation of earlier record");
 });
 
 test("old scenarios are retained but never silently displayed or promoted",()=>{
@@ -103,7 +101,10 @@ test("unknown, malformed or conflicting times never authorize a chart node",()=>
 
 test("corrected owner Micro W2 and superseded old time remain distinguishable",()=>{
   const packet=buildEngine22WorkingWaveNodesV1({currentWavelength:source()});
-  const recorded=packet.degrees.micro.nodes.find(n=>n.label==="W2 research anchor");
+  const archivedModel=packet.degrees.micro.models.find(m=>
+    m.sourcePath.endsWith(".ownerMicroW3Nov9ReclassifiedResearch"));
+  const recorded=archivedModel.anchors.find(n=>n.label==="W2 research anchor");
+  assert.equal(recorded.presentationAllowed,false);
   assert.equal(recorded.marketAtUtc,"2026-11-08T23:00:00.000Z");
   // The old 15:00 AZ / 22:00Z source remains explicitly superseded.
   const prior=source().degrees.micro.ownerMicroW3Nov9ReclassifiedResearch.anchors.priorAnchorRevision;
