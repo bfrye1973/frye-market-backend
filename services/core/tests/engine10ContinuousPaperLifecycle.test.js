@@ -103,6 +103,20 @@ for(const combined of [false,true]){
   assert.equal(persisted.find(t=>t.tradeId===second.tradeId).status,"OPEN");
  });
 }
+test("runner-enabled Strategy 1 still records a genuine RUNNER_ARMED lifecycle marker",async()=>{
+ const a=input({candidate:"CAND-LEGIT-RUNNER",plan:"PLAN-LEGIT-RUNNER"});
+ a.runnerPlan={enabled:true,blockId:"BLOCK_3",contracts:1,status:"RUNNER_TARGET_SELECTED"};
+ a.strategy1Provenance.runnerPlan={enabled:true,blockId:"BLOCK_3",contracts:1};
+ const opened=await opening(a);assert.equal(opened.created,true);
+ const p1=await event(a,opened.tradeId,{id:"RUNNER-P1",action:"REDUCE",quantity:1,
+  price:101,remaining:2,block:"BLOCK_1",at:"2026-11-16T15:01:00Z"});
+ assert.equal(p1.remainingQty,2);
+ const p2=await event(a,opened.tradeId,{id:"RUNNER-P2",action:"REDUCE",quantity:1,
+  price:102,remaining:1,block:"BLOCK_2",at:"2026-11-16T15:02:00Z"});
+ assert.equal(p2.remainingQty,1);
+ assert.equal(p2.trade.events.filter(e=>e.eventType==="RUNNER_ARMED").length,1,
+  "explicit runner-enabled frozen plan should preserve existing runner event");
+});
 test("mismatched reported remaining, over-exit and noninteger qty fail before any Journal write",async()=>{
  const a=input({candidate:"CAND-MISMATCH",plan:"PLAN-MISMATCH"});
  const opened=await opening(a);assert.equal(opened.created,true);
