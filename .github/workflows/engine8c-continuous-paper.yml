@@ -10,6 +10,7 @@ on:
       - "services/core/logic/trading/engine8PaperExecutor.js"
       - "services/core/tests/engine8ContinuousPaperAcceptance.test.js"
       - "services/core/tests/engine8ContinuousPaperDurable.test.js"
+      - "services/core/tests/engine8ContinuousPaperHttp.test.js"
       - ".github/workflows/engine8c-continuous-paper.yml"
 permissions:
   contents: read
@@ -47,6 +48,8 @@ jobs:
           printf '%s\n' '{"version":"engine8.paperAcceptanceState.v1","acceptanceTradeCompleted":false,"newPaperOrdersAllowed":true}' > "$ENGINE8_PAPER_DATA_DIR/engine8-paper-acceptance-state.json"
           node --test services/core/tests/engine8Engine10Strategy1Provenance.test.js
           node --test services/core/tests/engine8PaperDurableStore.test.js
+      - name: Real protected HTTP PAPER bridge and three-contract lifecycle (ephemeral)
+        run: node --test services/core/tests/engine8ContinuousPaperHttp.test.js
       - name: No REAL or production data exposure
         run: |
           test "$ENGINE8_LIVE_TRADING_ENABLED" = "0"
