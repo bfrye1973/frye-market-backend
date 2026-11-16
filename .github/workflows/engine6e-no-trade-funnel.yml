@@ -22,6 +22,49 @@ jobs:
       - name: Syntax check snapshot integration
         working-directory: services/core
         run: node --check jobs/buildStrategySnapshot.js && node --check routes/runAllEngines.js && node --check server.js && node --check jobs/replayEngine6ENoTradeFunnel.js
+      - name: Read-only current production ES candidate eligibility precheck
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, datetime
+          url='https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES'
+          print('READ_ONLY_AUDIT_AT_UTC',datetime.datetime.now(datetime.timezone.utc).isoformat())
+          try:
+              req=urllib.request.Request(url,headers={'Accept':'application/json','Cache-Control':'no-store'})
+              with urllib.request.urlopen(req,timeout=25) as resp:
+                  status=resp.status
+                  payload=json.load(resp)
+              print('SNAPSHOT_HTTP',status)
+              scalp=(payload.get('strategies') or {}).get('intraday_scalp@10m') or {}
+              cand=scalp.get('engine26LocationCandidate') or {}
+              react=(((scalp.get('confluence') or {}).get('context') or {}).get('reaction') or {}).get('paperScalpReaction') or {}
+              part=(((scalp.get('confluence') or {}).get('context') or {}).get('volume') or {}).get('engine4AuthorizedReactionParticipation') or {}
+              paper=(scalp.get('permission') or {}).get('paper') or {}
+              order=scalp.get('engine8PaperOrder') or {}
+              print('SNAPSHOT_FIELDS',json.dumps({
+                  'ok':payload.get('ok'),'symbol':payload.get('symbol'),
+                  'snapshotTime':payload.get('snapshotTime'),
+                  'candidateId':cand.get('candidateId'),'zoneId':cand.get('zoneId'),
+                  'candidateStatus':cand.get('status'),'candidateInvalidated':cand.get('candidateInvalidated'),
+                  'candidateLifecycleStartTime':cand.get('candidateLifecycleStartTime'),
+                  'engine3Direction':react.get('direction'),
+                  'engine3Qualified':react.get('engine3Strategy1QualifiedForEngine6'),
+                  'engine3Allowed':react.get('allowed'),
+                  'engine4Confirmed':part.get('participationConfirmed'),
+                  'engine4Allowed':part.get('allowed'),
+                  'engine4HardBlocked':part.get('hardBlocked'),
+                  'paperDecision':paper.get('decision'),'paperAllowed':paper.get('allowed'),
+                  'paperLocked':paper.get('locked'),
+                  'paperBlockers':paper.get('blockers'),
+                  'orderStatus':order.get('status'),'orderPlanId':order.get('planId'),
+                  'orderBlockers':order.get('blockers'),
+              },default=str))
+              valid=(bool(cand.get('candidateId') and cand.get('zoneId')) and react.get('engine3Strategy1QualifiedForEngine6') is True and react.get('allowed') is True and part.get('participationConfirmed') is True and part.get('allowed') is True and paper.get('allowed') is True and paper.get('decision')=='FAST_INTRADAY_PAPER_ALLOW' and paper.get('locked') is True)
+              print('CURRENT_APPROVED_LOCKED_CANDIDATE', 'YES' if valid else 'NO')
+              print('ENGINE8_PRIVATE_LEDGER_CHECK','UNAVAILABLE_FROM_PUBLIC_SNAPSHOT')
+          except Exception as exc:
+              print('SNAPSHOT_READ_UNAVAILABLE',type(exc).__name__,str(exc)[:300])
+          PY
       - name: Run read-only funnel tests
         working-directory: services/core
         run: node --test tests/engine6ENoTradeFunnel.test.js tests/engine6EAcceptedExecutorReceipt.test.js tests/engine6ENoTradeFunnelGates.test.js tests/engine6ENoTradeFunnelStore.test.js tests/engine6ENoTradeFunnelJob.test.js tests/engine6EAdvisoryContext.test.js tests/engine6EHistoricalReplay.test.js tests/engine6EFrozenExitLifecycle.test.js tests/engine6EEngine8CandidateReset.test.js tests/engine6ECanonicalExecutorPreparation.test.js
