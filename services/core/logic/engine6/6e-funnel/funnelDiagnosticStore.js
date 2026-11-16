@@ -45,12 +45,19 @@ export function readFunnelCycles(date,{root=DEFAULT_FUNNEL_ROOT,maxRecords=10000
 export function summarizeFunnelCycles(records, date=null) {
   const byGate=Object.fromEntries(Array.from({length:12},(_,i)=>["G"+i,0]));
   const reasons={};const seen=new Map();const distinctByGate={};
+  const cycleStates={PASS:0,WAIT:0,BLOCK:0,UNAVAILABLE:0};
+  let verifiedOrderCycles=0;
   for(let i=0;i<12;i++) distinctByGate["G"+i]=new Set();
   for(const record of records){
+    const state=record?.firstFailedGate==null?"PASS":record?.firstFailureState;
+    if(Object.hasOwn(cycleStates,state)) cycleStates[state]++;
+    if(record?.executor?.orderCreated===true) verifiedOrderCycles++;
     const gate=record?.firstFailedGate;
     if(Object.hasOwn(byGate,gate)) byGate[gate]++;
     const failure=(record?.gates||[]).find(g=>g.gate===gate);
-    const reason=failure?.reason||"NO_STOPPING_GATE";
+    // Successful observations have no failure reason. Never count a passing
+    // executed cycle as a no-trade cause in the diagnostic leaderboard.
+    const reason=failure?.reason||null;
     const reasonList=[reason,...(Array.isArray(failure?.observed?.blockers)?failure.observed.blockers:[]),...(Array.isArray(failure?.observed?.reasonCodes)?failure.observed.reasonCodes:[])];
     for(const item of new Set(reasonList.filter(Boolean))) reasons[item]=(reasons[item]||0)+1;
     const id=record?.candidateId;
@@ -62,7 +69,7 @@ export function summarizeFunnelCycles(records, date=null) {
     }
   }
   return {schema:"engine6e.noTradeFunnelSummary.v1",readOnly:true,date,cycles:records.length,distinctCandidates:seen.size,
-    stoppedAtGate:byGate,distinctCandidatesReachingGate:Object.fromEntries(Object.entries(distinctByGate).map(([k,v])=>[k,v.size])),
+    stoppedAtGate:byGate,cycleStates,verifiedOrderCycles,distinctCandidatesReachingGate:Object.fromEntries(Object.entries(distinctByGate).map(([k,v])=>[k,v.size])),
     topReasonCodes:Object.entries(reasons).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([reason,count])=>({reason,count})),
     last20:records.slice(-20).reverse()};
 }
