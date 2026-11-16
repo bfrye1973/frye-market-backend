@@ -14,11 +14,16 @@ test('NTP diagnostic validates origin, stratum, leap and conservative network-de
  const response=Buffer.alloc(48);response[0]=0x24;response[1]=2;
  response.writeUInt32BE(1,8);
  request.subarray(40,48).copy(response,24);
+ stamp(response,16,sendWallMs-30000);
  stamp(response,32,sendWallMs+13);
  stamp(response,40,sendWallMs+15);
  const v=inspectNtpReply(response,{request,sendWallMs,receiveWallMs:sendWallMs+40});
  assert.ok(v);
  assert.equal(v.stratum,2);
+ assert.equal(v.staleReference,false);
+ const stale=Buffer.from(response);
+ stamp(stale,16,sendWallMs-600000);
+ assert.equal(inspectNtpReply(stale,{request,sendWallMs,receiveWallMs:sendWallMs+40}).staleReference,true);
  assert.ok(Math.abs(v.offsetMs+6)<0.01);
  assert.ok(v.uncertaintyMs>=19);
  assert.equal(v.referenceType,'REMOTE_NTP_DIAGNOSTIC');
