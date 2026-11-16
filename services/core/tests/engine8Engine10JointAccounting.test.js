@@ -76,6 +76,19 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
  assert.equal(estimatedNet,235);
  assert.equal(final.trade.summary.realizedPnL,gross);
  assert.deepEqual(exitEvents.map(e=>e.eventRealizedPnL),[50,200]);
+ assert.deepEqual(exitEvents[0].contractAllocations.map(c=>c.blockId),["BLOCK_1"]);
+ assert.deepEqual(exitEvents[1].contractAllocations.map(c=>c.blockId),["BLOCK_2","BLOCK_3"]);
+ assert.deepEqual(exitEvents[1].contractAllocations.map(c=>c.contractId),["CONTRACT_2","CONTRACT_3"]);
+ assert.deepEqual(exitEvents[1].contractAllocations.map(c=>c.allocatedQuantity),[1,1]);
+ assert.deepEqual(exitEvents[1].contractAllocations.map(c=>c.grossRealizedPnL),[100,100]);
+ assert.equal(exitEvents[1].contractAllocations.reduce((sum,c)=>sum+c.grossRealizedPnL,0),exitEvents[1].eventRealizedPnL,
+  "one combined fill, two independently attributed contract blocks");
+ assert.equal(final.trade.summary.paperFeeEstimate.estimatedFees,15);
+ assert.equal(final.trade.summary.paperFeeEstimate.estimatedNetRealizedPnL,235);
+ assert.equal(final.trade.summary.paperFeeEstimate.provenance,"ENGINE7_FROZEN_COMMISSION_ESTIMATE");
+ assert.equal(final.trade.summary.paperFeeEstimate.authoritativeBrokerFeeReceipt,false);
+ assert.equal(final.trade.summary.paperFeeEstimate.authoritativeNetReceipt,false);
+
  assert.equal(final.trade.events.filter(e=>e.eventType==="TRADE_CLOSED").length,1);
  assert.equal(final.trade.openingPlan?.runnerPlan?.enabled,false);
  assert.deepEqual(final.trade.strategy1Provenance.finalThreeContractAllocation,allocation);
@@ -89,6 +102,8 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
    journalFeeReceipt:feeReceiptPresent?"PUBLISHED":"NOT_PUBLISHED",
    journalNetReceipt:Number.isFinite(publishedNet)?"PUBLISHED":"NOT_PUBLISHED",
    allocatedContracts:expectedByContract,
+   journalContractAllocations:exitEvents.map(e=>e.contractAllocations),
+   journalPaperFeeEstimate:final.trade.summary.paperFeeEstimate,
    exactCombinedExitQuantity:2,runnerExpected:false,extraRunnerEvents};
  assert.equal(evidence.journalFeeReceipt,"NOT_PUBLISHED");
  assert.equal(evidence.journalNetReceipt,"NOT_PUBLISHED");
