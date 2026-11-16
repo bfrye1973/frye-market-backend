@@ -14,9 +14,12 @@ function fixture(){
 test("current approval manifest produces existing seven-degree published waves",()=>{
  const a=buildAuthorizedWorkingStructureV1(fixture());
  assert.equal(a.status,"COMPLETE_WORKING_SELECTION");
- assert.equal(a.publicationRevision,6);
+ assert.equal(a.publicationRevision,7);
  assert.equal(a.degrees.micro.activeWave,"C");
  assert.equal(a.degrees.subminute.activeWave,"C");
+ assert.equal(a.degrees.submicro.activeWave,"W2");
+ assert.equal(a.degrees.micro.activeWave,"C");
+ assert.equal(a.degrees.minute.activeWave,"W2");
 });
 test("new owner-approved model selection requires only manifest change, not consumer code",()=>{
  const f=fixture(),base=buildAuthorizedWorkingStructureV1(f);
@@ -24,7 +27,7 @@ test("new owner-approved model selection requires only manifest change, not cons
  const selection=structuredClone(ownerApprovedWorkingSelection);
  selection.selectionRevision=3;
  selection.approvalReference="TEST_APPROVAL_FOR_NEW_OWNER_MODEL";
- selection.degrees.micro={...selection.degrees.micro,key:"ownerMicroW4Up",modelVersion:"engine22.microW4Owner.v1",activeWave:"W4",direction:"DOWN"};
+ selection.degrees.micro={...selection.degrees.micro,key:"ownerMicroW4Up",modelVersion:"engine22.microW4Owner.v1",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE"};
 
  const updated=buildAuthorizedWorkingStructureV1({...f,selection});
  assert.equal(updated.status,"COMPLETE_WORKING_SELECTION");
