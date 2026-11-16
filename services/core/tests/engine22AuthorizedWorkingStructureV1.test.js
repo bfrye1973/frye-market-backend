@@ -8,6 +8,8 @@ historicalSelection.selectionRevision=6;
 historicalSelection.approvalReference="OWNER_20261102_SUBMICRO_C_DOWN";
 historicalSelection.degrees.submicro={key:"ownerSubmicroCDownNov2",modelVersion:"engine22.submicroCDownNov2OwnerWorking.v1",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",parentDegree:"micro",parentWave:"C"};
 historicalSelection.degrees.micro={key:"ownerMicroCDownOct31",modelVersion:"engine22.microCDownOct31OwnerWorking.v1",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentWave:"C"};
+historicalSelection.degrees.subminute={key:"ownerSubminuteCDownOct31",modelVersion:"engine22.subminuteCDownOct31OwnerWorking.v1",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",parentDegree:"minute",parentWave:"W2"};
+historicalSelection.degrees.minute={key:"ownerMinuteW2Retracement",modelVersion:"engine22.minuteW2RetracementOwner.v1",activeWave:"W2",direction:"DOWN",stage:"DEVELOPING",parentDegree:"minor",parentWave:null};
 const buildHistorical=options=>buildAuthorizedWorkingStructureV1({...options,selection:historicalSelection});
 const cfg={
 submicro:["ownerSubmicroCDownNov2","engine22.submicroCDownNov2OwnerWorking.v1","C","DOWN","DEVELOPING_CANDIDATE","micro","C"],
