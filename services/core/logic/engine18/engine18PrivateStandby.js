@@ -3,6 +3,7 @@
  // No Ironbeam auth, source socket, R2 upload, chart, trading or HTTP listener.
 import {existsSync,mkdirSync,readFileSync,statSync,statfsSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
+import {diagnoseEngine18HostClock} from './engine18NtpDiagnostic.js';
 const MOUNT='/var/data/engine18-recorder';
 const authorized=process.env.ENGINE18_LIVE_CAPTURE_APPROVED==='YES' ||
  process.env.ENGINE18_MANAGER_TRIAL_ACCEPTED==='YES';
@@ -59,8 +60,19 @@ function snapshot(){
 }
 if(!existsSync(MOUNT))process.stderr.write('ENGINE18_PRIVATE_STANDBY_DISK_NOT_PRESENT\n');
 process.stdout.write('ENGINE18_PRIVATE_HOST_CHECK '+JSON.stringify(snapshot())+'\n');
+async function clockDiagnostic(){
+ try{
+  const evidence=await diagnoseEngine18HostClock();
+  process.stdout.write('ENGINE18_PRIVATE_NTP_DIAGNOSTIC '+JSON.stringify(evidence)+'\n');
+ }catch{
+  process.stderr.write('ENGINE18_PRIVATE_NTP_DIAGNOSTIC_UNAVAILABLE\n');
+ }
+}
+void clockDiagnostic(); // read-only once at startup; no recording authorized
 const timer=setInterval(()=>{
  process.stdout.write('ENGINE18_PRIVATE_HOST_CHECK '+JSON.stringify(snapshot())+'\n');
 },60000);
-process.once('SIGTERM',()=>{clearInterval(timer);process.exit(0);});
-process.once('SIGINT',()=>{clearInterval(timer);process.exit(0);});
+const ntpTimer=setInterval(()=>{void clockDiagnostic();},1800000);
+ntpTimer.unref?.();
+process.once('SIGTERM',()=>{clearInterval(timer);clearInterval(ntpTimer);process.exit(0);});
+process.once('SIGINT',()=>{clearInterval(timer);clearInterval(ntpTimer);process.exit(0);});
