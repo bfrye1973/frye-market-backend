@@ -32,3 +32,21 @@ test("cannot append a forged trading record",()=>{
   try{assert.throws(()=>appendFunnelCycle({schema:"other",readOnly:false},{root:dir,date:"2026-11-11"}),/INVALID_FUNNEL_RECORD/);}
   finally{fs.rmSync(dir,{recursive:true,force:true});}
 });
+
+test("successful executed cycles are counted as success, never as no-trade reason",()=>{
+  const successful={schema:"engine6e.noTradeFunnel.v1",readOnly:true,snapshotTime:"2026-11-16T17:00:00Z",
+    candidateId:"A",zoneId:"Z",firstFailedGate:null,firstFailureState:null,
+    executor:{available:true,orderCreated:true},
+    gates:Array.from({length:12},(_,i)=>({gate:"G"+i,state:"PASS",reached:true}))};
+  const stopped={...successful,candidateId:"B",firstFailedGate:"G3",firstFailureState:"WAIT",
+    executor:{available:false,orderCreated:false},
+    gates:successful.gates.map((g,i)=>i===3?{...g,state:"WAIT",reason:"ENGINE3_REACTION_PENDING"}:i>3?{...g,reached:false}:g)};
+  const report=summarizeFunnelCycles([successful,stopped],"2026-11-16");
+  assert.equal(report.cycles,2);
+  assert.deepEqual(report.cycleStates,{PASS:1,WAIT:1,BLOCK:0,UNAVAILABLE:0});
+  assert.equal(report.verifiedOrderCycles,1);
+  assert.equal(report.stoppedAtGate.G3,1);
+  assert.deepEqual(report.topReasonCodes,[{reason:"ENGINE3_REACTION_PENDING",count:1}]);
+  assert.equal(report.distinctCandidates,2);
+  assert.equal(report.distinctCandidatesReachingGate.G11,1);
+});
