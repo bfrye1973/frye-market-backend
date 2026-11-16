@@ -1,0 +1,27 @@
+name: Engine22 Subminute ABC Nov16 Owner Anchors
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js'
+      - 'services/core/tests/engine22SubminuteAbcDownNov16.test.js'
+      - '.github/workflows/engine22-subminute-abc-nov16.yml'
+permissions:
+  contents: read
+jobs:
+  subminute-current:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate owner Subminute ABC nodes, fib math and no-lookahead touches
+        run: |
+          node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+          node --check services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js
+          node --check services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js
+          node --test services/core/tests/engine22SubminuteAbcDownNov16.test.js services/core/tests/engine22WorkingWaveNodesV1.test.js

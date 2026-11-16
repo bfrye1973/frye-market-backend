@@ -1068,6 +1068,67 @@ export function applyOwnerPriceTouchesV1({
         touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
         touchEvidence:l.touchEvidence}]));
   }
+  // Nov 16 owner Subminute ABC C-down: only observations after the
+  // Nov 15 B-high event can turn new C Fibonacci WATCH levels green.
+  // Independent journal ID: never inherit old Subminute C/W1 touch history.
+  const subminuteABC=root.degrees?.subminute?.ownerSubminuteAbcDownNov16Research;
+  if(subminuteABC?.version==="engine22.ownerSubminuteAbcDownNov16Research.v1" &&
+      subminuteABC.selectionStatus==="RESEARCH_ONLY" &&
+      Array.isArray(subminuteABC.levels)){
+    const start=Date.parse(subminuteABC.anchors?.bHighAtUtc);
+    if(Number.isFinite(start)){
+      const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+      const id=JSON.stringify(["subminute","ownerSubminuteAbcDownNov16Research",
+        subminuteABC.version,subminuteABC.anchors?.aHigh,
+        subminuteABC.anchors?.aLow,subminuteABC.anchors?.bHigh,
+        subminuteABC.anchors?.bHighAtUtc,
+        subminuteABC.levels.map(l=>[l.key,l.price])]);
+      const old=disk[id]||{};
+      const priorModel=previousWavelength?.degrees?.subminute?.ownerSubminuteAbcDownNov16Research;
+      const same=priorModel?.version===subminuteABC.version &&
+        priorModel.anchors?.bHigh===subminuteABC.anchors.bHigh &&
+        priorModel.anchors?.bHighAtUtc===subminuteABC.anchors.bHighAtUtc &&
+        priorModel.anchors?.aHigh===subminuteABC.anchors.aHigh &&
+        priorModel.anchors?.aLow===subminuteABC.anchors.aLow;
+      const quote=finite(currentPrice);
+      const previous=same?finite(previousWavelength?.currentPrice):null;
+      const observed=[];
+      if(now>=start&&quote!==null)
+        observed.push({low:previous===null?quote:Math.min(previous,quote),
+          time:new Date(now).toISOString(),source:"ES_CURRENT_PRICE",verified:false});
+      for(const bar of Array.isArray(bars10m)?bars10m:[]){
+        const raw=bar?.time??bar?.timestamp??bar?.t;
+        const parsed=typeof raw==="string"&&!/^\\d+$/.test(raw)?Date.parse(raw):Number(raw);
+        const at=Number.isFinite(parsed)?(parsed<1e11?parsed*1000:parsed):NaN;
+        const low=finite(Number(bar?.low??bar?.l)),high=finite(Number(bar?.high??bar?.h));
+        if(!Number.isFinite(at)||at<start||at+600000>now ||
+           low===null||high===null||low>high)continue;
+        observed.push({low,time:new Date(at).toISOString(),
+          source:"ES_10M_COMPLETED_OHLC",
+          verified:subminuteABC.priceBasisReconciliation==="VERIFIED"});
+      }
+      subminuteABC.levels=subminuteABC.levels.map(l=>{
+        const prior=old[l.key]?.price===l.price?old[l.key]:
+          same?priorModel.levels?.find(x=>x.key===l.key&&x.price===l.price&&x.status==="TOUCHED"):null;
+        const retained=prior?.status==="TOUCHED";
+        const hit=retained?null:observed.find(o=>o.low<=l.price);
+        const source=retained?(prior.touchEvidenceType||"PREVIOUS_SNAPSHOT"):(hit?.source||null);
+        return {...l,status:retained||hit?"TOUCHED":"WATCH",
+          provisional:true,touchEvidenceAvailable:Boolean(retained||hit),
+          touchEvidenceType:source,touchedAt:retained?prior.touchedAt||null:hit?.time||null,
+          touchEvidence:retained?prior.touchEvidence||null:hit?{
+            verified:hit.verified,
+            evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?
+              "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+            modelPriceBasisVerified:subminuteABC.priceBasisReconciliation==="VERIFIED",
+          }:null};
+      });
+      disk[id]=Object.fromEntries(subminuteABC.levels.filter(l=>l.status==="TOUCHED")
+        .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+          touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+          touchEvidence:l.touchEvidence}]));
+    }
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }

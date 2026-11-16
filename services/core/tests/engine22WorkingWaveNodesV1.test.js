@@ -48,8 +48,13 @@ test("same Engine22 Strategy models supply selected Micro/Submicro research anch
   assert.equal(packet.degrees.minute.nodes[0].noExecution,true);
   assert.equal(packet.degrees.minute.nodes[0].waveCompletionConfirmed,false,
     "Owner-marked research must not silently promote canonical count");
-  assert.equal(packet.degrees.subminute.nodes.length,0,
-    "Subminute research/Fib references must not be converted into current chart nodes");
+  assert.deepEqual(packet.degrees.subminute.nodes.map(n=>[n.label,n.price,n.marketAtUtc]),[
+    ["A starting high",7675.75,"2026-11-12T16:00:00.000Z"],
+    ["A ending low",7516,"2026-11-13T15:00:00.000Z"],
+    ["B ending high",7614,"2026-11-15T23:30:00.000Z"],
+  ]);
+  assert(packet.degrees.subminute.nodes.every(n=>n.noExecution&&n.waveCompletionConfirmed===false));
+  assert.equal(packet.degrees.subminute.nodes.some(n=>n.label==="C ending low / W1 start"),false);
 });
 
 test("fingerprint remains unchanged on price/touch updates, changes on corrected anchor",()=>{
@@ -140,7 +145,7 @@ test("matching current Strategy-card price and date recovers exact Engine22 hist
   assert.deepEqual(packet.degrees.intermediate.nodes.map(n=>[n.price,n.ownerArizonaTime]),[
     [7151,"2026-01-28 10:00 AZ"],[6407,"2026-03-30 03:00 AZ"]]);
   assert.deepEqual(packet.degrees.minute.nodes.map(n=>n.price),[7671]);
-  assert.equal(packet.degrees.subminute.nodes.length,0);
+  assert.deepEqual(packet.degrees.subminute.nodes.map(n=>n.price),[7675.75,7516,7614]);
 });
 
 test("unmatched date-only current card price is never assigned an archived time",()=>{
