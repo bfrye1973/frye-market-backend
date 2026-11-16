@@ -56,6 +56,12 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
   gates.push(!isObj(order)?absent("G10"):up(order.status)==="READY_TO_CREATE_PAPER_ORDER"&&order.executable===true?passed("G10",evidence(order)):hasHard(order)?blocked("G10","PAPER_ADAPTER_BLOCKED"):waiting("G10","PAPER_ADAPTER_NOT_READY"));
   const ex=isObj(executorResult?.execution)?executorResult.execution:executorResult;
   gates.push(match(executorResult,order,candidateId,zoneId)?passed("G11",{orderId:ex.orderId??null,executionId:ex.executionId??null,planId:ex.planId??null}):isObj(executorResult)&&ex?.rejected===true&&ex?.candidateId===candidateId&&ex?.planId===order?.planId?blocked("G11","EXECUTOR_REJECTED"):absent("G11","EXECUTOR_ORDER_CREATION_NOT_VERIFIED"));
+  // Inconsistent upstream reports are visible as diagnostics, NEVER as a
+  // separate Engine6 market veto. The owner of Engine9 must fix its contract.
+  const consistencyWarnings=[];
+  if(mgmt?.managementReady===true &&
+      codes(mgmt?.blockers).some(code=>/^TARGET_[123]_INVALID$/.test(up(code))))
+    consistencyWarnings.push("ENGINE9_READY_WITH_INVALID_TARGET");
   // Unreached downstream stages remain evidence-only; never create additional independent failures.
   const first=gates.find(x=>x.state!=="PASS")??null;
   return {schema:"engine6e.noTradeFunnel.v1",readOnly:true,symbol:"ES",strategyId:SID,
@@ -63,6 +69,7 @@ export function buildNoTradeFunnel(snapshot, {executorResult=null, lifecycleOutc
     price:c?.currentPrice??v?.price??null,candidateId,zoneId,
     candidateLifecycleStartTime:c?.candidateLifecycleStartTime??c?.zoneMemorySummary?.candidateLifecycleStartTime??null,
     direction:direction||null,
+    consistencyWarnings,
     firstFailedGate:first?.gate??null,firstFailureState:first?.state??null,
     gates:gates.map((x,i)=>first && i>gates.indexOf(first)?{...x,reached:false}: {...x,reached:true}),
     advisory:{engine6:v?.engine6AdvisoryContext??null,engine22:advisory(v?.engine22WaveStrategy?.authorizedWorkingStructure),engine25:advisory(v?.engine25Context??v?.engine25Participation),engine29:advisory(v?.engine29CrossMarketStress),engine27:advisory(v?.engine27MinuteDecision)},
