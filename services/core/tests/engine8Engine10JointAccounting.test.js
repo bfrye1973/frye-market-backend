@@ -83,12 +83,13 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
  // This MUST remain explicit in review, never silently reported as verified net.
  const publishedNet=final.trade.summary.netRealizedPnL;
  const feeReceiptPresent=Number.isFinite(final.trade.summary.totalFees);
+ const extraRunnerEvents=final.trade.events.filter(e=>e.eventType==="RUNNER_ARMED").length;
  const evidence={grossJournal:final.trade.summary.realizedPnL,
    estimatedFees:estimatedRoundTripFees,estimatedNet,
    journalFeeReceipt:feeReceiptPresent?"PUBLISHED":"NOT_PUBLISHED",
    journalNetReceipt:Number.isFinite(publishedNet)?"PUBLISHED":"NOT_PUBLISHED",
    allocatedContracts:expectedByContract,
-   exactCombinedExitQuantity:2,runnerExpected:false};
+   exactCombinedExitQuantity:2,runnerExpected:false,extraRunnerEvents};
  assert.equal(evidence.journalFeeReceipt,"NOT_PUBLISHED");
  assert.equal(evidence.journalNetReceipt,"NOT_PUBLISHED");
  console.log("ENGINE8_ENGINE10_CONTRACT_ACCOUNTING",JSON.stringify(evidence));
