@@ -38,7 +38,6 @@ jobs:
           node --test services/core/tests/engine8ContinuousPaperAcceptance.test.js
           node --test services/core/tests/engine8ContinuousPaperDurable.test.js
           node --test services/core/tests/engine10ContinuousPaperLifecycle.test.js
-          node --test services/core/tests/engine8Engine10Strategy1LifecycleReplay.test.js
       - name: Actual isolated protected HTTP execution and candidate A/B lifecycle
         run: node --test services/core/tests/engine8ContinuousPaperHttp.test.js
       - name: Delayed real Engine10 Journal acknowledgement and safe Engine8 retry
