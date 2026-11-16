@@ -1647,6 +1647,19 @@ function appendRunnerArmedEvent({
   identity,
   management,
 }) {
+  // Strategy 1's frozen no-runner plan is authoritative. A P2/midpoint
+  // exit is not permission to synthesize runner management. Preserve the
+  // existing runner-enabled path and all historical Journal events.
+  if (
+    trade?.strategyId === "intraday_scalp@10m" &&
+    (
+      trade?.openingPlan?.runnerPlan?.enabled === false ||
+      trade?.strategy1Provenance?.runnerPlan?.enabled === false
+    )
+  ) {
+    return;
+  }
+
   const targetId =
     toUpper(management?.targetId);
 
