@@ -1129,6 +1129,65 @@ export function applyOwnerPriceTouchesV1({
           touchEvidence:l.touchEvidence}]));
     }
   }
+  // Current Micro C DOWN and Minute W2 DOWN: independent durable ES
+  // touch evidence. Prior waves, old research models and pre-origin bars
+  // never make these new Fibonacci levels green.
+  for(const [degree,modelKey,startField,kind] of [
+    ["micro","ownerMicroAbcDownNov16Research","bHighAtUtc","MICRO_C_DOWN_20261116"],
+    ["minute","ownerMinuteW1FormingNov9Research","w1EndingHighAtUtc","MINUTE_W2_DOWN_20261111"],
+  ]){
+    const model=root.degrees?.[degree]?.[modelKey];
+    if(model?.selectionStatus!=="RESEARCH_ONLY"||!Array.isArray(model.levels))continue;
+    const start=Date.parse(model.anchors?.[startField]);
+    if(!Number.isFinite(start))continue;
+    const id=JSON.stringify([degree,kind,model.version,start,
+      model.anchors?.[degree==="micro"?"aHigh":"w1StartReference"],
+      model.anchors?.[degree==="micro"?"aLow":"w1EndingHigh"],
+      model.anchors?.[degree==="micro"?"bHigh":"w1EndingHighAtUtc"],
+      model.levels.map(l=>[l.key,l.price])]);
+    const now=Number.isFinite(evaluationTimeMs)?evaluationTimeMs:Date.now();
+    const oldModel=previousWavelength?.degrees?.[degree]?.[modelKey];
+    const same=oldModel?.version===model.version &&
+      oldModel.anchors?.[startField]===model.anchors?.[startField] &&
+      JSON.stringify(oldModel.levels?.map(l=>[l.key,l.price]))===
+        JSON.stringify(model.levels.map(l=>[l.key,l.price]));
+    const oldQuote=same?finite(previousWavelength?.currentPrice):null;
+    const quote=finite(currentPrice),observed=[];
+    if(now>=start&&quote!==null)
+      observed.push({low:oldQuote===null?quote:Math.min(quote,oldQuote),
+        source:"ES_CURRENT_PRICE",time:new Date(now).toISOString(),verified:false});
+    for(const bar of Array.isArray(bars10m)?bars10m:[]){
+      const raw=bar?.time??bar?.timestamp??bar?.t;
+      const parsed=typeof raw==="string"&&!/^\\d+$/.test(raw)?Date.parse(raw):Number(raw);
+      const at=Number.isFinite(parsed)?(parsed<1e11?parsed*1000:parsed):NaN;
+      const low=finite(Number(bar?.low??bar?.l)),high=finite(Number(bar?.high??bar?.h));
+      if(!Number.isFinite(at)||at<start||at+600000>now||
+        low===null||high===null||low>high)continue;
+      observed.push({low,source:"ES_10M_COMPLETED_OHLC",
+        time:new Date(at).toISOString(),
+        verified:model.priceBasisReconciliation==="VERIFIED"});
+    }
+    const persisted=disk[id]||{};
+    model.levels=model.levels.map(level=>{
+      const prev=persisted[level.key]?.price===level.price?persisted[level.key]:
+        same?oldModel.levels?.find(l=>l.key===level.key&&l.price===level.price&&l.status==="TOUCHED"):null;
+      const retained=prev?.status==="TOUCHED";
+      const hit=retained?null:observed.find(o=>o.low<=level.price);
+      const source=retained?prev.touchEvidenceType:hit?.source||null;
+      return {...level,status:retained||hit?"TOUCHED":"WATCH",
+        touchEvidenceAvailable:Boolean(retained||hit),
+        touchEvidenceType:source,touchedAt:retained?prev.touchedAt||null:hit?.time||null,
+        touchEvidence:retained?prev.touchEvidence||null:hit?{
+          verified:hit.verified,evidenceClass:hit.source==="ES_10M_COMPLETED_OHLC"?
+            "COMPLETED_CANDLE_BASIS_PENDING":"ES_SNAPSHOT_OBSERVATION",
+          modelPriceBasisVerified:model.priceBasisReconciliation==="VERIFIED",
+        }:null};
+    });
+    disk[id]=Object.fromEntries(model.levels.filter(l=>l.status==="TOUCHED")
+      .map(l=>[l.key,{key:l.key,price:l.price,status:l.status,
+        touchEvidenceType:l.touchEvidenceType,touchedAt:l.touchedAt,
+        touchEvidence:l.touchEvidence}]));
+  }
   if(typeof storePath==="string"&&path.isAbsolute(storePath))store(storePath,disk);
   return root;
 }
