@@ -53,14 +53,17 @@ for(const direction of ["LONG","SHORT"]){
   assert.equal(plan.upstreamState.engine27HardGateApplied,false);
  });
 }
-test("document Engine9 inconsistency: invalid third target currently leaves managementReady true",()=>{
+test("Engine9 corrected: invalid third target cannot produce an official ready management plan",()=>{
  const x=inputs();
  x.engine26ProposedGeometry.target3Price=7530;
  x.engine26ProposedGeometry.testingExitLifecycle.block3.price=7530;
  const plan=buildEngine9OfficialManagementPlan(x);
- // Known Engine 9 owner-controlled gap: blocker is emitted but not reflected in managementReady.
  assert.ok(plan.blockers.includes("TARGET_3_INVALID"));
- assert.equal(plan.managementReady,true);
+ assert.equal(plan.managementReady,false);
+ assert.equal(plan.official,false);
+ assert.equal(plan.planId,null);
+ assert.equal(plan.planStatus,"WAITING_FOR_VALID_TARGETS");
+ assert.equal(plan.threeBlockManagement.enabled,false);
 });
 test("fresh candidate identity cannot borrow previous candidate's geometry",()=>{
  const x=inputs();
