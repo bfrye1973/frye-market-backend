@@ -702,17 +702,18 @@ function readStructuralEntrySnapshot(symbol = null) {
     return snapshot;
   }
 
+  // Owner retired SPY snapshots. Never substitute stale SPY strategy
+  // context for an ES/MES trade when the ES snapshot is unavailable.
+  // Return explicit unavailability instead; historical trade journal is intact.
   if (
     preferred !== SNAPSHOT_FILE
   ) {
-    return readJson(
-      SNAPSHOT_FILE,
-      {
-        ok: false,
-        now: null,
-        strategies: {},
-      }
-    );
+    return {
+      ok: false,
+      now: null,
+      strategies: {},
+      reason: "ES_SNAPSHOT_UNAVAILABLE",
+    };
   }
 
   return {
