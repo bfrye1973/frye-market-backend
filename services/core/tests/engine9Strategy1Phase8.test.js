@@ -206,3 +206,51 @@ test("does not create downstream authority", () => {
   assert.equal(plan.noExecution, true);
   assert.equal(plan.noJournalWrite, true);
 });
+
+test("LONG invalid third midpoint is never official even when the price is numeric", () => {
+  const inputs = makeInputs();
+  inputs.engine26ProposedGeometry.target3Price = 7773.5;
+  inputs.engine26ProposedGeometry.testingExitLifecycle.block3.price = 7773.5;
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.deepEqual(plan.officialTargets.map((target) => target.price), [
+    7753.25, 7763.5, 7773.5,
+  ]);
+  assert.ok(plan.blockers.includes("TARGET_3_INVALID"));
+  assert.equal(plan.planStatus, "WAITING_FOR_VALID_TARGETS");
+  assert.equal(plan.managementReady, false);
+  assert.equal(plan.official, false);
+  assert.equal(plan.planId, null);
+  assert.equal(plan.geometryValidated, false);
+});
+
+test("SHORT invalid third midpoint is never official even when directional", () => {
+  const inputs = makeInputs();
+  inputs.engine26ProposedGeometry.direction = "SHORT";
+  inputs.engine26ProposedGeometry.proposedStopPrice = 7705.75;
+  inputs.engine26ProposedGeometry.proposedStopDistancePoints = 9.25;
+  inputs.engine26ProposedGeometry.target1Price = 7690.75;
+  inputs.engine26ProposedGeometry.target2Price = 7650.25;
+  inputs.engine26ProposedGeometry.target3Price = 7640.25;
+  inputs.engine26ProposedGeometry.testingExitLifecycle.block3.price = 7640.25;
+  const plan = buildEngine9OfficialManagementPlan(inputs);
+  assert.ok(plan.blockers.includes("TARGET_3_INVALID"));
+  assert.equal(plan.managementReady, false);
+  assert.equal(plan.official, false);
+  assert.equal(plan.planId, null);
+  assert.equal(plan.planStatus, "WAITING_FOR_VALID_TARGETS");
+});
+
+test("numeric wrong-side P1 or P2 cannot produce official plan", () => {
+  for (const [field, marker] of [
+    ["target1Price", "TARGET_1_INVALID"],
+    ["target2Price", "TARGET_2_INVALID"],
+  ]) {
+    const inputs = makeInputs();
+    inputs.engine26ProposedGeometry[field] = 7680;
+    const plan = buildEngine9OfficialManagementPlan(inputs);
+    assert.ok(plan.blockers.includes(marker));
+    assert.equal(plan.managementReady, false);
+    assert.equal(plan.official, false);
+    assert.equal(plan.planId, null);
+  }
+});
