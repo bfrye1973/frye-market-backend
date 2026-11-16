@@ -23,7 +23,7 @@ test("current approval manifest produces existing seven-degree published waves",
 });
 test("new owner-approved model selection requires only manifest change, not consumer code",()=>{
  const f=fixture(),base=buildAuthorizedWorkingStructureV1(f);
- f.currentWavelength.degrees.micro.ownerMicroW4Up={version:"engine22.microW4Owner.v1",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentWave:"C",levels:[{price:7770,status:"WATCH"}]};
+ f.currentWavelength.degrees.micro.ownerMicroW4Up={version:"engine22.microW4Owner.v1",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentWave:"W1_FORMING_RESEARCH",levels:[{price:7770,status:"WATCH"}]};
  const selection=structuredClone(ownerApprovedWorkingSelection);
  selection.selectionRevision=3;
  selection.approvalReference="TEST_APPROVAL_FOR_NEW_OWNER_MODEL";
