@@ -877,6 +877,38 @@ export function buildCurrentWavelength({
         oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
         noExecution:true,noPermissionCreated:true,
       },
+      // Owner 2026-11-16: NEW November 12-15 Subminute ABC, independent of
+      // archived Nov 5 ABC and W1-forming interpretations. C down is
+      // developing research only; never manufacture a C ending low.
+      ownerSubminuteAbcDownNov16Research:{
+        version:"engine22.ownerSubminuteAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"subminute",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"minute",parentWave:"W2_RESEARCH",
+        anchors:{
+          aHigh:7675.75,aHighLocalTime:"2026-11-12 09:00 AZ",
+          aHighAtUtc:"2026-11-12T16:00:00Z",
+          aLow:7516,aLowLocalTime:"2026-11-13 08:00 AZ",
+          aLowAtUtc:"2026-11-13T15:00:00Z",
+          bHigh:7614,bHighLocalTime:"2026-11-15 16:30 AZ",
+          bHighAtUtc:"2026-11-15T23:30:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_SUBMINUTE_ABC_DOWN",
+        },
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        aLength:159.75,
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7614-(7675.75-7516)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"SUBMINUTE_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalSubminuteModelsPreserved:true,
+        priceBasisReconciliation:"PENDING",
+      },
       // New November 5 owner-marked ABC is a research-only card overlay.
       // Do not promote it into current seven-degree selection or overwrite
       // the October 31 wick/body models and their historical touches.
