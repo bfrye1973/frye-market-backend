@@ -1,0 +1,53 @@
+name: Engine 8 + Engine 10 joint isolated PAPER acceptance
+on:
+  push:
+    branches: [engine8-engine10-joint-acceptance-nov16]
+  pull_request:
+    paths:
+      - ".github/workflows/engine8-engine10-joint-acceptance.yml"
+      - "services/core/tests/engine8Engine10JointAccounting.test.js"
+permissions:
+  contents: read
+jobs:
+  joint-protected-http:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      ENGINE8_PAPER_DATA_DIR: /tmp/e8e10-http-paper-${{ github.run_id }}
+      TRADE_JOURNAL_DIR: /tmp/e8e10-http-journal-${{ github.run_id }}
+      ENGINE8_PAPER_ONLY: "1"
+      ENGINE8_LIVE_TRADING_ENABLED: "0"
+      ENGINE8_ALLOW_LIVE_FUTURES: "0"
+      ENGINE8_KILL_SWITCH: "0"
+      REPLAY_MODE: "0"
+      ENGINE12_REPLAY_MODE: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install test dependencies
+        run: npm install --ignore-scripts
+      - name: Combined Engine8 and Engine10 syntax and acceptance safety
+        run: |
+          node --check services/core/logic/journal/tradeJournalStore.js
+          node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
+          node --check services/core/logic/trading/engine8PaperExecutor.js
+          node --check services/core/logic/trading/runEngine8PaperLifecycleExecution.js
+          node --test services/core/tests/engine8ContinuousPaperAcceptance.test.js
+          node --test services/core/tests/engine8ContinuousPaperDurable.test.js
+          node --test services/core/tests/engine10ContinuousPaperLifecycle.test.js
+      - name: Actual isolated protected HTTP execution and candidate A/B lifecycle
+        run: node --test services/core/tests/engine8ContinuousPaperHttp.test.js
+      - name: Combined midpoint contract accounting and fee audit
+        run: node --test services/core/tests/engine8Engine10JointAccounting.test.js
+      - name: Engine10 REAL broker accounting regressions (no real broker access)
+        run: |
+          node --test services/core/tests/engine10RealContractIdentity.test.js
+          node --test services/core/tests/engine10RealMultiCampaignFifo.test.js
+      - name: Verify no real trading environment flags
+        run: |
+          test "$ENGINE8_LIVE_TRADING_ENABLED" = "0"
+          test "$ENGINE8_ALLOW_LIVE_FUTURES" = "0"
+          test "$ENGINE8_PAPER_ONLY" = "1"
