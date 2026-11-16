@@ -5,6 +5,8 @@ on:
   pull_request:
     paths:
       - 'services/core/logic/engine18/engine18RawOnlyDiagnosticWorker.js'
+      - 'services/core/logic/engine18/engine18Phase5S3Coordinator.js'
+      - 'services/core/tests/engine18Post301Readiness.test.js'
       - 'services/core/logic/engine18/engine18RawOnlyDiagnosticEntrypoint.js'
       - 'services/core/tests/engine18RawOnlyDiagnostic.test.js'
       - '.github/workflows/engine18-raw-only-diagnostic.yml'
@@ -23,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18Phase5S3Coordinator.js
       - run: node --check services/core/logic/engine18/engine18RawOnlyDiagnosticWorker.js
       - run: node --check services/core/logic/engine18/engine18RawOnlyDiagnosticEntrypoint.js
       - run: node --test services/core/tests/engine18RawOnlyDiagnostic.test.js
+      - run: node --test services/core/tests/engine18Post301Readiness.test.js
