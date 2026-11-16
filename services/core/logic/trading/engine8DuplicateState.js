@@ -23,7 +23,8 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
+import { readPaperStore, writePaperStore, paperStorePath } from "./engine8PaperDurableStore.js";
+import { resolveEngine8PaperAcceptanceEligibility } from "./engine8PaperAcceptanceEligibility.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1095,6 +1096,24 @@ export function getEngine8DuplicateState({
   const acceptanceState =
     getEngine8AcceptanceState();
 
+  // Do not allow a missing, corrupt, ambiguous, or explicitly disabled
+  // authorization record to masquerade as an ordinary open test state.
+  // This reads only the dedicated durable PAPER authority; the legacy
+  // completion file is retained for audit and is NOT merged or rewritten.
+  const acceptanceEligibility =
+    resolveEngine8PaperAcceptanceEligibility({
+      state: readJson(ACCEPTANCE_FILE, null),
+      storePresent: fs.existsSync(
+        paperStorePath("engine8-paper-acceptance-state.json")
+      ),
+      candidateId: normalizedCandidateId,
+      planId: normalizedPlanId,
+      continuousPaperAuthorized:
+        process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED === "1",
+      operatorPaperDisabled:
+        process.env.ENGINE8_PAPER_OPERATOR_DISABLED === "1",
+    });
+
   const lifecycleState =
     getEngine8ExecutionState();
 
@@ -1114,6 +1133,14 @@ export function getEngine8DuplicateState({
               ?.candidateId
           ) ===
           normalizedCandidateId
+      ) ||
+      lifecycleRecords.some(
+        (record) =>
+          text(record?.candidateId) === normalizedCandidateId
+      ) ||
+      trades.some(
+        (trade) =>
+          text(trade?.candidateId) === normalizedCandidateId
       )
     );
 
@@ -1252,6 +1279,10 @@ export function getEngine8DuplicateState({
     acceptanceTradeCompleted,
 
     newPaperOrdersAllowed,
+
+    // Effective continuous-PAPER authorization is separate from the
+    // historical one-time acceptance trial audit flags above.
+    acceptanceEligibility,
 
     journalPendingExecution,
 
