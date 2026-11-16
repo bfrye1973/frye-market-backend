@@ -59,9 +59,9 @@ test("Submicro touches persist independently after post-B eligible new low",()=>
 });
 test("Old owner selections, older Fibonacci models, higher degrees preserved",()=>{
  const w=base(7400);
- assert.equal(ownerApprovedWorkingSelection.selectionRevision,6);
- assert.equal(ownerApprovedWorkingSelection.degrees.micro.key,"ownerMicroCDownOct31");
- assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroCDownNov2");
+ assert.equal(ownerApprovedWorkingSelection.selectionRevision,7);
+ assert.equal(ownerApprovedWorkingSelection.degrees.micro.key,"ownerMicroAbcDownNov16Research");
+ assert.equal(ownerApprovedWorkingSelection.degrees.submicro.key,"ownerSubmicroW3Nov9InternalResearch");
  assert.equal(w.degrees.micro.ownerMicroCDownOct31.version,"engine22.microCDownOct31OwnerWorking.v1");
  assert.equal(w.degrees.submicro.ownerSubmicroCDownNov2.version,"engine22.submicroCDownNov2OwnerWorking.v1");
  assert.equal(w.degrees.minute.ownerMinuteAbcResearch.version,"engine22.minuteAbcDownNov5Research.v1");
