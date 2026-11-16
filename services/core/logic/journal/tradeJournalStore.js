@@ -1641,6 +1641,47 @@ function resolveManagementEvent({
   };
 }
 
+// PAPER-only Strategy 1 audit attribution. A combined midpoint order is ONE
+// real PAPER execution with multiple frozen contract-block allocations, never
+// two fabricated fills. Historical records are never backfilled or rewritten.
+function strategy1PaperContractAllocations({trade, fillQuantity, closePrice}) {
+  if (trade?.accountMode !== "PAPER" ||
+      trade?.strategyId !== "intraday_scalp@10m") return null;
+  const plan = trade?.openingPlan?.threeBlockManagement ||
+    trade?.strategy1Provenance?.threeBlockManagement;
+  const blocks = plan?.blocks;
+  const originalQty = toNumberOrNull(trade?.qty?.originalQty);
+  const previousExited = toNumberOrNull(trade?.qty?.cumulativeExitQuantity) ?? 0;
+  if (!Array.isArray(blocks) || blocks.length !== 3 ||
+      originalQty !== 3 || !Number.isSafeInteger(fillQuantity) ||
+      !Number.isSafeInteger(previousExited)) return null;
+  const slots = [];
+  const used = new Set();
+  for (const block of blocks) {
+    const count = toNumberOrNull(block?.contracts);
+    const blockId = normalizeId(block?.blockId);
+    const contractId = normalizeId(block?.contractId);
+    if (count !== 1 || !blockId || !contractId ||
+        used.has(blockId) || used.has(contractId)) return null;
+    used.add(blockId); used.add(contractId);
+    slots.push({blockId,contractId,targetId:normalizeId(block?.targetId),
+      frozenTargetPrice:toNumberOrNull(block?.targetPrice)});
+  }
+  if (previousExited + fillQuantity > slots.length) return null;
+  const entry = toNumberOrNull(trade?.entry?.price);
+  const dpp = toNumberOrNull(trade?.riskBasis?.dollarsPerPoint);
+  const direction = toUpper(trade?.direction);
+  const points = entry === null || closePrice === null ? null :
+    round2((direction === "SHORT" ? entry-closePrice : closePrice-entry));
+  return slots.slice(previousExited,previousExited+fillQuantity).map(slot=>({
+    ...slot,allocatedQuantity:1,actualExitPrice:closePrice,
+    realizedPoints:points,
+    grossRealizedPnL:points === null || dpp === null ? null : round2(points*dpp),
+    source:"FROZEN_STRATEGY_1_BLOCK_SEQUENCE",
+    executionAccounting:"ONE_FILL_MULTIPLE_CONTRACT_ALLOCATIONS"
+  }));
+}
+
 function appendRunnerArmedEvent({
   trade,
   eventTime,
@@ -1751,6 +1792,29 @@ function updateSummary(trade) {
           frozenRisk
         )
       : null;
+
+  // PAPER commission is an explicit estimate, NEVER a broker fee receipt.
+  // Do not populate REAL totalFees/netRealizedPnL with estimated amounts.
+  if (trade?.accountMode === "PAPER" &&
+      trade?.strategyId === "intraday_scalp@10m") {
+    const rate = toNumberOrNull(
+      trade?.riskBasis?.commissionDollarsPerContractRoundTrip
+    );
+    const exited = toNumberOrNull(trade?.qty?.cumulativeExitQuantity);
+    if (rate !== null && rate >= 0 &&
+        Number.isSafeInteger(exited) && realizedPnL !== null) {
+      const estimatedFees = round2(rate * exited);
+      trade.summary.paperFeeEstimate = {
+        estimatedFees,
+        estimatedNetRealizedPnL:round2(realizedPnL-estimatedFees),
+        estimatedRoundTripFeePerContract:rate,
+        estimatedClosedContracts:exited,
+        provenance:"ENGINE7_FROZEN_COMMISSION_ESTIMATE",
+        authoritativeBrokerFeeReceipt:false,
+        authoritativeNetReceipt:false
+      };
+    }
+  }
 }
 
 
@@ -6260,6 +6324,10 @@ export async function applyEngine8ExecutionToJournal({
         fillQuantity,
     });
 
+  const contractAllocations = strategy1PaperContractAllocations({
+    trade,fillQuantity,closePrice,
+  });
+
   trade.events =
     Array.isArray(trade.events)
       ? trade.events
@@ -6326,6 +6394,11 @@ export async function applyEngine8ExecutionToJournal({
 
     pnlBasis:
       pnl.pnlBasis,
+
+    ...(contractAllocations ? {
+      contractAllocations,
+      allocationProvenance:"FROZEN_STRATEGY_1_PLAN",
+    } : {}),
   });
 
   appendRunnerArmedEvent({
