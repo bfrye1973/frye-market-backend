@@ -69,3 +69,17 @@ test("Engine 8/10 safeguards remain evidence, not Engine6 independent market vet
  assert.equal(result.firstFailedGate,null);
  assert.ok(result.gates.every(g=>g.state==="PASS"));
 });
+
+test("Engine9 contradictory ready + invalid third target is reported but never becomes Engine6 veto",()=>{
+ const x=snapshot();
+ x.strategies["intraday_scalp@10m"].engine9OfficialManagementPlan={
+   managementReady:true,blockers:["TARGET_3_INVALID"]};
+ const result=buildNoTradeFunnel(x,{executorResult:verifiedReceipt()});
+ assert.equal(result.firstFailedGate,null);
+ assert.deepEqual(result.consistencyWarnings,["ENGINE9_READY_WITH_INVALID_TARGET"]);
+ assert.equal(result.gates[8].state,"PASS");
+ assert.equal(result.executor.orderCreated,true);
+ // Engine9 owns the management contract correction; Engine6E does not invent
+ // another gate or override frozen Engine6 permission.
+ assert.equal(x.strategies["intraday_scalp@10m"].permission.paper.allowed,true);
+});
