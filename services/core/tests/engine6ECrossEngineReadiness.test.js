@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {buildEngine6AdvisoryContext} from "../logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js";
 import {buildNoTradeFunnel} from "../logic/engine6/6e-funnel/buildNoTradeFunnel.js";
+import {ownerApprovedWorkingSelection} from "../logic/engine22/wave/ownerApprovedWorkingSelectionV1.js";
 const candidate=(direction)=>({ok:true,symbol:"ES",generatedAt:"2026-11-16T18:00:00.000Z",strategies:{
  "intraday_scalp@10m":{
  engine26LocationCandidate:{candidateId:"CAND-"+direction,zoneId:"ZONE-"+direction,evaluationAuthorized:true,currentPrice:7700},
@@ -75,3 +76,55 @@ for(const direction of ["LONG","SHORT"]){
    assert.equal(before.strategies["intraday_scalp@10m"].permission.paper.locked,true);
  });
 }
+
+test("merged Engine22 revision 7 exact owner wave hierarchy is valid read-only Engine6E context",()=>{
+ const owner=ownerApprovedWorkingSelection;
+ assert.equal(owner.selectionRevision,7);
+ assert.equal(owner.approvalReference,"OWNER_20261116_LATEST_MICRO_SUBMINUTE_ABC_SUBMICRO_W2_MINUTE_W2");
+ for(const [degree,wave,direction,parentDegree,parentWave] of [
+  ["submicro","W2","DOWN","micro","C"],
+  ["micro","C","DOWN","subminute","C"],
+  ["subminute","C","DOWN","minute","W2"],
+  ["minute","W2","DOWN","minor","W3_OWNER_WORKING_RESEARCH"]
+ ]){
+  const d=owner.degrees[degree];
+  assert.equal(d.activeWave,wave,degree);
+  assert.equal(d.direction,direction,degree);
+  assert.equal(d.parentDegree,parentDegree,degree);
+  assert.equal(d.parentWave,parentWave,degree);
+  assert.ok(d.stage.includes("DEVELOPING_OWNER_RESEARCH"),degree);
+ }
+ // Construct a STRICT syntactically valid publication from the actual owner
+ // manifest fields. This tests consumer compatibility; the Engine22 publisher
+ // and its own CI separately verify the full runtime emitted publication.
+ const packet=selection();
+ packet.publicationRevision=owner.selectionRevision;
+ packet.selectionApprovalReference=owner.approvalReference;
+ for(const degree of ["submicro","micro","subminute","minute"]){
+  const entry=owner.degrees[degree];
+  Object.assign(packet.degrees[degree],{
+   activeWave:entry.activeWave,direction:entry.direction,stage:entry.stage,
+   modelVersion:entry.modelVersion,
+   parentDegree:entry.parentDegree,parentWave:entry.parentWave,
+   sourcePath:"currentWavelength.degrees."+degree+"."+entry.key,
+   selectionStatus:"OWNER_SELECTED_WORKING",completionConfirmed:false
+  });
+ }
+ packet.degrees.minor.activeWave="W3_OWNER_WORKING_RESEARCH";
+ for(const direction of ["LONG","SHORT"]){
+  const x=candidate(direction);
+  x.strategies["intraday_scalp@10m"].engine22WaveStrategy={authorizedWorkingStructure:structuredClone(packet)};
+  const ctx=buildEngine6AdvisoryContext({snapshot:x});
+  assert.equal(ctx.wave.available,true);
+  assert.equal(ctx.wave.ownerRevision,7);
+  assert.equal(ctx.wave.submicro.activeWave,"W2");
+  assert.equal(ctx.wave.submicro.workingDirection,"DOWN");
+  assert.equal(ctx.wave.submicro.completionConfirmed,false);
+  assert.equal(ctx.wave.micro.activeWave,"C");
+  assert.equal(ctx.wave.micro.workingDirection,"DOWN");
+  assert.equal(ctx.wave.micro.completionConfirmed,false);
+  const funnel=buildNoTradeFunnel(x);
+  assert.equal(funnel.firstFailedGate,"G11");
+  assert.equal(funnel.gates[5].state,"PASS");
+ }
+});
