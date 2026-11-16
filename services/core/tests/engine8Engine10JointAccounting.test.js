@@ -114,3 +114,37 @@ test("combined P2/P3 midpoint: gross realized allocation, fixed fee estimate and
  assert.equal(duplicate.skipped,true);
  assert.equal(fs.readFileSync(path.join(dir,"trade-journal.json"),"utf8"),before);
 });
+
+test("separate P2/P3 fills persist one frozen contract identity per midpoint exit",async()=>{
+ const second={...ticket,
+  candidateId:"JOINT-SEPARATE",planId:"JOINT-SEPARATE-PLAN",
+  executionId:"SEPARATE-ENTRY-X",orderId:"SEPARATE-ENTRY-O",idempotencyKey:"SEPARATE-ENTRY-I",
+  fillTime:"2026-11-16T16:00:00Z",
+  strategy1Provenance:{...ticket.strategy1Provenance,
+   candidateId:"JOINT-SEPARATE",planId:"JOINT-SEPARATE-PLAN"}};
+ const open=await createTradeJournalEntryFromEngine8Fill({
+  ticket:second,order:{...second,status:"FILLED"},result:{...second,status:"FILLED"}
+ });
+ assert.equal(open.created,true);
+ const id={...second,tradeId:open.tradeId};
+ const p1=await send(lifecycle(id,"SEP-P1",1,2,101,"REDUCE","BLOCK_1","2026-11-16T16:01:00Z"));
+ const p2=await send(lifecycle(id,"SEP-P2",1,1,102,"REDUCE","BLOCK_2","2026-11-16T16:02:00Z"));
+ const p3Ticket=lifecycle(id,"SEP-P3",1,0,102,"EXIT","BLOCK_3","2026-11-16T16:02:01Z");
+ p3Ticket.targetId="T3";
+ const p3=await send(p3Ticket);
+ assert.equal(p1.remainingQty,2);
+ assert.equal(p2.remainingQty,1);
+ assert.equal(p3.status,"CLOSED");
+ assert.equal(p3.remainingQty,0);
+ assert.equal(p3.trade.qty.cumulativeExitQuantity,3);
+ const exits=p3.trade.events.filter(e=>e.qtyClosed>0&&e.action!=="NEW_ENTRY");
+ assert.deepEqual(exits.map(e=>e.contractAllocations?.map(c=>c.contractId)),[
+  ["CONTRACT_1"],["CONTRACT_2"],["CONTRACT_3"]
+ ]);
+ assert.deepEqual(exits.map(e=>e.eventRealizedPnL),[50,100,100]);
+ assert.equal(p3.trade.summary.realizedPnL,250);
+ assert.equal(p3.trade.summary.paperFeeEstimate.estimatedFees,15);
+ assert.equal(p3.trade.summary.paperFeeEstimate.estimatedNetRealizedPnL,235);
+ assert.equal(p3.trade.events.filter(e=>e.eventType==="RUNNER_ARMED").length,0);
+ assert.equal(p3.trade.events.filter(e=>e.eventType==="TRADE_CLOSED").length,1);
+});
