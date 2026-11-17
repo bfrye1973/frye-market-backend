@@ -1,0 +1,24 @@
+name: Engine18C Daily Raw Session Preparation Safety
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18DailyRawSessionReadiness.js'
+      - 'services/core/tests/engine18DailyRawSessionReadiness.test.js'
+      - '.github/workflows/engine18-daily-raw-readiness.yml'
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18DailyRawSessionReadiness.js
+      - run: node --test services/core/tests/engine18DailyRawSessionReadiness.test.js
