@@ -1,0 +1,35 @@
+name: Engine18C HAND Zone Watch Offline Acceptance
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18HandZone*.js'
+      - 'services/core/logic/engine18/engine18ChartZoneSource.js'
+      - 'services/core/logic/engine18/bootstrapServer.js'
+      - 'services/core/routes/esSmzLevels.js'
+      - 'services/core/jobs/buildEsManualStructuresFromTxt.js'
+      - 'services/core/tests/engine18HandZoneWatcher.test.js'
+      - '.github/workflows/engine18-hand-zone-watch.yml'
+jobs:
+  five-minute-watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18HandZoneContext.js
+      - run: node --check services/core/logic/engine18/engine18HandZoneWatcher.js
+      - run: node --check services/core/logic/engine18/engine18HandZoneR2History.js
+      - run: node --check services/core/logic/engine18/engine18ChartZoneSource.js
+      - run: node --check services/core/logic/engine18/engine18HandZoneRuntime.js
+      - run: node --check services/core/logic/engine18/bootstrapServer.js
+      - run: node --check services/core/routes/esSmzLevels.js
+      - run: node --check services/core/jobs/buildEsManualStructuresFromTxt.js
+      - run: node --test services/core/tests/engine18HandZoneWatcher.test.js
