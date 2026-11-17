@@ -116,3 +116,16 @@ Manager requires v5/v6 comparison on original point-in-time data, LONG/SHORT sym
 
 ## Recovery instruction for any future Engine 3 teammate, Manager, or Claude
 **Read this file first, then PR #337 and PR #336, then the Manager's Nov 17 directive and Claude's source review.** Report actual code/test status from the latest commits; do not treat plans as implemented. Start at the Phase 1 next-actions checklist. Never promote v6 or start Phase 2 without explicit manager decision. No production merge, deploy, raw recording activation, or downstream authority changes are authorized.
+
+## Phase 1 implementation continuation — 2026-11-17 later checkpoint
+**Prior sections above are retained as historical status at first lock. This addendum supersedes their earlier "not wired" descriptions.**
+
+- The branch now assembles `engine3V6Shadow` alongside canonical `engine3V5`, not in its downstream handoff. State is saved to a **separate v6 shadow-only file**; neither Engine4 nor Engine6 receives v6 authority.
+- The v6 phase-1 pure reducer supports: holding through ordinary chop, timestamp-guarded completed 1m/5m anchor invalidation, diagnostic deterioration with renewed-progress clock reset, candidate changes, no same-tick inversion, out-of-order Replay guard, and verified Engine10 PAPER lock inputs.
+- Fresh Phase1 v6 direction is **seeded exclusively from a fresh, quality-validated canonical v5 establishment event**, with a provisional latest completed-5m extreme as anchor. This is only a Phase1 experimental comparison; **Phase2 still must establish `zoneActivatedAt` and a true causal reaction anchor**. Do not mistake the provisional anchor for approved final reaction geometry.
+- The Engine10 source adapter requires an exact **single** OPEN PAPER ES Strategy1 Journal trade with valid LONG/SHORT, `tradeId`, and positive `qty.remainingQty`. Missing/ambiguous records and failed list reads cannot invent a lock. Its diagnostic is published separately.
+- Added realistic builder-level LONG/SHORT lock tests, adapter tests, per-tick state tests, shadow-store tests and static production handoff tests.
+- A clean-`main` GitHub Actions comparison at commit `fc3489438ec2a7a998f59e3fa3cdd41b08f9b45d` confirmed both clean main and this branch had **179 legacy tests, 49 passed, 130 failed**. Therefore those 130 broad-suite failures are pre-existing at that point; they are **not a green legacy suite**.
+- All work remains **draft-only** in PR #337. No merge, deploy, recording, new 1m cadence, or v6 canonical promotion.
+- Latest post-addendum CI must be checked before claiming comprehensive new Phase1 test clearance. Exact active head/test SHA should be taken from PR #337, not copied from an earlier run.
+- Outstanding: verify newest test suite; verify Engine10 persistent journal read-health gap (the existing `listTrades` API returns an empty list for missing stored data, so "no open trade" is not always proof of healthy disk); historical original Engine12 Replay on Render; manager acceptance of provisional-anchor limitations. No Phase2 without manager authorization.
