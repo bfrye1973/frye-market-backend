@@ -9,7 +9,7 @@ function completed(bars,timeframe,evaluationTimeMs){
  const result=deriveCandleCompletionTruth({bars,timeframe,evaluationTimeMs});
  return (result.completedBars??[]).map(b=>{
    const start=n(Number(b?.time??b?.t??b?.tSec));
-   return {close:n(Number(b?.close)),high:n(Number(b?.high)),
+   return {open:n(Number(b?.open)),close:n(Number(b?.close)),high:n(Number(b?.high)),
      low:n(Number(b?.low)),closeTimeMs:start!==null?start*1000+duration:null,
      completed:true};
  }).filter(b=>b.close!==null&&b.closeTimeMs!==null);
@@ -30,23 +30,51 @@ export function buildEngine3V6Phase1Shadow({
  const reactionAnchor=established&&finalFive
    ? v5Direction==="SHORT"?finalFive.high:v5Direction==="LONG"?finalFive.low:null
    :null;
- const seed=established&&reactionAnchor!==null&&finalFive
+ const seed=typeof candidateId==="string"&&candidateId.length>0&&
+   established&&reactionAnchor!==null&&finalFive
    ? {establishedNow:true,direction:v5Direction,reactionAnchor,
        establishedAtMs:finalFive.closeTimeMs}:null;
+ const establishmentTime=n(priorState?.establishedAtMs);
+ const recentOne=establishmentTime!==null
+   ?one.filter(b=>b.closeTimeMs>establishmentTime).slice(-3):[];
+ const overlapRatios=[];
+ for(let i=1;i<recentOne.length;i++){
+   const first=recentOne[i-1],second=recentOne[i];
+   const intersection=Math.max(0,Math.min(first.high,second.high)-Math.max(first.low,second.low));
+   const span=Math.max(first.high,second.high)-Math.min(first.low,second.low);
+   if(Number.isFinite(intersection)&&Number.isFinite(span)&&span>0)
+     overlapRatios.push(intersection/span);
+ }
+ const overlap=overlapRatios.length>=2
+   ?overlapRatios.reduce((a,b)=>a+b,0)/overlapRatios.length:null;
+ const elapsed=n(evaluationTimeMs)!==null&&n(priorState?.lastProgressAtMs)!==null
+   ?evaluationTimeMs-priorState.lastProgressAtMs:null;
+ const noProgress=elapsed!==null&&elapsed>=6*60000&&
+   recentOne.length>=2;
+ const completedAbsorption=establishmentTime!==null&&
+   five.some(b=>b.closeTimeMs>establishmentTime)&&
+   v5?.evidence?.priceAction?.controlState==="ABSORPTION";
+ const observedOpposing=establishmentTime!==null&&recentOne.length>=2&&
+   ((priorState?.canonicalDirection==="SHORT"&&
+     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="BULLISH")||
+    (priorState?.canonicalDirection==="LONG"&&
+     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="BEARISH"));
  const result=evaluateEngine3V6Phase1({
    priorState,candidateId,zoneId,
    observedControl:v5?.evidence?.priceAction?.controlState??"NO_CONTROL",
    observedQuality:v5?.evidence?.priceAction?.quality??"WEAK",
    completed1m:one,completed5m:five,evaluationTimeMs,
    seedFromV5:seed,openTradeActive,lockedTradeDirection,policy,
-   evidence:{noProgress:false,highOverlap:false,opposingReaction:false,
-     completed5mAbsorption:false},
+   evidence:{noProgress,highOverlap:overlap!==null&&overlap>=0.60,
+     opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
  });
  return {...result,
    reactionAnchorBasis:result.establishedNow
      ?"PROVISIONAL_LATEST_COMPLETED_5M_EXTREME_PHASE1"
      :priorState?.reactionAnchorBasis??"UNVERIFIED",
    policyStatus:policy?"EXPERIMENTAL_SHADOW_POLICY":"NO_EXPERIMENTAL_POLICY",
+   deteriorationEvidenceDiagnostics:{noProgress,oneMinuteOverlapRatio:overlap,
+     opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
    rawBarHistoryArchived:false,
    stage:"PHASE1_SHADOW_ONLY",
    v5CanonicalDirection:v5Direction,
