@@ -105,6 +105,14 @@ async function exchange({WebSocketImpl,url,request,decode,timeoutMs}){
   ws.once('message',data=>{try{finish(null,decode(data))}catch{finish(Error('Rithmic Test invalid response'))}});
  })}finally{clearTimeout(timer);try{ws.close()}catch{}try{ws.terminate?.()}catch{}}
 }
+export async function probeRithmicSystemInfo({env=process.env,WebSocketImpl=WebSocket,timeoutMs=8000}={}){
+ verifyTestEnvironment(env);
+ if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>30000)throw Error('invalid timeout');
+ const system=await exchange({WebSocketImpl,url:RITHMIC_TEST_ENDPOINT,
+  request:encodeSystemInfoRequest(),decode:parseSystemInfo,timeoutMs});
+ return {stage:'SYSTEM_INFO',testAvailable:system.systems.includes('Rithmic Test'),
+  rpCodes:system.rpCodes,readOnly:true};
+}
 export async function probeRithmicTest({env=process.env,WebSocketImpl=WebSocket,timeoutMs=8000}={}){
  const creds=verifyTestEnvironment(env);
  if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>30000)throw Error('invalid timeout');
