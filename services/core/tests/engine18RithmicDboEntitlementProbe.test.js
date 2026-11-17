@@ -25,7 +25,7 @@ test('DBO requests are read-only and count only vendor-confirmed frames',async()
   close(){}terminate(){}
  }
  const result=await probeRithmicDbo({env,WebSocketImpl:FakeWS,timeoutMs:1000,
-  initialProbe:async()=>({authenticated:true})});
+  initialProbe:async()=>({testAvailable:true})});
  assert.equal(sockets,1);
  assert.deepEqual(sent,[10,117,115]);
  assert.equal(result.counts.ack,1);assert.equal(result.counts.snapshot,1);
@@ -41,7 +41,7 @@ test('nonzero vendor reply stays safe and fails without book acceptance',async()
   close(){}terminate(){}
  }
  const r=await probeRithmicDbo({env,WebSocketImpl:FakeWS,timeoutMs:1000,
-  initialProbe:async()=>({authenticated:true})});
+  initialProbe:async()=>({testAvailable:true})});
  assert.equal(r.reason,'DBO_RESPONSE_NONZERO');assert.deepEqual(r.codes,['99']);
  assert.equal(r.sawOrderUpdate,false);
 });
