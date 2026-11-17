@@ -105,7 +105,7 @@ export function evaluateEngine3V6Phase1({
   // Phase1: deterioration expiry is an observation, NEVER an invalidation cause.
   if(prev!=="NEUTRAL"&&(closed1||closed5)){
     return {...base,canonicalDirection:"NEUTRAL",convictionState:"INVALIDATED",
-      invalidatedNow:true,deterioratingSinceMs:null,
+      invalidatedNow:true,invalidatedAtMs:validTime,deterioratingSinceMs:null,
       reasonCodes:reasons(closed1&&"ANCHOR_INVALIDATED_COMPLETED_1M",
         closed5&&"ANCHOR_INVALIDATED_COMPLETED_5M",
         "OPPOSITE_ESTABLISHMENT_DEFERRED")};
