@@ -107,3 +107,38 @@ test("warning and anchor threat are independent, annotation-only switches",()=>{
  assert.equal(on.directionEstablishmentAuthorized,off.directionEstablishmentAuthorized);
  assert.equal(on.canonicalDirectionAuthority,off.canonicalDirectionAuthority);
 });
+
+test("post-activation 5m supplies true anchor if eligible 1m engagement is unavailable",()=>{
+ const z={low:106,high:110,midline:108,zoneId:"Z"};
+ const five=[...oldBars,
+  b(now-10*minute,5*minute,110,106,108),
+  b(now-5*minute,5*minute,111,107,109),
+  b(now,5*minute,112,107,109)];
+ const e=phase2({...eligible,zone:z,authorizedStartedAt:now-11*minute,
+  bars5m:five,bars1m:[],observedDirection:"SHORT",establishingNow:true});
+ assert.equal(e.reactionSite,"whole");
+ assert.equal(e.reactionSiteEvidenceSource,"5m");
+ assert.equal(e.anchorSource,"POST_ACTIVATION_5M_EXTREME");
+ assert.equal(e.reactionAnchor,112);
+ assert.equal(e.shadowSeedEvidenceEligible,true);
+});
+test("held anchor freezes both reaction direction and site even after another edge is touched",()=>{
+ const five=[...oldBars,b(now-10*minute,5*minute,111,105,108),
+  b(now-5*minute,5*minute,111,105,108),
+  b(now,5*minute,111,105,108)];
+ const initial=phase2({...eligible,authorizedStartedAt:now-11*minute,
+  bars5m:five,bars1m:[b(now-minute,minute,111,109,110)],
+  observedDirection:"SHORT",establishingNow:true});
+ assert.equal(initial.reactionSite,"upper");
+ const next=phase2({...eligible,priorActivation:initial.activationRun,
+  bars5m:five,bars1m:[b(now-minute,minute,102,99,100)],
+  observedDirection:"SHORT",priorReactionAnchor:initial.reactionAnchor,
+  priorAnchorDirection:"SHORT",priorReactionSite:"upper"});
+ assert.equal(next.reactionSite,"upper");
+ assert.equal(next.reactionAnchor,initial.reactionAnchor);
+ const reversed=phase2({...eligible,priorActivation:initial.activationRun,
+  bars5m:five,bars1m:[b(now-minute,minute,102,99,100)],
+  observedDirection:"LONG",priorReactionAnchor:initial.reactionAnchor,
+  priorAnchorDirection:"SHORT",priorReactionSite:"upper"});
+ assert.notEqual(reversed.anchorSource,"FROZEN_PREVIOUS");
+});
