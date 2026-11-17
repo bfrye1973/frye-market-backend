@@ -8559,6 +8559,7 @@ attachEngine4AuthorizedReactionParticipation({
       : null;
 
 let engine26OpenPaperTrades = [];
+let engine26OpenPaperTradesReadSucceeded = false;
 let engine10OpenEsFamilyTrades = [];
 
 if (isEsIntradayScalp) {
@@ -8570,12 +8571,14 @@ if (isEsIntradayScalp) {
       accountMode: "PAPER",
     });
 
-    engine26OpenPaperTrades = Array.isArray(openPaperResp?.trades)
+    engine26OpenPaperTradesReadSucceeded = Array.isArray(openPaperResp?.trades);
+    engine26OpenPaperTrades = engine26OpenPaperTradesReadSucceeded
       ? openPaperResp.trades
       : [];
   } catch (err) {
     console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
     engine26OpenPaperTrades = [];
+    engine26OpenPaperTradesReadSucceeded = false;
   }
 
   try {
@@ -8878,6 +8881,7 @@ if (isEsIntradayScalp) {
 // This never infers direction from Engine3, Engine26 or the wave count.
 const engine3OpenPaperLock = resolveEngine10OpenPaperDirection({
   trades: engine26OpenPaperTrades,
+  readSucceeded: engine26OpenPaperTradesReadSucceeded,
   symbol,
   strategyId: s.strategyId,
 });
@@ -8919,6 +8923,8 @@ const engine3V5 =
 
 patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
+patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
+  engine3OpenPaperLock;
 
 if (isEsIntradayScalp) {
   saveEngine3V5CanonicalState({
