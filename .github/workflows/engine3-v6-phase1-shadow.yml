@@ -1,0 +1,30 @@
+name: Engine 3 v6 Phase 1 Shadow Safety
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/**'
+      - 'services/core/tests/engine3V6*.test.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - '.github/workflows/engine3-v6-phase1-shadow.yml'
+  workflow_dispatch:
+jobs:
+  phase1:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify syntax
+        run: |
+          node --check logic/engine3/v6/evaluateEngine3V6Phase1.js
+          node --check logic/engine3/v6/resolveEngine10OpenPaperDirection.js
+          node --check jobs/buildStrategySnapshot.js
+      - name: Run Phase 1 unit tests
+        run: node --test tests/engine3V6Phase1Shadow.test.js tests/engine3V6Engine10OpenTradeLock.test.js
+      - name: Existing Engine 3 v5 regression checks
+        run: |
+          node --test tests/engine3V5*.test.js
