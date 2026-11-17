@@ -110,7 +110,8 @@ test('same-rank baseline is descriptive and zero residual for unchanged images',
    assert.ok(cell.meanDistanceFromTouchTicks>=0);
   }
  }
- assert.deepEqual(result.summarySafe.topTwoBidConcentrations,[]);\n assert.deepEqual(result.summarySafe.topTwoAskConcentrations,[]);
+ assert.deepEqual(result.summarySafe.topTwoBidConcentrations,[]);
+ assert.deepEqual(result.summarySafe.topTwoAskConcentrations,[]);
 });
 
 test('top concentrations rank positive residual depth, not longest coverage',()=>{
