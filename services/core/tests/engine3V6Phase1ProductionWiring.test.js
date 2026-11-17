@@ -9,3 +9,14 @@ test("production assembly passes only Engine10 OPEN PAPER resolution to existing
  assert.match(source,/buildEngine3V5Shadow\(\{\s*openTradeActive:\s*engine3OpenPaperLock\.openTradeActive,/);
  assert.match(source,/lockedTradeDirection:\s*engine3OpenPaperLock\.lockedTradeDirection/);
 });
+
+test("v6 shadow is published beside, never in place of, canonical v5",()=>{
+ const v5=source.indexOf("patchedConfluence.context.reaction.engine3V5 =");
+ const v6=source.indexOf("patchedConfluence.context.reaction.engine3V6Shadow =");
+ const handoff=source.indexOf("const engine3Strategy1Handoff =");
+ assert.ok(v5>=0&&v6>v5&&handoff>v6);
+ assert.match(source,/loadEngine3V6Phase1ShadowState\(\)/);
+ assert.match(source,/saveEngine3V6Phase1ShadowState\(\{ state: engine3V6Shadow \}\)/);
+ const segment=source.slice(handoff,handoff+500);
+ assert.doesNotMatch(segment,/engine3V6Shadow/);
+});
