@@ -1,3 +1,4 @@
+# BASELINE CI ONLY: unchanged workflow commands on main; no Engine22 implementation or test changes
 name: Engine22 unified wave history contract checks
 on:
   pull_request:
