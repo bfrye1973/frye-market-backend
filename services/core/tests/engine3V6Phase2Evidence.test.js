@@ -64,7 +64,8 @@ for(const [direction,extreme] of [["SHORT",113],["LONG",97]]){
   assert.equal(out.anchorSource,"POST_ACTIVATION_1M_EXTREME");
   const later=run({...base,priorActivation:out.activationRun,
    bars1m:[...one,bar(now-minute,minute,125,85,105)],bars5m:five,
-   observedDirection:direction,priorReactionAnchor:out.reactionAnchor});
+   observedDirection:direction,priorReactionAnchor:out.reactionAnchor,
+   priorAnchorDirection:direction});
   assert.equal(later.reactionAnchor,extreme);
  });
 }
@@ -75,9 +76,12 @@ test("adverse forming-bar warning cannot alter direction, conviction or permissi
  assert.ok(prior.geometry);
  const input={...base,priorActivation:prior.activationRun,bars5m:[
   ...h,bar(now+5*minute,5*minute,125,95,110)],
-  observedDirection:"SHORT",priorReactionAnchor:110};
+  observedDirection:"SHORT",priorReactionAnchor:110,
+  priorAnchorDirection:"SHORT",progressExtreme:106};
  const warning=run(input);
  assert.equal(warning.adverseDisplacementWarning,true);
+ assert.equal(warning.adverseWarning,true);
+ assert.equal(warning.anchorThreatened,true);
  assert.equal(warning.directionEstablishmentAuthorized,false);
  assert.equal(warning.canonicalDirectionAuthority,false);
  assert.equal(warning.noPermissionCreated,true);
