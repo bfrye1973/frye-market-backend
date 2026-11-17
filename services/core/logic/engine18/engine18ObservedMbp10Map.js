@@ -56,14 +56,16 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
  if(!Array.isArray(records)||!num(maxIntervalMs)||maxIntervalMs<=0)throw Error('bounded offline records required');
  const images=[],fieldCounts={},diagnostics={
   depthFrames:0,validDepthFrames:0,invalidDepthFrames:0,invalidReasons:{},
-  zeroSizeLevels:0,nonTickLevels:0,rankPositionAgreement:0,rankPositionTotal:0,
+  zeroSizeLevels:0,nonTickLevels:0,rankPositionAgreement:0,rankZeroBasedMatches:0,rankOneBasedMatches:0,rankPositionTotal:0,
+  oGreaterThanSz:0,oLessThanOrEqualSz:0,nonTickLevelValues:0,
   tUnchangedPriceSizeChanged:0,tChangedPriceSizeUnchanged:0,
   previousLevelComparisons:0,consecutiveDisplayedIncrease:0,consecutiveDisplayedDecrease:0,
   consecutiveDisplayedUnchanged:0,tradeItems:0,tradeSqIncreases:0,tradeSqNonIncreasing:0,
   tradeSqGaps:0,tradeSqDuplicates:0,tradeSqFirst:null,tradeSqLast:null,
   tradeIs:{true:0,false:0,missing:0},tradeClx:{true:0,false:0,missing:0},
   quoteFrames:0,quoteCompared:0,quoteBestPriceAgreement:0,quoteBestSizeAgreement:0,
-  quoteShapeMissing:0,receiveGapHistogram:{under10:0,under100:0,under1000:0,over1000:0},
+  quoteShapeMissing:0,quotesAfterLastDepth:0,tradesAfterLastDepth:0,
+  depthFields:{},quoteFields:{},tradeFields:{},receiveGapHistogram:{under10:0,under100:0,under1000:0,over1000:0},
   controlEvents:{},unverifiedReceiptClock:true
  };
  let previousDepth=null,previousSq=null,previousReceipt=null,latestDepth=null;
@@ -99,11 +101,14 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    }
    diagnostics.validDepthFrames++;latestDepth=image;
    const current=new Map(entries(image).map(x=>[key(x.side,x.price),x]));
+   for(const rawLevel of [...message.d[0].b,...message.d[0].a])updateField(diagnostics.depthFields,rawLevel);
    for(const r of current.values()){
     const id=key(r.side,r.price);observedCells.add(id);
     if(r.sz===0)diagnostics.zeroSizeLevels++;
     diagnostics.rankPositionTotal++;
-    if(r.l===r.rank||r.l===r.rank+1)diagnostics.rankPositionAgreement++;
+    if(r.l===r.rank){diagnostics.rankPositionAgreement++;diagnostics.rankZeroBasedMatches++;}
+    if(r.l===r.rank+1){diagnostics.rankPositionAgreement++;diagnostics.rankOneBasedMatches++;}
+    if(r.o>r.sz)diagnostics.oGreaterThanSz++;else diagnostics.oLessThanOrEqualSz++;
     if(previousDepth?.state==='VALID'){
      const old=position.get(id);
      if(old){
@@ -122,6 +127,8 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   }else if(Array.isArray(message.q)){
    diagnostics.quoteFrames++;
    const q=message.q[0];
+   if(obj(q))updateField(diagnostics.quoteFields,q);
+   if(latestDepth)diagnostics.quotesAfterLastDepth++;
    if(!obj(q)||!latestDepth||!num(q.b)||!num(q.a)||!num(q.bs)||!num(q.as)){
     diagnostics.quoteShapeMissing++;continue;
    }
@@ -132,6 +139,8 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    for(const trade of message.tr){
     if(!obj(trade))continue;
     diagnostics.tradeItems++;
+    if(latestDepth)diagnostics.tradesAfterLastDepth++;
+    updateField(diagnostics.tradeFields,trade);
     for(const f of ['is','clx']){
      const k=typeof trade[f]==='boolean'?String(trade[f]):'missing';diagnostics['trade'+f.charAt(0).toUpperCase()+f.slice(1)][k]++;
     }
@@ -197,6 +206,14 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   privateAbsoluteGrid:perSide,diagnostics,
   summarySafe:{depthFrames:diagnostics.depthFrames,validDepthFrames:diagnostics.validDepthFrames,
    invalidDepthFrames:diagnostics.invalidDepthFrames,invalidReasons:diagnostics.invalidReasons,
+   rankZeroBasedMatches:diagnostics.rankZeroBasedMatches,
+   rankOneBasedMatches:diagnostics.rankOneBasedMatches,
+   rankPositionTotal:diagnostics.rankPositionTotal,
+   oGreaterThanSz:diagnostics.oGreaterThanSz,oLessThanOrEqualSz:diagnostics.oLessThanOrEqualSz,
+   tUnchangedPriceSizeChanged:diagnostics.tUnchangedPriceSizeChanged,
+   tChangedPriceSizeUnchanged:diagnostics.tChangedPriceSizeUnchanged,
+   depthFields:diagnostics.depthFields,quoteFields:diagnostics.quoteFields,
+   tradeFields:diagnostics.tradeFields,
    distinctSidePriceCells:observedCells.size,zeroSizeLevels:diagnostics.zeroSizeLevels,
    previousLevelComparisons:diagnostics.previousLevelComparisons,
    consecutiveDisplayedIncrease:diagnostics.consecutiveDisplayedIncrease,
@@ -206,6 +223,9 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    tradeSqNonIncreasing:diagnostics.tradeSqNonIncreasing,
    tradeSqDuplicates:diagnostics.tradeSqDuplicates,tradeSqGaps:diagnostics.tradeSqGaps,
    quoteCompared:diagnostics.quoteCompared,
+   quotesAfterLastDepth:diagnostics.quotesAfterLastDepth,
+   tradesAfterLastDepth:diagnostics.tradesAfterLastDepth,
+   tradeIs:diagnostics.tradeIs,tradeClx:diagnostics.tradeClx,
    quoteBestPriceAgreement:diagnostics.quoteBestPriceAgreement,
    quoteBestSizeAgreement:diagnostics.quoteBestSizeAgreement,
    receiveGapHistogram:diagnostics.receiveGapHistogram,
