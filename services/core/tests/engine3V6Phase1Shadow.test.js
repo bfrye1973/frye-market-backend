@@ -73,3 +73,22 @@ test("never reseed opposite direction in the same tick as invalidation",()=>{
  assert.equal(r.invalidatedNow,true);
  assert.equal(r.reversedNow,false);
 });
+
+test("renewed progress resets deterioration timeout instead of falsely invalidating",()=>{
+ const prior={...old("SHORT"),deterioratingSinceMs:100000,progressExtreme:95,
+   lastProgressAtMs:100000};
+ const r=run({...common,priorState:prior,
+   evidence:{noProgress:true,highOverlap:true},
+   completed1m:[{close:90,low:89,high:94,completed:true,closeTimeMs:960000}]});
+ assert.equal(r.canonicalDirection,"SHORT");
+ assert.equal(r.invalidatedNow,false);
+ assert.equal(r.deterioratingSinceMs,null);
+ assert.equal(r.progressExtreme,89);
+});
+test("Engine10 opposite lock discards stale prior reaction anchor",()=>{
+ const r=run({...common,priorState:old("LONG"),
+   openTradeActive:true,lockedTradeDirection:"SHORT"});
+ assert.equal(r.canonicalDirection,"SHORT");
+ assert.equal(r.reactionAnchor,null);
+ assert.equal(r.establishedAtMs,null);
+});
