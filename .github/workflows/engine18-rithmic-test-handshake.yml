@@ -1,0 +1,22 @@
+name: Engine18B Rithmic Test Read-Only Handshake
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18RithmicTestProbe.js'
+      - 'services/core/tests/engine18RithmicTestProbe.test.js'
+      - '.github/workflows/engine18-rithmic-test-handshake.yml'
+jobs:
+  no-network-handshake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check services/core/logic/engine18/engine18RithmicTestProbe.js
+      - run: node --test services/core/tests/engine18RithmicTestProbe.test.js
