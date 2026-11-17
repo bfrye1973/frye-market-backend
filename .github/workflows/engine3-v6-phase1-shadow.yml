@@ -24,7 +24,7 @@ jobs:
           node --check logic/engine3/v6/resolveEngine10OpenPaperDirection.js
           node --check jobs/buildStrategySnapshot.js
       - name: Run Phase 1 unit tests
-        run: node --test tests/engine3V6Phase1Shadow.test.js tests/engine3V6Engine10OpenTradeLock.test.js
-      - name: Existing Engine 3 v5 regression checks
+        run: node --test tests/engine3V6Phase1Shadow.test.js tests/engine3V6Engine10OpenTradeLock.test.js tests/engine3V6Phase1ProductionWiring.test.js
+      - name: Existing Engine 3 tests (where present)
         run: |
-          node --test tests/engine3V5*.test.js
+          find tests -maxdepth 1 -name '*engine3*test.js' ! -name 'engine3V6*' -print0 | xargs -0 -r node --test
