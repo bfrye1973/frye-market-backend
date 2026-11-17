@@ -49,7 +49,8 @@ test("one-sided, opposed, missing and unresolved cases fail closed",()=>{
  pub.degrees.micro.direction="UP";
  assert.equal(context(s,"SELLERS_CONTROL").alignmentState,"CONFLICT");
  for(const state of ["CONTESTED","ABSORPTION","NO_CONTROL"]){
-  assert.equal(context(s,state).alignmentState,"NO_STRUCTURAL_CONTEXT");
+  assert.equal(context(s,state).alignmentState,"STRUCTURE_PRESENT_PRICE_ACTION_UNRESOLVED");
+  assert.equal(context(s,state).structureAvailable,true);
  }
  pub.degrees.micro.selectionStatus="RESEARCH_ONLY";
  const d=context(s,"SELLERS_CONTROL");
