@@ -50,7 +50,8 @@ export function buildEngine3V6Phase2Evidence({
  priorActivation=null,candidateId=null,zoneId=null,eligible=false,
  authorizedStartedAt=null,zone=null,bars1m=[],bars5m=[],
  evaluationTimeMs=null,policy=null,observedDirection="NEUTRAL",
- priorReactionAnchor=null,priorAnchorDirection=null,establishingNow=false,
+ priorReactionAnchor=null,priorAnchorDirection=null,priorReactionSite=null,
+ establishingNow=false,
  progressExtreme=null,warningEnabled=true,
 }={}){
  const now=time(evaluationTimeMs);
@@ -92,41 +93,50 @@ export function buildEngine3V6Phase2Evidence({
  // Narrow zones retain the original whole-zone site. Wide zones choose
  // the actual post-activation band ENGAGED, not a side inferred from LONG/SHORT.
  const touched=(band,b)=>Boolean(band&&b.high>=band.low&&b.low<=band.high);
- let siteName=null;
- let engagedIndex=-1;
- if(frozen?.wideZone===false){
-   siteName="whole";
-   engagedIndex=filteredOne.findIndex(b=>touched(frozen.originalZone,b));
- }else if(frozen?.wideZone===true){
-   const hits=[];
-   for(let i=0;i<filteredOne.length;i++){
-     for(const name of ["upper","lower"]){
-       if(touched(frozen[name],filteredOne[i]))
-         hits.push({name,index:i});
-     }
-   }
-   // Latest independent contact is the active reaction site.
-   // If the same bar spans both edges it is ambiguous: no directional seed.
-   if(hits.length){
-     const lastIndex=Math.max(...hits.map(h=>h.index));
-     const candidates=[...new Set(hits.filter(h=>h.index===lastIndex).map(h=>h.name))];
-     if(candidates.length===1){
-       siteName=candidates[0];
-       // React from first engagement of the active site, not its latest touch.
-       engagedIndex=hits.find(h=>h.name===siteName).index;
-     }
-   }
- }
- const site=siteName==="whole"?frozen?.originalZone:frozen?.[siteName];
- const engagedBars=engagedIndex>=0?filteredOne.slice(engagedIndex):[];
- const anchorCandidate=direction==="SHORT"&&engagedBars.length
-  ?Math.max(...engagedBars.map(b=>b.high)):
-  direction==="LONG"&&engagedBars.length
-  ?Math.min(...engagedBars.map(b=>b.low)):null;
  const priorAnchor=same&&priorAnchorDirection===direction&&direction!=="NEUTRAL"
    ?num(priorReactionAnchor):null;
- const shadowSeedEvidenceEligible=Boolean(frozen&&site&&engagedBars.length>0&&
-   filteredFive.length>=2&&filteredOne.length>0&&anchorCandidate!==null);
+ const priorSite=priorAnchor!==null&&["whole","upper","lower"].includes(priorReactionSite)
+   ?priorReactionSite:null;
+ let siteName=priorSite;
+ let engagedIndex=-1;
+ let engagedSource=null;
+ const findSite=bars=>{
+   if(frozen?.wideZone===false){
+     const index=bars.findIndex(bar=>touched(frozen.originalZone,bar));
+     return index>=0?{name:"whole",index}:null;
+   }
+   if(frozen?.wideZone!==true)return null;
+   const hits=[];
+   for(let i=0;i<bars.length;i++){
+     for(const name of ["upper","lower"]){
+       if(touched(frozen[name],bars[i]))hits.push({name,index:i});
+     }
+   }
+   if(!hits.length)return null;
+   const lastIndex=Math.max(...hits.map(h=>h.index));
+   const choices=[...new Set(hits.filter(h=>h.index===lastIndex).map(h=>h.name))];
+   if(choices.length!==1)return null;
+   // First engagement of the confirmed last-contact site sets the anchor.
+   return {name:choices[0],index:hits.find(h=>h.name===choices[0]).index};
+ };
+ if(!siteName){
+   const from1m=findSite(filteredOne);
+   const from5m=from1m?null:findSite(filteredFive);
+   const selected=from1m??from5m;
+   siteName=selected?.name??null;
+   engagedIndex=selected?.index??-1;
+   engagedSource=from1m?"1m":from5m?"5m":null;
+ }
+ const site=siteName==="whole"?frozen?.originalZone:frozen?.[siteName];
+ const causalBars=engagedSource==="1m"?filteredOne:
+   engagedSource==="5m"?filteredFive:[];
+ const engagedBars=engagedIndex>=0?causalBars.slice(engagedIndex):[];
+ const anchorCandidate=direction==="SHORT"&&engagedBars.length
+  ?Math.max(...engagedBars.map(bar=>bar.high)):
+  direction==="LONG"&&engagedBars.length
+  ?Math.min(...engagedBars.map(bar=>bar.low)):null;
+ const shadowSeedEvidenceEligible=Boolean(frozen&&site&&
+   filteredFive.length>=2&&(priorAnchor!==null||anchorCandidate!==null));
  const anchor=priorAnchor??(establishingNow&&shadowSeedEvidenceEligible?anchorCandidate:null);
  const atr=frozen?.frozenAtr5m;
  const forming=five.forming;
@@ -149,11 +159,13 @@ export function buildEngine3V6Phase2Evidence({
   slowPathEvidenceState:filteredFive.length>=2?"SUFFICIENT_POST_ACTIVATION_5M":
     "INSUFFICIENT_POST_ACTIVATION_EVIDENCE",
   geometry:frozen,reactionSite:siteName,
+  reactionSiteEvidenceSource:engagedSource??(priorSite?"FROZEN_PREVIOUS":"UNAVAILABLE"),
   anchorDirection:anchor!==null?direction:null,
   shadowSeedEvidenceEligible,
   reactionAnchor:anchor,
   anchorSource:priorAnchor!==null?"FROZEN_PREVIOUS":
-    anchor!==null?"POST_ACTIVATION_1M_EXTREME":"UNAVAILABLE",
+    anchor!==null&&engagedSource==="1m"?"POST_ACTIVATION_1M_EXTREME":
+    anchor!==null&&engagedSource==="5m"?"POST_ACTIVATION_5M_EXTREME":"UNAVAILABLE",
   adverseDisplacementWarning:Boolean(adverse),
   adverseWarning:Boolean(adverse),anchorThreatened:Boolean(threatened),
   reasonCodes:[
