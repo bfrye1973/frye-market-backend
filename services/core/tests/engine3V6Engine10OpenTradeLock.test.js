@@ -15,4 +15,7 @@ test("ambiguous open paper trades fail closed, no invented lock",()=>{
  assert.equal(r.openTradeActive,false);assert.equal(r.blocker,true);
  assert.equal(resolve({trades:[trade("SIDEWAYS")]}).openTradeActive,false);
  assert.equal(resolve({trades:null}).openTradeActive,false);
+ assert.equal(resolve({trades:null}).blocker,true);
+ assert.equal(resolve({trades:[],readSucceeded:false}).reasonCode,"ENGINE10_OPEN_TRADE_READ_UNVERIFIED");
+ assert.equal(resolve({trades:[trade("LONG"),trade("LONG")]}).blocker,true);
 });
