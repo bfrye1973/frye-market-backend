@@ -8947,7 +8947,7 @@ patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
 // The shadow is never consulted by Engine4, Engine6, or downstream handoffs.
 if (isEsIntradayScalp) {
   const savedShadow = loadEngine3V6Phase1ShadowState();
-  const engine3V6Shadow = buildEngine3V6Phase1Shadow({
+  let engine3V6Shadow = buildEngine3V6Phase1Shadow({
     priorState: savedShadow.found ? savedShadow.state : null,
     v5: engine3V5,
     candidateId: engine26LocationCandidate?.candidateId ?? null,
@@ -8987,6 +8987,37 @@ if (isEsIntradayScalp) {
     policy: {wideMultiplier:2,bandFraction:0.25,
       bandFloorPoints:1,atrPeriod:14,observedUncertaintyMs:180000},
   });
+  // Phase2 requires post-activation evidence for an initial shadow direction.
+  // A pre-activation/grace bar or provisional Phase1 5m anchor cannot
+  // establish direction merely because v5 fired.
+  if (engine3V6Shadow.establishedNow === true) {
+    if (engine3V6Phase2Evidence.shadowSeedEvidenceEligible !== true ||
+        engine3V6Phase2Evidence.reactionAnchor == null) {
+      engine3V6Shadow = {
+        ...engine3V6Shadow,
+        canonicalDirection: "NEUTRAL",
+        convictionState: "NEUTRAL",
+        establishedNow: false,
+        reactionAnchor: null,
+        establishedAtMs: null,
+        reasonCodes: [
+          ...(engine3V6Shadow.reasonCodes || []),
+          "PHASE2_POST_ACTIVATION_EVIDENCE_REQUIRED",
+          "UNCERTAINTY_WINDOW_BARS_HAVE_ZERO_ESTABLISHMENT_AUTHORITY",
+        ],
+      };
+    } else {
+      engine3V6Shadow = {
+        ...engine3V6Shadow,
+        reactionAnchor: engine3V6Phase2Evidence.reactionAnchor,
+        reactionAnchorBasis: "PHASE2_POST_ACTIVATION_REACTION_EXTREME",
+        reasonCodes: [
+          ...(engine3V6Shadow.reasonCodes || []),
+          "PHASE2_CAUSAL_REACTION_ANCHOR_CONFIRMED",
+        ],
+      };
+    }
+  }
   patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
   patchedConfluence.context.reaction.engine3V6Phase2Evidence =
     engine3V6Phase2Evidence;
