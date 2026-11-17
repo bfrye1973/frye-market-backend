@@ -1,4 +1,5 @@
 import {ENGINE18_MONITOR_HTML} from "./monitorPage.js";
+import {startEngine18HandZoneResearch} from "./engine18HandZoneRuntime.js";
 import {startEngine18IronbeamLevel2Monitor} from "./ironbeamV2Level2Monitor.js";
 import {probeIronbeamV2DemoStream} from "./ironbeamV2DemoStreamProbe.js";
 import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
@@ -6,6 +7,14 @@ import { probeIronbeamV2Demo } from "./ironbeamV2DemoProbe.js";
 // The API key is injected only through Render's protected Environment settings.
 // No secret values are ever returned or logged here.
 import http from "node:http";
+let handZoneWatcher=null;
+let handZoneStatus={stale:true,reason:"DISABLED"};
+if(process.env.ENGINE18_HAND_ZONE_WATCH_ENABLED==="YES"){
+ void startEngine18HandZoneResearch().then(w=>{
+  handZoneWatcher=w;
+  handZoneStatus={stale:true,reason:"AWAITING_FRESH_SOURCE"};
+ }).catch(()=>{handZoneStatus={stale:true,reason:"CONFIG_OR_SOURCE_UNAVAILABLE"};});
+}
 const port = Number(process.env.PORT || 10000);
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw Error("ENGINE18_INVALID_PORT");
 let ironbeamLevel2Monitor=null;
@@ -65,6 +74,16 @@ const service = http.createServer((req,res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Content-Type", "application/json; charset=utf-8");
+  if(pathname==="/api/engine18/hand-zone-health"&&req.method==="GET"){
+    // Only operational status, no proprietary absolute zone prices exposed publicly.
+    const h=handZoneWatcher?.health()??handZoneStatus;
+    res.writeHead(200);res.end(JSON.stringify({schema:"engine18.handZoneHealth.v1",
+      enabled:process.env.ENGINE18_HAND_ZONE_WATCH_ENABLED==="YES",
+      stale:h.stale,reason:h.stale?'UNAVAILABLE_OR_UNVERIFIED':null,
+      pollIntervalMs:300000,readOnly:true,
+      // No manual geometry, source revision/hash or edit timing on public HTTP.
+      sourceZoneSyncHealthy:!h.stale,priceBasisVerified:false}));return;
+  }
   if(pathname==="/api/engine18/liquidity-zones"){
     // A demo-only owner dashboard experiment. No raw book or stream frames.
     // Origin gating is NOT authentication; leave disabled until display rights
