@@ -110,7 +110,11 @@ export function buildEngine3V6Phase2Evidence({
    if(hits.length){
      const lastIndex=Math.max(...hits.map(h=>h.index));
      const candidates=[...new Set(hits.filter(h=>h.index===lastIndex).map(h=>h.name))];
-     if(candidates.length===1){siteName=candidates[0];engagedIndex=lastIndex;}
+     if(candidates.length===1){
+       siteName=candidates[0];
+       // React from first engagement of the active site, not its latest touch.
+       engagedIndex=hits.find(h=>h.name===siteName).index;
+     }
    }
  }
  const site=siteName==="whole"?frozen?.originalZone:frozen?.[siteName];
