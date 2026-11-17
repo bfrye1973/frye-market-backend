@@ -79,11 +79,10 @@ const service = http.createServer((req,res) => {
     const h=handZoneWatcher?.health()??handZoneStatus;
     res.writeHead(200);res.end(JSON.stringify({schema:"engine18.handZoneHealth.v1",
       enabled:process.env.ENGINE18_HAND_ZONE_WATCH_ENABLED==="YES",
-      stale:h.stale,reason:h.reason,revision:h.revision??null,
-      lastAttemptAt:h.lastAttemptAt??null,lastSuccessAt:h.lastSuccessAt??null,
-      lastChangedAt:h.lastChangedAt??null,lastGoodHash:h.lastGoodHash??null,
-      historyCount:h.historyCount??0,pollIntervalMs:300000,
-      readOnly:true,priceBasisVerified:!h.stale}));return;
+      stale:h.stale,reason:h.stale?'UNAVAILABLE_OR_UNVERIFIED':null,
+      pollIntervalMs:300000,readOnly:true,
+      // No manual geometry, source revision/hash or edit timing on public HTTP.
+      priceBasisVerified:!h.stale}));return;
   }
   if(pathname==="/api/engine18/liquidity-zones"){
     // A demo-only owner dashboard experiment. No raw book or stream frames.
