@@ -71,3 +71,27 @@ test('trade sq and quote cross-check diagnostics are descriptive and determinist
  assert.equal(sha(a),sha(b));
  assert.equal(a.summarySafe.previousLevelComparisons,20);
 });
+
+test('GAP and DISCONNECTED invalidate continuity and quote comparisons until new depth',()=>{
+ const prior=book(),following=book();following.d[0].b[0].sz+=10;
+ const events=[record(prior,1,100),
+  {localSeq:2,statusCode:'FEED_GAP',raw:'',receivedMonoNs:'150000000'},
+  record({q:[{b:5000,bs:100,a:5000.25,as:200}]},3,155),
+  record(following,4,160),
+  {localSeq:5,statusCode:'DISCONNECTED',raw:'',receivedMonoNs:'170000000'},
+  record(following,6,180)];
+ const result=analyzeObservedMbp10(events);
+ assert.equal(result.summarySafe.depthFrames,3);
+ assert.equal(result.summarySafe.previousLevelComparisons,0);
+ assert.equal(result.summarySafe.quoteCompared,0);
+ assert.equal(result.summarySafe.consecutiveDisplayedIncrease,0);
+ const cells=result.privateAbsoluteGrid.bid;
+ assert.ok(cells.every(x=>x.observedCoverageMs===0),'no observed time spans disconnected segments');
+});
+test('malformed frame invalidates continuity rather than silently carrying forward',()=>{
+ const good=book(),bad={d:[{s:'TEST',b:[],a:[]}]};
+ const r=analyzeObservedMbp10([record(good,1,100),record(bad,2,110),record(good,3,120)]);
+ assert.equal(r.summarySafe.invalidDepthFrames,1);
+ assert.equal(r.summarySafe.previousLevelComparisons,0);
+ assert.equal(r.summarySafe.quoteCompared,0);
+});
