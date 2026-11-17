@@ -2,28 +2,25 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 const source=fs.readFileSync(new URL("../jobs/buildStrategySnapshot.js",import.meta.url),"utf8");
-test("Phase2 publishes separate diagnostic and persists frozen activation with v6 only",()=>{
- assert.match(source,/engine3V6Phase2Evidence\s*=\s*buildEngine3V6Phase2Evidence\(/);
- assert.match(source,/engine3V6Phase2Evidence\s*=\s*\n\s*engine3V6Phase2Evidence/);
- assert.match(source,/phase2ActivationRun:\s*engine3V6Phase2Evidence\.activationRun/);
- assert.match(source,/phase2ReactionAnchor:\s*engine3V6Phase2Evidence\.reactionAnchor/);
- assert.match(source,/buildEngine3V6CausalControl\\(/);
- assert.match(source,/causalControl:\\s*phase2Causal/);
- assert.match(source,/phase2AnchorDirection:/);
- const p=source.indexOf("const engine3V6Phase2Evidence =");
- const v5=source.indexOf("patchedConfluence.context.reaction.engine3V5 =");
+test("Phase2 consumes post-activation control before v6 shadow reducer",()=>{
+ const p=source.indexOf("const phase2Filter = buildEngine3V6Phase2Evidence");
+ const c=source.indexOf("const phase2Causal = buildEngine3V6CausalControl");
+ const v=source.indexOf("const engine3V6Shadow = buildEngine3V6Phase1Shadow");
  const handoff=source.indexOf("const engine3Strategy1Handoff =");
- assert.ok(v5>=0&&p>v5&&handoff>p);
- assert.doesNotMatch(source.slice(handoff,handoff+600),/engine3V6Phase2Evidence/);
+ assert.ok(p>=0&&c>p&&v>c&&handoff>v);
+ assert.ok(source.includes("causalControl:phase2Causal"));
+ assert.ok(source.includes("phase2Evidence:engine3V6Phase2Evidence"));
+ assert.ok(source.includes("phase2AnchorDirection:"));
+ assert.ok(source.includes("phase2ActivationRun:"));
+ assert.ok(source.includes("phase2ReactionAnchor:"));
+ assert.ok(source.includes("engine3V6Shadow.invalidatedNow"));
+ assert.ok(source.includes("patchedConfluence.context.reaction.engine3V6Phase2Evidence ="));
+ assert.doesNotMatch(source.slice(handoff,handoff+600),/phase2Causal|engine3V6Phase2Evidence/);
 });
-test("Phase2 does not reuse Engine26 lifecycle timestamps and keeps v6 downstream isolated",()=>{
- const begin=source.indexOf("const activationArgsV6 =");
- const end=source.indexOf("patchedConfluence.context.reaction.engine3V6Shadow =",begin);
- const fragment=source.slice(begin,end);
- assert.match(fragment,/engine3AuthorizationStartedAt/);
- assert.doesNotMatch(fragment,/candidateLifecycleStartTime/);
- assert.match(fragment,/buildEngine3V6CausalControl/);
- assert.ok(fragment.indexOf("buildEngine3V6CausalControl")<
-   fragment.indexOf("buildEngine3V6Phase1Shadow"));
+test("Phase2 uses only Engine26 owned authorization timestamp",()=>{
+ const p=source.indexOf("const activationArgsV6 =");
+ const c=source.indexOf("const phase2Filter =",p);
+ const region=source.slice(p,c);
+ assert.ok(region.includes("engine3AuthorizationStartedAt"));
+ assert.ok(!region.includes("candidateLifecycleStartTime"));
 });
-
