@@ -54,6 +54,8 @@ import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConf
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
 import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
+import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
+import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -8925,6 +8927,32 @@ patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
 patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
   engine3OpenPaperLock;
+// Engine3 v6 Phase 1: separate READ_ONLY shadow; v5 remains canonical.
+// The shadow is never consulted by Engine4, Engine6, or downstream handoffs.
+if (isEsIntradayScalp) {
+  const savedShadow = loadEngine3V6Phase1ShadowState();
+  const engine3V6Shadow = buildEngine3V6Phase1Shadow({
+    priorState: savedShadow.found ? savedShadow.state : null,
+    v5: engine3V5,
+    candidateId: engine26LocationCandidate?.candidateId ?? null,
+    zoneId: engine26LocationCandidate?.zoneId ?? null,
+    bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    openTradeActive: engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
+    policy: {
+      // Manager-approved SHADOW hypotheses only; not v5 thresholds.
+      invalidationCloses1m: 2,
+      deteriorationEvidenceCount: 2,
+      deteriorationTimeoutMs: 12 * 60 * 1000,
+    },
+  });
+  patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
+  patchedConfluence.context.reaction.engine3V6ShadowPersistence =
+    saveEngine3V6Phase1ShadowState({ state: engine3V6Shadow });
+}
+
 
 if (isEsIntradayScalp) {
   saveEngine3V5CanonicalState({
