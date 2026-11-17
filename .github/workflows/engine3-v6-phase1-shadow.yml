@@ -24,6 +24,7 @@ jobs:
         run: |
           node --check logic/engine3/v6/evaluateEngine3V6Phase1.js
           node --check logic/engine3/v6/resolveEngine10OpenPaperDirection.js
+          node --check logic/engine3/v6/engine3Engine10VerifiedLockStore.js
           node --check logic/engine3/v6/buildEngine3V6Phase1Shadow.js
           node --check logic/engine3/v6/engine3V6Phase1ShadowStore.js
           node --check jobs/buildStrategySnapshot.js
