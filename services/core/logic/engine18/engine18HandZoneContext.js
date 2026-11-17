@@ -1,6 +1,6 @@
 // Engine 18 HAND-zone context, private READ-ONLY research only.
-// The ES chart consumes structures_sticky from /api/v1/es-smz-levels?symbol=ES.
-// No assumptions that HAND parent (yellow) equals negotiated (turquoise) or Engine26 GREEN.
+// The canonical owner-approved ES parent/NEG set comes directly from GitHub main TXT.
+// HAND parent and negotiated provenance preserved; owner-approved raw prices never roll-adjusted.
 // Never grant a trade, rewrite a chart band, or backdate a version.
 import {createHash} from 'node:crypto';
 export const ZONE_POLL_MS=300000;
@@ -18,13 +18,14 @@ export function normalizeChartHandZones(payload,{contract='XCME:ES.Z26',approved
  // An upgraded chart-effective publisher must provide stable immutable sourceRevision + sourceUpdatedAt.
  if(!safeId(meta.sourceRevision)||!validDate(meta.sourceUpdatedAt))
   throw Error('SOURCE_REVISION_UNVERIFIED');
- if(meta.contract!==contract||meta.priceBasis!=='VERIFIED_DISPLAY_CONTRACT')
-  throw Error('PRICE_BASIS_UNVERIFIED');
- if(meta.zoneAuthority!=='CHART_EFFECTIVE_HAND')
+ if(meta.contract!==contract||meta.priceBasis!=='CHART_UNADJUSTED')
+  throw Error('SOURCE_COORDINATES_UNVERIFIED');
+ if(meta.zoneAuthority!=='GITHUB_MAIN_HAND')
   throw Error('HAND_MAPPING_UNVERIFIED');
- if(!Array.isArray(approvedKinds)||!approvedKinds.length||
-  !approvedKinds.every(x=>['NEGOTIATED','PARENT','MANUAL_IMBALANCE'].includes(x)))
-  throw Error('HAND_MAPPING_UNVERIFIED');
+ if(approvedKinds!==null&&(!Array.isArray(approvedKinds)||
+  !approvedKinds.every(x=>['NEGOTIATED','PARENT'].includes(x))))
+  throw Error('INVALID_APPROVED_KIND_FILTER');
+ const kinds=approvedKinds??['NEGOTIATED','PARENT'];
  const seen=new Set(),zones=[];
  for(const s of payload.structures_sticky){
   if(s?.rangeSource!=='manual'||s?.locked!==true||s?.status!=='active')
@@ -37,14 +38,14 @@ export function normalizeChartHandZones(payload,{contract='XCME:ES.Z26',approved
   const hi=Math.max(...pr),lo=Math.min(...pr);
   if(hi<=lo)throw Error('INVALID_PRICE_RANGE');
   const kind=s.isNegotiated===true?'NEGOTIATED':'PARENT';
-  if(!approvedKinds.includes(kind))continue;
+  if(!kinds.includes(kind))continue;
   zones.push({id,source:'HAND',kind,lo,hi,negotiated:kind==='NEGOTIATED',
-   contract,priceBasis:'ESZ26_VERIFIED_DISPLAY',sourceRevision:meta.sourceRevision});
+   contract,priceBasis:'CHART_UNADJUSTED',sourceRevision:meta.sourceRevision});
  }
  zones.sort((a,b)=>a.id.localeCompare(b.id));
- return {schema:ZONE_SCHEMA,source:'HAND',sourceName:'ES_CHART_EFFECTIVE_STICKY',
-  contract,priceBasis:'ESZ26_VERIFIED_DISPLAY',sourceRevision:meta.sourceRevision,
-  sourceUpdatedAt:meta.sourceUpdatedAt,approvedKinds:[...new Set(approvedKinds)].sort(),
+ return {schema:ZONE_SCHEMA,source:'HAND',sourceName:'GITHUB_MAIN_ES_MANUAL_TXT',
+  contract,priceBasis:'CHART_UNADJUSTED',sourceRevision:meta.sourceRevision,
+  sourceUpdatedAt:meta.sourceUpdatedAt,approvedKinds:[...new Set(kinds)].sort(),
   zones};
 }
 export function semanticZoneHash(model){
@@ -61,12 +62,15 @@ export function approvedSnapshotAt(history,asOf,{contract='XCME:ES.Z26'}={}){
  const s=available.at(-1);
  return {status:'AVAILABLE',snapshot:s};
 }
-export function linkObservedBookToZones({snapshot,image,eventTime,previousImage=null,
+export function linkObservedBookToZones({snapshot,image,eventTime,priceBasisEvidence=null,previousImage=null,
  previousTime=null,priorSnapshot=null}={}){
  if(!snapshot||!validDate(eventTime)||snapshot.contract!=='XCME:ES.Z26'||
   !validDate(snapshot.firstObservedAt)||Date.parse(snapshot.firstObservedAt)>Date.parse(eventTime)||
   priorSnapshot&&priorSnapshot.hash!==snapshot.hash)
   return {status:'HISTORICAL_ZONE_UNVERIFIED'};
+ if(priceBasisEvidence?.contract!=='XCME:ES.Z26'||
+  priceBasisEvidence?.zoneHash!==snapshot.hash||
+  priceBasisEvidence?.verified!==true)return {status:'PRICE_BASIS_UNVERIFIED'};
  if(image?.state!=='VALID')return {status:'FEED_INVALID'};
  const mid=(image.bestBid+image.bestAsk)/2;
  const prevMid=previousImage?.state==='VALID'&&validDate(previousTime)&&
