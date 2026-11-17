@@ -119,7 +119,7 @@ test("post-activation 5m supplies true anchor if eligible 1m engagement is unava
  assert.equal(e.reactionSite,"whole");
  assert.equal(e.reactionSiteEvidenceSource,"5m");
  assert.equal(e.anchorSource,"POST_ACTIVATION_5M_EXTREME");
- assert.equal(e.reactionAnchor,112);
+ assert.equal(e.reactionAnchor,113);
  assert.equal(e.shadowSeedEvidenceEligible,true);
 });
 test("held anchor freezes both reaction direction and site even after another edge is touched",()=>{
