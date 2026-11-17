@@ -74,7 +74,9 @@ export function evaluateEngine3V6Phase1({
     deteriorationEvidenceVotes:votes,deterioratingSinceMs:deteriorationSince,
     evaluationTimeMs:validTime,observedControl,observedQuality,
     invalidationEvidence:{closed1mThroughAnchor:Boolean(closed1),
-      closed5mThroughAnchor:Boolean(closed5),deteriorationExpired:Boolean(timedOut)},
+      closed5mThroughAnchor:Boolean(closed5)},
+    deteriorationResearch:{timeoutExceeded:Boolean(timedOut),
+      timeoutHasInvalidationAuthority:false},
     reasonCodes:[],noPermissionCreated:true,noExecution:true,
     authoritativeDownstream:false,
   };
@@ -100,18 +102,19 @@ export function evaluateEngine3V6Phase1({
       invalidatedNow:true,invalidatedAtMs:validTime,deterioratingSinceMs:null,
       reasonCodes:["CANDIDATE_IDENTITY_CHANGED","OPPOSITE_ESTABLISHMENT_DEFERRED"]};
   }
-  if(prev!=="NEUTRAL"&&(closed1||closed5||timedOut)){
+  // Phase1: deterioration expiry is an observation, NEVER an invalidation cause.
+  if(prev!=="NEUTRAL"&&(closed1||closed5)){
     return {...base,canonicalDirection:"NEUTRAL",convictionState:"INVALIDATED",
       invalidatedNow:true,deterioratingSinceMs:null,
       reasonCodes:reasons(closed1&&"ANCHOR_INVALIDATED_COMPLETED_1M",
         closed5&&"ANCHOR_INVALIDATED_COMPLETED_5M",
-        timedOut&&"SUSTAINED_DETERIORATION_EXPIRED",
         "OPPOSITE_ESTABLISHMENT_DEFERRED")};
   }
   if(prev!=="NEUTRAL"){
     return {...base,canonicalDirection:prev,
       convictionState:deteriorating?"DETERIORATING":"HOLDING",
       reasonCodes:reasons(deteriorating?"DIRECTION_HELD_WITH_DETERIORATION":"DIRECTION_HELD",
+        timedOut&&"DETERIORATION_TIMEOUT_DIAGNOSTIC_ONLY",
         observedDirection===opposite(prev)&&"OPPOSITE_CONTROL_NOT_AUTOMATIC_REVERSAL")};
   }
   // Phase 1 may ONLY mirror a genuinely fresh, independently established
