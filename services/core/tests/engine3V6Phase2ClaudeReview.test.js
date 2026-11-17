@@ -37,7 +37,7 @@ test("deferred 5m seed can establish later after postactivation evidence matures
  const bars1m=[b(now-3*minute,minute,109,106,107),
   b(now-2*minute,minute,108,103,105),
   b(now-minute,minute,107,102,103)];
- const e=phase2({...eligible,authorizedStartedAt:now-16*minute,
+ const e=phase2({...eligible,authorizedStartedAt:now-11*minute,
   bars5m:[...oldBars,...bars5m],bars1m,
   observedDirection:"SHORT",establishingNow:true});
  assert.ok(e.completed5mEligible.length>=2);
