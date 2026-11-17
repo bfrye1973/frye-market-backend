@@ -24,9 +24,11 @@ jobs:
         run: |
           node --check logic/engine3/v6/evaluateEngine3V6Phase1.js
           node --check logic/engine3/v6/resolveEngine10OpenPaperDirection.js
+          node --check logic/engine3/v6/buildEngine3V6Phase1Shadow.js
+          node --check logic/engine3/v6/engine3V6Phase1ShadowStore.js
           node --check jobs/buildStrategySnapshot.js
       - name: Run Phase 1 unit tests
-        run: node --test tests/engine3V6Phase1Shadow.test.js tests/engine3V6Engine10OpenTradeLock.test.js tests/engine3V6Phase1ProductionWiring.test.js
+        run: node --test tests/engine3V6*.test.js
       - name: Compare legacy Engine 3 tests against clean base
         shell: bash
         run: |
