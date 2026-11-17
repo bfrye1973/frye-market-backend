@@ -18,10 +18,10 @@ export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
  const first=await initialProbe({env,WebSocketImpl,timeoutMs:Math.min(timeoutMs,8000)});
  if(!first.testAvailable)return {stage:'SYSTEM_INFO',authenticated:false,counts:null,
   reason:'TEST_SYSTEM_NOT_AVAILABLE',readOnly:true};
- let socket,timer,settled=false,resolveDone;
+ let socket,timer,settled=false,authenticated=false,resolveDone;
  const counts={ack:0,snapshot:0,updates:0,heartbeats:0,other:0,invalidFrames:0},
   codes=[],seen=new Set();
- const report=reason=>({stage:'DBO_ENTITLEMENT',authenticated:true,reason,
+ const report=reason=>({stage:'DBO_ENTITLEMENT',authenticated,reason,
   counts:{...counts},codes:codes.slice(0,8),sawOrderUpdate:counts.updates>0,
   bookValid:false,snapshotComplete:false,readOnly:true});
  return await new Promise(resolve=>{
@@ -47,6 +47,7 @@ export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
       for(const code of raw){if(codes.length<8)codes.push(rpSafe(code));}
       return resolveDone('LOGIN_REJECTED');
     }
+    authenticated=true;
     try{socket.send(encodeDboTestRequest({kind:'subscribe',symbol,exchange}));
       socket.send(encodeDboTestRequest({kind:'snapshot',symbol,exchange}));}
     catch{return resolveDone('DBO_SEND_FAILED');}
