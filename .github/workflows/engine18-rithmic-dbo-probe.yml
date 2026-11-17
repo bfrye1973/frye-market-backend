@@ -1,0 +1,21 @@
+name: Engine18 Rithmic Test DBO Entitlement Probe
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18RithmicDboEntitlementProbe.js'
+      - 'services/core/logic/engine18/engine18RithmicRenderTestServer.js'
+      - 'services/core/tests/engine18RithmicDboEntitlementProbe.test.js'
+      - '.github/workflows/engine18-rithmic-dbo-probe.yml'
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check services/core/logic/engine18/engine18RithmicDboEntitlementProbe.js
+      - run: node --check services/core/logic/engine18/engine18RithmicRenderTestServer.js
+      - run: node --test services/core/tests/engine18RithmicDboEntitlementProbe.test.js
