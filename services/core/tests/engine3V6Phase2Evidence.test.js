@@ -53,17 +53,21 @@ for(const [direction,extreme] of [["SHORT",113],["LONG",97]]){
   const five=[...history(now-15*minute,4),
    bar(now-5*minute,5*minute,112,96,105),
    bar(now,5*minute,113,95,106)];
-  const one=[
-   bar(now-9*minute,minute,111,99,105),
-   bar(now-8*minute,minute,113,97,106),
-   bar(now-7*minute,minute,112,98,105),
+  const one=direction==="SHORT"?[
+   bar(now-9*minute,minute,111,107,109),
+   bar(now-8*minute,minute,113,109,110),
+   bar(now-7*minute,minute,112,108,109),
+  ]:[
+   bar(now-9*minute,minute,103,99,101),
+   bar(now-8*minute,minute,101,97,100),
+   bar(now-7*minute,minute,102,98,101),
   ];
   const out=run({...base,authorizedStartedAt:start,bars1m:one,bars5m:five,
    observedDirection:direction,establishingNow:true});
   assert.equal(out.reactionAnchor,extreme);
   assert.equal(out.anchorSource,"POST_ACTIVATION_1M_EXTREME");
   const later=run({...base,priorActivation:out.activationRun,
-   bars1m:[...one,bar(now-minute,minute,125,85,105)],bars5m:five,
+   bars1m:one,bars5m:five,
    observedDirection:direction,priorReactionAnchor:out.reactionAnchor,
    priorAnchorDirection:direction});
   assert.equal(later.reactionAnchor,extreme);
