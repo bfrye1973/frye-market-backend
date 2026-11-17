@@ -5,6 +5,11 @@ import {normalizeChartHandZones,semanticZoneHash,approvedSnapshotAt,
 import {Engine18HandZoneWatcher,Engine18MemoryZoneHistory} from '../logic/engine18/engine18HandZoneWatcher.js';
 import {makeEngine18ChartZoneFetcher} from '../logic/engine18/engine18ChartZoneSource.js';
 import {parseObservedMbp10} from '../logic/engine18/engine18ObservedMbp10Map.js';
+import {Engine18HandZoneR2History} from '../logic/engine18/engine18HandZoneR2History.js';
+import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 const zone=(id,lo,hi,neg=true)=>({rangeSource:'manual',locked:true,status:'active',isNegotiated:neg,
  details:{id},displayPriceRange:[hi,lo]});
 const nowMs=Date.parse('2026-11-17T15:00:00.000Z');
@@ -152,4 +157,34 @@ test('stale chart publisher timestamp leaves existing zone history immutable but
  assert.equal(w.health().reason,'SOURCE_STALE');
  assert.equal(h.history.writes,1);
  w.stop();
+});
+
+test('private immutable R2 history adapter recovers encrypted versions and refuses tampering',async()=>{
+ const root=mkdtempSync(join(tmpdir(),'engine18-zone-history-'));
+ const objects=new Map(),writes=[];
+ const store={
+  stagingRoot:root,keyId:'test-key',
+  listObjectKeys:async prefix=>[...objects.keys()].filter(x=>x.startsWith(prefix)),
+  uploadClosed:async ({path,key,plaintextSha256,expectedSize})=>{
+   if(objects.has(key))throw Error('IMMUTABLE_CONFLICT');
+   const data=readFileSync(path);
+   assert.equal(data.length,expectedSize);
+   assert.equal(createHash('sha256').update(data).digest('hex'),plaintextSha256);
+   objects.set(key,JSON.parse(data.toString('utf8')));writes.push(key);
+  },
+  readSmallEncryptedJson:async key=>structuredClone(objects.get(key))
+ };
+ try{
+  const history=new Engine18HandZoneR2History({store});
+  const h=harness({sequence:[payload()],history});
+  await h.watcher.start();
+  assert.equal(writes.length,1);
+  const restored=await history.load();
+  assert.equal(restored.length,1);
+  assert.equal(restored[0].firstObservedAt,'2026-11-17T15:00:00.000Z');
+  assert.equal(restored[0].zones.length,1);
+  const badKey=[...objects.keys()][0];
+  objects.get(badKey).zones[0].hi+=.25;
+  await assert.rejects(history.load(),/VERSION_HASH_MISMATCH/);
+ }finally{rmSync(root,{recursive:true,force:true});}
 });
