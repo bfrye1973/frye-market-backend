@@ -140,3 +140,15 @@ Manager requires v5/v6 comparison on original point-in-time data, LONG/SHORT sym
 - **Important release distinction:** Engine10-to-v5 `openTradeActive` / `lockedTradeDirection` wiring and fallback change **CANONICAL v5 behavior if merged**, whereas v6 reducer remains shadow-only. Explicit Manager/execution owner approval or separate release/gate required; never describe whole PR #337 as wholly shadow-only.
 - Focused GitHub Actions on latest code head `be8b7699668374ae820aaa6857266eef21e84e8b`: **40 tests, 40 pass, 0 fail**; workflow https://github.com/bfrye1973/frye-market-backend/actions/runs/44195972410. Broad legacy suite 179 tests / 49 pass / 130 fail baseline remains unresolved; no general regression health claim.
 - **No merge, deploy, Phase 2, canonical v6 promotion, or recording activation.** Request Manager re-review and separate authorization for v5 lock change.
+
+## Phase 2 Shadow Development — November 17 update (supersedes earlier Phase2-not-authorized status)
+- Engine3 Manager approved Phase2 **shadow development only**, recorded on PR #337; this approval **did not authorize merge/deployment**, recording, v6 canonical promotion or Phase4 fast cadence.
+- Separate stacked draft PR #340: https://github.com/bfrye1973/frye-market-backend/pull/340 (based on unmerged Phase1 PR #337 branch).
+- Dedicated Phase2 evidence implementation, research contract and no-write archive packet preparation committed to PR #340.
+- Engine26 source change tracked in issue #341: https://github.com/bfrye1973/frye-market-backend/issues/341. The live canonical `engine3AuthorizationStartedAt` has not yet been implemented/verified; Engine3 observed activation is fallback in shadow only.
+- Latest Phase2 workflow https://github.com/bfrye1973/frye-market-backend/actions/runs/44198867741: syntax PASS; Phase2 focused **15/15 PASS**; Phase1 compatibility **36/36 PASS**.
+- Detailed consolidated Phase2 evidence and blockers: https://github.com/bfrye1973/frye-market-backend/pull/340#issuecomment-6963976374
+- A/B/C gates frozen: 20% median give-back reduction minimum, +5 percentage points max false invalidations, 50 out-of-sample episodes minimum and nonincreasing churn. NOT yet statistically evaluated; Nov17 is regression only.
+- Raw bar archive is only a **pure in-memory packet builder**. No recorder, write or activation has occurred.
+- Stacked branch contains Phase1 canonical v5 Engine10 lock proposal; that behavior still needs its **own approval** before any production merge. Never deploy the stacked branch implicitly.
+- Stop before Phase3/4 advancement pending Manager review; v5 remains canonical and Engine22 diagnostic only.
