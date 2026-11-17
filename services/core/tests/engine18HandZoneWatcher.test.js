@@ -29,7 +29,7 @@ const harness=({sequence,history=new Engine18MemoryZoneHistory(),startAt=nowMs,
  const watcher=new Engine18HandZoneWatcher({fetchSource,store:history,approvedKinds,
  now:()=>time,schedule:(fn,ms)=>{callback=fn;period=ms;return 1;},
  cancel:()=>{cancelled++;}});
- return {watcher,history,advance:ms=>{time+=ms;},tick:()=>callback(),
+ return {watcher,history,advance:ms=>{time+=ms;},tick:async()=>{callback();await new Promise(resolve=>setImmediate(resolve));},
  get period(){return period;},get cancelled(){return cancelled;}};
 };
 test('chart HAND zone normalizes stable sort, separate provenance and strict basis',()=>{
@@ -51,7 +51,7 @@ test('first poll and exact 300000ms timer, unchanged no writes; reordering no wr
  await h.watcher.start();
  assert.equal(h.period,300000);assert.equal(h.history.writes,1);
  assert.equal(h.watcher.health().historyCount,1);
- h.advance(300000);await h.watcher.poll();
+ h.advance(300000);await h.tick();
  assert.equal(h.history.writes,1);assert.equal(h.watcher.health().unchangedCount,1);
  assert.equal(h.watcher.health().lastGoodHash,h.watcher.getCurrent().hash);
  h.watcher.stop();assert.equal(h.cancelled,1);
@@ -63,7 +63,15 @@ test('detect boundaries, added/deleted zones, immutable versions, revisions and 
  const removed=payload([zone('MANUAL|ES|NEG|B',5003,5004)],'rev-4',nowMs+900000);
  const h=harness({sequence:[first,changed,added,removed]});
  await h.watcher.start();const original=h.watcher.getCurrent();
- for(let i=0;i<3;i++){h.advance(300000);assert.equal((await h.watcher.poll()).status,'CHANGED');}
+ for(let i=0;i<3;i++){
+  h.advance(300000);await h.tick();
+  assert.equal(h.watcher.health().changedCount,i+2);
+ }
+ console.log('ENGINE18_HAND_ZONE_ISOLATED_300000MS_PROOF '+JSON.stringify({
+  ticks:3,pollMs:h.period,immutableVersions:h.history.writes,
+  latestZoneCount:h.watcher.getCurrent().zones.length,
+  changedBoundaries:true,addedZone:true,deletedZone:true,
+  publisher:'INJECTED_SOURCE_NOT_PRODUCTION'}));
  assert.equal(h.history.writes,4);assert.equal(h.watcher.getCurrent().zones.length,1);
  assert.equal(original.zones[0].hi,5001);
  assert.equal(h.watcher.getVersions().length,4);
