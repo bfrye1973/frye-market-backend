@@ -12,6 +12,7 @@ test('protobuf handshake uses market data template only, no order plant',()=>{
  assert.equal(a[PROTOCOL_FIELDS.templateId][0],16);
  const b=decodeFields(encodeTickerPlantLogin({user:'demo',password:'not_logged'}));
  assert.equal(b[PROTOCOL_FIELDS.templateId][0],10);
+ assert.equal(b[PROTOCOL_FIELDS.templateVersion][0].toString(),'5.55');
  assert.equal(b[PROTOCOL_FIELDS.infraType][0],1);
  assert.equal(b[PROTOCOL_FIELDS.systemName][0].toString(),'Rithmic Test');
 });
@@ -73,4 +74,24 @@ test('DBO acknowledgements are not misrepresented as complete book',()=>{
   assert.equal(reply.bookValid,false);
  }
  assert.equal(classifyDboTestResponse(Buffer.concat([int(PROTOCOL_FIELDS.templateId,10)])).recognized,false);
+});
+
+test('only a single zero response code establishes authentication',async()=>{
+ const {EventEmitter}=await import('node:events');
+ const sys=Buffer.concat([int(PROTOCOL_FIELDS.templateId,17),field(PROTOCOL_FIELDS.rpCode,'0'),
+ field(PROTOCOL_FIELDS.systemName,'Rithmic Test')]);
+ const rejected=Buffer.concat([int(PROTOCOL_FIELDS.templateId,11),field(PROTOCOL_FIELDS.rpCode,'100'),
+ field(PROTOCOL_FIELDS.rpCode,'sensitive server response')]);
+ let connections=0;
+ class FakeWS extends EventEmitter{
+  constructor(){super();this.n=connections++;queueMicrotask(()=>this.emit('open'))}
+  send(){queueMicrotask(()=>this.emit('message',this.n===0?sys:rejected))}
+  close(){}terminate(){}
+ }
+ const out=await probeRithmicTest({WebSocketImpl:FakeWS,env:{
+  RITHMIC_TEST_CONNECT_ENABLED:'YES',RITHMIC_TEST_USER:'test',
+  RITHMIC_TEST_PASSWORD:'not-a-real-password'},timeoutMs:1000});
+ assert.equal(out.authenticated,false);
+ assert.deepEqual(out.rpCodes,['100','REDACTED']);
+ assert.equal(out.readOnly,true);
 });
