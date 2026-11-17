@@ -54,6 +54,34 @@ export function parseLogin(frame){
  return Object.freeze({templateId:id,rpCodes,
   heartbeatIntervalBytes:value(f,PROTOCOL_FIELDS.heartbeatInterval)?.length||0});
 }
+
+// Read-only entitlement probes only: vendor v0.90.0.0 templates 115/117.
+// A subscription acknowledgement does NOT prove a complete DBO snapshot or
+// correct book reconstruction. Caller must separately establish snapshot boundaries.
+export const DBO_TEMPLATES=Object.freeze({snapshotRequest:115,snapshotResponse:116,
+ updatesRequest:117,updatesResponse:118,event:160});
+export function encodeDboTestRequest({kind,symbol,exchange}){
+ if(kind!=='snapshot'&&kind!=='subscribe')throw Error('unsupported read-only DBO action');
+ if(typeof symbol!=='string'||!/^[A-Z0-9.]{2,24}$/.test(symbol))
+  throw Error('explicit vendor symbol required');
+ if(typeof exchange!=='string'||!/^[A-Z0-9.]{2,16}$/.test(exchange))
+  throw Error('explicit vendor exchange required');
+ const parts=[num(PROTOCOL_FIELDS.templateId,kind==='snapshot'?
+  DBO_TEMPLATES.snapshotRequest:DBO_TEMPLATES.updatesRequest)];
+ if(kind==='subscribe')parts.push(num(100000,1)); // RequestDepthByOrderUpdates.SUBSCRIBE
+ parts.push(str(110100,symbol),str(110101,exchange));
+ return Buffer.concat(parts);
+}
+export function classifyDboTestResponse(frame){
+ const f=decodeFields(frame),templateId=value(f,PROTOCOL_FIELDS.templateId);
+ if(![116,118,160].includes(templateId))return {recognized:false,templateId};
+ return {recognized:true,templateId,kind:templateId===116?'SNAPSHOT':
+  templateId===118?'SUBSCRIPTION_ACK':'UPDATE',
+  rpCodes:strings(f,PROTOCOL_FIELDS.rpCode),
+  // Snapshot frame count/order completeness remains UNKNOWN until observed
+  snapshotComplete:false,bookValid:false};
+}
+
 export function verifyTestEnvironment(env){
  if(env.RITHMIC_TEST_CONNECT_ENABLED!=='YES')throw Error('Rithmic network connection disabled');
  if(!env.RITHMIC_TEST_USER||!env.RITHMIC_TEST_PASSWORD)throw Error('missing Rithmic Test credentials');
