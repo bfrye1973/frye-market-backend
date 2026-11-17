@@ -25,14 +25,24 @@ app.listen(port,host,()=>{
  if(status.attempts!==0)return;
  status.attempts=1;status.phase='PROBING';
  const doDbo=process.env.RITHMIC_TEST_DBO_PROBE_ENABLED==='YES';
- const operation=doDbo?probeRithmicDbo({timeoutMs:15000}):probeRithmicTest({timeoutMs:12000});
+ const operation=doDbo?probeRithmicDbo({timeoutMs:30000}):probeRithmicTest({timeoutMs:12000});
  operation.then(result=>{
   if(doDbo){
    status.phase=result.stage==='DBO_ENTITLEMENT'?'DBO_OBSERVED':'DBO_BLOCKED';
    console.log('RITHMIC_TEST_DBO_RESULT '+JSON.stringify({
     stage:result.stage,authenticated:result.authenticated===true,
     reason:result.reason,counts:result.counts,codes:result.codes,
-    sawOrderUpdate:result.sawOrderUpdate===true,bookValid:false,readOnly:true}));
+    sawOrderUpdate:result.sawOrderUpdate===true,bookValid:false,readOnly:true,
+    observedMs:result.observedMs,snapshotOrders:result.snapshotOrders,
+    snapshotLevels:result.snapshotLevels,distinctSnapshotPrices:result.distinctSnapshotPrices,
+    bestBid:result.bestBid,bestAsk:result.bestAsk,
+    updateKinds:result.updateKinds,firstSequence:result.firstSequence,
+    lastSequence:result.lastSequence,
+    nonIncreasingSequences:result.nonIncreasingSequences,
+    positiveSequenceJumps:result.positiveSequenceJumps,
+    firstUpdateElapsedMs:result.firstUpdateElapsedMs,
+    lastUpdateElapsedMs:result.lastUpdateElapsedMs,
+    updateCountsPerSecond:result.updateCountsPerSecond}));
    return;
   }
   status.phase=result.stage==='LOGIN'&&result.authenticated?'AUTHENTICATED':
