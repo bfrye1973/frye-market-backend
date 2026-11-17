@@ -68,7 +68,7 @@ for(const [direction,extreme] of [["SHORT",113],["LONG",97]]){
  });
 }
 test("adverse forming-bar warning cannot alter direction, conviction or permission",()=>{
- const start=now-20*minute;
+ const start=now-10*minute;
  const h=history(now-15*minute,5,4);
  const input={...base,authorizedStartedAt:start,bars5m:[
   ...h,bar(now+5*minute,5*minute,125,95,110)],
