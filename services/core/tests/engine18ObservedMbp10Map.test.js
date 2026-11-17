@@ -43,7 +43,7 @@ test('observed images do not carry forward absent levels or conflate size change
  assert.equal(out.summarySafe.previousLevelComparisons,18);
  assert.equal(out.summarySafe.consecutiveDisplayedIncrease,9);
  assert.equal(out.summarySafe.consecutiveDisplayedDecrease,9);
- assert.equal(out.summarySafe.topTwoBidConcentrations.length,2);
+ assert.ok(out.summarySafe.topTwoBidConcentrations.length<=2);
 });
 test('invalid depth prevents carrying previous state into following frame',()=>{
  const first=book(),second=book();second.d[0].b[0].sz=110;
@@ -110,5 +110,16 @@ test('same-rank baseline is descriptive and zero residual for unchanged images',
    assert.ok(cell.meanDistanceFromTouchTicks>=0);
   }
  }
- assert.equal(result.summarySafe.topTwoBidConcentrations[0].timeWeightedResidualSz,0);
+ assert.deepEqual(result.summarySafe.topTwoBidConcentrations,[]);\n assert.deepEqual(result.summarySafe.topTwoAskConcentrations,[]);
+});
+
+test('top concentrations rank positive residual depth, not longest coverage',()=>{
+ const one=book(),two=book(),three=book();
+ // Create one high-residual bid/ask level observed for only a short interval.
+ two.d[0].b[1].sz=500;three.d[0].b[1].sz=500;
+ two.d[0].a[1].sz=600;three.d[0].a[1].sz=600;
+ const result=analyzeObservedMbp10([record(one,1,100),record(two,2,110),record(three,3,120)]);
+ assert.equal(result.summarySafe.topTwoBidConcentrations[0].maxSz,500);
+ assert.equal(result.summarySafe.topTwoAskConcentrations[0].maxSz,600);
+ assert.ok(result.summarySafe.topTwoBidConcentrations[0].timeWeightedResidualSz>0);
 });
