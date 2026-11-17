@@ -2,6 +2,8 @@ name: Engine6 PAPER activation read-only snapshot audit (test only)
 on:
   push:
     branches: [engine6-paper-readonly-activation-audit-nov17]
+  pull_request:
+    paths: [".github/workflows/engine6-paper-activation-readonly-audit.yml"]
 permissions:
   contents: read
 jobs:
