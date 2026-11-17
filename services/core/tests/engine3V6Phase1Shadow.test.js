@@ -20,13 +20,16 @@ for(const d of ["SHORT","LONG"]){
   assert.equal(r.establishedNow,false);assert.equal(r.reversedNow,false);
  });
 }
-test("deterioration annotates held direction, expires by explicit policy",()=>{
+test("deterioration and expiry remain diagnostic-only and cannot release SHORT",()=>{
  const prior={...old("SHORT"),deterioratingSinceMs:100000};
  const evidence={noProgress:true,highOverlap:true};
  const r=run({...common,priorState:prior,evidence, evaluationTimeMs:500000});
  assert.equal(r.canonicalDirection,"SHORT");assert.equal(r.convictionState,"DETERIORATING");
  const expired=run({...common,priorState:prior,evidence,evaluationTimeMs:1000000});
- assert.equal(expired.invalidatedNow,true);assert.equal(expired.canonicalDirection,"NEUTRAL");
+ assert.equal(expired.invalidatedNow,false);assert.equal(expired.canonicalDirection,"SHORT");
+ assert.equal(expired.convictionState,"DETERIORATING");
+ assert.equal(expired.deteriorationResearch.timeoutExceeded,true);
+ assert.equal(expired.deteriorationResearch.timeoutHasInvalidationAuthority,false);
 });
 test("open Engine10 direction lock wins over local counter reaction",()=>{
  const r=run({...common,priorState:old("SHORT"),openTradeActive:true,lockedTradeDirection:"SHORT",
@@ -91,4 +94,15 @@ test("Engine10 opposite lock discards stale prior reaction anchor",()=>{
  assert.equal(r.canonicalDirection,"SHORT");
  assert.equal(r.reactionAnchor,null);
  assert.equal(r.establishedAtMs,null);
+});
+
+test("long-running deterioration alone cannot invalidate LONG",()=>{
+ const prior={...old("LONG"),deterioratingSinceMs:100000};
+ const r=run({...common,priorState:prior,evidence:{noProgress:true,highOverlap:true},
+  evaluationTimeMs:1000000});
+ assert.equal(r.canonicalDirection,"LONG");
+ assert.equal(r.convictionState,"DETERIORATING");
+ assert.equal(r.invalidatedNow,false);
+ assert.equal(r.deteriorationResearch.timeoutExceeded,true);
+ assert.ok(r.reasonCodes.includes("DETERIORATION_TIMEOUT_DIAGNOSTIC_ONLY"));
 });
