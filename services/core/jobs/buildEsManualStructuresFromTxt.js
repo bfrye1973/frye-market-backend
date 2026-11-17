@@ -23,7 +23,6 @@
 // - Reversed ranges are accepted and normalized.
 
 import fs from "fs";
-import {createHash} from "node:crypto";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -152,8 +151,6 @@ function main() {
   }
 
   const raw = fs.readFileSync(IN_TXT, "utf8");
-  const bytes=Buffer.from(raw,"utf8");
-  const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
   const lines = raw.split(/\r?\n/);
 
   const structures = [];
@@ -265,8 +262,6 @@ function main() {
       symbol: SYMBOL,
       tickSize: TICK_SIZE,
       inputFile: path.basename(IN_TXT),
-      sourceGitBlobSha,
-      sourceBytes:bytes.length,
       notes: "Generated from es-smz-manual-zones.txt. Do not hand-edit this JSON.",
     },
     structures,
