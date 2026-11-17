@@ -112,6 +112,7 @@ import {
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
+import {buildEngine6AdvisoryContext} from "../logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js";
 import {
   evaluateEngine6Strategy1Phase4Contract,
   filterEngine15ArtifactsForFastLane,
@@ -2377,7 +2378,7 @@ function buildEngine6PaperPermission({
         "engine4CurrentScalpParticipation"
     );
 
-  const engine25HardBlocked =
+  const engine25AdvisoryRiskWarning =
     engine25Context?.ok === true &&
     (
       String(
@@ -2632,10 +2633,9 @@ const engine22StructuralDirection =
     );
   }
 
-  if (engine25HardBlocked) {
-    blockers.push(
-      "ENGINE25_HARD_RISK_BLOCK"
-    );
+  if (engine25AdvisoryRiskWarning) {
+    warnings.push("ENGINE25_ADVISORY_RISK_WARNING");
+    reasonCodes.push("ENGINE25_RISK_CONTEXT_ADVISORY_ONLY");
   }
 
   if (
@@ -2860,7 +2860,7 @@ const engine22StructuralDirection =
     participationWaitingForEngine3 !== true &&
     participationHardBlocked !== true &&
 
-    engine25HardBlocked !== true &&
+    
     ["LONG", "SHORT"].includes(direction) &&
     Number.isFinite(targetPoints) &&
     targetPoints >= 8;
@@ -2872,7 +2872,7 @@ const engine22StructuralDirection =
     reactionAllowed &&
     participationAllowed &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
+    
     direction === "LONG";
 
   const allowed =
@@ -2915,7 +2915,7 @@ const engine22StructuralDirection =
     );
 
     reasonCodes.push(
-      "ENGINE25_NOT_HARD_BLOCKED"
+      "ENGINE25_CONTEXT_ADVISORY_ONLY"
     );
 
     reasonCodes.push(
@@ -2967,15 +2967,12 @@ const engine22StructuralDirection =
     reactionActive === true &&
     direction === "LONG" &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
+    
     !uniqueBlockers.includes(
       "PAPER_DIRECTION_MISSING"
     ) &&
     !uniqueBlockers.includes(
       "PAPER_SHORT_RESEARCH_DISABLED_V1"
-    ) &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
     );
 
   const shortReactionState =
@@ -3015,10 +3012,6 @@ const engine22StructuralDirection =
     engine26ShortResearchOnly === true &&
     engine3ShortRejection === true &&
     participationHardBlocked !== true &&
-    engine25HardBlocked !== true &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
-    ) &&
     !uniqueBlockers.includes(
       "ENGINE4_PAPER_PARTICIPATION_HARD_BLOCKED"
     );
@@ -3029,11 +3022,7 @@ const engine22StructuralDirection =
     shortResearchWatch !== true &&
     engine26ShortWatchOnly === true &&
     engine26DoNotChaseLong === true &&
-    engine26ShortResearchOnly === true &&
-    engine25HardBlocked !== true &&
-    !uniqueBlockers.includes(
-      "ENGINE25_HARD_RISK_BLOCK"
-    );
+    engine26ShortResearchOnly === true;
 
   if (shortResearchWatch) {
     reasonCodes.push(
@@ -11757,6 +11746,32 @@ if (String(symbol || "").toUpperCase() === "ES") {
         noJournalMutation:
           true,
       };
+    }
+  }
+
+  // Engine 6E read-only advisory publication: after all authoritative decisions.
+  // This cannot enter Phase 4 qualification, PAPER locking, sizing, or execution.
+  if (String(symbol || "").toUpperCase() === "ES") {
+    const readAdvisoryJson = (name) => {
+      try { return JSON.parse(fs.readFileSync(`${DATA_DIR}/${name}`, "utf8")); }
+      catch { return null; }
+    };
+    const strategy1 = result.strategies?.["intraday_scalp@10m"];
+    if (strategy1 && typeof strategy1 === "object") {
+      try {
+        strategy1.engine6AdvisoryContext = buildEngine6AdvisoryContext({
+          snapshot: result,
+          engine25Participation: readAdvisoryJson("engine25-participation.json"),
+          engine29Stress: readAdvisoryJson("engine29-cross-market-stress.json"),
+        });
+      } catch (error) {
+        strategy1.engine6AdvisoryContext = {
+          schema: "engine6.marketIntelligenceAdvisory.v1",
+          mode: "READ_ONLY_ADVISORY", available: false,
+          noPermissionCreated: true, noEntryVeto: true,
+          reasonCodes: ["ENGINE6_ADVISORY_CONTEXT_UNAVAILABLE"],
+        };
+      }
     }
   }
 
