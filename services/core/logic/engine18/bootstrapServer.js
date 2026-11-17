@@ -82,7 +82,7 @@ const service = http.createServer((req,res) => {
       stale:h.stale,reason:h.stale?'UNAVAILABLE_OR_UNVERIFIED':null,
       pollIntervalMs:300000,readOnly:true,
       // No manual geometry, source revision/hash or edit timing on public HTTP.
-      priceBasisVerified:!h.stale}));return;
+      sourceZoneSyncHealthy:!h.stale,priceBasisVerified:false}));return;
   }
   if(pathname==="/api/engine18/liquidity-zones"){
     // A demo-only owner dashboard experiment. No raw book or stream frames.
