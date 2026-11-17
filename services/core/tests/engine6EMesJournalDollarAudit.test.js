@@ -14,8 +14,8 @@ function identity(dirName){
  strategyId:"intraday_scalp@10m",candidateId:"MES-"+dirName,zoneId:"MES-ZONE-"+dirName,
  planId:"MES-PLAN-"+dirName,direction:dirName,setupType:"NEGOTIATED_ZONE_SWEEP_RECLAIM_ROTATION"};
 }
-function ticket(dirName){
- const base=identity(dirName),long=dirName==="LONG",entry=7600,stop=long?7590:7610,boundary=long?7601:7599,midpoint=long?7602:7598;
+function ticket(dirName,movePoints){
+ const base={...identity(dirName),candidateId:"MES-"+dirName+"-"+movePoints,planId:"MES-PLAN-"+dirName+"-"+movePoints},long=dirName==="LONG",entry=7600,stop=long?7590:7610,boundary=long?entry+movePoints-5:entry-movePoints+5,midpoint=long?entry+movePoints:entry-movePoints;
  const sizing=buildEngine7ProposedSizingPreview({engine26ProposedGeometry:{...base,proposedEntryPrice:entry,proposedStopPrice:stop,proposedStopDistancePoints:10,proposedTargets:[],snapshotTime:"2026-11-16T22:00:00Z"},riskConfig:cfg});
  assert.equal(sizing.finalContracts,3);
  assert.equal(sizing.dollarsPerPoint,5);
@@ -44,8 +44,9 @@ function exit(t,tradeId,id,quantity,remaining,price,action,block,target){
  exitReason:action==="EXIT"?"FINAL_EXIT":"TARGET_EXIT"};
 }
 for(const direction of ["LONG","SHORT"]){
- test("MES "+direction+": actual PAPER journal persists 3→2→0 and $5/pt gross",async()=>{
-  const t=ticket(direction);
+ for(const movePoints of [30,40,50]){
+ test("MES "+direction+" "+movePoints+"-point institutional move: 3→2→0 at $5/pt",async()=>{
+  const t=ticket(direction,movePoints);
   const opened=await createTradeJournalEntryFromEngine8Fill({ticket:t,order:{...t,status:"FILLED"},result:{...t,status:"FILLED"}});
   assert.equal(opened.created,true);assert.equal(opened.trade.qty.originalQty,3);
   assert.equal(opened.trade.riskBasis.dollarsPerPoint,5);
@@ -55,18 +56,20 @@ for(const direction of ["LONG","SHORT"]){
   const p23=exit(t,opened.tradeId,direction+"-P2P3",2,0,t.midpoint,"EXIT","BLOCK_2","T2");
   const closed=await applyEngine8ExecutionToJournal({ticket:p23,order:{...p23,status:"FILLED"},result:{...p23,status:"FILLED"}});
   assert.equal(closed.status,"CLOSED");assert.equal(closed.remainingQty,0);
-  assert.equal(closed.trade.summary.realizedPnL,25);
+  const expectedGross=(3*movePoints-5)*5;
+  assert.equal(closed.trade.summary.realizedPnL,expectedGross);
   assert.equal(closed.trade.summary.paperFeeEstimate.estimatedFees,4.5);
-  assert.equal(closed.trade.summary.paperFeeEstimate.estimatedNetRealizedPnL,20.5);
+  assert.equal(closed.trade.summary.paperFeeEstimate.estimatedNetRealizedPnL,expectedGross-4.5);
   assert.equal(closed.trade.summary.paperFeeEstimate.authoritativeBrokerFeeReceipt,false);
   const fills=closed.trade.events.filter(e=>e.qtyClosed>0&&e.action!=="NEW_ENTRY");
   assert.deepEqual(fills.map(e=>e.fillQuantity),[1,2]);
-  assert.deepEqual(fills.map(e=>e.eventRealizedPnL),[5,20]);
+  assert.deepEqual(fills.map(e=>e.eventRealizedPnL),[(movePoints-5)*5,movePoints*2*5]);
   assert.deepEqual(fills[1].contractAllocations.map(c=>c.blockId),["BLOCK_2","BLOCK_3"]);
   assert.equal(closed.trade.events.filter(e=>e.eventType==="RUNNER_ARMED").length,0);
   const persisted=JSON.parse(fs.readFileSync(path.join(dir,"trade-journal.json"),"utf8"));
   const matched=persisted.find(x=>x.tradeId===opened.tradeId);
   assert.equal(matched.status,"CLOSED");assert.equal(matched.qty.remainingQty,0);
-  console.log("MES_JOURNAL_EVIDENCE",JSON.stringify({direction,tradeId:opened.tradeId,originalQty:3,exitQuantities:[1,2],grossUsd:25,estimatedFees:4.5,estimatedNet:20.5,ratePerPoint:5,brokerCalls:0}));
+  console.log("MES_JOURNAL_EVIDENCE",JSON.stringify({direction,movePoints,tradeId:opened.tradeId,originalQty:3,stopDistancePoints:10,firstTargetPoints:movePoints-5,midpointTargetPoints:movePoints,exitQuantities:[1,2],grossUsd:expectedGross,estimatedFees:4.5,estimatedNet:expectedGross-4.5,ratePerPoint:5,brokerCalls:0}));
  });
+ }
 }
