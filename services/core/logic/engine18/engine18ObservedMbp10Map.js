@@ -238,8 +238,18 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   delete out.residualSampleSum;delete out.meanDepthTicksFromTouchSum;
   perSide[x.side].push(out);
  }
- for(const side of ['bid','ask'])perSide[side].sort((a,b)=>b.observedCoverageMs-a.observedCoverageMs||
-  (b.timeWeightedSz??-1)-(a.timeWeightedSz??-1)||b.maxSz-a.maxSz);
+ // Research concentration ranks by residual size against the SAME-SIDE SAME-RANK
+ // within-capture median, never by exposure duration alone. Missing residuals
+ // are ineligible and remain accessible in the full private absolute grid.
+ const rankedConcentrations={};
+ for(const side of ['bid','ask']){
+  perSide[side].sort((a,b)=>b.observedCoverageMs-a.observedCoverageMs||
+   (b.timeWeightedSz??-1)-(a.timeWeightedSz??-1)||b.maxSz-a.maxSz);
+  rankedConcentrations[side]=perSide[side].filter(x=>x.observedCoverageMs>0&&
+   Number.isFinite(x.timeWeightedResidualSz)&&x.timeWeightedResidualSz>0)
+   .sort((a,b)=>b.timeWeightedResidualSz-a.timeWeightedResidualSz||
+    b.observedCoverageMs-a.observedCoverageMs||b.maxSz-a.maxSz).slice(0,2);
+ }
  // This return contains licensed absolute prices: KEEP PRIVATE, never log or upload.
  return {schema:OBSERVED_MBP10_SCHEMA,images,coverage:coverageAt,
   privateAbsoluteGrid:perSide,diagnostics,
@@ -268,11 +278,11 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    quoteBestPriceAgreement:diagnostics.quoteBestPriceAgreement,
    quoteBestSizeAgreement:diagnostics.quoteBestSizeAgreement,
    receiveGapHistogram:diagnostics.receiveGapHistogram,
-   topTwoBidConcentrations:perSide.bid.slice(0,2).map(x=>({observations:x.observations,
+   topTwoBidConcentrations:rankedConcentrations.bid.map(x=>({observations:x.observations,
     observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz,
     meanDistanceFromTouchTicks:x.meanDistanceFromTouchTicks,
     timeWeightedResidualSz:x.timeWeightedResidualSz})),
-   topTwoAskConcentrations:perSide.ask.slice(0,2).map(x=>({observations:x.observations,
+   topTwoAskConcentrations:rankedConcentrations.ask.map(x=>({observations:x.observations,
     observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz,
     meanDistanceFromTouchTicks:x.meanDistanceFromTouchTicks,
     timeWeightedResidualSz:x.timeWeightedResidualSz})),
@@ -280,6 +290,7 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
     'top-ten aggregated MBP only','no order IDs, execution/cancellation/replenishment labels',
     'out-of-coverage is UNKNOWN, not zero',
     'within-sample same-rank median is descriptive, nonrepresentative',
+    'top concentrations require positive observed residual and are not predictive',
     'no probabilities or trading signals']}
  };
 }
