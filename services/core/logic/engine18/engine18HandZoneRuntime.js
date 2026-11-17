@@ -19,9 +19,9 @@ export async function startEngine18HandZoneResearch({env=process.env,fetchImpl=f
   stagingRoot:'/tmp',fetchImpl
  });
  const watcher=new Engine18HandZoneWatcher({
-  fetchSource:makeEngine18ChartZoneFetcher({fetchImpl}),
+  fetchSource:makeEngine18ChartZoneFetcher({fetchImpl,token:env.ENGINE18_GITHUB_READ_TOKEN||null}),
   store:new Engine18HandZoneR2History({store}),
-  approvedKinds:env.ENGINE18_HAND_ZONE_APPROVED_KINDS?.split(',').filter(Boolean)||null,
+  approvedKinds:['PARENT','NEGOTIATED'],
   onChange:s=>console.log('ENGINE18_ZONE_CONTEXT_CHANGED',JSON.stringify({
    hash:s.hash,sourceRevision:s.sourceRevision,firstObservedAt:s.firstObservedAt,
    zones:s.zones.length,source:s.source,readOnly:true}))
