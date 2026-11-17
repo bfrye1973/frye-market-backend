@@ -53,6 +53,7 @@ import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidat
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
+import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -8873,8 +8874,17 @@ if (isEsIntradayScalp) {
     engine3ReactionConfirmation10m,
   };
 
+// Verify OPEN PAPER lifecycle from the existing Engine10 Journal read.
+// This never infers direction from Engine3, Engine26 or the wave count.
+const engine3OpenPaperLock = resolveEngine10OpenPaperDirection({
+  trades: engine26OpenPaperTrades,
+  symbol,
+  strategyId: s.strategyId,
+});
 const engine3V5 =
   buildEngine3V5Shadow({
+    openTradeActive: engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
     engine26LocationCandidate,
     engine26ReactionHandoff,
 
