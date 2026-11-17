@@ -15,6 +15,8 @@ jobs:
         working-directory: services/core
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -25,6 +27,34 @@ jobs:
           node --check jobs/buildStrategySnapshot.js
       - name: Run Phase 1 unit tests
         run: node --test tests/engine3V6Phase1Shadow.test.js tests/engine3V6Engine10OpenTradeLock.test.js tests/engine3V6Phase1ProductionWiring.test.js
-      - name: Existing Engine 3 tests (where present)
+      - name: Compare legacy Engine 3 tests against clean base
+        shell: bash
         run: |
-          find tests -maxdepth 1 -name '*engine3*test.js' ! -name 'engine3V6*' -print0 | xargs -0 -r node --test
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            echo "No PR base SHA: compare unavailable"; exit 1
+          fi
+          git worktree add --detach /tmp/engine3-base "$BASE_SHA"
+          for root in "/tmp/engine3-base/services/core" "$PWD"; do
+            (
+              cd "$root"
+              find tests -maxdepth 1 -name '*engine3*test.js' ! -name 'engine3V6*' -print0 |
+                xargs -0 -r node --test > "$root/engine3-legacy-result.tap" 2>&1 || true
+              echo "$root"
+              grep -E '^# (tests|pass|fail) ' "$root/engine3-legacy-result.tap" | tail -3
+            )
+          done
+          node - <<'NODE'
+          const fs=require('fs');
+          const parse=p=>{
+            const s=fs.readFileSync(p,'utf8');
+            const n=key=>Number(s.match(new RegExp('^# '+key+' (\\d+)$','m'))?.[1]??NaN);
+            return {tests:n('tests'),passed:n('pass'),failed:n('fail')};
+          };
+          const base=parse('/tmp/engine3-base/services/core/engine3-legacy-result.tap');
+          const head=parse('engine3-legacy-result.tap');
+          console.log(JSON.stringify({base,head},null,2));
+          if(!Number.isFinite(base.failed)||!Number.isFinite(head.failed))process.exit(1);
+          if(head.failed>base.failed)process.exit(1);
+          NODE
