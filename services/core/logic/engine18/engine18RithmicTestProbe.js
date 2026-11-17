@@ -3,7 +3,7 @@
 import WebSocket from 'ws';
 export const RITHMIC_TEST_ENDPOINT='wss://rituz00100.rithmic.com:443';
 export const PROTOCOL_FIELDS=Object.freeze({templateId:154467,userMsg:132760,rpCode:132766,
- systemName:153628,user:131003,password:130004,appName:130002,
+ systemName:153628,templateVersion:153634,user:131003,password:130004,appName:130002,
  appVersion:131803,infraType:153621,heartbeatInterval:153633});
 const uvar=n=>{if(!Number.isSafeInteger(n)||n<0)throw Error('invalid protobuf integer');
  const a=[];do{let b=n%128;n=Math.floor(n/128);a.push(n?b|128:b)}while(n);return Buffer.from(a)};
@@ -14,6 +14,7 @@ export function encodeSystemInfoRequest(){return num(PROTOCOL_FIELDS.templateId,
 export function encodeTickerPlantLogin({user,password,systemName='Rithmic Test'}){
  if(!user||!password||systemName!=='Rithmic Test')throw Error('Rithmic Test credentials and fixed system required');
  return Buffer.concat([num(PROTOCOL_FIELDS.templateId,10),
+ str(PROTOCOL_FIELDS.templateVersion,'5.55'),
  str(PROTOCOL_FIELDS.user,user),str(PROTOCOL_FIELDS.password,password),
  str(PROTOCOL_FIELDS.appName,'Frye Engine18 ReadOnly Test'),
  str(PROTOCOL_FIELDS.appVersion,'0.1.0'),
@@ -44,7 +45,7 @@ export function parseSystemInfo(frame){
  const f=decodeFields(frame),id=value(f,PROTOCOL_FIELDS.templateId);
  if(id!==17)throw Error('unexpected system-info template');
  const rpCodes=strings(f,PROTOCOL_FIELDS.rpCode);
- return Object.freeze({templateId:id,systems:rpCodes.includes('0')?strings(f,PROTOCOL_FIELDS.systemName):[],
+ return Object.freeze({templateId:id,systems:rpCodes.length===1&&rpCodes[0]==='0'?strings(f,PROTOCOL_FIELDS.systemName):[],
   rpCodes});
 }
 export function parseLogin(frame){
@@ -52,7 +53,7 @@ export function parseLogin(frame){
  if(id!==11)throw Error('unexpected login template');
  const rpCodes=strings(f,PROTOCOL_FIELDS.rpCode);
  return Object.freeze({templateId:id,rpCodes,
-  heartbeatIntervalBytes:value(f,PROTOCOL_FIELDS.heartbeatInterval)?.length||0});
+  heartbeatIntervalPresent:Buffer.isBuffer(value(f,PROTOCOL_FIELDS.heartbeatInterval))});
 }
 
 // Read-only entitlement probes only: vendor v0.90.0.0 templates 115/117.
@@ -113,8 +114,8 @@ export async function probeRithmicTest({env=process.env,WebSocketImpl=WebSocket,
   rpCodes:system.rpCodes,systemsCount:system.systems.length,readOnly:true};
  const login=await exchange({WebSocketImpl,url:RITHMIC_TEST_ENDPOINT,
   request:encodeTickerPlantLogin(creds),decode:parseLogin,timeoutMs});
- return {stage:'LOGIN',testAvailable:true,authenticated:login.rpCodes.includes('0'),
-  rpCodes:login.rpCodes,readOnly:true,dbSnapshotVerified:false,dbUpdatesVerified:false};
+ return {stage:'LOGIN',testAvailable:true,authenticated:login.rpCodes.length===1&&login.rpCodes[0]==='0',
+  rpCodes:login.rpCodes.map((v,i)=>i===0?v:'REDACTED'),readOnly:true,dbSnapshotVerified:false,dbUpdatesVerified:false};
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
  probeRithmicTest().then(x=>{process.stdout.write(JSON.stringify(x)+'\n')},
