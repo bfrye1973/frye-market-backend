@@ -38,3 +38,16 @@ Guardrails: no overwriting canonical Engine12 Replay; no duplicate recorder; coo
 LONG/SHORT symmetry; activation reset/continuity; source timestamp vs fallback; uncertainty bars cannot establish; pre-activation filtering; strict completed bars; minimum two postactivation 5m bars; valid locked ATR geometry; narrow/wide zones; upper/lower anchors; frozen anchor; warning invariance; v5/Engine4/Engine6 isolation; no merge/deploy.
 
 Open dependency: Engine26 owner to implement and test the authoritative `engine3AuthorizationStartedAt` continuity contract. See PR #340 change request. Separate canonical v5/Engine10 lock release decision and legacy tests remain tracked in PR #337.
+
+## Phase 2 Manager + Claude conditional review corrections (2026-11-17)
+**Still awaits Manager acceptance; no merge, deploy, recording or Phase3/4 start.**
+
+Corrections on stacked draft PR #340:
+- **Causal evidence is now consumed**, not merely filtered: `buildEngine3V6CausalControl` runs the existing v5 1m/5m evidence and buyer/seller-control modules on strictly post-activation completed bars. The v6 reducer receives this independently recomputed control; old v5 canonical control never supplies a Phase2 initial direction. Phase2 also scopes v6 deterioration and anchor invalidation bar evidence post-activation.
+- **Deferred seed:** once genuine mature post-activation 5m control qualifies and a true reaction anchor is available, the v6 shadow may establish even if v5's one-shot `establishedNow` happened earlier. This is the existing 5m slow path, NOT a new 1m fast path.
+- **Actual engagement:** wide-zone upper/lower site follows the actual post-activation band engaged, not presumed LONG/SHORT mapping. Ambiguous both-edge candle contact does not seed; narrow zones retain the exact whole-zone site. The original Engine26 zone object is preserved.
+- **Directional anchor lifecycle:** anchor and reaction site are frozen for an established direction and cleared when invalidated; an opposite direction cannot inherit the previous direction's anchor/site. Post-activation 1m extremes are preferred, with eligible completed-5m extreme fallback where 1m engagement is unavailable; no retrospective prior bars.
+- **Separate warning annotations:** `adverseWarning` triggers on adverse forming-bar movement >=0.75 activation ATR5m from forming open or >=1 ATR5m from progress extreme; `anchorThreatened` triggers at/within 0.25 ATR5m of the fixed reaction anchor. Both remain strictly diagnostic, with no direction, conviction, Engine4, Engine6, invalidation, reversal or execution authority.
+- **Regression evidence:** code head `86318d19c2be3acd70be7f18b6c1b7c5e1b7bce5` passed Phase2 focused **28/28** plus Phase1 compatibility **36/36**, including syntax checks (Actions run https://github.com/bfrye1973/frye-market-backend/actions/runs/44200752083).
+- Nov17-shaped tests are synthetic causal fixtures, **not exact original raw-bar re-simulation**; original immutable Replay lacks raw history. No claimed empirical trade improvement or A/B/C research result.
+- Engine26-owned authorization timestamp remains separate issue #341 and raw archive remains **in-memory packet preparation only**, not wired to production recording.
