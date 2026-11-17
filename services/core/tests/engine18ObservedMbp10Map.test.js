@@ -95,3 +95,20 @@ test('malformed frame invalidates continuity rather than silently carrying forwa
  assert.equal(r.summarySafe.previousLevelComparisons,0);
  assert.equal(r.summarySafe.quoteCompared,0);
 });
+
+test('same-rank baseline is descriptive and zero residual for unchanged images',()=>{
+ const one=book(),two=book();
+ const result=analyzeObservedMbp10([record(one,1,100),record(two,2,110)]);
+ assert.equal(result.summarySafe.validDepthFrames,2);
+ assert.equal(result.summarySafe.distinctSidePriceCells,20);
+ for(const side of ['bid','ask']){
+  assert.equal(result.privateAbsoluteGrid[side].length,10);
+  for(const cell of result.privateAbsoluteGrid[side]){
+   assert.equal(cell.timeWeightedResidualSz,0);
+   assert.equal(cell.meanSampleResidualSz,0);
+   assert.equal(cell.observedCoverageMs,10);
+   assert.ok(cell.meanDistanceFromTouchTicks>=0);
+  }
+ }
+ assert.equal(result.summarySafe.topTwoBidConcentrations[0].timeWeightedResidualSz,0);
+});
