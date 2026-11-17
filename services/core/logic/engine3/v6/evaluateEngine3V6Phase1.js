@@ -58,8 +58,8 @@ export function evaluateEngine3V6Phase1({
   ].filter(Boolean).length;
   const start=number(priorState?.deterioratingSinceMs);
   const deteriorating=deteriorationEvidenceCount!==null&&votes>=deteriorationEvidenceCount;
-  const deteriorationSince=deteriorating?(start??validTime):null;
-  const timedOut=deteriorating&&deteriorationTimeoutMs!==null&&
+  const deteriorationSince=deteriorating&&!improved?(start??validTime):null;
+  const timedOut=deteriorating&&!improved&&deteriorationTimeoutMs!==null&&
     validTime!==null&&deteriorationSince!==null&&validTime-deteriorationSince>=deteriorationTimeoutMs;
   const observedDirection=observedControl==="BUYERS_CONTROL"?"LONG":
     observedControl==="SELLERS_CONTROL"?"SHORT":"NEUTRAL";
@@ -79,8 +79,13 @@ export function evaluateEngine3V6Phase1({
     authoritativeDownstream:false,
   };
   if(openTradeActive===true&&lock!=="NEUTRAL"){
+    const sameLockedDirection=prev===lock;
     return {...base,canonicalDirection:lock,convictionState:"OPEN_TRADE_LOCKED",
-      reasonCodes:["ENGINE10_OPEN_TRADE_DIRECTION_LOCK_APPLIED"]};
+      reactionAnchor:sameLockedDirection?anchor:null,
+      establishedAtMs:sameLockedDirection?establishedAtMs:null,
+      deterioratingSinceMs:null,
+      reasonCodes:["ENGINE10_OPEN_TRADE_DIRECTION_LOCK_APPLIED",
+        !sameLockedDirection?"OPPOSITE_PRIOR_ANCHOR_DISCARDED":null].filter(Boolean)};
   }
   // Duplicate or out-of-order evaluations must never rewind canonical shadow state.
   if(validTime!==null&&number(priorState?.lastEvaluatedAtMs)!==null&&
