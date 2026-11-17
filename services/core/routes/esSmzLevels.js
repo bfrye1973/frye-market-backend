@@ -13,7 +13,6 @@
 // - Return a shape similar to SPY smz-levels.json
 
 import express from "express";
-import {createHash} from "node:crypto";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -23,7 +22,6 @@ const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const SOURCE_TEXT_PATH=path.resolve(__dirname,"../data/es-smz-manual-zones.txt");
 const MANUAL_STRUCTURES_PATH = path.resolve(
   __dirname,
   "../data/es-smz-manual-structures.json"
@@ -114,17 +112,6 @@ router.get("/", async (req, res) => {
 
     const raw = fs.readFileSync(MANUAL_STRUCTURES_PATH, "utf8");
     const json = JSON.parse(raw);
-    // Preserve existing chart rendering even for old generated files.
-    // Research alone fails closed when provenance is unavailable or stale.
-    // A source Git blob SHA is NOT a historical approval/drawing timestamp.
-    let sourceGitBlobSha=null,sourceVerified=false;
-    if(fs.existsSync(SOURCE_TEXT_PATH)&&json?.meta?.sourceGitBlobSha){
-      const bytes=fs.readFileSync(SOURCE_TEXT_PATH);
-      sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-      sourceVerified=sourceGitBlobSha===json.meta.sourceGitBlobSha;
-    }
-    const stableRevision=sourceVerified?
-      createHash("sha256").update(JSON.stringify(json.structures||[])).digest("hex"):null;
 
     const structures = Array.isArray(json?.structures) ? json.structures : [];
 
@@ -139,16 +126,6 @@ router.get("/", async (req, res) => {
       symbol: "ES",
       meta: {
         generated_at_utc: new Date().toISOString(),
-        servedAt: new Date().toISOString(),
-        sourceRevision: stableRevision?"rev-"+stableRevision:null,
-        sourceProvenanceVerified:sourceVerified,
-        sourceGitBlobSha,
-        sourceUpdatedAt: sourceVerified?json.meta.updatedUtc:null,
-        zoneAuthority:"CHART_EFFECTIVE_HAND",
-        // This route uses source-file price basis; never certify ESZ26 roll
-        // merely because the chart renders a ticker labelled ES.
-        contract:null,
-        priceBasis:"UNVERIFIED",
         source: "es-smz-manual-structures.json",
         manual_structures_loaded: structures.length,
         structures_sticky_count: structuresSticky.length,
