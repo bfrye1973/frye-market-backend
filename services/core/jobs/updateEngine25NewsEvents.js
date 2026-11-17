@@ -614,6 +614,21 @@ export async function buildAndWriteEngine25NewsEvents({
   now = new Date(),
   fetcher = fetchFinlightReutersFeed,
 } = {}) {
+  // Owner-requested subscription-limit pause. Fail closed by default:
+  // no Finlight REST or targeted enrichment calls until explicitly reenabled.
+  // Do not erase the previously persisted news/events or touch other engines.
+  if (process.env.ENGINE25_FINLIGHT_REST_ENABLED !== "true") {
+    console.log("[engine25-news-events] FINLIGHT_REST_PAUSED_SUBSCRIPTION_LIMIT; no API calls");
+    return {
+      ok: true,
+      skipped: true,
+      reason: "FINLIGHT_REST_PAUSED_SUBSCRIPTION_LIMIT",
+      engine: ENGINE25_NEWS_ENGINE,
+      preservedExistingEvents: true,
+      apiRequests: 0,
+    };
+  }
+
   const generatedAtUtc = now.toISOString();
   const liveWindow = buildLiveWindow(now);
 
