@@ -11,7 +11,7 @@ export function evaluateEngine3V6Phase1({
   completed1m=[],completed5m=[], evaluationTimeMs=null,
   reactionAnchor=null, progressExtreme=null, evidence=null,
   openTradeActive=false,lockedTradeDirection="NEUTRAL",
-  policy=null, seedFromV5=null,
+  policy=null, seedFromV5=null, seedFromPhase2=null,
 }={}){
   const prev=dir(priorState?.canonicalDirection);
   const lock=dir(lockedTradeDirection);
@@ -119,18 +119,23 @@ export function evaluateEngine3V6Phase1({
   }
   // Phase 1 may ONLY mirror a genuinely fresh, independently established
   // v5 directional event. Never derive a new direction from Engine 22 or 1m.
-  const seedDirection=dir(seedFromV5?.direction);
-  const seedAnchor=number(seedFromV5?.reactionAnchor);
-  const seedTime=number(seedFromV5?.establishedAtMs);
+  // Phase2 uses independently rebuilt post-activation 5m control; no dependency
+  // on a one-shot v5 establishedNow event. Phase1 retains its original adapter.
+  const phase2Seed=seedFromPhase2?.postActivationVerified===true;
+  const seed=phase2Seed?seedFromPhase2:seedFromV5;
+  const seedDirection=dir(seed?.direction);
+  const seedAnchor=number(seed?.reactionAnchor);
+  const seedTime=number(seed?.establishedAtMs);
   const afterInvalidation=number(priorState?.invalidatedAtMs);
-  if(seedFromV5?.establishedNow===true&&seedDirection!=="NEUTRAL"&&
+  if(seed?.establishedNow===true&&seedDirection!=="NEUTRAL"&&
      seedAnchor!==null&&seedTime!==null&&validTime!==null&&seedTime<=validTime&&
      (afterInvalidation===null||seedTime>afterInvalidation)&&
      (!priorState?.candidateId||sameCandidate)){
     return {...base,canonicalDirection:seedDirection,convictionState:"HOLDING",
       reactionAnchor:seedAnchor,establishedAtMs:seedTime,
       establishedNow:true,
-      reasonCodes:["FRESH_V5_DIRECTION_SEEDED_SHADOW_ONLY","V5_REMAINS_CANONICAL"]};
+      reasonCodes:[phase2Seed?"PHASE2_POST_ACTIVATION_SLOW_CONTROL_SEEDED":"FRESH_V5_DIRECTION_SEEDED_SHADOW_ONLY",
+        "V5_REMAINS_CANONICAL"]};
   }
   return {...base,canonicalDirection:"NEUTRAL",convictionState:"NEUTRAL",
     reasonCodes:["PHASE1_NO_FRESH_V5_SEED","V5_REMAINS_CANONICAL"]};
