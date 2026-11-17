@@ -22,3 +22,39 @@ test("ambiguous open paper trades fail closed, no invented lock",()=>{
  assert.equal(resolve({trades:[],readSucceeded:false}).reasonCode,"ENGINE10_OPEN_TRADE_READ_UNVERIFIED");
  assert.equal(resolve({trades:[trade("LONG"),trade("LONG")]}).blocker,true);
 });
+
+const verified=(verifiedAtMs=1000000)=>({
+ source:"ENGINE10_JOURNAL",symbol:"ES",strategyId:"intraday_scalp@10m",
+ lockedTradeDirection:"SHORT",tradeId:"TRADE-1",remainingQty:3,verifiedAtMs,
+});
+test("journal failure holds recent verified lock but flags blocked/unverified",()=>{
+ const r=resolve({trades:null,readSucceeded:false,priorVerifiedLock:verified(),
+  evaluationTimeMs:1000000+9*60000});
+ assert.equal(r.openTradeActive,true);
+ assert.equal(r.lockedTradeDirection,"SHORT");
+ assert.equal(r.blocker,true);
+ assert.equal(r.lifecycleVerified,false);
+ assert.equal(r.fallbackFromVerified,true);
+});
+test("ambiguous multiple OPEN trades cannot erase recent verified lock",()=>{
+ const r=resolve({trades:[trade("SHORT"),trade("LONG",{tradeId:"TRADE-2"})],
+  priorVerifiedLock:verified(),evaluationTimeMs:1000000+60000});
+ assert.equal(r.openTradeActive,true);assert.equal(r.blocker,true);
+ assert.equal(r.lockedTradeDirection,"SHORT");
+});
+test("expired or mismatched verified lock is not usable; no indefinite latch",()=>{
+ const expired=resolve({trades:null,readSucceeded:false,priorVerifiedLock:verified(),
+  evaluationTimeMs:1000000+11*60000});
+ assert.equal(expired.openTradeActive,false);
+ assert.equal(expired.blocker,true);
+ const wrong=resolve({trades:null,readSucceeded:false,
+  priorVerifiedLock:{...verified(),strategyId:"OTHER"},evaluationTimeMs:1000000+60000});
+ assert.equal(wrong.openTradeActive,false);
+});
+test("verified empty OPEN list is distinct from an unreadable journal",()=>{
+ const r=resolve({trades:[],readSucceeded:true,priorVerifiedLock:verified(),
+  evaluationTimeMs:1000000+60000});
+ assert.equal(r.openTradeActive,false);
+ assert.equal(r.lifecycleVerified,true);
+ assert.equal(r.blocker,false);
+});
