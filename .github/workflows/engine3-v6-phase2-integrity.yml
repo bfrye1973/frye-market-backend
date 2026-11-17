@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'services/core/logic/engine3/v6/buildEngine3V6Phase2Evidence.js'
+      - 'services/core/logic/engine3/v6/buildEngine3V6CausalControl.js'
+      - 'services/core/logic/engine3/v6/buildEngine3V6Phase1Shadow.js'
       - 'services/core/logic/engine3/v6/buildEngine3RawBarArchivePacket.js'
       - 'services/core/tests/engine3V6Phase2*.test.js'
       - 'services/core/jobs/buildStrategySnapshot.js'
@@ -22,6 +24,8 @@ jobs:
       - name: Syntax check
         run: |
           node --check logic/engine3/v6/buildEngine3V6Phase2Evidence.js
+          node --check logic/engine3/v6/buildEngine3V6CausalControl.js
+          node --check logic/engine3/v6/buildEngine3V6Phase1Shadow.js
           node --check logic/engine3/v6/buildEngine3RawBarArchivePacket.js
           node --check jobs/buildStrategySnapshot.js
       - name: Phase 2 evidence unit tests
