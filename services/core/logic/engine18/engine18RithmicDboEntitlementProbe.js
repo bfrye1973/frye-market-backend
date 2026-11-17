@@ -1,13 +1,13 @@
 // Bounded Rithmic Test DBO entitlement probe. No persistence or trading.
 import WebSocket from 'ws';
-import {probeRithmicTest,encodeTickerPlantLogin,encodeDboTestRequest,
+import {probeRithmicSystemInfo,encodeTickerPlantLogin,encodeDboTestRequest,
  decodeFields,classifyDboTestResponse,PROTOCOL_FIELDS,RITHMIC_TEST_ENDPOINT,
  verifyTestEnvironment} from './engine18RithmicTestProbe.js';
 
 const templateOf=frame=>decodeFields(frame)[PROTOCOL_FIELDS.templateId]?.[0];
 const rpSafe=x=>typeof x==='string'&&/^\d{1,6}$/.test(x)?x:'OTHER';
 export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
- timeoutMs=15000,initialProbe=probeRithmicTest}={}){
+ timeoutMs=15000,initialProbe=probeRithmicSystemInfo}={}){
  const {user,password}=verifyTestEnvironment(env);
  const symbol=env.RITHMIC_TEST_SYMBOL||'ESZ6',exchange=env.RITHMIC_TEST_EXCHANGE||'CME';
  // Validate vendor symbol/exchange before any network activity.
@@ -16,8 +16,8 @@ export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>20000)
   throw Error('invalid bounded test duration');
  const first=await initialProbe({env,WebSocketImpl,timeoutMs:Math.min(timeoutMs,8000)});
- if(!first.authenticated)return {stage:'LOGIN',authenticated:false,counts:null,
-  reason:'TEST_LOGIN_NOT_ACCEPTED',readOnly:true};
+ if(!first.testAvailable)return {stage:'SYSTEM_INFO',authenticated:false,counts:null,
+  reason:'TEST_SYSTEM_NOT_AVAILABLE',readOnly:true};
  let socket,timer,settled=false,resolveDone;
  const counts={ack:0,snapshot:0,updates:0,heartbeats:0,other:0,invalidFrames:0},
   codes=[],seen=new Set();
@@ -43,7 +43,10 @@ export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
    catch{counts.invalidFrames++;return resolveDone('MALFORMED_FRAME');}
    if(id===11){
     const raw=(fields[PROTOCOL_FIELDS.rpCode]||[]).map(v=>Buffer.isBuffer(v)?v.toString('utf8'):'');
-    if(raw.length!==1||raw[0]!=='0')return resolveDone('SECOND_LOGIN_REJECTED');
+    if(raw.length!==1||raw[0]!=='0'){
+      for(const code of raw){if(codes.length<8)codes.push(rpSafe(code));}
+      return resolveDone('LOGIN_REJECTED');
+    }
     try{socket.send(encodeDboTestRequest({kind:'subscribe',symbol,exchange}));
       socket.send(encodeDboTestRequest({kind:'snapshot',symbol,exchange}));}
     catch{return resolveDone('DBO_SEND_FAILED');}
