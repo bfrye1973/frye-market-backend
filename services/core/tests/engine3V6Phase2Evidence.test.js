@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {buildEngine3V6Phase2Evidence as run} from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
+import {buildEngine3V6Phase1Shadow} from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
 const minute=60000,now=Date.parse("2026-11-17T17:00:00Z");
 const bar=(start,dur,high,low,close)=>({time:(start-dur)/1000,open:close,high,low,close});
 const history=(end,count,atrWidth=4)=>Array.from({length:count},(_,i)=>{
@@ -110,4 +111,22 @@ test("authoritative activation timestamp in the future cannot be trusted",()=>{
  const out=run({...base,authorizedStartedAt:now+minute});
  assert.equal(out.activationSource,"ENGINE3_OBSERVED");
  assert.equal(out.activationStartedAtMs,now);
+});
+
+test("forming adverse warning is invariant for actual v6 shadow direction and conviction",()=>{
+ const establishedAtMs=now-15*minute;
+ const priorState={schema:"engine3.v6.phase1.shadow.v1",mode:"SHADOW_READ_ONLY",
+  candidateId:"A",canonicalDirection:"SHORT",convictionState:"HOLDING",
+  reactionAnchor:110,establishedAtMs,lastEvaluatedAtMs:now-minute};
+ const h=history(now-15*minute,5);
+ const forming=bar(now+5*minute,5*minute,125,95,110);
+ const context={priorState,candidateId:"A",zoneId:"Z",
+  evaluationTimeMs:now,v5:{evidence:{priceAction:{controlState:"CONTESTED",quality:"WEAK"}}},
+  bars1m:[],policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
+    deteriorationTimeoutMs:720000}};
+ const without=buildEngine3V6Phase1Shadow({...context,bars5m:h});
+ const withWarning=buildEngine3V6Phase1Shadow({...context,bars5m:[...h,forming]});
+ assert.equal(withWarning.canonicalDirection,without.canonicalDirection);
+ assert.equal(withWarning.convictionState,without.convictionState);
+ assert.equal(withWarning.noEngine6Authority,true);
 });
