@@ -1,7 +1,7 @@
 // Engine18 supervised five-minute chart-effective HAND zone watcher.
 // Safe-by-default: no active approval on stale/unavailable/unverified source.
 // Externally injected durable append/read store, timer and source for CI/runtime.
-import {normalizeChartHandZones,semanticZoneHash,ZONE_POLL_MS,digest} from './engine18HandZoneContext.js';
+import {normalizeChartHandZones,semanticZoneHash,ZONE_POLL_MS} from './engine18HandZoneContext.js';
 const iso=ms=>new Date(ms).toISOString();
 const safeTime=s=>typeof s==='string'&&Number.isFinite(Date.parse(s));
 export class Engine18HandZoneWatcher{
@@ -17,7 +17,7 @@ export class Engine18HandZoneWatcher{
   this.timeoutMs=timeoutMs;this.maxSourceAgeMs=maxSourceAgeMs;this.pollIntervalMs=pollIntervalMs;
   this.versions=[];this.active=null;this.timer=null;this.busy=false;this.started=false;
   this.healthState={lastAttemptAt:null,lastSuccessAt:null,lastChangedAt:null,
-   revision:null,sourceName:'ES_CHART_EFFECTIVE_STICKY',sourceAgeMs:null,
+   revision:null,sourceName:'GITHUB_MAIN_ES_MANUAL_TXT',sourceAgeMs:null,
    stale:true,reason:'NOT_STARTED',lastGoodHash:null,changedCount:0,unchangedCount:0,
    failureCount:0};
  }
@@ -56,8 +56,9 @@ export class Engine18HandZoneWatcher{
    // Bounded attempts and backoff, with injected fetch abort support.
    let data,err;
    for(let attempt=0;attempt<2;attempt++){
-    try{data=await this.fetchSource({timeoutMs:this.timeoutMs,attempt});err=null;break;}
-    catch(e){err=e;if(attempt===0)await Promise.resolve();}
+    try{data=await this.fetchSource({timeoutMs:this.timeoutMs,attempt,
+      previousSourceRevision:this.versions.at(-1)?.sourceRevision??null});err=null;break;}
+    catch(e){err=e;if(attempt===0)await new Promise(resolve=>setTimeout(resolve,250));}
    }
    if(err)throw Error('SOURCE_UNAVAILABLE');
    if(!data?.meta||!safeTime(data.meta.servedAt))
@@ -68,8 +69,6 @@ export class Engine18HandZoneWatcher{
    const model=normalizeChartHandZones(data,{approvedKinds:this.approvedKinds});
    const prior=this.versions.at(-1);
    if(prior){
-    if(Date.parse(model.sourceUpdatedAt)<Date.parse(prior.sourceUpdatedAt))
-     throw Error('SOURCE_REVISION_REGRESSION');
     if(model.sourceRevision===prior.sourceRevision&&semanticZoneHash(model)!==prior.hash)
      throw Error('SOURCE_REVISION_CONTENT_CONFLICT');
    }
