@@ -172,6 +172,18 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    }
   }
  }
+ // Same-side, same-rank median from THIS short recording only. This is a
+ // descriptive within-sample reference, not a trained expected-depth baseline.
+ const rankSamples=new Map();
+ for(const row of images){
+  if(row.image.state!=='VALID')continue;
+  for(const entry of entries(row.image)){
+   const slot=entry.side+':'+entry.rank;
+   if(!rankSamples.has(slot))rankSamples.set(slot,[]);
+   rankSamples.get(slot).push(entry.sz);
+  }
+ }
+ const rankBaseline=new Map([...rankSamples].map(([k,v])=>[k,median(v)]));
  const grid=new Map();
  for(const row of images){
   if(row.image.state!=='VALID')continue;
@@ -179,8 +191,14 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    const id=key(entry.side,entry.price);
    if(!grid.has(id))grid.set(id,{side:entry.side,price:entry.price,observations:0,maxSz:0,maxO:0,
     weightedSz:0,weightedO:0,coverageMs:0,increases:0,decreases:0,unchanged:0,
-    prevSz:null,prevFrameIndex:null,zeros:0});
-   const cell=grid.get(id);cell.observations++;cell.maxSz=Math.max(cell.maxSz,entry.sz);
+    zeros:0,residualWeighted:0,residualWeightMs:0,
+    residualSampleSum:0,meanDepthTicksFromTouchSum:0});
+   const cell=grid.get(id);cell.observations++;
+   const medianAtRank=rankBaseline.get(entry.side+':'+entry.rank);
+   cell.residualSampleSum+=entry.sz-medianAtRank;
+   const touch=entry.side==='bid'?row.image.bestBid:row.image.bestAsk;
+   cell.meanDepthTicksFromTouchSum+=Math.abs(entry.price-touch)/tick;
+   cell.maxSz=Math.max(cell.maxSz,entry.sz);
    cell.maxO=Math.max(cell.maxO,entry.o);if(entry.sz===0)cell.zeros++;
   }
  }
@@ -201,6 +219,8 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
     else cell.unchanged++;
     if(ms!==null&&ms<=maxIntervalMs){
      cell.coverageMs+=ms;cell.weightedSz+=ms*item.sz;cell.weightedO+=ms*item.o;
+     cell.residualWeighted+=ms*(item.sz-rankBaseline.get(item.side+':'+item.rank));
+     cell.residualWeightMs+=ms;
     }
    }
   }
@@ -209,8 +229,13 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
  for(const x of grid.values()){
   const out={...x,observedCoverageMs:x.coverageMs,
    timeWeightedSz:x.coverageMs>0?x.weightedSz/x.coverageMs:null,
-   timeWeightedO:x.coverageMs>0?x.weightedO/x.coverageMs:null};
+   timeWeightedO:x.coverageMs>0?x.weightedO/x.coverageMs:null,
+   timeWeightedResidualSz:x.residualWeightMs>0?x.residualWeighted/x.residualWeightMs:null,
+   meanSampleResidualSz:x.observations?x.residualSampleSum/x.observations:null,
+   meanDistanceFromTouchTicks:x.observations?x.meanDepthTicksFromTouchSum/x.observations:null};
   delete out.weightedSz;delete out.weightedO;delete out.coverageMs;
+  delete out.residualWeighted;delete out.residualWeightMs;
+  delete out.residualSampleSum;delete out.meanDepthTicksFromTouchSum;
   perSide[x.side].push(out);
  }
  for(const side of ['bid','ask'])perSide[side].sort((a,b)=>b.observedCoverageMs-a.observedCoverageMs||
@@ -244,11 +269,17 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
    quoteBestSizeAgreement:diagnostics.quoteBestSizeAgreement,
    receiveGapHistogram:diagnostics.receiveGapHistogram,
    topTwoBidConcentrations:perSide.bid.slice(0,2).map(x=>({observations:x.observations,
-    observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz})),
+    observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz,
+    meanDistanceFromTouchTicks:x.meanDistanceFromTouchTicks,
+    timeWeightedResidualSz:x.timeWeightedResidualSz})),
    topTwoAskConcentrations:perSide.ask.slice(0,2).map(x=>({observations:x.observations,
-    observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz})),
+    observedCoverageMs:x.observedCoverageMs,maxSz:x.maxSz,
+    meanDistanceFromTouchTicks:x.meanDistanceFromTouchTicks,
+    timeWeightedResidualSz:x.timeWeightedResidualSz})),
    limitations:['one minute, nonrepresentative','receipt time UNVERIFIED',
     'top-ten aggregated MBP only','no order IDs, execution/cancellation/replenishment labels',
-    'out-of-coverage is UNKNOWN, not zero','no probabilities or trading signals']}
+    'out-of-coverage is UNKNOWN, not zero',
+    'within-sample same-rank median is descriptive, nonrepresentative',
+    'no probabilities or trading signals']}
  };
 }
