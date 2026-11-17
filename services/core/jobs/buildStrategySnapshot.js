@@ -56,6 +56,7 @@ import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.j
 import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
 import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVerifiedEngine10PaperLock } from "../logic/engine3/v6/engine3Engine10VerifiedLockStore.js";
 import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
+import { buildEngine3V6Phase2Evidence } from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
 import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
@@ -8963,9 +8964,38 @@ if (isEsIntradayScalp) {
       deteriorationTimeoutMs: 12 * 60 * 1000,
     },
   });
+  // Phase2 supplements v6 with evidence-integrity diagnostics only.
+  // It does NOT feed a new direction back into the Phase1 reducer.
+  const engine3V6Phase2Evidence = buildEngine3V6Phase2Evidence({
+    priorActivation: savedShadow.found
+      ? savedShadow.state?.phase2ActivationRun ?? null : null,
+    candidateId: engine26LocationCandidate?.candidateId ?? null,
+    zoneId: engine26LocationCandidate?.zoneId ?? null,
+    eligible: engine3V5?.normalizedZoneInput?.eligible === true,
+    // Engine26-owned authority timestamp; never substitute lifecycle start.
+    authorizedStartedAt:
+      engine26ReactionHandoff?.engine3AuthorizationStartedAt ??
+      engine26LocationCandidate?.engine3AuthorizationStartedAt ?? null,
+    zone: engine3V5?.normalizedZoneInput?.zone ?? null,
+    bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    observedDirection: engine3V6Shadow.canonicalDirection,
+    priorReactionAnchor: savedShadow.found
+      ? savedShadow.state?.phase2ReactionAnchor ?? null : null,
+    establishingNow: engine3V6Shadow.establishedNow === true,
+    policy: {wideMultiplier:2,bandFraction:0.25,
+      bandFloorPoints:1,atrPeriod:14,observedUncertaintyMs:180000},
+  });
   patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
+  patchedConfluence.context.reaction.engine3V6Phase2Evidence =
+    engine3V6Phase2Evidence;
   patchedConfluence.context.reaction.engine3V6ShadowPersistence =
-    saveEngine3V6Phase1ShadowState({ state: engine3V6Shadow });
+    saveEngine3V6Phase1ShadowState({state:{
+      ...engine3V6Shadow,
+      phase2ActivationRun: engine3V6Phase2Evidence.activationRun,
+      phase2ReactionAnchor: engine3V6Phase2Evidence.reactionAnchor,
+    }});
 }
 
 
