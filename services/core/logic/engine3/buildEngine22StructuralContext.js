@@ -10,6 +10,7 @@ const STATES = Object.freeze({
   PARTIAL_ALIGNMENT:"PARTIAL_ALIGNMENT",
   CONFLICT:"CONFLICT",
   NO_STRUCTURAL_CONTEXT:"NO_STRUCTURAL_CONTEXT",
+  STRUCTURE_PRESENT_PRICE_ACTION_UNRESOLVED:"STRUCTURE_PRESENT_PRICE_ACTION_UNRESOLVED",
 });
 function safe(value) { return typeof value==="string" ? value.trim().toUpperCase() : ""; }
 function published(degree) {
@@ -34,19 +35,21 @@ export function buildEngine22StructuralContext({
   const submicro=contextAvailable ? published(authorized.publication.degrees.submicro) : published(null);
   const micro=contextAvailable ? published(authorized.publication.degrees.micro) : published(null);
   let alignmentState=STATES.NO_STRUCTURAL_CONTEXT;
-  if (contextAvailable) {
+  if (contextAvailable && !priceDirection) {
+    alignmentState=STATES.STRUCTURE_PRESENT_PRICE_ACTION_UNRESOLVED;
+  } else if (contextAvailable) {
     const dirs=[submicro.direction,micro.direction];
     const matches=priceDirection ? dirs.filter(d=>d===priceDirection).length : 0;
     const opposites=priceDirection ? dirs.filter(d=>d==="UP"||d==="DOWN").filter(d=>d!==priceDirection).length : 0;
     if (matches===2) alignmentState=priceDirection==="DOWN"?STATES.FULL_BEARISH_ALIGNMENT:STATES.FULL_BULLISH_ALIGNMENT;
     else if (matches>0 && opposites===0) alignmentState=STATES.PARTIAL_ALIGNMENT;
     else if (opposites>0) alignmentState=STATES.CONFLICT;
-    // Unresolved price action remains NO_STRUCTURAL_CONTEXT for alignment purposes.
   }
   return {
     schema:"engine3.engine22StructuralContext.v1",
     source:"engine22WaveStrategy.authorizedWorkingStructure",
     available:contextAvailable,
+    structureAvailable:contextAvailable,
     sourceReasonCode:lookahead?"ENGINE22_PUBLICATION_AFTER_EVALUATION":tooOld?"ENGINE22_PUBLICATION_OLDER_THAN_POLICY":authorized.reasonCode,
     sourceRevision:authorized.publication?.publicationRevision??null,
     sourcePublishedAt:authorized.publication?.publishedAt??null,
@@ -54,7 +57,7 @@ export function buildEngine22StructuralContext({
     asOfVerified:asOfKnown && publishedKnown && !lookahead,
     evaluationTime:asOfKnown?new Date(asOfMs).toISOString():null,
     publicationAgeMs:asOfKnown && publishedKnown?asOfMs-publishAtMs:null,
-    waveMaturity:"NOT_PUBLISHED_IN_AUTHORIZED_CONTRACT",
+    waveMaturity:"UNAVAILABLE",
     submicroDirection:submicro.direction,submicroWave:submicro.wave,
     microDirection:micro.direction,microWave:micro.wave,
     priceActionControlState:control||"NO_CONTROL",
