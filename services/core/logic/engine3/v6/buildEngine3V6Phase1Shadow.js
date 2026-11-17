@@ -20,8 +20,16 @@ export function buildEngine3V6Phase1Shadow({
  lockedTradeDirection="NEUTRAL",policy=null,
  causalControl=null,phase2Evidence=null,
 }={}){
- const one=completed(bars1m,"1m",evaluationTimeMs);
- const five=completed(bars5m,"5m",evaluationTimeMs);
+ // Phase2 must use the same eligible post-activation windows for EVERYTHING:
+ // control, deterioration, invalidation and initial anchor. Full v5 bars remain
+ // only in the independent Phase1 comparison when causalControl is absent.
+ const causalMode=causalControl!==null;
+ const sourceOne=causalMode?(phase2Evidence?.completed1mEligible||[]).map(b=>({
+   time:b.startMs/1000,open:b.open,high:b.high,low:b.low,close:b.close})):bars1m;
+ const sourceFive=causalMode?(phase2Evidence?.completed5mEligible||[]).map(b=>({
+   time:b.startMs/1000,open:b.open,high:b.high,low:b.low,close:b.close})):bars5m;
+ const one=completed(sourceOne,"1m",evaluationTimeMs);
+ const five=completed(sourceFive,"5m",evaluationTimeMs);
  const v5Direction=v5?.canonical?.canonical?.direction??v5?.canonical?.direction??"NEUTRAL";
  const established=v5?.stateMachine?.establishedNow===true&&
    v5?.validation?.valid===true&&v5?.canonical?.authoritativeDownstream!==false;
@@ -31,7 +39,6 @@ export function buildEngine3V6Phase1Shadow({
  const reactionAnchor=established&&finalFive
    ? v5Direction==="SHORT"?finalFive.high:v5Direction==="LONG"?finalFive.low:null
    :null;
- const causalMode=causalControl!==null;
  const causalDirection=causalMode?causalControl.observedDirection:v5Direction;
  // Phase2 DEFERRED seed. Does not depend on one-shot v5.establishedNow;
  // only mature, independently recalculated POST-ACTIVATION 5m control.
@@ -68,12 +75,13 @@ export function buildEngine3V6Phase1Shadow({
    recentOne.length>=2;
  const completedAbsorption=establishmentTime!==null&&
    five.some(b=>b.closeTimeMs>establishmentTime)&&
-   v5?.evidence?.priceAction?.controlState==="ABSORPTION";
+   (causalMode?causalControl?.control?.controlState:v5?.evidence?.priceAction?.controlState)==="ABSORPTION";
+ const completed1mReactionBias=causalMode
+   ?causalControl?.observation1m?.completed?.reaction?.reactionBias??"NONE"
+   :v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias??"NONE";
  const observedOpposing=establishmentTime!==null&&recentOne.length>=2&&
-   ((priorState?.canonicalDirection==="SHORT"&&
-     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="UP")||
-    (priorState?.canonicalDirection==="LONG"&&
-     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="DOWN"));
+   ((priorState?.canonicalDirection==="SHORT"&&completed1mReactionBias==="UP")||
+    (priorState?.canonicalDirection==="LONG"&&completed1mReactionBias==="DOWN"));
  const result=evaluateEngine3V6Phase1({
    priorState,candidateId,zoneId,
    observedControl:causalMode
@@ -89,12 +97,12 @@ export function buildEngine3V6Phase1Shadow({
  });
  return {...result,
    reactionAnchorBasis:result.establishedNow
-     ?"PROVISIONAL_LATEST_COMPLETED_5M_EXTREME_PHASE1"
+     ?(causalMode?"PHASE2_POST_ACTIVATION_REACTION_EXTREME":"PROVISIONAL_LATEST_COMPLETED_5M_EXTREME_PHASE1")
      :priorState?.reactionAnchorBasis??"UNVERIFIED",
    policyStatus:policy?"EXPERIMENTAL_SHADOW_POLICY":"NO_EXPERIMENTAL_POLICY",
    deteriorationEvidenceDiagnostics:{noProgress,oneMinuteOverlapRatio:overlap,
      overlapFormula:"CANONICAL_V5_INTERSECTION_OVER_SMALLER_RANGE",
-     completed1mReactionBias:v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias??"NONE",
+     completed1mReactionBias,
      opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
    rawBarHistoryArchived:false,
    stage:"PHASE1_SHADOW_ONLY",
