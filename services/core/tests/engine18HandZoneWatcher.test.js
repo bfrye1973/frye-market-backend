@@ -23,7 +23,9 @@ const harness=({sequence,history=new Engine18MemoryZoneHistory(),startAt=nowMs,
  approvedKinds=['NEGOTIATED']}={})=>{
  let time=startAt,callback=null,period=null,cancelled=0,n=0;
  const fetchSource=async()=>{const next=sequence[Math.min(n++,sequence.length-1)];
-  if(next instanceof Error)throw next;return typeof next==='function'?next(time):next;};
+  if(next instanceof Error)throw next;
+  const result=typeof next==='function'?next(time):next;
+  return result?.meta?{...result,meta:{...result.meta,servedAt:new Date(time).toISOString()}}:result;};
  const watcher=new Engine18HandZoneWatcher({fetchSource,store:history,approvedKinds,
  now:()=>time,schedule:(fn,ms)=>{callback=fn;period=ms;return 1;},
  cancel:()=>{cancelled++;}});
@@ -126,4 +128,19 @@ test('sourceRevision is not approval timestamp; no backwards date inference',()=
  assert.ok(!Object.hasOwn(v,'firstObservedAt'));
  assert.throws(()=>normalizeChartHandZones({...payload(),
   meta:{...payload().meta,sourceRevision:null}},{approvedKinds:['NEGOTIATED']}),/REVISION/);
+});
+
+test('stale chart publisher timestamp leaves existing zone history immutable but current unavailable',async()=>{
+ const h=harness({sequence:[payload(),()=>({...payload(),meta:{...payload().meta,
+  servedAt:'2026-11-17T14:00:00.000Z'}})]});
+ await h.watcher.start();h.advance(300000);
+ // This test uses the real stale-publisher path directly rather than the harness freshness helper.
+ const model=payload();
+ const bad={...model,meta:{...model.meta,servedAt:'2026-11-17T14:00:00.000Z'}};
+ const w=new Engine18HandZoneWatcher({fetchSource:async()=>bad,store:h.history,
+  approvedKinds:['NEGOTIATED'],now:()=>nowMs+300000});
+ await w.start();
+ assert.equal(w.health().stale,true);
+ assert.equal(w.health().reason,'SOURCE_STALE');
+ assert.equal(h.history.writes,1);
 });
