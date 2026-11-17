@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {evaluateEngine3V6Phase1 as run} from "../logic/engine3/v6/evaluateEngine3V6Phase1.js";
 const p={invalidationCloses1m:2,deteriorationEvidenceCount:2,deteriorationTimeoutMs:720000};
-const old=(direction)=>({canonicalDirection:direction,candidateId:"A",reactionAnchor:100});
+const old=(direction)=>({canonicalDirection:direction,candidateId:"A",reactionAnchor:100,establishedAtMs:800000});
 const common={candidateId:"A",zoneId:"Z",evaluationTimeMs:1000000,policy:p};
 const b=(close,ms)=>({close,closeTimeMs:ms,completed:true});
 for(const d of ["SHORT","LONG"]){
@@ -41,4 +41,35 @@ test("missing numeric policy and absent anchor cannot manufacture invalidation",
  const r=run({...common,priorState:old("SHORT"),policy:{},completed1m:[b(120,960000)]});
  assert.equal(r.canonicalDirection,"SHORT");
  assert.equal(r.noPermissionCreated,true);assert.equal(r.authoritativeDownstream,false);
+});
+
+test("historical bars before establishment cannot invalidate direction",()=>{
+ const r=run({...common,priorState:old("SHORT"),
+  completed1m:[b(125,600000),b(130,700000)],
+  completed5m:[b(130,700000)]});
+ assert.equal(r.canonicalDirection,"SHORT");
+ assert.equal(r.invalidatedNow,false);
+});
+test("out-of-order Replay tick cannot rewind a held state",()=>{
+ const prior={...old("LONG"),lastEvaluatedAtMs:1100000,convictionState:"DETERIORATING"};
+ const r=run({...common,priorState:prior,completed5m:[b(80,900000)]});
+ assert.equal(r.canonicalDirection,"LONG");
+ assert.deepEqual(r.reasonCodes,["DUPLICATE_OR_REWOUND_EVALUATION_IGNORED"]);
+});
+test("only fresh, time-verified v5 establishment can seed Phase1",()=>{
+ const seed={direction:"SHORT",reactionAnchor:107,establishedNow:true,establishedAtMs:900000};
+ const r=run({...common,priorState:null,seedFromV5:seed});
+ assert.equal(r.canonicalDirection,"SHORT");
+ assert.equal(r.establishedNow,true);
+ assert.equal(r.reactionAnchor,107);
+ const noSeed=run({...common,priorState:null,seedFromV5:{...seed,establishedNow:false}});
+ assert.equal(noSeed.canonicalDirection,"NEUTRAL");
+ assert.equal(noSeed.establishedNow,false);
+});
+test("never reseed opposite direction in the same tick as invalidation",()=>{
+ const seed={direction:"LONG",reactionAnchor:95,establishedNow:true,establishedAtMs:960000};
+ const r=run({...common,priorState:old("SHORT"),completed5m:[b(110,960000)],seedFromV5:seed});
+ assert.equal(r.canonicalDirection,"NEUTRAL");
+ assert.equal(r.invalidatedNow,true);
+ assert.equal(r.reversedNow,false);
 });
