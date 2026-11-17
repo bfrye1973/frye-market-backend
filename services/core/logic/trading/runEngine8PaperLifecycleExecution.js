@@ -38,6 +38,9 @@ import {
 import {
   markEngine8AcceptanceTradeCompleted,
 } from "./engine8AcceptanceState.js";
+import {
+  markEngine8AcceptanceTradeCompleted as markDurableEngine8AcceptanceTrial,
+} from "./engine8DuplicateState.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1890,6 +1893,23 @@ export async function runEngine8PaperLifecycleExecution({
           nowIso(),
       });
 
+    // Synchronize the separate durable PAPER acceptance audit only after
+    // an authoritative Engine 10 CLOSED/zero-quantity acknowledgement.
+    // This is additive: never merge/delete/reset the legacy source.
+    const durableAcceptanceResult =
+      markDurableEngine8AcceptanceTrial({
+        executionId: record.executionId,
+        orderId: record.orderId,
+        idempotencyKey: record.idempotencyKey,
+        tradeId: record.tradeId,
+        planId: record.planId,
+        candidateId: record.candidateId,
+        strategyId: record.strategyId,
+        journalStatus: record.engine10Status,
+        remainingQty: record.remainingQty,
+        closedAt: nowIso(),
+      });
+
     record =
       saveLifecycleRecord(
         lifecycleKey,
@@ -1900,6 +1920,14 @@ export async function runEngine8PaperLifecycleExecution({
             clone(
               acceptanceResult
             ),
+
+          durableAcceptanceResult:
+            clone(
+              durableAcceptanceResult
+            ),
+
+          durableAcceptanceTrialRecorded:
+            durableAcceptanceResult?.ok === true,
 
           acceptanceTradeCompleted:
             acceptanceResult
@@ -1914,7 +1942,8 @@ export async function runEngine8PaperLifecycleExecution({
 
           status:
             acceptanceResult?.ok ===
-            true
+            true &&
+            durableAcceptanceResult?.ok === true
               ? "FINAL_EXIT_ACCEPTANCE_COMPLETED"
               : "FINAL_EXIT_JOURNALED_ACCEPTANCE_LOCK_FAILED",
         }
@@ -2228,6 +2257,23 @@ export async function reconcileEngine8PaperLifecycleJournal({
           nowIso(),
       });
 
+    // Synchronize the separate durable PAPER acceptance audit only after
+    // an authoritative Engine 10 CLOSED/zero-quantity acknowledgement.
+    // This is additive: never merge/delete/reset the legacy source.
+    const durableAcceptanceResult =
+      markDurableEngine8AcceptanceTrial({
+        executionId: record.executionId,
+        orderId: record.orderId,
+        idempotencyKey: record.idempotencyKey,
+        tradeId: record.tradeId,
+        planId: record.planId,
+        candidateId: record.candidateId,
+        strategyId: record.strategyId,
+        journalStatus: record.engine10Status,
+        remainingQty: record.remainingQty,
+        closedAt: nowIso(),
+      });
+
     record =
       saveLifecycleRecord(
         lifecycleKey,
@@ -2238,6 +2284,14 @@ export async function reconcileEngine8PaperLifecycleJournal({
             clone(
               acceptanceResult
             ),
+
+          durableAcceptanceResult:
+            clone(
+              durableAcceptanceResult
+            ),
+
+          durableAcceptanceTrialRecorded:
+            durableAcceptanceResult?.ok === true,
 
           acceptanceTradeCompleted:
             acceptanceResult
@@ -2252,7 +2306,8 @@ export async function reconcileEngine8PaperLifecycleJournal({
 
           status:
             acceptanceResult?.ok ===
-            true
+            true &&
+            durableAcceptanceResult?.ok === true
               ? "FINAL_EXIT_ACCEPTANCE_COMPLETED"
               : "FINAL_EXIT_JOURNALED_ACCEPTANCE_LOCK_FAILED",
         }
