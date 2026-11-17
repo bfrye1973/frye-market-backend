@@ -50,7 +50,8 @@ export function buildEngine3V6Phase2Evidence({
  priorActivation=null,candidateId=null,zoneId=null,eligible=false,
  authorizedStartedAt=null,zone=null,bars1m=[],bars5m=[],
  evaluationTimeMs=null,policy=null,observedDirection="NEUTRAL",
- priorReactionAnchor=null,establishingNow=false,
+ priorReactionAnchor=null,priorAnchorDirection=null,establishingNow=false,
+ progressExtreme=null,warningEnabled=true,
 }={}){
  const now=time(evaluationTimeMs);
  const base={schema:"engine3.v6.phase2.evidence.v1",mode:"SHADOW_READ_ONLY",
@@ -61,7 +62,9 @@ export function buildEngine3V6Phase2Evidence({
   preActivation1mCount:0,preActivation5mCount:0,
   slowPathEvidenceState:"INSUFFICIENT_POST_ACTIVATION_EVIDENCE",
   geometry:null,reactionSite:null,reactionAnchor:null,
-  adverseDisplacementWarning:false,adverseWarningOnly:true,
+  anchorDirection:null,
+  adverseDisplacementWarning:false,adverseWarning:false,anchorThreatened:false,
+  adverseWarningOnly:true,
   graceBarsCanEstablish:false,directionEstablishmentAuthorized:false,
   shadowSeedEvidenceEligible:false,
   canonicalDirectionAuthority:false,noPermissionCreated:true,noExecution:true,
@@ -86,24 +89,54 @@ export function buildEngine3V6Phase2Evidence({
  const filteredOne=one.completed.filter(b=>b.closeTimeMs>start);
  const filteredFive=five.completed.filter(b=>b.closeTimeMs>start);
  const direction=observedDirection==="SHORT"?"SHORT":observedDirection==="LONG"?"LONG":"NEUTRAL";
- const siteName=direction==="SHORT"?"upper":direction==="LONG"?"lower":null;
- const band=siteName?frozen?.[siteName]:null;
- const engage=band&&filteredOne.findIndex(b=>b.high>=band.low&&b.low<=band.high);
- const engagedBars=engage>=0?filteredOne.slice(engage):[];
+ // Narrow zones retain the original whole-zone site. Wide zones choose
+ // the actual post-activation band ENGAGED, not a side inferred from LONG/SHORT.
+ const touched=(band,b)=>Boolean(band&&b.high>=band.low&&b.low<=band.high);
+ let siteName=null;
+ let engagedIndex=-1;
+ if(frozen?.wideZone===false){
+   siteName="whole";
+   engagedIndex=filteredOne.findIndex(b=>touched(frozen.originalZone,b));
+ }else if(frozen?.wideZone===true){
+   const hits=[];
+   for(let i=0;i<filteredOne.length;i++){
+     for(const name of ["upper","lower"]){
+       if(touched(frozen[name],filteredOne[i]))
+         hits.push({name,index:i});
+     }
+   }
+   // Latest independent contact is the active reaction site.
+   // If the same bar spans both edges it is ambiguous: no directional seed.
+   if(hits.length){
+     const lastIndex=Math.max(...hits.map(h=>h.index));
+     const candidates=[...new Set(hits.filter(h=>h.index===lastIndex).map(h=>h.name))];
+     if(candidates.length===1){siteName=candidates[0];engagedIndex=lastIndex;}
+   }
+ }
+ const site=siteName==="whole"?frozen?.originalZone:frozen?.[siteName];
+ const engagedBars=engagedIndex>=0?filteredOne.slice(engagedIndex):[];
  const anchorCandidate=direction==="SHORT"&&engagedBars.length
   ?Math.max(...engagedBars.map(b=>b.high)):
   direction==="LONG"&&engagedBars.length
   ?Math.min(...engagedBars.map(b=>b.low)):null;
- const priorAnchor=same?num(priorReactionAnchor):null;
- const shadowSeedEvidenceEligible=Boolean(frozen&&band&&engagedBars.length>0&&
+ const priorAnchor=same&&priorAnchorDirection===direction&&direction!=="NEUTRAL"
+   ?num(priorReactionAnchor):null;
+ const shadowSeedEvidenceEligible=Boolean(frozen&&site&&engagedBars.length>0&&
    filteredFive.length>=2&&filteredOne.length>0&&anchorCandidate!==null);
  const anchor=priorAnchor??(establishingNow&&shadowSeedEvidenceEligible?anchorCandidate:null);
- // Warning on a forming 5m bar cannot alter direction, conviction, or permission.
- const adverse=anchor!==null&&frozen?.frozenAtr5m>0&&five.forming
-  ?direction==="SHORT"
-    ?five.forming.high-anchor>=frozen.frozenAtr5m
-    :direction==="LONG"
-    ?anchor-five.forming.low>=frozen.frozenAtr5m:false:false;
+ const atr=frozen?.frozenAtr5m;
+ const forming=five.forming;
+ const currentMove=forming&&direction==="SHORT"?forming.high-forming.open:
+   forming&&direction==="LONG"?forming.open-forming.low:0;
+ const progress=num(progressExtreme);
+ const progressMove=forming&&progress!==null&&direction==="SHORT"?forming.high-progress:
+   forming&&progress!==null&&direction==="LONG"?progress-forming.low:0;
+ // Warnings are annotations only and have no state-machine inputs.
+ const adverse=warningEnabled&&atr>0&&Boolean(forming)&&direction!=="NEUTRAL"&&
+   (currentMove>=0.75*atr||progressMove>=atr);
+ const threatened=warningEnabled&&atr>0&&anchor!==null&&Boolean(forming)&&
+   (direction==="SHORT"?forming.high>=anchor-0.25*atr:
+     direction==="LONG"?forming.low<=anchor+0.25*atr:false);
  return {...base,activationSource:source,activationStartedAtMs:start,
   activationUncertaintyMs:uncertainty,activationRun,
   completed1mEligible:filteredOne,completed5mEligible:filteredFive,
@@ -112,17 +145,20 @@ export function buildEngine3V6Phase2Evidence({
   slowPathEvidenceState:filteredFive.length>=2?"SUFFICIENT_POST_ACTIVATION_5M":
     "INSUFFICIENT_POST_ACTIVATION_EVIDENCE",
   geometry:frozen,reactionSite:siteName,
+  anchorDirection:anchor!==null?direction:null,
   shadowSeedEvidenceEligible,
   reactionAnchor:anchor,
   anchorSource:priorAnchor!==null?"FROZEN_PREVIOUS":
     anchor!==null?"POST_ACTIVATION_1M_EXTREME":"UNAVAILABLE",
   adverseDisplacementWarning:Boolean(adverse),
+  adverseWarning:Boolean(adverse),anchorThreatened:Boolean(threatened),
   reasonCodes:[
    same?"CONTINUOUS_AUTHORIZATION_RUN":"NEW_AUTHORIZATION_RUN",
    source==="ENGINE3_OBSERVED"?"OBSERVED_ACTIVATION_NO_GRACE_DIRECTION_AUTHORITY":"ENGINE26_ACTIVATION_CONSUMED",
    frozen?"FROZEN_ATR_SITE_GEOMETRY":"ATR_AT_ACTIVATION_UNAVAILABLE",
    filteredFive.length<2?"INSUFFICIENT_POST_ACTIVATION_EVIDENCE":null,
-   adverse?"ADVERSE_DISPLACEMENT_WARNING_ANNOTATION_ONLY":null
+   adverse?"ADVERSE_WARNING_ANNOTATION_ONLY":null,
+   threatened?"ANCHOR_THREATENED_ANNOTATION_ONLY":null
   ].filter(Boolean)};
 }
 export default buildEngine3V6Phase2Evidence;
