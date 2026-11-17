@@ -17,6 +17,6 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check services/core/logic/engine18/engine18RithmicTestProbe.js
       - run: node --test services/core/tests/engine18RithmicTestProbe.test.js
