@@ -1,0 +1,26 @@
+name: Engine18C Observed MBP-10 Offline Only
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18ObservedMbp10Map.js'
+      - 'services/core/logic/engine18/engine18ObservedMbp10OfflineEntrypoint.js'
+      - 'services/core/tests/engine18ObservedMbp10Map.test.js'
+      - '.github/workflows/engine18-observed-mbp10.yml'
+jobs:
+  offline-mbp10:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    permissions: {contents: read}
+    strategy:
+      fail-fast: false
+      matrix:
+        tz: [UTC, America/Phoenix]
+    env:
+      TZ: ${{ matrix.tz }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18ObservedMbp10Map.js
+      - run: node --check services/core/logic/engine18/engine18ObservedMbp10OfflineEntrypoint.js
+      - run: node --test services/core/tests/engine18ObservedMbp10Map.test.js
