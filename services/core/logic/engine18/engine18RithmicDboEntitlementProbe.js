@@ -7,22 +7,42 @@ import {probeRithmicSystemInfo,encodeTickerPlantLogin,encodeDboTestRequest,
 const templateOf=frame=>decodeFields(frame)[PROTOCOL_FIELDS.templateId]?.[0];
 const rpSafe=x=>typeof x==='string'&&/^\d{1,6}$/.test(x)?x:'OTHER';
 export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
- timeoutMs=15000,initialProbe=probeRithmicSystemInfo}={}){
+ timeoutMs=30000,initialProbe=probeRithmicSystemInfo}={}){
  const {user,password}=verifyTestEnvironment(env);
  const symbol=env.RITHMIC_TEST_SYMBOL||'ESZ6',exchange=env.RITHMIC_TEST_EXCHANGE||'CME';
  // Validate vendor symbol/exchange before any network activity.
  encodeDboTestRequest({kind:'subscribe',symbol,exchange});
  encodeDboTestRequest({kind:'snapshot',symbol,exchange});
- if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>20000)
+ if(!Number.isInteger(timeoutMs)||timeoutMs<1000||timeoutMs>60000)
   throw Error('invalid bounded test duration');
  const first=await initialProbe({env,WebSocketImpl,timeoutMs:Math.min(timeoutMs,8000)});
  if(!first.testAvailable)return {stage:'SYSTEM_INFO',authenticated:false,counts:null,
   reason:'TEST_SYSTEM_NOT_AVAILABLE',readOnly:true};
  let socket,timer,settled=false,authenticated=false,resolveDone;
+ const startMs=Date.now(),perSecond=new Map(),prices=new Set();
+ let snapshotOrders=0,snapshotLevels=0,bestBid=null,bestAsk=null,
+  firstUpdateMs=null,lastUpdateMs=null,firstSequence=null,lastSequence=null,
+  nonIncreasingSequences=0,positiveSequenceJumps=0;
+ const updateKinds={NEW:0,CHANGE:0,DELETE:0,OTHER:0};
+ const observeSequence=x=>{if(!Number.isSafeInteger(x))return;
+  if(firstSequence===null)firstSequence=x;
+  if(lastSequence!==null){if(x<=lastSequence)nonIncreasingSequences++;
+   else if(x>lastSequence+1)positiveSequenceJumps++;}
+  lastSequence=x;};
+ const countSecond=()=>{const sec=Math.floor((Date.now()-startMs)/1000);
+  perSecond.set(sec,(perSecond.get(sec)||0)+1);};
+ const priceFrom=x=>Buffer.isBuffer(x)&&x.length===8?x.readDoubleLE(0):null;
  const counts={ack:0,snapshot:0,updates:0,heartbeats:0,other:0,invalidFrames:0},
   codes=[],seen=new Set();
  const report=reason=>({stage:'DBO_ENTITLEMENT',authenticated,reason,
   counts:{...counts},codes:codes.slice(0,8),sawOrderUpdate:counts.updates>0,
+  observedMs:Date.now()-startMs,firstUpdateElapsedMs:firstUpdateMs===null?null:firstUpdateMs-startMs,
+  lastUpdateElapsedMs:lastUpdateMs===null?null:lastUpdateMs-startMs,
+  snapshotOrders,snapshotLevels,distinctSnapshotPrices:prices.size,
+  bestBid,bestAsk,updateKinds,firstSequence,lastSequence,
+  nonIncreasingSequences,positiveSequenceJumps,
+  updateCountsPerSecond:[...perSecond.entries()].sort((a,b)=>a[0]-b[0]).slice(0,65),
+  // Sequence scope/snapshot termination unverified: no reconstruction claims.
   bookValid:false,snapshotComplete:false,readOnly:true});
  return await new Promise(resolve=>{
   resolveDone=reason=>{if(settled)return;settled=true;clearTimeout(timer);
@@ -57,13 +77,27 @@ export async function probeRithmicDbo({env=process.env,WebSocketImpl=WebSocket,
    if(id===116||id===118||id===160){
     const reply=classifyDboTestResponse(data);
     if(reply.kind==='SUBSCRIPTION_ACK')counts.ack++;
-    else if(reply.kind==='SNAPSHOT')counts.snapshot++;
-    else if(reply.kind==='UPDATE')counts.updates++;
+    else if(reply.kind==='SNAPSHOT'){
+     counts.snapshot++;
+     const p=priceFrom(fields[154405]?.[0]),side=fields[153612]?.[0];
+     snapshotOrders+=(fields[149238]||[]).length;
+     if(p!==null&&Number.isFinite(p)){
+       prices.add(p);snapshotLevels++;
+       if(side===1)bestBid=bestBid===null? p:Math.max(bestBid,p);
+       if(side===2)bestAsk=bestAsk===null? p:Math.min(bestAsk,p);
+     }
+    }
+    else if(reply.kind==='UPDATE'){
+     counts.updates++;countSecond();
+     const now=Date.now();if(firstUpdateMs===null)firstUpdateMs=now;lastUpdateMs=now;
+     observeSequence(fields[112002]?.[0]);
+     for(const t of fields[110121]||[]){const k=t===1?'NEW':t===2?'CHANGE':t===3?'DELETE':'OTHER';updateKinds[k]++;}
+    }
     for(const code of reply.rpCodes){if(codes.length<8)codes.push(rpSafe(code));}
-    if(counts.snapshot>0&&counts.updates>0)return resolveDone('SNAPSHOT_AND_UPDATES_OBSERVED');
+    // Keep observing for the entire bounded window. Never exit on first update.
     if(counts.ack>0&&codes.some(c=>c!=='0'))return resolveDone('DBO_RESPONSE_NONZERO');
    }else counts.other++;
-   if(counts.ack+counts.snapshot+counts.updates+counts.other>3000)
+   if(counts.ack+counts.snapshot+counts.updates+counts.other>100000)
     return resolveDone('FRAME_LIMIT_REACHED');
   });
  });
