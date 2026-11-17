@@ -43,8 +43,9 @@ const value=(o,k)=>o[k]?.[0];
 export function parseSystemInfo(frame){
  const f=decodeFields(frame),id=value(f,PROTOCOL_FIELDS.templateId);
  if(id!==17)throw Error('unexpected system-info template');
- return Object.freeze({templateId:id,systems:strings(f,PROTOCOL_FIELDS.systemName),
-  rpCodes:strings(f,PROTOCOL_FIELDS.rpCode)});
+ const rpCodes=strings(f,PROTOCOL_FIELDS.rpCode);
+ return Object.freeze({templateId:id,systems:rpCodes.includes('0')?strings(f,PROTOCOL_FIELDS.systemName):[],
+  rpCodes});
 }
 export function parseLogin(frame){
  const f=decodeFields(frame),id=value(f,PROTOCOL_FIELDS.templateId);
@@ -84,8 +85,8 @@ export async function probeRithmicTest({env=process.env,WebSocketImpl=WebSocket,
   rpCodes:system.rpCodes,systemsCount:system.systems.length,readOnly:true};
  const login=await exchange({WebSocketImpl,url:RITHMIC_TEST_ENDPOINT,
   request:encodeTickerPlantLogin(creds),decode:parseLogin,timeoutMs});
- return {stage:'LOGIN',testAvailable:true,rpCodes:login.rpCodes,
-  readOnly:true,dbSnapshotVerified:false,dbUpdatesVerified:false};
+ return {stage:'LOGIN',testAvailable:true,authenticated:login.rpCodes.includes('0'),
+  rpCodes:login.rpCodes,readOnly:true,dbSnapshotVerified:false,dbUpdatesVerified:false};
 }
 if(process.argv[1]&&import.meta.url===new URL('file://'+process.argv[1]).href){
  probeRithmicTest().then(x=>{process.stdout.write(JSON.stringify(x)+'\n')},
