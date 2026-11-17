@@ -8991,6 +8991,8 @@ if (isEsIntradayScalp) {
       ?priorV6?.phase2ReactionAnchor ?? null:null,
     priorAnchorDirection:priorAnchorAllowed
       ?priorV6?.phase2AnchorDirection ?? null:null,
+    priorReactionSite:priorAnchorAllowed
+      ?priorV6?.phase2ReactionSite ?? null:null,
     progressExtreme:priorV6?.progressExtreme ?? null,
     establishingNow:phase2Causal.qualified && priorV6Direction === "NEUTRAL",
   });
@@ -9026,6 +9028,8 @@ if (isEsIntradayScalp) {
         ?null:engine3V6Phase2Evidence.reactionAnchor,
       phase2AnchorDirection:engine3V6Shadow.invalidatedNow
         ?null:engine3V6Phase2Evidence.anchorDirection,
+      phase2ReactionSite:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.reactionSite,
     }});
 }
 
