@@ -55,8 +55,12 @@ export function buildEngine3V6Phase1Shadow({
        establishedAtMs:finalFive.closeTimeMs}:null;
  const seed=causalMode?causalSeed:originalSeed;
  const establishmentTime=n(priorState?.establishedAtMs);
+ const scopedOne=causalMode
+   ?(phase2Evidence?.completed1mEligible??[]):one;
+ const scopedFive=causalMode
+   ?(phase2Evidence?.completed5mEligible??[]):five;
  const recentOne=establishmentTime!==null
-   ?one.filter(b=>b.closeTimeMs>establishmentTime).slice(-3):[];
+   ?scopedOne.filter(b=>b.closeTimeMs>establishmentTime).slice(-3):[];
  const overlapRatios=[];
  for(let i=1;i<recentOne.length;i++){
    const first=recentOne[i-1],second=recentOne[i];
@@ -90,7 +94,7 @@ export function buildEngine3V6Phase1Shadow({
    observedQuality:causalMode
      ?causalControl?.control?.quality??"WEAK"
      :v5?.evidence?.priceAction?.quality??"WEAK",
-   completed1m:one,completed5m:five,evaluationTimeMs,
+   completed1m:scopedOne,completed5m:scopedFive,evaluationTimeMs,
    seedFromV5:seed,openTradeActive,lockedTradeDirection,policy,
    evidence:{noProgress,highOverlap:overlap!==null&&overlap>=0.60,
      opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
@@ -109,6 +113,7 @@ export function buildEngine3V6Phase1Shadow({
    v5CanonicalDirection:v5Direction,
    causalControlSource:causalMode?"POST_ACTIVATION_5M_INDEPENDENT":"PHASE1_V5_SEED",
    sourceControlRecalculated:causalMode,
+   deteriorationInputsPostActivation:causalMode,
    noCanonicalPromotion:true,noEngine4Authority:true,noEngine6Authority:true};
 }
 export default buildEngine3V6Phase1Shadow;
