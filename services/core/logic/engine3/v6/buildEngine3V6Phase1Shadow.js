@@ -18,6 +18,7 @@ export function buildEngine3V6Phase1Shadow({
  priorState=null,v5=null,candidateId=null,zoneId=null,
  bars1m=[],bars5m=[],evaluationTimeMs=null,openTradeActive=false,
  lockedTradeDirection="NEUTRAL",policy=null,
+ causalControl=null,phase2Evidence=null,
 }={}){
  const one=completed(bars1m,"1m",evaluationTimeMs);
  const five=completed(bars5m,"5m",evaluationTimeMs);
@@ -30,10 +31,22 @@ export function buildEngine3V6Phase1Shadow({
  const reactionAnchor=established&&finalFive
    ? v5Direction==="SHORT"?finalFive.high:v5Direction==="LONG"?finalFive.low:null
    :null;
- const seed=typeof candidateId==="string"&&candidateId.length>0&&
+ const causalMode=causalControl!==null;
+ const causalDirection=causalMode?causalControl.observedDirection:v5Direction;
+ // Phase2 DEFERRED seed. Does not depend on one-shot v5.establishedNow;
+ // only mature, independently recalculated POST-ACTIVATION 5m control.
+ const causalSeed=causalMode&&causalControl?.qualified===true&&
+   phase2Evidence?.shadowSeedEvidenceEligible===true&&
+   phase2Evidence?.reactionAnchor!==null&&
+   finalFive&&finalFive.closeTimeMs>=(phase2Evidence.activationStartedAtMs??Infinity)
+   ?{establishedNow:true,direction:causalDirection,
+      reactionAnchor:phase2Evidence.reactionAnchor,
+      establishedAtMs:finalFive.closeTimeMs}:null;
+ const originalSeed=!causalMode&&typeof candidateId==="string"&&candidateId.length>0&&
    established&&reactionAnchor!==null&&finalFive
    ? {establishedNow:true,direction:v5Direction,reactionAnchor,
        establishedAtMs:finalFive.closeTimeMs}:null;
+ const seed=causalMode?causalSeed:originalSeed;
  const establishmentTime=n(priorState?.establishedAtMs);
  const recentOne=establishmentTime!==null
    ?one.filter(b=>b.closeTimeMs>establishmentTime).slice(-3):[];
@@ -63,8 +76,12 @@ export function buildEngine3V6Phase1Shadow({
      v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="DOWN"));
  const result=evaluateEngine3V6Phase1({
    priorState,candidateId,zoneId,
-   observedControl:v5?.evidence?.priceAction?.controlState??"NO_CONTROL",
-   observedQuality:v5?.evidence?.priceAction?.quality??"WEAK",
+   observedControl:causalMode
+     ?causalControl?.control?.controlState??"NO_CONTROL"
+     :v5?.evidence?.priceAction?.controlState??"NO_CONTROL",
+   observedQuality:causalMode
+     ?causalControl?.control?.quality??"WEAK"
+     :v5?.evidence?.priceAction?.quality??"WEAK",
    completed1m:one,completed5m:five,evaluationTimeMs,
    seedFromV5:seed,openTradeActive,lockedTradeDirection,policy,
    evidence:{noProgress,highOverlap:overlap!==null&&overlap>=0.60,
@@ -82,6 +99,8 @@ export function buildEngine3V6Phase1Shadow({
    rawBarHistoryArchived:false,
    stage:"PHASE1_SHADOW_ONLY",
    v5CanonicalDirection:v5Direction,
+   causalControlSource:causalMode?"POST_ACTIVATION_5M_INDEPENDENT":"PHASE1_V5_SEED",
+   sourceControlRecalculated:causalMode,
    noCanonicalPromotion:true,noEngine4Authority:true,noEngine6Authority:true};
 }
 export default buildEngine3V6Phase1Shadow;
