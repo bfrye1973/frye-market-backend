@@ -26,6 +26,7 @@ jobs:
         working-directory: services/core
         run: |
           node --test tests/engine6EMesReleaseSizing.test.js
+          node --test tests/engine6EMesJournalDollarAudit.test.js
           node --test tests/engine7SingleSizingOwner.test.js
       - name: Run read-only funnel tests
         working-directory: services/core
