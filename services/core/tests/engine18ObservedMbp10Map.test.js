@@ -114,11 +114,11 @@ test('same-rank baseline is descriptive and zero residual for unchanged images',
 });
 
 test('top concentrations rank positive residual depth, not longest coverage',()=>{
- const one=book(),two=book(),three=book();
- // Create one high-residual bid/ask level observed for only a short interval.
- two.d[0].b[1].sz=500;three.d[0].b[1].sz=500;
- two.d[0].a[1].sz=600;three.d[0].a[1].sz=600;
- const result=analyzeObservedMbp10([record(one,1,100),record(two,2,110),record(three,3,120)]);
+ const one=book(),two=book(),three=book(),four=book();
+ // A one-frame spike has positive residual against a 3-of-4 normal baseline.
+ two.d[0].b[1].sz=500;
+ two.d[0].a[1].sz=600;
+ const result=analyzeObservedMbp10([record(one,1,100),record(two,2,110),record(three,3,120),record(four,4,130)]);
  assert.equal(result.summarySafe.topTwoBidConcentrations[0].maxSz,500);
  assert.equal(result.summarySafe.topTwoAskConcentrations[0].maxSz,600);
  assert.ok(result.summarySafe.topTwoBidConcentrations[0].timeWeightedResidualSz>0);
