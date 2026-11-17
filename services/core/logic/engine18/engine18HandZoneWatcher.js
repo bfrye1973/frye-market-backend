@@ -77,6 +77,7 @@ export class Engine18HandZoneWatcher{
    if(prior?.hash===h){
     this.active=prior;this.healthState.unchangedCount++;
     this.healthState.revision=model.sourceRevision;
+    this.healthState.lastGoodHash=h;
     this.healthState.lastSuccessAt=iso(this.now());
     this.healthState.stale=false;this.healthState.reason=null;
     return {status:'UNCHANGED',hash:h};
