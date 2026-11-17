@@ -153,7 +153,7 @@ function main() {
 
   const raw = fs.readFileSync(IN_TXT, "utf8");
   const bytes=Buffer.from(raw,"utf8");
-  const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\\0`).update(bytes).digest("hex");
+  const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
   const lines = raw.split(/\r?\n/);
 
   const structures = [];
