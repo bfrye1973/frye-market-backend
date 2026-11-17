@@ -155,7 +155,7 @@ test('historical revision firstObservedAt is watcher clock; future zone unavaila
   eventTime:'2026-11-17T15:01:00.000Z',priceBasisEvidence:{
    verified:true,contract:'XCME:ES.Z26',zoneHash:current.hash}});
  assert.equal(linked.status,'OBSERVED_ONLY');
- assert.equal(linked.zones.find(x=>x.kind==='NEGOTIATED'&&x.lo===7599).insideBand,true);
+ assert.equal(linked.zones.find(x=>x.kind==='NEGOTIATED'&&x.id.includes('7599.00-7638.00')).insideBand,true);
  h.watcher.stop();
 });
 test('unavailable source marks active STALE; prior versions persist; timer overlaps skipped',async()=>{
@@ -205,7 +205,10 @@ test('real AES-GCM store writes multiple immutable zone revisions and restores o
    '| NEG 7599.00-7639.00\n7487.25-7541.00'],
    revisions:[rev(1),rev(2),rev(3)]});
   await gh.watcher.start();
-  for(let i=0;i<2;i++){gh.advance(300000);await gh.tick();}
+  for(let i=0;i<2;i++){
+   gh.advance(300000);
+   assert.equal((await gh.watcher.poll()).status,'CHANGED');
+  }
   gh.watcher.stop();
   const restored=await history.load();
   assert.equal(restored.length,3);
