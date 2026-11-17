@@ -143,4 +143,5 @@ test('stale chart publisher timestamp leaves existing zone history immutable but
  assert.equal(w.health().stale,true);
  assert.equal(w.health().reason,'SOURCE_STALE');
  assert.equal(h.history.writes,1);
+ w.stop();
 });
