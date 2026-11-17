@@ -93,3 +93,21 @@ test("authorization loss resets run, next eligibility begins new observation run
  assert.equal(resumed.activationSource,"ENGINE3_OBSERVED");
  assert.equal(resumed.activationStartedAtMs,now+minute);
 });
+
+test("future bars, missing ATR and changed candidate do not create synthetic reaction sites",()=>{
+ const start=now-10*minute;
+ const future=bar(now+minute,minute,140,90,110);
+ const result=run({...base,authorizedStartedAt:start,
+  bars1m:[future],bars5m:history(now,2),observedDirection:"SHORT",
+  establishingNow:true});
+ assert.equal(result.completed1mEligible.length,0);
+ assert.equal(result.geometry,null);
+ assert.equal(result.reactionAnchor,null);
+ assert.equal(result.shadowSeedEvidenceEligible,false);
+ assert.equal(result.directionEstablishmentAuthorized,false);
+});
+test("authoritative activation timestamp in the future cannot be trusted",()=>{
+ const out=run({...base,authorizedStartedAt:now+minute});
+ assert.equal(out.activationSource,"ENGINE3_OBSERVED");
+ assert.equal(out.activationStartedAtMs,now);
+});
