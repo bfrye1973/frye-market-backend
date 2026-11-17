@@ -57,6 +57,7 @@ import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEn
 import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVerifiedEngine10PaperLock } from "../logic/engine3/v6/engine3Engine10VerifiedLockStore.js";
 import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
 import { buildEngine3V6Phase2Evidence } from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
+import { buildEngine3V6CausalControl } from "../logic/engine3/v6/buildEngine3V6CausalControl.js";
 import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
@@ -8947,85 +8948,84 @@ patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
 // The shadow is never consulted by Engine4, Engine6, or downstream handoffs.
 if (isEsIntradayScalp) {
   const savedShadow = loadEngine3V6Phase1ShadowState();
-  let engine3V6Shadow = buildEngine3V6Phase1Shadow({
-    priorState: savedShadow.found ? savedShadow.state : null,
-    v5: engine3V5,
-    candidateId: engine26LocationCandidate?.candidateId ?? null,
-    zoneId: engine26LocationCandidate?.zoneId ?? null,
-    bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
-    bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
-    evaluationTimeMs,
-    openTradeActive: engine3OpenPaperLock.openTradeActive,
-    lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
-    policy: {
-      // Manager-approved SHADOW hypotheses only; not v5 thresholds.
-      invalidationCloses1m: 2,
-      deteriorationEvidenceCount: 2,
-      deteriorationTimeoutMs: 12 * 60 * 1000,
-    },
-  });
-  // Phase2 supplements v6 with evidence-integrity diagnostics only.
-  // It does NOT feed a new direction back into the Phase1 reducer.
-  const engine3V6Phase2Evidence = buildEngine3V6Phase2Evidence({
-    priorActivation: savedShadow.found
-      ? savedShadow.state?.phase2ActivationRun ?? null : null,
-    candidateId: engine26LocationCandidate?.candidateId ?? null,
-    zoneId: engine26LocationCandidate?.zoneId ?? null,
-    eligible: engine3V5?.normalizedZoneInput?.eligible === true,
-    // Engine26-owned authority timestamp; never substitute lifecycle start.
+  const priorV6 = savedShadow.found ? savedShadow.state : null;
+  const candidateIdV6 = engine26LocationCandidate?.candidateId ?? null;
+  const zoneIdV6 = engine26LocationCandidate?.zoneId ?? null;
+  const zoneInputV6 = engine3V5?.normalizedZoneInput ?? null;
+  const activationArgsV6 = {
+    priorActivation: priorV6?.phase2ActivationRun ?? null,
+    candidateId: candidateIdV6,
+    zoneId: zoneIdV6,
+    eligible: zoneInputV6?.eligible === true,
     authorizedStartedAt:
       engine26ReactionHandoff?.engine3AuthorizationStartedAt ??
       engine26LocationCandidate?.engine3AuthorizationStartedAt ?? null,
-    zone: engine3V5?.normalizedZoneInput?.zone ?? null,
+    zone: zoneInputV6?.zone ?? null,
     bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
     bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
     evaluationTimeMs,
-    observedDirection: engine3V6Shadow.canonicalDirection,
-    priorReactionAnchor: savedShadow.found
-      ? savedShadow.state?.phase2ReactionAnchor ?? null : null,
-    establishingNow: engine3V6Shadow.establishedNow === true,
     policy: {wideMultiplier:2,bandFraction:0.25,
       bandFloorPoints:1,atrPeriod:14,observedUncertaintyMs:180000},
+  };
+  // First pass determines eligible post-activation bars and frozen geometry.
+  // Does not grant direction.
+  const phase2Filter = buildEngine3V6Phase2Evidence({
+    ...activationArgsV6,observedDirection:"NEUTRAL",
   });
-  // Phase2 requires post-activation evidence for an initial shadow direction.
-  // A pre-activation/grace bar or provisional Phase1 5m anchor cannot
-  // establish direction merely because v5 fired.
-  if (engine3V6Shadow.establishedNow === true) {
-    if (engine3V6Phase2Evidence.shadowSeedEvidenceEligible !== true ||
-        engine3V6Phase2Evidence.reactionAnchor == null) {
-      engine3V6Shadow = {
-        ...engine3V6Shadow,
-        canonicalDirection: "NEUTRAL",
-        convictionState: "NEUTRAL",
-        establishedNow: false,
-        reactionAnchor: null,
-        establishedAtMs: null,
-        reasonCodes: [
-          ...(engine3V6Shadow.reasonCodes || []),
-          "PHASE2_POST_ACTIVATION_EVIDENCE_REQUIRED",
-          "UNCERTAINTY_WINDOW_BARS_HAVE_ZERO_ESTABLISHMENT_AUTHORITY",
-        ],
-      };
-    } else {
-      engine3V6Shadow = {
-        ...engine3V6Shadow,
-        reactionAnchor: engine3V6Phase2Evidence.reactionAnchor,
-        reactionAnchorBasis: "PHASE2_POST_ACTIVATION_REACTION_EXTREME",
-        reasonCodes: [
-          ...(engine3V6Shadow.reasonCodes || []),
-          "PHASE2_CAUSAL_REACTION_ANCHOR_CONFIRMED",
-        ],
-      };
-    }
-  }
+  // Recompute v6 control from strictly eligible bars using the existing
+  // v5 evidence algorithms. DO NOT reuse canonical v5 control from old bars.
+  const phase2Causal = buildEngine3V6CausalControl({
+    phase2Evidence:phase2Filter,normalizedZoneInput:zoneInputV6,
+    evaluationTimeMs,
+  });
+  const priorV6Direction = priorV6?.canonicalDirection ?? "NEUTRAL";
+  const observedV6Direction = priorV6Direction === "LONG" ||
+    priorV6Direction === "SHORT" ? priorV6Direction :
+    phase2Causal.qualified ? phase2Causal.observedDirection : "NEUTRAL";
+  const priorAnchorAllowed = priorV6?.convictionState !== "INVALIDATED" &&
+    priorV6Direction === observedV6Direction;
+  const engine3V6Phase2Evidence = buildEngine3V6Phase2Evidence({
+    ...activationArgsV6,
+    observedDirection:observedV6Direction,
+    priorReactionAnchor:priorAnchorAllowed
+      ?priorV6?.phase2ReactionAnchor ?? null:null,
+    priorAnchorDirection:priorAnchorAllowed
+      ?priorV6?.phase2AnchorDirection ?? null:null,
+    progressExtreme:priorV6?.progressExtreme ?? null,
+    establishingNow:phase2Causal.qualified && priorV6Direction === "NEUTRAL",
+  });
+  // Phase1 reducer remains the ONLY v6 direction state machine;
+  // Phase2 provides its independent, causally scoped evidence/seed.
+  const engine3V6Shadow = buildEngine3V6Phase1Shadow({
+    priorState:priorV6,
+    v5:engine3V5,
+    causalControl:phase2Causal,
+    phase2Evidence:engine3V6Phase2Evidence,
+    candidateId:candidateIdV6,zoneId:zoneIdV6,
+    bars1m:engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m:engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    openTradeActive:engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection:engine3OpenPaperLock.lockedTradeDirection,
+    policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
+      deteriorationTimeoutMs:12*60000},
+  });
   patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
   patchedConfluence.context.reaction.engine3V6Phase2Evidence =
-    engine3V6Phase2Evidence;
+    {...engine3V6Phase2Evidence,causalPriceControl:{
+      controlState:phase2Causal.control?.controlState??"NO_CONTROL",
+      quality:phase2Causal.control?.quality??"WEAK",
+      qualified:phase2Causal.qualified,
+      source:phase2Causal.controlSource,
+    }};
   patchedConfluence.context.reaction.engine3V6ShadowPersistence =
     saveEngine3V6Phase1ShadowState({state:{
       ...engine3V6Shadow,
-      phase2ActivationRun: engine3V6Phase2Evidence.activationRun,
-      phase2ReactionAnchor: engine3V6Phase2Evidence.reactionAnchor,
+      phase2ActivationRun:engine3V6Phase2Evidence.activationRun,
+      phase2ReactionAnchor:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.reactionAnchor,
+      phase2AnchorDirection:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.anchorDirection,
     }});
 }
 
