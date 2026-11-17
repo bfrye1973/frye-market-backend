@@ -1205,7 +1205,6 @@ function findExistingOpeningTrade(
   if (identity.candidateId) {
     const match = trades.find(
       (trade) =>
-        trade?.status === "OPEN" &&
         sameNonEmpty(
           trade?.identity?.candidateId,
           identity.candidateId
@@ -1214,8 +1213,20 @@ function findExistingOpeningTrade(
           normalizeSymbol(identity.symbol) &&
         String(trade?.strategyId || "") ===
           String(identity.strategyId || "") &&
-        toUpper(trade?.direction) ===
-          toUpper(identity.direction)
+        (
+          // A completed Strategy 1 PAPER candidate remains completed.
+          // Fresh execution/order IDs must not resurrect its old identity.
+          (
+            String(trade?.strategyId || "") ===
+              "intraday_scalp@10m" &&
+            toUpper(trade?.accountMode) === "PAPER"
+          ) ||
+          (
+            trade?.status === "OPEN" &&
+            toUpper(trade?.direction) ===
+              toUpper(identity.direction)
+          )
+        )
     );
 
     if (match) return match;
@@ -6175,19 +6186,7 @@ export async function applyEngine8ExecutionToJournal({
     );
 
   const calculatedRemaining =
-    Math.max(
-      0,
-      previousRemaining -
-      fillQuantity
-    );
-
-  const nextRemaining =
-    reportedRemaining !== null
-      ? Math.max(
-          0,
-          reportedRemaining
-        )
-      : calculatedRemaining;
+    previousRemaining - fillQuantity;
 
   if (
     fillQuantity >
@@ -6204,6 +6203,32 @@ export async function applyEngine8ExecutionToJournal({
       fillQuantity,
     };
   }
+
+  // The Journal is responsible for the actual remaining position.
+  // A caller-supplied remaining quantity must agree with the executed fill;
+  // never clamp or silently let a malformed lifecycle event close a trade.
+  if (
+    !Number.isSafeInteger(fillQuantity) ||
+    !Number.isSafeInteger(previousRemaining) ||
+    (reportedRemaining !== null &&
+      (
+        !Number.isSafeInteger(reportedRemaining) ||
+        reportedRemaining !== calculatedRemaining
+      ))
+  ) {
+    return {
+      ok: false,
+      updated: false,
+      error: "EXIT_REMAINING_QUANTITY_MISMATCH",
+      tradeId: trade.tradeId,
+      previousRemaining,
+      fillQuantity,
+      expectedRemainingQty: calculatedRemaining,
+      reportedRemainingQty: reportedRemaining,
+    };
+  }
+
+  const nextRemaining = calculatedRemaining;
 
   const eventTime =
     getEventTime(
