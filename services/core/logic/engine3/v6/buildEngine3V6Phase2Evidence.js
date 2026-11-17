@@ -63,6 +63,7 @@ export function buildEngine3V6Phase2Evidence({
   geometry:null,reactionSite:null,reactionAnchor:null,
   adverseDisplacementWarning:false,adverseWarningOnly:true,
   graceBarsCanEstablish:false,directionEstablishmentAuthorized:false,
+  shadowSeedEvidenceEligible:false,
   canonicalDirectionAuthority:false,noPermissionCreated:true,noExecution:true,
   reasonCodes:[]};
  if(now===null||eligible!==true||!candidateId||!zoneId||!validZone(zone))
@@ -93,8 +94,10 @@ export function buildEngine3V6Phase2Evidence({
   ?Math.max(...engagedBars.map(b=>b.high)):
   direction==="LONG"&&engagedBars.length
   ?Math.min(...engagedBars.map(b=>b.low)):null;
- const priorAnchor=num(priorReactionAnchor);
- const anchor=priorAnchor??(establishingNow&&filteredFive.length>=2?anchorCandidate:null);
+ const priorAnchor=same?num(priorReactionAnchor):null;
+ const shadowSeedEvidenceEligible=Boolean(frozen&&band&&engagedBars.length>0&&
+   filteredFive.length>=2&&filteredOne.length>0&&anchorCandidate!==null);
+ const anchor=priorAnchor??(establishingNow&&shadowSeedEvidenceEligible?anchorCandidate:null);
  // Warning on a forming 5m bar cannot alter direction, conviction, or permission.
  const adverse=anchor!==null&&frozen?.frozenAtr5m>0&&five.forming
   ?direction==="SHORT"
@@ -109,6 +112,7 @@ export function buildEngine3V6Phase2Evidence({
   slowPathEvidenceState:filteredFive.length>=2?"SUFFICIENT_POST_ACTIVATION_5M":
     "INSUFFICIENT_POST_ACTIVATION_EVIDENCE",
   geometry:frozen,reactionSite:siteName,
+  shadowSeedEvidenceEligible,
   reactionAnchor:anchor,
   anchorSource:priorAnchor!==null?"FROZEN_PREVIOUS":
     anchor!==null?"POST_ACTIVATION_1M_EXTREME":"UNAVAILABLE",
