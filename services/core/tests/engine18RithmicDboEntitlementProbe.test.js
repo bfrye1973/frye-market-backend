@@ -31,6 +31,9 @@ test('DBO requests are read-only and count only vendor-confirmed frames',async()
  assert.equal(result.counts.ack,1);assert.equal(result.counts.snapshot,1);
  assert.equal(result.counts.updates,1);assert.equal(result.bookValid,false);
  assert.equal(result.snapshotComplete,false);
+ assert.equal(result.reason,'BOUNDED_TIMEOUT');
+ assert.equal(result.snapshotOrders,0);
+ assert.equal(result.updateCountsPerSecond.reduce((n,entry)=>n+entry[1],0),1);
 });
 test('nonzero vendor reply stays safe and fails without book acceptance',async()=>{
  let sent=0;
