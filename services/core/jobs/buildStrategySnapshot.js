@@ -54,6 +54,7 @@ import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConf
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
 import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
+import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVerifiedEngine10PaperLock } from "../logic/engine3/v6/engine3Engine10VerifiedLockStore.js";
 import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
 import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
@@ -8881,12 +8882,26 @@ if (isEsIntradayScalp) {
 
 // Verify OPEN PAPER lifecycle from the existing Engine10 Journal read.
 // This never infers direction from Engine3, Engine26 or the wave count.
+// A transient Engine10 journal failure or ambiguous multiple-OPEN result
+// must not erase a recently VERIFIED open-paper direction without evidence.
+// REVIEW-ONLY canonical v5 behavior change; Manager approval required before merge.
+const priorVerifiedEngine10Lock = loadVerifiedEngine10PaperLock();
 const engine3OpenPaperLock = resolveEngine10OpenPaperDirection({
   trades: engine26OpenPaperTrades,
   readSucceeded: engine26OpenPaperTradesReadSucceeded,
+  priorVerifiedLock: priorVerifiedEngine10Lock.lock,
+  evaluationTimeMs,
   symbol,
   strategyId: s.strategyId,
 });
+if (engine3OpenPaperLock.lifecycleVerified === true) {
+  if (engine3OpenPaperLock.openTradeActive === true) {
+    saveVerifiedEngine10PaperLock({ result: engine3OpenPaperLock });
+  } else {
+    // Only a successfully read empty OPEN list clears a stored verified lock.
+    clearVerifiedEngine10PaperLock();
+  }
+}
 const engine3V5 =
   buildEngine3V5Shadow({
     openTradeActive: engine3OpenPaperLock.openTradeActive,
