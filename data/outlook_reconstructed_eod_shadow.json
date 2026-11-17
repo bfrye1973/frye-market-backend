@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-16T23:37:17.385057+00:00",
+  "updated_at_utc": "2026-11-17T00:57:54.034340+00:00",
   "completedSessionDate": "2026-11-16",
   "score": 26.0,
   "state": "BEARISH",
@@ -56,9 +56,9 @@
     },
     {
       "sector": "Healthcare",
-      "breadth_pct": 17.63,
+      "breadth_pct": 17.46,
       "momentum_pct": 16.0,
-      "nh": 85,
+      "nh": 84,
       "nl": 397,
       "up": 8,
       "down": 42
@@ -136,10 +136,10 @@
     },
     "Energy": {
       "nh": 12,
-      "nl": 25,
+      "nl": 24,
       "up": 1,
       "down": 4,
-      "breadth_pct": 32.43,
+      "breadth_pct": 33.33,
       "momentum_pct": 20.0
     },
     "Financials": {
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-16",
-      "close": 7436.5,
-      "ma10": 7532.65,
-      "ma20": 7612.8,
+      "close": 7441.75,
+      "ma10": 7533.175,
+      "ma20": 7613.0625,
       "ma10Prior": 7549.925,
       "ma20Prior": 7630.2125,
       "ma10Upsloping": false,
@@ -256,18 +256,18 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 472,
+      "nh": 471,
       "nl": 1458,
       "up": 79,
       "down": 177,
-      "breadth_pct": 24.46,
+      "breadth_pct": 24.42,
       "momentum_pct": 30.86,
       "prior": {
         "nh": 561,
-        "nl": 1068,
+        "nl": 1067,
         "up": 72,
         "down": 182,
-        "breadth_pct": 34.44,
+        "breadth_pct": 34.46,
         "momentum_pct": 28.35
       }
     },
@@ -298,20 +298,20 @@
       "momentum_pct": 16.67,
       "prior": {
         "nh": 110,
-        "nl": 138,
+        "nl": 137,
         "up": 6,
         "down": 31,
-        "breadth_pct": 44.35,
+        "breadth_pct": 44.53,
         "momentum_pct": 16.22
       }
     },
     "small": {
       "members": 3448,
-      "nh": 292,
+      "nh": 291,
       "nl": 1142,
       "up": 71,
       "down": 138,
-      "breadth_pct": 20.36,
+      "breadth_pct": 20.31,
       "momentum_pct": 33.97,
       "prior": {
         "nh": 342,
