@@ -33,7 +33,7 @@ test('malformed, partial, crossed, unticked and unsorted frames fail closed',()=
 test('observed images do not carry forward absent levels or conflate size changes with execution',()=>{
  const first=book(),second=book();
  second.d[0].b=second.d[0].b.map(x=>({...x,p:x.p-.25,sz:x.sz+1}));
- second.d[0].a=second.d[0].a.map(x=>({...x,p:x.p+.25,sz:x.sz-1}));
+ second.d[0].a=second.d[0].a.map(x=>({...x,p:x.p+.25,sz:x.sz-2}));
  const out=analyzeObservedMbp10([record(first,1,100),record(second,2,120)]);
  assert.equal(out.summarySafe.depthFrames,2);
  assert.equal(out.summarySafe.validDepthFrames,2);
