@@ -32,6 +32,21 @@ export function evaluateEngine3V6Phase1({
       &&b.closeTimeMs<=validTime)
     .sort((a,b)=>a.closeTimeMs-b.closeTimeMs);
   const bars1=completedBars(completed1m),bars5=completedBars(completed5m);
+  const previousProgress=number(priorState?.progressExtreme);
+  const priorProgressAt=number(priorState?.lastProgressAtMs);
+  const directionExtremes=prev==="SHORT"
+    ?bars1.map(b=>number(b?.low)).filter(x=>x!==null)
+    :prev==="LONG"?bars1.map(b=>number(b?.high)).filter(x=>x!==null):[];
+  const observedExtreme=directionExtremes.length
+    ?prev==="SHORT"?Math.min(...directionExtremes):Math.max(...directionExtremes):null;
+  const improved=previousProgress!==null&&observedExtreme!==null&&
+    (prev==="SHORT"?observedExtreme<previousProgress:observedExtreme>previousProgress);
+  const nextProgress=observedExtreme===null?previousProgress:
+    previousProgress===null?observedExtreme:
+    prev==="SHORT"?Math.min(previousProgress,observedExtreme):
+    prev==="LONG"?Math.max(previousProgress,observedExtreme):previousProgress;
+  const nextProgressAt=improved||previousProgress===null&&observedExtreme!==null
+    ?bars1.at(-1)?.closeTimeMs??validTime:priorProgressAt;
   const against=(close,d)=>d==="SHORT"?close>anchor:close<anchor;
   const anchorBroken=prev!=="NEUTRAL"&&anchor!==null;
   const closed1=anchorBroken&&consecutiveCloses!==null&&bars1.length>=consecutiveCloses&&
@@ -51,7 +66,8 @@ export function evaluateEngine3V6Phase1({
   const qualified=["GOOD","STRONG"].includes(observedQuality);
   const base={
     schema:"engine3.v6.phase1.shadow.v1",mode:"SHADOW_READ_ONLY",
-    candidateId,zoneId,reactionAnchor:anchor,progressExtreme:number(progressExtreme),
+    candidateId,zoneId,reactionAnchor:anchor,progressExtreme:nextProgress??number(progressExtreme),
+    lastProgressAtMs:nextProgressAt,
     establishedAtMs,lastEvaluatedAtMs:validTime,
     canonicalDirection:prev,convictionState:prev==="NEUTRAL"?"NEUTRAL":"HOLDING",
     invalidatedNow:false,establishedNow:false,reversedNow:false,
