@@ -15,10 +15,15 @@ export function resolveEngine10OpenPaperDirection({
  // Multiple OPEN records may be independent positions, not duplicate readings.
  // Never choose a direction without an explicit position identity policy.
  if(matches.length!==1)return fail("MULTIPLE_OPEN_PAPER_TRADES_REQUIRE_IDENTITY_RESOLUTION");
- const direction=String(matches[0]?.direction??"").toUpperCase();
+ const trade=matches[0];
+ const remaining=trade?.qty?.remainingQty;
+ if(typeof trade?.tradeId!=="string"||!trade.tradeId.trim()||
+    typeof remaining!=="number"||!Number.isFinite(remaining)||remaining<=0)
+   return fail("OPEN_PAPER_TRADE_IDENTITY_OR_QUANTITY_UNVERIFIED");
+ const direction=String(trade?.direction??"").toUpperCase();
  if(!["LONG","SHORT"].includes(direction))return fail("INVALID_OPEN_PAPER_DIRECTION");
  return {openTradeActive:true,lockedTradeDirection:direction,
    source:"ENGINE10_JOURNAL",reasonCode:"OPEN_PAPER_TRADE_DIRECTION_VERIFIED",
-   blocker:false,lifecycleVerified:true,tradeId:matches[0]?.tradeId??null};
+   blocker:false,lifecycleVerified:true,tradeId:trade.tradeId,remainingQty:remaining};
 }
 export default resolveEngine10OpenPaperDirection;
