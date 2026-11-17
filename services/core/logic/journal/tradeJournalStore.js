@@ -1205,7 +1205,6 @@ function findExistingOpeningTrade(
   if (identity.candidateId) {
     const match = trades.find(
       (trade) =>
-        trade?.status === "OPEN" &&
         sameNonEmpty(
           trade?.identity?.candidateId,
           identity.candidateId
@@ -1214,8 +1213,20 @@ function findExistingOpeningTrade(
           normalizeSymbol(identity.symbol) &&
         String(trade?.strategyId || "") ===
           String(identity.strategyId || "") &&
-        toUpper(trade?.direction) ===
-          toUpper(identity.direction)
+        (
+          // A completed Strategy 1 PAPER candidate remains completed.
+          // Fresh execution/order IDs must not resurrect its old identity.
+          (
+            String(trade?.strategyId || "") ===
+              "intraday_scalp@10m" &&
+            toUpper(trade?.accountMode) === "PAPER"
+          ) ||
+          (
+            trade?.status === "OPEN" &&
+            toUpper(trade?.direction) ===
+              toUpper(identity.direction)
+          )
+        )
     );
 
     if (match) return match;
@@ -1638,12 +1649,66 @@ function resolveManagementEvent({
   };
 }
 
+// PAPER-only Strategy 1 audit attribution. A combined midpoint order is ONE
+// real PAPER execution with multiple frozen contract-block allocations, never
+// two fabricated fills. Historical records are never backfilled or rewritten.
+function strategy1PaperContractAllocations({trade, fillQuantity, closePrice}) {
+  if (trade?.accountMode !== "PAPER" ||
+      trade?.strategyId !== "intraday_scalp@10m") return null;
+  const plan = trade?.openingPlan?.threeBlockManagement ||
+    trade?.strategy1Provenance?.threeBlockManagement;
+  const blocks = plan?.blocks;
+  const originalQty = toNumberOrNull(trade?.qty?.originalQty);
+  const previousExited = toNumberOrNull(trade?.qty?.cumulativeExitQuantity) ?? 0;
+  if (!Array.isArray(blocks) || blocks.length !== 3 ||
+      originalQty !== 3 || !Number.isSafeInteger(fillQuantity) ||
+      !Number.isSafeInteger(previousExited)) return null;
+  const slots = [];
+  const used = new Set();
+  for (const block of blocks) {
+    const count = toNumberOrNull(block?.contracts);
+    const blockId = normalizeId(block?.blockId);
+    const contractId = normalizeId(block?.contractId);
+    if (count !== 1 || !blockId || !contractId ||
+        used.has(blockId) || used.has(contractId)) return null;
+    used.add(blockId); used.add(contractId);
+    slots.push({blockId,contractId,targetId:normalizeId(block?.targetId),
+      frozenTargetPrice:toNumberOrNull(block?.targetPrice)});
+  }
+  if (previousExited + fillQuantity > slots.length) return null;
+  const entry = toNumberOrNull(trade?.entry?.price);
+  const dpp = toNumberOrNull(trade?.riskBasis?.dollarsPerPoint);
+  const direction = toUpper(trade?.direction);
+  const points = entry === null || closePrice === null ? null :
+    round2((direction === "SHORT" ? entry-closePrice : closePrice-entry));
+  return slots.slice(previousExited,previousExited+fillQuantity).map(slot=>({
+    ...slot,allocatedQuantity:1,actualExitPrice:closePrice,
+    realizedPoints:points,
+    grossRealizedPnL:points === null || dpp === null ? null : round2(points*dpp),
+    source:"FROZEN_STRATEGY_1_BLOCK_SEQUENCE",
+    executionAccounting:"ONE_FILL_MULTIPLE_CONTRACT_ALLOCATIONS"
+  }));
+}
+
 function appendRunnerArmedEvent({
   trade,
   eventTime,
   identity,
   management,
 }) {
+  // Strategy 1's frozen no-runner plan is authoritative. A P2/midpoint
+  // exit is not permission to synthesize runner management. Preserve the
+  // existing runner-enabled path and all historical Journal events.
+  if (
+    trade?.strategyId === "intraday_scalp@10m" &&
+    (
+      trade?.openingPlan?.runnerPlan?.enabled === false ||
+      trade?.strategy1Provenance?.runnerPlan?.enabled === false
+    )
+  ) {
+    return;
+  }
+
   const targetId =
     toUpper(management?.targetId);
 
@@ -1735,6 +1800,29 @@ function updateSummary(trade) {
           frozenRisk
         )
       : null;
+
+  // PAPER commission is an explicit estimate, NEVER a broker fee receipt.
+  // Do not populate REAL totalFees/netRealizedPnL with estimated amounts.
+  if (trade?.accountMode === "PAPER" &&
+      trade?.strategyId === "intraday_scalp@10m") {
+    const rate = toNumberOrNull(
+      trade?.riskBasis?.commissionDollarsPerContractRoundTrip
+    );
+    const exited = toNumberOrNull(trade?.qty?.cumulativeExitQuantity);
+    if (rate !== null && rate >= 0 &&
+        Number.isSafeInteger(exited) && realizedPnL !== null) {
+      const estimatedFees = round2(rate * exited);
+      trade.summary.paperFeeEstimate = {
+        estimatedFees,
+        estimatedNetRealizedPnL:round2(realizedPnL-estimatedFees),
+        estimatedRoundTripFeePerContract:rate,
+        estimatedClosedContracts:exited,
+        provenance:"ENGINE7_FROZEN_COMMISSION_ESTIMATE",
+        authoritativeBrokerFeeReceipt:false,
+        authoritativeNetReceipt:false
+      };
+    }
+  }
 }
 
 
@@ -6175,19 +6263,7 @@ export async function applyEngine8ExecutionToJournal({
     );
 
   const calculatedRemaining =
-    Math.max(
-      0,
-      previousRemaining -
-      fillQuantity
-    );
-
-  const nextRemaining =
-    reportedRemaining !== null
-      ? Math.max(
-          0,
-          reportedRemaining
-        )
-      : calculatedRemaining;
+    previousRemaining - fillQuantity;
 
   if (
     fillQuantity >
@@ -6204,6 +6280,32 @@ export async function applyEngine8ExecutionToJournal({
       fillQuantity,
     };
   }
+
+  // The Journal is responsible for the actual remaining position.
+  // A caller-supplied remaining quantity must agree with the executed fill;
+  // never clamp or silently let a malformed lifecycle event close a trade.
+  if (
+    !Number.isSafeInteger(fillQuantity) ||
+    !Number.isSafeInteger(previousRemaining) ||
+    (reportedRemaining !== null &&
+      (
+        !Number.isSafeInteger(reportedRemaining) ||
+        reportedRemaining !== calculatedRemaining
+      ))
+  ) {
+    return {
+      ok: false,
+      updated: false,
+      error: "EXIT_REMAINING_QUANTITY_MISMATCH",
+      tradeId: trade.tradeId,
+      previousRemaining,
+      fillQuantity,
+      expectedRemainingQty: calculatedRemaining,
+      reportedRemainingQty: reportedRemaining,
+    };
+  }
+
+  const nextRemaining = calculatedRemaining;
 
   const eventTime =
     getEventTime(
@@ -6229,6 +6331,10 @@ export async function applyEngine8ExecutionToJournal({
       qtyClosed:
         fillQuantity,
     });
+
+  const contractAllocations = strategy1PaperContractAllocations({
+    trade,fillQuantity,closePrice,
+  });
 
   trade.events =
     Array.isArray(trade.events)
@@ -6296,6 +6402,11 @@ export async function applyEngine8ExecutionToJournal({
 
     pnlBasis:
       pnl.pnlBasis,
+
+    ...(contractAllocations ? {
+      contractAllocations,
+      allocationProvenance:"FROZEN_STRATEGY_1_PLAN",
+    } : {}),
   });
 
   appendRunnerArmedEvent({
