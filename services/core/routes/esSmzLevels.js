@@ -114,15 +114,17 @@ router.get("/", async (req, res) => {
 
     const raw = fs.readFileSync(MANUAL_STRUCTURES_PATH, "utf8");
     const json = JSON.parse(raw);
-    // Fail closed if deployed generated structures were built from a different text revision.
-    // Git SHA is source revision, NOT proof of owner approval time or contract basis.
-    if(!fs.existsSync(SOURCE_TEXT_PATH)||!json?.meta?.sourceGitBlobSha)
-      return res.status(503).json({ok:false,error:"ES_MANUAL_PROVENANCE_UNVERIFIED"});
-    const bytes=fs.readFileSync(SOURCE_TEXT_PATH);
-    const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
-    if(sourceGitBlobSha!==json.meta.sourceGitBlobSha)
-      return res.status(503).json({ok:false,error:"ES_MANUAL_SOURCE_STALE"});
-    const stableRevision=createHash("sha256").update(JSON.stringify(json.structures||[])).digest("hex");
+    // Preserve existing chart rendering even for old generated files.
+    // Research alone fails closed when provenance is unavailable or stale.
+    // A source Git blob SHA is NOT a historical approval/drawing timestamp.
+    let sourceGitBlobSha=null,sourceVerified=false;
+    if(fs.existsSync(SOURCE_TEXT_PATH)&&json?.meta?.sourceGitBlobSha){
+      const bytes=fs.readFileSync(SOURCE_TEXT_PATH);
+      sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
+      sourceVerified=sourceGitBlobSha===json.meta.sourceGitBlobSha;
+    }
+    const stableRevision=sourceVerified?
+      createHash("sha256").update(JSON.stringify(json.structures||[])).digest("hex"):null;
 
     const structures = Array.isArray(json?.structures) ? json.structures : [];
 
@@ -138,9 +140,10 @@ router.get("/", async (req, res) => {
       meta: {
         generated_at_utc: new Date().toISOString(),
         servedAt: new Date().toISOString(),
-        sourceRevision: "rev-"+stableRevision,
+        sourceRevision: stableRevision?"rev-"+stableRevision:null,
+        sourceProvenanceVerified:sourceVerified,
         sourceGitBlobSha,
-        sourceUpdatedAt: json.meta.updatedUtc,
+        sourceUpdatedAt: sourceVerified?json.meta.updatedUtc:null,
         zoneAuthority:"CHART_EFFECTIVE_HAND",
         // This route uses source-file price basis; never certify ESZ26 roll
         // merely because the chart renders a ticker labelled ES.
