@@ -41,9 +41,11 @@ export function buildEngine3V6Phase1Shadow({
  for(let i=1;i<recentOne.length;i++){
    const first=recentOne[i-1],second=recentOne[i];
    const intersection=Math.max(0,Math.min(first.high,second.high)-Math.max(first.low,second.low));
-   const span=Math.max(first.high,second.high)-Math.min(first.low,second.low);
-   if(Number.isFinite(intersection)&&Number.isFinite(span)&&span>0)
-     overlapRatios.push(intersection/span);
+   // Match canonical v5 sequenceMomentum pair overlap definition:
+   // intersection points / smaller candle range.
+   const smallerRange=Math.min(first.high-first.low,second.high-second.low);
+   if(Number.isFinite(intersection)&&Number.isFinite(smallerRange)&&smallerRange>0)
+     overlapRatios.push(intersection/smallerRange);
  }
  const overlap=overlapRatios.length>=2
    ?overlapRatios.reduce((a,b)=>a+b,0)/overlapRatios.length:null;
@@ -56,9 +58,9 @@ export function buildEngine3V6Phase1Shadow({
    v5?.evidence?.priceAction?.controlState==="ABSORPTION";
  const observedOpposing=establishmentTime!==null&&recentOne.length>=2&&
    ((priorState?.canonicalDirection==="SHORT"&&
-     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="BULLISH")||
+     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="UP")||
     (priorState?.canonicalDirection==="LONG"&&
-     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="BEARISH"));
+     v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias==="DOWN"));
  const result=evaluateEngine3V6Phase1({
    priorState,candidateId,zoneId,
    observedControl:v5?.evidence?.priceAction?.controlState??"NO_CONTROL",
@@ -74,6 +76,8 @@ export function buildEngine3V6Phase1Shadow({
      :priorState?.reactionAnchorBasis??"UNVERIFIED",
    policyStatus:policy?"EXPERIMENTAL_SHADOW_POLICY":"NO_EXPERIMENTAL_POLICY",
    deteriorationEvidenceDiagnostics:{noProgress,oneMinuteOverlapRatio:overlap,
+     overlapFormula:"CANONICAL_V5_INTERSECTION_OVER_SMALLER_RANGE",
+     completed1mReactionBias:v5?.evidence?.oneMinute?.completed?.reaction?.reactionBias??"NONE",
      opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
    rawBarHistoryArchived:false,
    stage:"PHASE1_SHADOW_ONLY",
