@@ -119,7 +119,7 @@ router.get("/", async (req, res) => {
     if(!fs.existsSync(SOURCE_TEXT_PATH)||!json?.meta?.sourceGitBlobSha)
       return res.status(503).json({ok:false,error:"ES_MANUAL_PROVENANCE_UNVERIFIED"});
     const bytes=fs.readFileSync(SOURCE_TEXT_PATH);
-    const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\\0`).update(bytes).digest("hex");
+    const sourceGitBlobSha=createHash("sha1").update(`blob ${bytes.length}\0`).update(bytes).digest("hex");
     if(sourceGitBlobSha!==json.meta.sourceGitBlobSha)
       return res.status(503).json({ok:false,error:"ES_MANUAL_SOURCE_STALE"});
     const stableRevision=createHash("sha256").update(JSON.stringify(json.structures||[])).digest("hex");
