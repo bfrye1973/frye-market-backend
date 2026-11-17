@@ -25,6 +25,23 @@ test("same-side seller and buyer alignment is read-only",()=>{
  s.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure.degrees.micro.direction="UP";
  d=context(s,"BUYERS_CONTROL");assert.equal(d.alignmentState,"FULL_BULLISH_ALIGNMENT");
 });
+test("as-of prevents future publications and optional stale policy",()=>{
+ const s=snapshot();
+ const future=context(s,"SELLERS_CONTROL");
+ assert.equal(future.asOfVerified,false);
+ const early=buildEngine22StructuralContext({snapshot:s,priceActionControl:{controlState:"SELLERS_CONTROL"},
+   evaluationTimeMs:Date.parse("2026-11-17T16:26:00Z")});
+ assert.equal(early.available,false);
+ assert.equal(early.sourceReasonCode,"ENGINE22_PUBLICATION_AFTER_EVALUATION");
+ const valid=buildEngine22StructuralContext({snapshot:s,priceActionControl:{controlState:"SELLERS_CONTROL"},
+   evaluationTimeMs:Date.parse("2026-11-17T16:28:00Z"),maxPublicationAgeMs:600000});
+ assert.equal(valid.alignmentState,"FULL_BEARISH_ALIGNMENT");
+ assert.equal(valid.asOfVerified,true);
+ const stale=buildEngine22StructuralContext({snapshot:s,priceActionControl:{controlState:"SELLERS_CONTROL"},
+   evaluationTimeMs:Date.parse("2026-11-17T17:00:00Z"),maxPublicationAgeMs:600000});
+ assert.equal(stale.alignmentState,"NO_STRUCTURAL_CONTEXT");
+ assert.equal(stale.sourceReasonCode,"ENGINE22_PUBLICATION_OLDER_THAN_POLICY");
+});
 test("one-sided, opposed, missing and unresolved cases fail closed",()=>{
  const s=snapshot(),pub=s.strategies["intraday_scalp@10m"].engine22WaveStrategy.authorizedWorkingStructure;
  pub.degrees.micro.direction="NEUTRAL";
