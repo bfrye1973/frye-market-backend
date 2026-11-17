@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'services/core/logic/engine3/v6/buildEngine3V6Phase2Evidence.js'
+      - 'services/core/logic/engine3/v6/buildEngine3RawBarArchivePacket.js'
       - 'services/core/tests/engine3V6Phase2*.test.js'
       - 'services/core/jobs/buildStrategySnapshot.js'
       - '.github/workflows/engine3-v6-phase2-integrity.yml'
@@ -21,6 +22,7 @@ jobs:
       - name: Syntax check
         run: |
           node --check logic/engine3/v6/buildEngine3V6Phase2Evidence.js
+          node --check logic/engine3/v6/buildEngine3RawBarArchivePacket.js
           node --check jobs/buildStrategySnapshot.js
       - name: Phase 2 evidence unit tests
         run: node --test tests/engine3V6Phase2*.test.js
