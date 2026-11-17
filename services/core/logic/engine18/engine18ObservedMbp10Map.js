@@ -68,8 +68,8 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   depthFields:{},quoteFields:{},tradeFields:{},receiveGapHistogram:{under10:0,under100:0,under1000:0,over1000:0},
   controlEvents:{},unverifiedReceiptClock:true
  };
- let previousDepth=null,previousSq=null,previousReceipt=null,latestDepth=null;
- const position=new Map(),coverageIntervals=new Map(),observedCells=new Set();
+ let previousDepth=null,previousSq=null,previousReceipt=null,latestDepth=null,segment=0;
+ const position=new Map(),observedCells=new Set();
  const updateField=(map,x)=>{for(const f of properties(x)){const name=f+':'+(x[f]===null?'null':Array.isArray(x[f])?'array':typeof x[f]);map[name]=(map[name]||0)+1;}};
  const duration=(a,b)=>{
   try{
@@ -79,10 +79,23 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   }catch{return null;}
  };
  for(const record of records){
-  if(record?.statusCode){diagnostics.controlEvents[record.statusCode]=(diagnostics.controlEvents[record.statusCode]||0)+1;continue;}
-  if(record?.rawEncoding!=='utf8'||typeof record.raw!=='string')continue;
-  let message;try{message=JSON.parse(record.raw);}catch{continue;}
-  if(!obj(message))continue;
+  if(record?.statusCode){
+   diagnostics.controlEvents[record.statusCode]=(diagnostics.controlEvents[record.statusCode]||0)+1;
+   if(['GAP','FEED_GAP','DISCONNECTED','RECONNECT','WS_ERROR','SOURCE_CONNECT_FAILED',
+       'MALFORMED_FRAME','SOURCE_ERROR'].includes(record.statusCode)){
+    segment++;previousDepth=null;latestDepth=null;position.clear();previousReceipt=null;
+   }
+   continue;
+  }
+  if(record?.rawEncoding!=='utf8'||typeof record.raw!=='string'){
+   segment++;previousDepth=null;latestDepth=null;position.clear();previousReceipt=null;continue;
+  }
+  let message;try{message=JSON.parse(record.raw);}catch{
+   segment++;previousDepth=null;latestDepth=null;position.clear();previousReceipt=null;continue;
+  }
+  if(!obj(message)){
+   segment++;previousDepth=null;latestDepth=null;position.clear();previousReceipt=null;continue;
+  }
   const dt=duration(previousReceipt,record.receivedMonoNs);
   if(dt!==null){
    const name=dt<10?'under10':dt<100?'under100':dt<1000?'under1000':'over1000';
@@ -92,11 +105,11 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   if(Array.isArray(message.d)){
    diagnostics.depthFrames++;
    const image=parseObservedMbp10(message,{tick});
-   images.push({image,monoNs:record.receivedMonoNs??null,seq:record.localSeq});
+   images.push({image,monoNs:record.receivedMonoNs??null,seq:record.localSeq,segment});
    if(image.state!=='VALID'){
     diagnostics.invalidDepthFrames++;
     diagnostics.invalidReasons[image.reason]=(diagnostics.invalidReasons[image.reason]||0)+1;
-    previousDepth=null;latestDepth=null;
+    previousDepth=null;latestDepth=null;position.clear();segment++;
     continue;
    }
    diagnostics.validDepthFrames++;latestDepth=image;
@@ -177,7 +190,8 @@ export function analyzeObservedMbp10(records,{tick=0.25,maxIntervalMs=1000}={}){
   const a=images[i],b=images[i+1];
   if(a.image.state!=='VALID')continue;
   const current=entries(a.image);
-  const next=b?.image.state==='VALID'?new Map(entries(b.image).map(x=>[key(x.side,x.price),x])):null;
+  const next=b?.image.state==='VALID'&&a.segment===b.segment?
+   new Map(entries(b.image).map(x=>[key(x.side,x.price),x])):null;
   const ms=next?duration(a.monoNs,b.monoNs):null;
   for(const item of current){
    const id=key(item.side,item.price),cell=grid.get(id),following=next?.get(id);
