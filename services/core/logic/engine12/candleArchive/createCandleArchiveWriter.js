@@ -61,8 +61,27 @@ export function validateCandleArchiveInput({packet,provenance,trustResult}={}){
       reasons.push("CANDLE_SOURCE_COVERAGE_INCOMPLETE_"+tf);
       continue;
     }
-    if(!Array.isArray(packetBars?.[tf]))
+    if(!Array.isArray(packetBars?.[tf])){
       reasons.push("CANDLE_PACKET_TIMEFRAME_MISSING_"+tf);
+    }else{
+      const before=packet?.sourceCountsBeforeFiltering?.[tf];
+      const after=packet?.sourceCountsAfterFiltering?.[tf];
+      const map=packet?.timeframeSourceMap?.[tf];
+      if(before!==coverage.observedCount||after!==coverage.acceptedCount)
+        reasons.push("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_"+tf);
+      if(map!==provenance?.timeframeSourceMap?.[tf])
+        reasons.push("CANDLE_PACKET_TIMEFRAME_MAP_MISMATCH_"+tf);
+      if(packetBars[tf].length!==bars.length)
+        reasons.push("CANDLE_PACKET_BAR_COUNT_MISMATCH_"+tf);
+      else{
+        for(let i=0;i<bars.length;i++){
+          const a=packetBars[tf][i], b=bars[i];
+          if(a?.startMs!==b?.startMs||a?.endMs!==b?.endMs||
+             ["open","high","low","close"].some(k=>a?.[k]!==b?.[k]))
+            reasons.push("CANDLE_PACKET_BAR_MISMATCH_"+tf);
+        }
+      }
+    }
     for(const b of bars){
       if(!contract(b?.sourceContract)||b.sourceContract!==provenance.physicalContract)
         reasons.push("CANDLE_SOURCE_CONTRACT_MISMATCH");
