@@ -4238,6 +4238,7 @@ async function buildEma10Posture({
   label,
   limit = 120,
   evaluationTimeMs = null,
+  includeSourceEvidence = false,
 }) {
   const path = ohlcPathForSymbol(symbol);
   const u = new URL(`${CORE_BASE}${path}`);
@@ -4245,8 +4246,10 @@ async function buildEma10Posture({
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("timeframe", tf);
   u.searchParams.set("limit", String(limit));
+  if(includeSourceEvidence===true&&tf==="10m")u.searchParams.set("evidence","1");
 
   const r = await fetchJson(u.toString(), 15000);
+  const consumerReceivedAtMs=Date.now();
   const bars = normalizeOhlcBars(r?.json);
 
 const completionTruth =
@@ -4321,6 +4324,17 @@ return {
   lastBarTime: lastBar ? barTime(lastBar) : null,
   barCount: bars.length,
   bars,
+  ...(includeSourceEvidence===true&&tf==="10m"?{
+    engine11SourceEvidence:{
+      schema:"engine3.shadowSourceTransport.v1",
+      trustStatus:"UNVERIFIED",
+      receipt:r?.json?.engine11Receipt??null,
+      selectedBarReferences:Array.isArray(r?.json?.selectedBarReferences)
+        ?r.json.selectedBarReferences:[],
+      consumerReceivedAtMs,engine3ConsumptionAttested:false,
+      calibrationAdmissible:false,recordingActivated:false,
+    }
+  }:{}),
   ...(completionTruth
   ? {
       completedBars: completionTruth.completedBars,
@@ -4338,7 +4352,7 @@ return {
 };
 }
 
-async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
+async function buildEmaPostureBlock(symbol, evaluationTimeMs = null, includeSourceEvidence=false) {
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
     buildEma10Posture({
       symbol,
@@ -4346,6 +4360,7 @@ async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
       label: "10m EMA10 Trigger Layer",
       limit: 120,
       evaluationTimeMs,
+      includeSourceEvidence,
     }).catch((err) => ({
       ok: false,
       symbol,
@@ -10439,6 +10454,8 @@ async function buildEngine2State(symbol) {
 async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
   const evaluationTimeMs = Date.now();
+  const engine3SourceEvidenceEnabled =
+    process.env.ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED === "1";
 
   const previousSnapshot = loadPreviousSnapshotSafe();
   const engine25Context = loadEngine25Context();
@@ -10483,7 +10500,7 @@ const [
     source: "/api/v1/ohlc",
     error: String(err?.message || err),
   })),
-   buildEmaPostureBlock(symbol, evaluationTimeMs).catch((err) => ({
+   buildEmaPostureBlock(symbol, evaluationTimeMs, engine3SourceEvidenceEnabled).catch((err) => ({
     symbol,
     source: "EMA10_POSTURE_FAILED",
     tenMinute: {
@@ -10527,6 +10544,7 @@ String(symbol || "").toUpperCase() === "ES"
       limit: 120,
       coreBase: CORE_BASE,
       fetchJson,
+      includeSourceEvidence:engine3SourceEvidenceEnabled,
     })
   : Promise.resolve({
       oneMinute: {
@@ -10587,6 +10605,12 @@ console.log("Engine21 alignment fetched");
   marketMeter.layers.oneHourEma10 = emaPosture?.oneHour || null;
   marketMeter.layers.fourHourEma10 = emaPosture?.fourHour || null;
   marketMeter.layers.dailyEma10 = emaPosture?.daily || null; 
+  const tenMinuteSourceEvidence=engine3SourceEvidenceEnabled
+    ? emaPosture?.tenMinute?.engine11SourceEvidence??null : null;
+  // Strip the new receipt sidecar from the market/strategy object so only
+  // the dedicated shadow diagnostic is new; trading inputs remain unchanged.
+  if(engine3SourceEvidenceEnabled&&emaPosture?.tenMinute)
+    delete emaPosture.tenMinute.engine11SourceEvidence;
   const result = {
   ok: true,
   symbol,
@@ -11946,6 +11970,24 @@ if (String(symbol || "").toUpperCase() === "ES") {
     }
   }
 
+  if(engine3SourceEvidenceEnabled&&String(symbol||"").toUpperCase()==="ES"){
+    const evidenceSources={
+      "1m":engine3DiagnosticBars?.oneMinute?.engine11SourceEvidence??null,
+      "5m":engine3DiagnosticBars?.fiveMinute?.engine11SourceEvidence??null,
+      "10m":tenMinuteSourceEvidence,
+    };
+    const allPresent=Object.values(evidenceSources).every(source=>
+      source?.receipt?.schema==="engine11.es.originalSourceReceipt.v3"&&
+      Array.isArray(source.selectedBarReferences));
+    result.engine3SourceEvidenceShadow={
+      schema:"engine3.shadowSourceReceiptLink.v1",mode:"READ_ONLY",
+      status:allPresent?"OBSERVED_UNVERIFIED":"SOURCE_RECEIPT_INCOMPLETE",
+      evaluationTimeMs,decisionComputedAtMs:Date.now(),
+      sources:evidenceSources,
+      sourceEvidenceVerified:false,engine3ConsumptionAttested:false,
+      calibrationAdmissible:false,recordingActivated:false,writerInvoked:false,
+    };
+  }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
   console.log("Strategy snapshot written:", SNAPSHOT_FILE);
