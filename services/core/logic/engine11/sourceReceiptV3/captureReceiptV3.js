@@ -55,10 +55,32 @@ export function captureReceiptV3({
   if(parsed.next_url!==undefined&&parsed.next_url!==null) {
     nextUrl=sanitizeMassiveAggregateRequest(parsed.next_url).url;
   }
+  // Capture the exact normalized value identity without retaining source bodies.
+  // This digest is only a comparison token, never a provider trust assertion.
+  const normalizedRow = r => {
+    const p=r.payload;
+    const ns=String(p?.window_start??'');
+    requireTruth(/^\\d{16,20}$/.test(ns),'V3_INVALID_WINDOW_START');
+    const nanos=BigInt(ns);
+    requireTruth(nanos>0n && nanos%1000000000n===0n,'V3_INVALID_WINDOW_ALIGNMENT');
+    const time=Number(nanos/1000000000n);
+    requireTruth(Number.isSafeInteger(time),'V3_INVALID_WINDOW_TIME');
+    const out={time,
+      open:Number(p?.open),high:Number(p?.high),
+      low:Number(p?.low),close:Number(p?.close),
+      volume:Number(p?.volume??0)};
+    requireTruth([out.open,out.high,out.low,out.close,out.volume]
+      .every(Number.isFinite),'V3_SOURCE_OHLCV_INVALID');
+    requireTruth(out.high>=out.low && out.open>=out.low &&
+      out.open<=out.high && out.close>=out.low &&
+      out.close<=out.high && out.volume>=0,'V3_SOURCE_OHLCV_INVALID');
+    return out;
+  };
   const observations=rows.map((r,ordinal)=>freeze({
     ordinal,windowStartNs:String(r.payload?.window_start??''),
     byteStart:r.byteStart,byteEnd:r.byteEnd,
     rowDigest:sha256(bytes.subarray(r.byteStart,r.byteEnd)),
+    normalizedBarDigest:hash(normalizedRow(r)),
   }));
   requireTruth(observations.every(o=>/^\d{16,20}$/.test(o.windowStartNs)),
     'V3_INVALID_WINDOW_START');
@@ -107,10 +129,15 @@ export function bindSelectedBarsToReceipt(receipt,selectedBars) {
     seen.add(bar.time);
     const source=sourceByStart.get(bar.time);
     requireTruth(source,'V3_SELECTED_BAR_SOURCE_MISSING');
+    requireTruth(source.normalizedBarDigest===hash({
+      time:bar.time,open:bar.open,high:bar.high,low:bar.low,
+      close:bar.close,volume:bar.volume
+    }), 'V3_SELECTED_BAR_OHLCV_MISMATCH');
     return freeze({
       sourceBarId:receipt.physicalContract+'|'+receipt.frame+'|'+source.windowStartNs,
       sourceRevisionId:'OBSERVED_SHA256:'+source.rowDigest,
       sourcePayloadDigest:source.rowDigest,
+      normalizedBarDigest:source.normalizedBarDigest,
       receiptId:receipt.receiptId,
       physicalContract:receipt.physicalContract,
       timeframe:receipt.frame,
