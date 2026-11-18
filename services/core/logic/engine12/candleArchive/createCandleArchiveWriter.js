@@ -168,8 +168,14 @@ export function createEngine12CandleArchiveWriter({
       fault("BEFORE_RECEIPT_LOOKUP");
       if(fsOps.existsSync(receiptFile)){
         const receipt=JSON.parse(fsOps.readFileSync(receiptFile,"utf8"));
-        if(receipt.packetSha256===digest&&receipt.dataFile===dataFile)
+        if(receipt.packetSha256===digest&&receipt.dataFile===dataFile){
+          if(!fsOps.existsSync(dataFile))
+            return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_ORPHAN_RECEIPT"};
+          const existingBytes=fsOps.readFileSync(dataFile);
+          if(sha256(existingBytes)!==digest)
+            return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_IMMUTABILITY_CONFLICT"};
           return {ok:true,recorded:true,duplicate:true,reason:"CANDLE_ARCHIVE_ALREADY_RECORDED",dataFile,receiptFile,sha256:digest};
+        }
         return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_IDENTITY_CONFLICT"};
       }
       if(fsOps.existsSync(dataFile)){
