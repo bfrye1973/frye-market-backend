@@ -28,7 +28,7 @@ export function captureReceiptV3({
   request,body,physicalContract,frame,httpStatus=200,
   requestStartedAtMs,firstByteAtMs,bodyCompletedAtMs,
   requestToFirstByteMonoMs,requestToBodyMonoMs,
-  resolver=null,sourceMode='LIVE_REST_CONSUMED_BY_ENGINE3',
+  resolver=null,sourceMode='REST_AGGREGATE_OBSERVED',
 }={}) {
   const clean=sanitizeMassiveAggregateRequest(request);
   requireTruth(typeof physicalContract==='string' &&
@@ -43,7 +43,7 @@ export function captureReceiptV3({
   requireTruth([requestToFirstByteMonoMs,requestToBodyMonoMs].every(t=>
     typeof t==='number'&&Number.isFinite(t)&&t>=0)&&
     requestToFirstByteMonoMs<=requestToBodyMonoMs,'V3_MONOTONIC_TIME_ORDER');
-  requireTruth(['LIVE_REST_CONSUMED_BY_ENGINE3','HISTORICAL_REFETCH',
+  requireTruth(['REST_AGGREGATE_OBSERVED','HISTORICAL_REFETCH',
     'SYNTHETIC_FIXTURE'].includes(sourceMode),'V3_SOURCE_MODE_INVALID');
   const bytes=Buffer.from(body);
   requireTruth(bytes.length>0&&bytes.length<=8*1024*1024,'V3_BODY_LIMIT');
@@ -72,6 +72,7 @@ export function captureReceiptV3({
     clock:{status:'UNVERIFIED',maxUncertaintyMs:null},
     providerFinality:'UNKNOWN',entitlementMode:'UNKNOWN',
     bodyRetained:false,sourceTrustVerified:false,
+    engine3ConsumptionVerified:false,
     resolver:resolver?{
       resolvedSymbol:resolver.resolvedSymbol??null,
       selectionRule:resolver.selectionRule??null,
@@ -80,4 +81,44 @@ export function captureReceiptV3({
     nextUrl,observations,
   };
   return freeze({...base,receiptId:'receipt:v3:'+hash(base)});
+}
+
+/**
+ * Bind only actually returned normalized bars to their exact source-row digests.
+ * This is *structural* linkage, not a claim about Engine3 consumption or trust.
+ * A conflicting same-start provider row is ambiguous and fails closed.
+ */
+export function bindSelectedBarsToReceipt(receipt,selectedBars) {
+  requireTruth(receipt?.schema==='engine11.es.originalSourceReceipt.v3' &&
+    Array.isArray(selectedBars),'V3_BIND_INPUT_INVALID');
+  requireTruth(receipt.nextUrl===null,'V3_PAGINATION_INCOMPLETE');
+  const sourceByStart=new Map();
+  for(const source of receipt.observations) {
+    const timeSec=Number(BigInt(source.windowStartNs)/1000000000n);
+    const previous=sourceByStart.get(timeSec);
+    requireTruth(!previous||previous.rowDigest===source.rowDigest,
+      'V3_CONFLICTING_SOURCE_REVISIONS');
+    if(!previous)sourceByStart.set(timeSec,source);
+  }
+  const seen=new Set();
+  const refs=selectedBars.map(bar=>{
+    requireTruth(Number.isSafeInteger(bar?.time)&&!seen.has(bar.time),
+      'V3_DUPLICATE_SELECTED_BAR');
+    seen.add(bar.time);
+    const source=sourceByStart.get(bar.time);
+    requireTruth(source,'V3_SELECTED_BAR_SOURCE_MISSING');
+    return freeze({
+      sourceBarId:receipt.physicalContract+'|'+receipt.frame+'|'+source.windowStartNs,
+      sourceRevisionId:'OBSERVED_SHA256:'+source.rowDigest,
+      sourcePayloadDigest:source.rowDigest,
+      receiptId:receipt.receiptId,
+      physicalContract:receipt.physicalContract,
+      timeframe:receipt.frame,
+      windowStartNs:source.windowStartNs,
+      ordinal:source.ordinal,
+      byteStart:source.byteStart,byteEnd:source.byteEnd,
+      sourceTrustVerified:false,
+    });
+  });
+  return freeze(refs);
 }
