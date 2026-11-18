@@ -4352,7 +4352,9 @@ return {
 };
 }
 
-async function buildEmaPostureBlock(symbol, evaluationTimeMs = null, includeSourceEvidence=false) {
+async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
+  const includeSourceEvidence =
+    process.env.ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED === "1";
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
     buildEma10Posture({
       symbol,
@@ -10500,7 +10502,7 @@ const [
     source: "/api/v1/ohlc",
     error: String(err?.message || err),
   })),
-   buildEmaPostureBlock(symbol, evaluationTimeMs, engine3SourceEvidenceEnabled).catch((err) => ({
+   buildEmaPostureBlock(symbol, evaluationTimeMs).catch((err) => ({
     symbol,
     source: "EMA10_POSTURE_FAILED",
     tenMinute: {
