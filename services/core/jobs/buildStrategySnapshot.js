@@ -9019,6 +9019,11 @@ if (isEsIntradayScalp) {
       quality:phase2Causal.control?.quality??"WEAK",
       qualified:phase2Causal.qualified,
       source:phase2Causal.controlSource,
+      controlGeometrySource:phase2Causal.controlGeometrySource,
+      controlGeometryEligible:phase2Causal.controlGeometryEligible,
+      engine26Zone:phase2Causal.engine26Zone,
+      engine3ControlLens:phase2Causal.engine3ControlLens,
+      reasonCodes:phase2Causal.reasonCodes,
     }};
   patchedConfluence.context.reaction.engine3V6ShadowPersistence =
     saveEngine3V6Phase1ShadowState({state:{
