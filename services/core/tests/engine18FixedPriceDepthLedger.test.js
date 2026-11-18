@@ -31,8 +31,9 @@ test('price-anchored candidate needs distinct actual frames and >=30 seconds of 
  assert.equal(b.observedInImages,7);
  assert.equal(b.currentlyInBook,true);
  assert.equal(b.coverageState,'IN_COVERAGE');
- assert.equal(b.currentRestingLiquidityVerified,true);
- assert.equal(s.diagnostics.elapsedBasis,'HOST_RECEIVED_MONOTONICITY_UNVERIFIED');
+ assert.equal(b.currentBookObserved,true);
+ assert.equal(b.currentRestingLiquidityVerified,false);
+ assert.equal(s.diagnostics.elapsedBasis,'HOST_WALL_RECEIVE_MS_UNVERIFIED');
 });
 test('when fixed price leaves moving MBP ladder, it is historical only, NOT resting',()=>{
  const r=createEngine18Level2ZoneReader({minObservations:3,minDurationMs:30000});
