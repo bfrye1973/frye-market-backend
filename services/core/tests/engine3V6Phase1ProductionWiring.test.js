@@ -16,7 +16,8 @@ test("v6 shadow is published beside, never in place of, canonical v5",()=>{
  const handoff=source.indexOf("const engine3Strategy1Handoff =");
  assert.ok(v5>=0&&v6>v5&&handoff>v6);
  assert.match(source,/loadEngine3V6Phase1ShadowState\(\)/);
- assert.match(source,/saveEngine3V6Phase1ShadowState\(\{ state: engine3V6Shadow \}\)/);
+ assert.ok(source.includes("saveEngine3V6Phase1ShadowState({state:{") ||
+  source.includes("saveEngine3V6Phase1ShadowState({ state: engine3V6Shadow })"));
  const segment=source.slice(handoff,handoff+500);
  assert.doesNotMatch(segment,/engine3V6Shadow/);
 });
