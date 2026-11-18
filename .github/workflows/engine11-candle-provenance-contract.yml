@@ -4,6 +4,10 @@ on:
     paths:
       - 'docs/engine11/ENGINE11_ES_COMPLETED_CANDLE_PROVENANCE_CONTRACT_V1_2026-11-18.md'
       - 'services/core/logic/engine11/candleProvenanceV1/**'
+      - 'services/core/logic/engine11/sourceReceiptV3/**'
+      - 'services/core/logic/engine11/sourceObservationsV2/**'
+      - 'services/core/logic/engine11/rawCandles/**'
+      - 'services/core/tests/engine11SourceReceiptV3.test.js'
       - 'services/core/tests/engine11CandleProvenanceContractV1.test.js'
       - 'services/core/tests/engine11IndependentOriginalBytePreflight.test.js'
       - '.github/workflows/engine11-candle-provenance-contract.yml'
@@ -19,7 +23,7 @@ jobs:
         with:
           node-version: '22'
       - name: Verify pure fail-closed Engine11 provenance (synthetic fixtures ONLY)
-        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js
+        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js services/core/tests/engine11SourceReceiptV3.test.js
       - name: Verify no real recorder side effects in changed validator
         run: |
           node --input-type=module - <<'NODE'
