@@ -4,7 +4,12 @@ import {inspectEngine26AuthorizationContract as inspect}
  from "../logic/engine3/v6/inspectEngine26AuthorizationContract.js";
 const t=Date.parse("2026-11-17T17:00:00Z");
 const valid={handoff:{candidateId:"C",zoneId:"Z",authorizeEngine3Evaluation:true,
- terminalLifecycle:false},candidate:{candidateId:"C",zoneId:"Z"},
+ terminalLifecycle:false,engine3AuthorizationSourceReady:true,
+ engine3AuthorizationStorageHealthy:true,engine3AuthorizationPersisted:true,
+ engine3AuthorizationStorageStatus:"WRITE_READBACK_VERIFIED",
+ engine3AuthorizationPersistenceMode:"PERSISTENT_MONOTONIC",
+ engine3AuthorizationSourceAsOf:new Date(t).toISOString()},
+ candidate:{candidateId:"C",zoneId:"Z"},
  normalizedZoneInput:{eligible:true,identity:{candidateId:"C",zoneId:"Z"}},
  evaluationTimeMs:t};
 test("source field absent -> explicit observed fallback; never infer candidateLifecycleStartTime",()=>{
@@ -36,4 +41,29 @@ test("source conflict, identity mismatch and run reset fail closed",()=>{
  priorActivation:{active:true,candidateId:"C",zoneId:"Z",source:"ENGINE26_AUTHORIZED",
  startedAtMs:t-120000}});
  assert.equal(moved.status,"ENGINE26_CONTINUITY_CHANGED_WITHOUT_RUN_RESET");
+});
+
+test("authoritative Engine26 timestamp requires source-ready storage-healthy and persisted",()=>{
+ const timestamp=new Date(t-60000).toISOString();
+ const noReady=inspect({...valid,handoff:{...valid.handoff,
+  engine3AuthorizationStartedAt:timestamp,engine3AuthorizationSourceReady:false}});
+ assert.equal(noReady.status,"ENGINE26_SOURCE_NOT_READY");
+ assert.equal(noReady.authoritativeTimestampMs,null);
+
+ const unhealthy=inspect({...valid,handoff:{...valid.handoff,
+  engine3AuthorizationStartedAt:timestamp,engine3AuthorizationStorageHealthy:false}});
+ assert.equal(unhealthy.status,"ENGINE26_STORAGE_UNHEALTHY");
+ assert.equal(unhealthy.authoritativeTimestampMs,null);
+
+ const unpersisted=inspect({...valid,handoff:{...valid.handoff,
+  engine3AuthorizationStartedAt:timestamp,engine3AuthorizationPersisted:false}});
+ assert.equal(unpersisted.status,"ENGINE26_AUTHORIZATION_NOT_PERSISTED");
+ assert.equal(unpersisted.authoritativeTimestampMs,null);
+});
+test("future Engine26 source as-of fails closed even when timestamp itself is historical",()=>{
+ const r=inspect({...valid,handoff:{...valid.handoff,
+  engine3AuthorizationStartedAt:new Date(t-60000).toISOString(),
+  engine3AuthorizationSourceAsOf:new Date(t+60000).toISOString()}});
+ assert.equal(r.status,"ENGINE26_SOURCE_ASOF_IN_FUTURE");
+ assert.equal(r.authoritativeTimestampMs,null);
 });
