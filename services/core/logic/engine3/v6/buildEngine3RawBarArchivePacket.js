@@ -164,4 +164,67 @@ export function buildEngine3RawBarArchivePacket({
     "ARCHIVE_PACKET_PREPARED_PROVENANCE_NOT_INDEPENDENTLY_VERIFIED":
     "ARCHIVE_PACKET_PREPARED_NO_ENGINE11_RECEIPT"};
 }
+// Minimal caller adapter for Engine12 record({packet,provenance}).
+// It NEVER calls a writer or verifies cryptographic source origin.
+// Only complete, untruncated and exact-reference packets may be submitted
+// for Engine12's independent trust verification.
+export function buildEngine3CandleArchiveWriterHandoff({
+ prepared=null,engine11Provenance=null,
+}={}){
+ const packet=prepared?.packet;
+ if(prepared?.ok!==true||packet?.schema!=="engine3.v6.rawBarPacket.preparation.v2"||
+    prepared?.recordingActivated!==false||
+    prepared?.sourceEvidenceVerified!==false||
+    prepared?.calibrationAdmissible!==false)
+   return rejected("ENGINE3_PACKET_PREPARATION_NOT_SAFE");
+ if(engine11Provenance?.schema!=="engine11.es.completedCandleProvenance.v1"||
+    !text(engine11Provenance.receiptId)||
+    !text(engine11Provenance.signatureOrDigest?.value)||
+    packet?.engine11ProvenanceReceiptId!==engine11Provenance.receiptId||
+    packet?.engine11ProvenanceDigest!==engine11Provenance.signatureOrDigest.value||
+    packet?.evaluationTimeMs!==engine11Provenance.evaluationTimeMs)
+   return rejected("CANDLE_SOURCE_RECEIPT_IDENTITY_MISMATCH");
+ if(!text(packet?.engine26?.candidateId)||!text(packet?.engine26?.zoneId))
+   return rejected("ENGINE26_CANDIDATE_ZONE_IDENTITY_MISSING");
+ for(const tf of Object.keys(frames)){
+  const bars=packet?.completedBars?.[tf],src=engine11Provenance?.bars?.[tf];
+  const counts=packet?.sourceFiltering?.[tf],coverage=engine11Provenance?.coverage?.[tf];
+  const refs=packet?.sourceBarReferences?.[tf];
+  if(!Array.isArray(bars)||!Array.isArray(src)||!Array.isArray(refs)||
+     bars.length===0||bars.length!==src.length||refs.length!==src.length||
+     counts?.truncatedCount!==0||packet?.sourceCountsBeforeFiltering?.[tf]!==bars.length||
+     packet?.sourceCountsAfterFiltering?.[tf]!==bars.length||
+     coverage?.coverageState!=="COMPLETE"||coverage?.gapCount!==0||
+     coverage?.acceptedCount!==bars.length||coverage?.observedCount!==bars.length||
+     coverage?.rejectedCount!==0||packet?.gapState?.[tf]!=="COMPLETE"||
+     !text(packet?.sourceTimeframeMap?.[tf]))
+    return rejected("CANDLE_SOURCE_COVERAGE_INCOMPLETE_"+tf);
+  for(let i=0;i<bars.length;i++){
+   const b=bars[i],v=src[i],r=refs[i];
+   if(!v||!r||v.timeframe!==tf||v.startMs!==b.startMs||
+      v.endMs!==b.endMs||v.endMs-b.startMs!==frames[tf]||
+      v.endMs>packet.evaluationTimeMs||
+      ["open","high","low","close"].some(k=>v[k]!==b[k])||
+      !text(r.sourceBarId)||r.sourceBarId!==v.sourceBarId||
+      r.sourceRevisionId!==v.sourceRevisionId||
+      r.sourcePayloadDigest!==v.sourcePayloadDigest||
+      r.sourceContract!==v.sourceContract||
+      r.availableAtMs!==v.availableAtMs||
+      v.finality!=="CONFIRMED")
+     return rejected("CANDLE_SOURCE_BAR_REFERENCE_MISMATCH_"+tf);
+  }
+ }
+ // Packet SHA is only Engine3's own deterministic digest, not Engine11
+ // origin authentication. Engine12 must independently verify both bytes.
+ if(prepared.sha256!==sha(JSON.stringify(packet)))
+   return rejected("ENGINE3_PACKET_DIGEST_MISMATCH");
+ return {
+  ok:true,mode:"PREPARED_FOR_INDEPENDENT_ENGINE12_VALIDATION",
+  recordingActivated:false,calibrationAdmissible:false,
+  sourceEvidenceVerified:false,writerInvoked:false,
+  writerInput:{packet,provenance:engine11Provenance},
+  packetSha256:prepared.sha256,dedupeKey:prepared.dedupeKey,
+  reasonCode:"ENGINE12_INDEPENDENT_PROVENANCE_VERIFICATION_REQUIRED",
+ };
+}
 export default buildEngine3RawBarArchivePacket;
