@@ -1,0 +1,34 @@
+name: Engine 3 v6 Phase 2 Evidence Integrity
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/buildEngine3V6Phase2Evidence.js'
+      - 'services/core/logic/engine3/v6/buildEngine3V6CausalControl.js'
+      - 'services/core/logic/engine3/v6/buildEngine3V6Phase1Shadow.js'
+      - 'services/core/logic/engine3/v6/buildEngine3RawBarArchivePacket.js'
+      - 'services/core/tests/engine3V6Phase2*.test.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - '.github/workflows/engine3-v6-phase2-integrity.yml'
+  workflow_dispatch:
+jobs:
+  phase2:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check
+        run: |
+          node --check logic/engine3/v6/buildEngine3V6Phase2Evidence.js
+          node --check logic/engine3/v6/buildEngine3V6CausalControl.js
+          node --check logic/engine3/v6/buildEngine3V6Phase1Shadow.js
+          node --check logic/engine3/v6/buildEngine3RawBarArchivePacket.js
+          node --check jobs/buildStrategySnapshot.js
+      - name: Phase 2 evidence unit tests
+        run: node --test tests/engine3V6Phase2*.test.js
+      - name: Phase 1 compatibility regression
+        run: node --test tests/engine3V6Phase1*.test.js tests/engine3V6Engine10OpenTradeLock.test.js

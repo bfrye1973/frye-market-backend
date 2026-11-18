@@ -1,0 +1,63 @@
+name: Engine 3 v6 Phase 1 Shadow Safety
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/**'
+      - 'services/core/tests/engine3V6*.test.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - '.github/workflows/engine3-v6-phase1-shadow.yml'
+  workflow_dispatch:
+jobs:
+  phase1:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify syntax
+        run: |
+          node --check logic/engine3/v6/evaluateEngine3V6Phase1.js
+          node --check logic/engine3/v6/resolveEngine10OpenPaperDirection.js
+          node --check logic/engine3/v6/engine3Engine10VerifiedLockStore.js
+          node --check logic/engine3/v6/buildEngine3V6Phase1Shadow.js
+          node --check logic/engine3/v6/engine3V6Phase1ShadowStore.js
+          node --check jobs/buildStrategySnapshot.js
+      - name: Run Phase 1 unit tests
+        run: node --test tests/engine3V6*.test.js
+      - name: Compare legacy Engine 3 tests against clean base
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ]; then
+            echo "No PR base SHA: compare unavailable"; exit 1
+          fi
+          git worktree add --detach /tmp/engine3-base "$BASE_SHA"
+          for root in "/tmp/engine3-base/services/core" "$PWD"; do
+            (
+              cd "$root"
+              find tests -maxdepth 1 -name '*engine3*test.js' ! -name 'engine3V6*' -print0 |
+                xargs -0 -r node --test > "$root/engine3-legacy-result.tap" 2>&1 || true
+              echo "$root"
+              grep -E '^# (tests|pass|fail) ' "$root/engine3-legacy-result.tap" | tail -3
+            )
+          done
+          node - <<'NODE'
+          const fs=require('fs');
+          const parse=p=>{
+            const s=fs.readFileSync(p,'utf8');
+            const n=key=>Number(s.match(new RegExp('^# '+key+' (\\d+)$','m'))?.[1]??NaN);
+            return {tests:n('tests'),passed:n('pass'),failed:n('fail')};
+          };
+          const base=parse('/tmp/engine3-base/services/core/engine3-legacy-result.tap');
+          const head=parse('engine3-legacy-result.tap');
+          console.log(JSON.stringify({base,head},null,2));
+          if(!Number.isFinite(base.failed)||!Number.isFinite(head.failed))process.exit(1);
+          if(head.failed>base.failed)process.exit(1);
+          NODE
