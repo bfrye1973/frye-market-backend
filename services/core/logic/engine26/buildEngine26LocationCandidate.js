@@ -3339,6 +3339,14 @@ function buildWaitingHandoff(
     },
     engine3AuthorizationContinuous: false,
     engine3AuthorizationActive: false,
+    engine3AuthorizationSourceReady: false,
+    engine3AuthorizationStorageHealthy: false,
+    engine3AuthorizationStorageStatus:
+      "NO_AUTHORIZATION_CONTEXT",
+    engine3AuthorizationPersistenceMode:
+      "NOT_APPLICABLE",
+    engine3AuthorizationPersisted: false,
+    engine3AuthorizationWarnings: [],
 
     reasonCodes: [
       "ENGINE26_REACTION_OBSERVER_ALWAYS_ACTIVE",
@@ -6263,6 +6271,18 @@ export function buildEngine26ReactionHandoff({
     engine3AuthorizationActive:
       evaluationAuthorized === true &&
       candidate.engine3AuthorizationActive !== false,
+    engine3AuthorizationSourceReady:
+      candidate.engine3AuthorizationSourceReady === true,
+    engine3AuthorizationStorageHealthy:
+      candidate.engine3AuthorizationStorageHealthy === true,
+    engine3AuthorizationStorageStatus:
+      candidate.engine3AuthorizationStorageStatus ?? null,
+    engine3AuthorizationPersistenceMode:
+      candidate.engine3AuthorizationPersistenceMode ?? null,
+    engine3AuthorizationPersisted:
+      candidate.engine3AuthorizationPersisted === true,
+    engine3AuthorizationWarnings:
+      candidate.engine3AuthorizationWarnings || [],
 
     directionalEvidence:
       candidate.directionalEvidence ?? null,
@@ -6522,6 +6542,24 @@ export function buildEngine26A(
     engine3AuthorizationActive:
       engine3AuthorizationClock
         .engine3AuthorizationActive,
+    engine3AuthorizationSourceReady:
+      engine3AuthorizationClock
+        .engine3AuthorizationSourceReady,
+    engine3AuthorizationStorageHealthy:
+      engine3AuthorizationClock
+        .engine3AuthorizationStorageHealthy,
+    engine3AuthorizationStorageStatus:
+      engine3AuthorizationClock
+        .engine3AuthorizationStorageStatus,
+    engine3AuthorizationPersistenceMode:
+      engine3AuthorizationClock
+        .engine3AuthorizationPersistenceMode,
+    engine3AuthorizationPersisted:
+      engine3AuthorizationClock
+        .engine3AuthorizationPersisted,
+    engine3AuthorizationWarnings:
+      engine3AuthorizationClock
+        .engine3AuthorizationWarnings || [],
   };
 
   const engine26ReactionHandoff =
@@ -6644,6 +6682,24 @@ export function buildEngine26A(
     engine3AuthorizationActive:
       engine26LocationCandidate
         ?.engine3AuthorizationActive === true,
+    engine3AuthorizationSourceReady:
+      engine26LocationCandidate
+        ?.engine3AuthorizationSourceReady === true,
+    engine3AuthorizationStorageHealthy:
+      engine26LocationCandidate
+        ?.engine3AuthorizationStorageHealthy === true,
+    engine3AuthorizationStorageStatus:
+      engine26LocationCandidate
+        ?.engine3AuthorizationStorageStatus ?? null,
+    engine3AuthorizationPersistenceMode:
+      engine26LocationCandidate
+        ?.engine3AuthorizationPersistenceMode ?? null,
+    engine3AuthorizationPersisted:
+      engine26LocationCandidate
+        ?.engine3AuthorizationPersisted === true,
+    engine3AuthorizationWarnings:
+      engine26LocationCandidate
+        ?.engine3AuthorizationWarnings || [],
     directionalEvidence:
       engine26LocationCandidate?.directionalEvidence ?? null,
     ema10Posture:
