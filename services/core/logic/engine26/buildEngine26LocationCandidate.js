@@ -3370,6 +3370,7 @@ export function buildEngine26LocationCandidate({
   bars10m = [],
   ema10Posture = null,
   manualZonesFilePath = undefined,
+  manualZonesApplyRollover = undefined,
   memoryFilePath = DEFAULT_MEMORY_PATH,
   persistMemory = true,
   tickSize = DEFAULT_TICK_SIZE,
@@ -3443,6 +3444,12 @@ export function buildEngine26LocationCandidate({
     manualZonesFilePath
       ? readEngine26ManualImbalanceZones({
           filePath: manualZonesFilePath,
+          ...(typeof manualZonesApplyRollover === "boolean"
+            ? {
+                applyRollover:
+                  manualZonesApplyRollover,
+              }
+            : {}),
         })
       : readEngine26ManualImbalanceZones();
 
