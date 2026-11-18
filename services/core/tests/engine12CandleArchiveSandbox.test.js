@@ -218,3 +218,31 @@ test("canonical Replay sibling is untouched",()=>{
     assert.deepEqual(fs.readFileSync(replayFile),before);
   }finally{fs.rmSync(t.base,{recursive:true,force:true})}
 });
+
+test("permission and ENOSPC faults never produce successful receipt",()=>{
+  const t=temp();
+  try{
+    for(const [code,reason] of [["EACCES","CANDLE_ARCHIVE_PERMISSION_DENIED"],["ENOSPC","CANDLE_ARCHIVE_STORAGE_EXHAUSTED"]]){
+      const root=path.join(t.replay,"engine12-"+code.toLowerCase());
+      const w=createEngine12CandleArchiveWriter({
+        root,enabled:true,trustVerifier:trust,
+        faultInjector:stage=>{if(stage==="BEFORE_DATA_WRITE")throw Object.assign(new Error(code),{code})}
+      });
+      const r=w.record({packet:packet(),provenance:provenance()});
+      assert.equal(r.reason,reason);
+      assert.equal(r.recorded,false);
+    }
+  }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+
+test("orphan receipt fails closed instead of inventing missing data",()=>{
+  const t=temp();
+  try{
+    const w=createEngine12CandleArchiveWriter({root:t.root,enabled:true,trustVerifier:trust});
+    const first=w.record({packet:packet(),provenance:provenance()});
+    assert.equal(first.ok,true);
+    fs.unlinkSync(first.dataFile);
+    const second=w.record({packet:packet(),provenance:provenance()});
+    assert.equal(second.reason,"CANDLE_ARCHIVE_ORPHAN_RECEIPT");
+  }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
