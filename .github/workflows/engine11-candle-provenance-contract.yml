@@ -9,6 +9,7 @@ on:
       - 'services/core/logic/engine11/rawCandles/**'
       - 'services/core/tests/engine11SourceReceiptV3.test.js'
       - 'services/core/tests/engine11ReceiptRouteSafety.test.js'
+      - 'services/core/tests/engine11SourceConsumptionTiming.test.js'
       - 'services/core/routes/futuresOhlc.js'
       - 'services/core/tests/engine11CandleProvenanceContractV1.test.js'
       - 'services/core/tests/engine11IndependentOriginalBytePreflight.test.js'
@@ -25,7 +26,7 @@ jobs:
         with:
           node-version: '22'
       - name: Verify pure fail-closed Engine11 provenance (synthetic fixtures ONLY)
-        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js services/core/tests/engine11SourceReceiptV3.test.js services/core/tests/engine11ReceiptRouteSafety.test.js
+        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js services/core/tests/engine11SourceReceiptV3.test.js services/core/tests/engine11ReceiptRouteSafety.test.js services/core/tests/engine11SourceConsumptionTiming.test.js
       - name: Validate route syntax without provider connection
         run: node --check services/core/routes/futuresOhlc.js
       - name: Verify no real recorder side effects in changed validator
