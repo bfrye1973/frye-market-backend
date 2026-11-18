@@ -1,0 +1,41 @@
+name: Engine11 approved one-shot ES source trial (no raw artifact)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/scripts/engine11OneShotMassiveEsSourceTrial.mjs'
+      - '.github/workflows/engine11-approved-one-shot-source-trial.yml'
+permissions:
+  contents: read
+jobs:
+  bounded-source-check:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Single approved provider sample (4 bounded requests; raw responses TEMP ONLY)
+        env:
+          MASSIVE_API_KEY: ${{ secrets.MASSIVE_API_KEY }}
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLYGON_API: ${{ secrets.POLYGON_API }}
+          POLY_API_KEY: ${{ secrets.POLY_API_KEY }}
+          ENGINE11_TRIAL_OUTPUT: /tmp/engine11-one-shot-es-20261118
+        run: node services/core/scripts/engine11OneShotMassiveEsSourceTrial.mjs
+      - name: Preserve only request clock, counts, physical contract and SHA metadata
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine11-one-shot-source-trial-metadata-only
+          path: /tmp/engine11-one-shot-es-20261118/manifest.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Securely remove raw provider bodies from ephemeral runner
+        if: always()
+        run: |
+          rm -rf /tmp/engine11-one-shot-es-20261118
+          echo "ENGINE11_TRIAL_NO_RAW_BYTES_RETAINED"
