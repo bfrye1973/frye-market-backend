@@ -102,6 +102,7 @@ test("whole-zone midpoint is not used after a wide lower site selection",()=>{
   normalizedZoneInput:zi(whole),evaluationTimeMs:now});
  assert.equal(edge.controlGeometrySource,"LOWER_SITE");
  assert.equal(original.controlGeometrySource,"WHOLE_ZONE");
+ assert.equal(original.validation5m.completed.reaction.reactionState,"IN_ZONE_PRESSURE_UP");
  assert.equal(edge.controlGeometryEligible,true);
  assert.equal(edge.control.reactionState!==original.control.reactionState ||
    edge.control.contactState!==original.control.contactState ||
