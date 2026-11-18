@@ -89,6 +89,13 @@ try{
      !["open","high","low","close"].every(k=>Number.isFinite(Number(row?.[k])));
   }))throw Error("ENGINE11_TRIAL_SOURCE_DATA_MALFORMED_"+resolution);
  }
+ // Independent readback: reopen every temporary original provider body.
+ // Keep only digest / clock metadata as a public Actions artifact.
+ for(const r of receipts){
+   const bytes=await fs.readFile(path.join(root,r.name+".raw.json"));
+   if(bytes.length!==r.rawByteSize||sha(bytes)!==r.rawBodySha256)
+     throw Error("ENGINE11_TRIAL_RAW_READBACK_DIGEST_MISMATCH_"+r.name);
+ }
  const manifest={
   schema:"engine11.es.oneShotSourceCaptureTrial.v1",
   capturedAtUtc:iso(Date.now()),physicalContract,rootSymbol:"ES",
@@ -108,7 +115,7 @@ try{
    count:r.resultCount,captureTimestamp:r.bodyReadCompletedAtUtc
   })),
   entitlement:"UNKNOWN",clock:"UNVERIFIED",calibrationAdmissible:false,
-  output:"PRIVATE_SHORT_LIVED_ARTIFACT_ONLY"
+  output:"METADATA_ONLY_PUBLIC_REPO_NO_RAW_ARTIFACT"
  }));
 }catch(e){
  console.error("ENGINE11_ONE_SHOT_CAPTURE_BLOCKED",String(e?.message||e));
