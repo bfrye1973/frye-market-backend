@@ -8967,7 +8967,11 @@ if (isEsIntradayScalp) {
     engine3V6AuthorizationReadiness.status==="AUTHORITATIVE_TIMESTAMP_VALID"
       ? engine3V6AuthorizationReadiness.authoritativeTimestampMs : null;
   const activationArgsV6 = {
-    priorActivation: priorV6?.phase2ActivationRun ?? null,
+    // Do not carry a prior ENGINE26_AUTHORIZED run through source-health loss.
+    // Observed activation remains the only fallback in shadow.
+    priorActivation:authoritativeV6Activation===null &&
+      priorV6?.phase2ActivationRun?.source==="ENGINE26_AUTHORIZED"
+        ?null:priorV6?.phase2ActivationRun??null,
     candidateId: candidateIdV6,
     zoneId: zoneIdV6,
     eligible: zoneInputV6?.eligible === true,
