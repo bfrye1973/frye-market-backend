@@ -1,5 +1,5 @@
-// Phase3 preparation only: validate future Engine26-owned authorization metadata.
-// No synthetic history, no rescoring, no change to the shadow's current fallback.
+// Phase3 preparation only: validate Engine26-owned authorization metadata.
+// No synthetic history, no rescoring, no trade authority.
 const milliseconds=x=>typeof x==="number"&&Number.isFinite(x)?x:
  typeof x==="string"&&Number.isFinite(Date.parse(x))?Date.parse(x):null;
 const validId=x=>typeof x==="string"&&x.trim().length>0;
@@ -27,19 +27,51 @@ export function inspectEngine26AuthorizationContract({
    priorActivation?.candidateId===candidateId&&priorActivation?.zoneId===zoneId;
  const continuityChanged=prior&&priorActivation?.source==="ENGINE26_AUTHORIZED"&&
    published!==null&&published!==priorActivation.startedAtMs;
- const valid=active&&published!==null&&at!==null&&!after&&!conflict&&!continuityChanged;
+
+ // Engine3 may only call the Engine26 timestamp authoritative when Engine26
+ // explicitly proves that its source state is ready, storage is healthy, and
+ // the current continuity record was durably persisted/read back.
+ const sourceReady=
+   handoff?.engine3AuthorizationSourceReady===true;
+ const storageHealthy=
+   handoff?.engine3AuthorizationStorageHealthy===true;
+ const persisted=
+   handoff?.engine3AuthorizationPersisted===true;
+ const sourceHealthValid=
+   sourceReady&&storageHealthy&&persisted;
+
+ const sourceAsOf=milliseconds(
+   handoff?.engine3AuthorizationSourceAsOf??
+   candidate?.engine3AuthorizationSourceAsOf??
+   null
+ );
+ const sourceAsOfFuture=
+   sourceAsOf!==null&&at!==null&&sourceAsOf>at;
+
+ const valid=active&&published!==null&&at!==null&&!after&&!conflict&&
+   !continuityChanged&&sourceHealthValid&&!sourceAsOfFuture;
  return {
-  schema:"engine3.v6.engine26AuthorizationReadiness.v1",mode:"SHADOW_DIAGNOSTIC_ONLY",
+  schema:"engine3.v6.engine26AuthorizationReadiness.v2",mode:"SHADOW_DIAGNOSTIC_ONLY",
   candidateId,zoneId,evaluationTimeMs:at,
   status:valid?"AUTHORITATIVE_TIMESTAMP_VALID":
    !active?"AUTHORIZATION_NOT_ELIGIBLE":
    raw==null?"FIELD_NOT_YET_PUBLISHED":
+   !sourceReady?"ENGINE26_SOURCE_NOT_READY":
+   !storageHealthy?"ENGINE26_STORAGE_UNHEALTHY":
+   !persisted?"ENGINE26_AUTHORIZATION_NOT_PERSISTED":
+   sourceAsOfFuture?"ENGINE26_SOURCE_ASOF_IN_FUTURE":
    conflict?"ENGINE26_SOURCE_TIMESTAMP_CONFLICT":
    after?"AUTHORIZATION_TIMESTAMP_IN_FUTURE":
    continuityChanged?"ENGINE26_CONTINUITY_CHANGED_WITHOUT_RUN_RESET":
    "ENGINE26_SOURCE_TIME_UNVERIFIED",
   authoritativeTimestampMs:valid?published:null,
   observedFallbackAllowed:active&&!valid,
+  sourceHealth:{
+   sourceReady,storageHealthy,persisted,
+   storageStatus:handoff?.engine3AuthorizationStorageStatus??null,
+   persistenceMode:handoff?.engine3AuthorizationPersistenceMode??null,
+   sourceAsOfTimeMs:sourceAsOf,
+  },
   externalOwner:"ENGINE26",
   candidateLifecycleStartTimeAccepted:false,
   noDirectionAuthority:true,noPermissionCreated:true,
