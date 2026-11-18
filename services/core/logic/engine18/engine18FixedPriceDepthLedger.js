@@ -79,16 +79,17 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
  }
  function snapshot({nowMs,topN=12}={}){
   if(!Number.isFinite(nowMs)||nowMs<=0)throw Error('ENGINE18_BAD_LEDGER_CLOCK');
-  const candidates=fresh().filter(e=>e.qualifyingImages>=minImages&&
+  const eligible=fresh().filter(e=>e.qualifyingImages>=minImages&&
     e.observedImages>=minImages&&e.coveredElapsedMs>=minDurationMs&&
-    nowMs>=e.lastSeenMs&&nowMs-e.lastSeenMs<=maxElapsedMs)
-   .sort((a,b)=>b.coveredElapsedMs-a.coveredElapsedMs||
+    nowMs>=e.lastSeenMs&&nowMs-e.lastSeenMs<=maxElapsedMs);
+  const candidates=eligible.filter(e=>e.coverageState===STATES.COVERED &&
+    nowMs-e.lastSeenMs<=maxFrameGapMs).sort((a,b)=>b.coveredElapsedMs-a.coveredElapsedMs||
       b.maxObservedSize-a.maxObservedSize||b.qualifyingImages-a.qualifyingImages)
    .slice(0,topN).map(e=>({
     side:e.side,price:e.price,priceTicks:e.priceTicks,
-    visibleContracts:e.coverageState===STATES.COVERED?e.lastObservedSize:null,
+    visibleContracts:e.lastObservedSize,
     lastObservedSize:e.lastObservedSize,
-    visibleOrderCount:e.coverageState===STATES.COVERED?e.lastObservedOrderCount:null,
+    visibleOrderCount:e.lastObservedOrderCount,
     observedInImages:e.observedImages,
     observedPersistenceMs:e.coveredElapsedMs,
     firstObservedAtMs:e.firstSeenMs,lastObservedAtMs:e.lastSeenMs,
@@ -110,13 +111,16 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    activeObservedPrices:active,outOfCoveragePrices:fresh().filter(e=>e.coverageState===STATES.OUT).length,
    unknownPrices:fresh().filter(e=>e.coverageState===STATES.UNKNOWN).length,
    durationQualified,imagesQualified,strengthQualified,
-   candidateCount:candidates.length,minDurationMs,minImages,maxFrameGapMs,
+   candidateCount:candidates.length,historicalQualifiedPrices:eligible.length,
+   lastSeenButOutOfCoverage:eligible.filter(e=>e.coverageState!==STATES.COVERED).length,
+   minDurationMs,minImages,maxFrameGapMs,
    lastValidDepthAgeMs:age,elapsedBasis:'HOST_RECEIVED_MONOTONICITY_UNVERIFIED',
    denominator:'VALID_DISTINCT_DEPTH_IMAGES',
    noCandidateReason:candidates.length?null:!frames?'NO_VALID_DEPTH':
     !imagesQualified?'INSUFFICIENT_PRICE_OBSERVATIONS':
     !durationQualified?'INSUFFICIENT_COVERED_ELAPSED_TIME':
-    !strengthQualified?'NO_REPEATED_DISPLAYED_CONCENTRATION':'CANDIDATES_EXPIRED_OR_OUTSIDE_WINDOW'}};
+    !strengthQualified?'NO_REPEATED_DISPLAYED_CONCENTRATION':
+    eligible.length?'QUALIFIED_LEVELS_NOT_IN_CURRENT_BOOK':'CANDIDATES_EXPIRED_OR_OUTSIDE_WINDOW'}};
  }
  return Object.freeze({observe,invalidate,snapshot});
 }
