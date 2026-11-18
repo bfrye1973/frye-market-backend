@@ -60,7 +60,7 @@ export function captureReceiptV3({
   const normalizedRow = r => {
     const p=r.payload;
     const ns=String(p?.window_start??'');
-    requireTruth(/^\\d{16,20}$/.test(ns),'V3_INVALID_WINDOW_START');
+    requireTruth(/^\d{16,20}$/.test(ns),'V3_INVALID_WINDOW_START');
     const nanos=BigInt(ns);
     requireTruth(nanos>0n && nanos%1000000000n===0n,'V3_INVALID_WINDOW_ALIGNMENT');
     const time=Number(nanos/1000000000n);
