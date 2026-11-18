@@ -642,3 +642,183 @@ test(
     );
   }
 );
+
+
+test(
+  "Engine26 blocked writer never removes a real lock owned by another process",
+  () => {
+    const { dir, filePath } = makeClockPath();
+    const lockPath = `${filePath}.lock`;
+    try {
+      fs.writeFileSync(
+        lockPath,
+        JSON.stringify({
+          pid: 999999,
+          owner: "OTHER_PROCESS",
+        }),
+        "utf8"
+      );
+      const originalLock =
+        fs.readFileSync(lockPath, "utf8");
+
+      const result = resolveEngine3AuthorizationClock({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: "C1",
+        zoneId: "Z1",
+        authorized: true,
+        sourceAsOf:
+          "2026-11-18T13:00:00.000Z",
+        filePath,
+        persist: true,
+      });
+
+      assert.equal(
+        result.engine3AuthorizationSourceReady,
+        false
+      );
+      assert.equal(
+        result.engine3AuthorizationStorageStatus,
+        "CONCURRENT_WRITER_BLOCKED"
+      );
+      assert.equal(
+        fs.existsSync(lockPath),
+        true
+      );
+      assert.equal(
+        fs.readFileSync(lockPath, "utf8"),
+        originalLock
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+test(
+  "Engine26 rechecks durable head under its lock and blocks a stale writer race",
+  () => {
+    const { dir, filePath } = makeClockPath();
+    try {
+      resolveEngine3AuthorizationClock({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: "C1",
+        zoneId: "Z1",
+        authorized: true,
+        sourceAsOf:
+          "2026-11-18T13:00:00.000Z",
+        filePath,
+        persist: true,
+      });
+
+      let injected = false;
+      const fsOps = {
+        existsSync: (...args) =>
+          fs.existsSync(...args),
+        readFileSync: (...args) =>
+          fs.readFileSync(...args),
+        mkdirSync: (...args) =>
+          fs.mkdirSync(...args),
+        writeFileSync: (...args) =>
+          fs.writeFileSync(...args),
+        fsyncSync: (...args) =>
+          fs.fsyncSync(...args),
+        closeSync: (...args) =>
+          fs.closeSync(...args),
+        renameSync: (...args) =>
+          fs.renameSync(...args),
+        unlinkSync: (...args) =>
+          fs.unlinkSync(...args),
+        statSync: (...args) =>
+          fs.statSync(...args),
+        fstatSync: (...args) =>
+          fs.fstatSync(...args),
+        openSync: (target, flags, ...rest) => {
+          if (
+            !injected &&
+            target === `${filePath}.lock` &&
+            flags === "wx"
+          ) {
+            injected = true;
+            const durable = JSON.parse(
+              fs.readFileSync(filePath, "utf8")
+            );
+            const key =
+              "ES::intraday_scalp@10m";
+            durable.records[key] = {
+              ...durable.records[key],
+              engine3AuthorizationStartedAt:
+                "2026-11-18T14:00:00.000Z",
+              sourceAsOf:
+                "2026-11-18T14:00:00.000Z",
+              lastAuthorizedAsOf:
+                "2026-11-18T14:00:00.000Z",
+            };
+            fs.writeFileSync(
+              filePath,
+              `${JSON.stringify(
+                durable,
+                null,
+                2
+              )}\n`,
+              "utf8"
+            );
+          }
+          return fs.openSync(
+            target,
+            flags,
+            ...rest
+          );
+        },
+      };
+
+      const stale = resolveEngine3AuthorizationClock({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: "C1",
+        zoneId: "Z1",
+        authorized: true,
+        sourceAsOf:
+          "2026-11-18T13:30:00.000Z",
+        filePath,
+        persist: true,
+        fsOps,
+      });
+
+      assert.equal(
+        stale.engine3AuthorizationSourceReady,
+        false
+      );
+      assert.equal(
+        stale.engine3AuthorizationStorageStatus,
+        "STALE_WRITE_BLOCKED"
+      );
+      assert.equal(
+        stale.engine3AuthorizationPersistenceMode,
+        "READ_ONLY_STALE_WRITER"
+      );
+
+      const durable = JSON.parse(
+        fs.readFileSync(filePath, "utf8")
+      );
+      const record =
+        durable.records["ES::intraday_scalp@10m"];
+
+      assert.equal(
+        record.sourceAsOf,
+        "2026-11-18T14:00:00.000Z"
+      );
+      assert.equal(
+        record.engine3AuthorizationStartedAt,
+        "2026-11-18T14:00:00.000Z"
+      );
+      assert.equal(
+        fs.existsSync(`${filePath}.lock`),
+        false
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
