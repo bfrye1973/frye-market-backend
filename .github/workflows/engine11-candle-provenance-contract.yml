@@ -5,6 +5,7 @@ on:
       - 'docs/engine11/ENGINE11_ES_COMPLETED_CANDLE_PROVENANCE_CONTRACT_V1_2026-11-18.md'
       - 'services/core/logic/engine11/candleProvenanceV1/**'
       - 'services/core/tests/engine11CandleProvenanceContractV1.test.js'
+      - 'services/core/tests/engine11IndependentOriginalBytePreflight.test.js'
       - '.github/workflows/engine11-candle-provenance-contract.yml'
 jobs:
   preflight-synthetic:
@@ -18,15 +19,18 @@ jobs:
         with:
           node-version: '22'
       - name: Verify pure fail-closed Engine11 provenance (synthetic fixtures ONLY)
-        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js
+        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js
       - name: Verify no real recorder side effects in changed validator
         run: |
           node --input-type=module - <<'NODE'
           import fs from 'node:fs';
-          const path='services/core/logic/engine11/candleProvenanceV1/inspectProvenance.js';
-          const code=fs.readFileSync(path,'utf8');
-          for(const word of ['writeFile(', 'createWriteStream(', 'mkdir(', 'fetch(', 'spawn(']){
-            if(code.includes(word))throw Error('ENGINE11_PROVENANCE_PREFLIGHT_SIDE_EFFECT_'+word);
+          const files=['services/core/logic/engine11/candleProvenanceV1/inspectProvenance.js',
+                       'services/core/logic/engine11/candleProvenanceV1/inspectOriginalSourceReceipt.js'];
+          for(const path of files){
+            const code=fs.readFileSync(path,'utf8');
+            for(const word of ['writeFile(', 'createWriteStream(', 'mkdir(', 'fetch(', 'spawn(']){
+              if(code.includes(word))throw Error('ENGINE11_PROVENANCE_PREFLIGHT_SIDE_EFFECT_'+word);
+            }
           }
           console.log('ENGINE11_CANDLE_PROVENANCE_DESIGN_ONLY_NO_WRITER');
           NODE
