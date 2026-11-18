@@ -122,7 +122,9 @@ export function createEngine12CandleArchiveWriter({
   fsOps=fs,
   maxRecordBytes=1024*1024,
   maxArchiveBytes=10*1024*1024*1024,
+  faultInjector=()=>{},
 }={}){
+  const fault=stage=>faultInjector(stage);
   function treeBytes(dir){
     if(!fsOps.existsSync(dir))return 0;
     let total=0,stack=[dir];
@@ -163,6 +165,7 @@ export function createEngine12CandleArchiveWriter({
     const receiptFile=path.join(root,"receipts",stamp.date,identity+".json");
 
     try{
+      fault("BEFORE_RECEIPT_LOOKUP");
       if(fsOps.existsSync(receiptFile)){
         const receipt=JSON.parse(fsOps.readFileSync(receiptFile,"utf8"));
         if(receipt.packetSha256===digest&&receipt.dataFile===dataFile)
@@ -173,12 +176,15 @@ export function createEngine12CandleArchiveWriter({
         const current=fsOps.readFileSync(dataFile);
         if(sha256(current)!==digest)return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_IMMUTABILITY_CONFLICT"};
       }else{
+        fault("BEFORE_DATA_WRITE");
         const wr=writeExclusiveFile(dataFile,bytes,fsOps);
+        fault("AFTER_DATA_FINAL_CLAIM");
         if(!wr.ok){
           const current=fsOps.readFileSync(dataFile);
           if(sha256(current)!==digest)return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_IMMUTABILITY_CONFLICT"};
         }
       }
+      fault("BEFORE_DATA_READBACK");
       const readback=fsOps.readFileSync(dataFile);
       if(sha256(readback)!==digest)
         return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_READBACK_HASH_MISMATCH"};
@@ -194,7 +200,9 @@ export function createEngine12CandleArchiveWriter({
           modelFingerprint:packet?.engine22?.modelFingerprint??null},
         readbackSha256:digest,verifiedAtUtc:new Date().toISOString()};
       const receiptBytes=Buffer.from(canonicalJson(receipt)+"\n");
+      fault("BEFORE_RECEIPT_WRITE");
       const rw=writeExclusiveFile(receiptFile,receiptBytes,fsOps);
+      fault("AFTER_RECEIPT_FINAL_CLAIM");
       if(!rw.ok){
         const stored=JSON.parse(fsOps.readFileSync(receiptFile,"utf8"));
         if(stored.packetSha256!==digest||stored.dataFile!==dataFile)
