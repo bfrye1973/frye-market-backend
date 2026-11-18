@@ -12,13 +12,24 @@ const evalMs=Date.parse("2026-11-18T15:00:00Z");
 
 function packet(){
   const durations={"1m":60000,"5m":300000,"10m":600000};
-  const completedBars={},sourceCountsBeforeFiltering={},sourceCountsAfterFiltering={},timeframeSourceMap={};
+  const completedBars={},sourceCountsBeforeFiltering={},sourceCountsAfterFiltering={},
+    sourceFiltering={},sourceTimeframeMap={},gapState={},sourceBarReferences={};
   for(const [tf,dur] of Object.entries(durations)){
     const start=evalMs-dur-5000;
     completedBars[tf]=[{startMs:start,endMs:start+dur,open:7000,high:7001,low:6999,close:7000.25}];
     sourceCountsBeforeFiltering[tf]=1;
     sourceCountsAfterFiltering[tf]=1;
-    timeframeSourceMap[tf]="MASSIVE_"+tf;
+    sourceFiltering[tf]={observedCount:1,completedCount:1,acceptedCount:1,rejectedCount:0,
+      formingCount:0,truncatedCount:0};
+    sourceTimeframeMap[tf]="MASSIVE_"+tf;
+    gapState[tf]="COMPLETE";
+    sourceBarReferences[tf]=[{
+      sourceBarId:"bar-"+tf,sourceRevisionId:"r1",
+      sourcePayloadDigest:"a".repeat(64),sourceContract:"ESZ6",
+      providerEventId:"event-"+tf,firstReceivedAtMs:start+dur+100,
+      availableAtMs:start+dur+200,completionObservedAtMs:start+dur+150,
+      finality:"CONFIRMED"
+    }];
   }
   return {
     schema:"engine3.v6.rawBarPacket.preparation.v2",
@@ -36,9 +47,15 @@ function packet(){
       publicationRevision:3,
       modelFingerprint:"m".repeat(64)
     },
+    engine11ProvenanceSchema:"engine11.es.completedCandleProvenance.v1",
+    engine11ProvenanceReceiptId:"receipt-real-fixture",
+    engine11ProvenanceDigest:"b".repeat(64),
     sourceCountsBeforeFiltering,
     sourceCountsAfterFiltering,
-    timeframeSourceMap,
+    sourceFiltering,
+    sourceTimeframeMap,
+    gapState,
+    sourceBarReferences,
     completedBars
   };
 }
@@ -104,7 +121,12 @@ function provenance(){
   };
 }
 
-const trust=({provenance:p})=>({verified:true,receiptId:p.receiptId});
+const trust=({provenance:p})=>({
+  verified:true,
+  receiptId:p.receiptId,
+  digest:p.signatureOrDigest.value,
+  verificationMode:"SYNTHETIC_SANDBOX"
+});
 
 function temp(){
   const base=fs.mkdtempSync(path.join(os.tmpdir(),"e12-candle-"));
@@ -131,6 +153,7 @@ test("trusted packet writes immutable data and receipt",()=>{
     assert.equal(fs.existsSync(r.dataFile),true);
     const receipt=JSON.parse(fs.readFileSync(r.receiptFile,"utf8"));
     assert.equal(receipt.status,"RECORDED_VERIFIED");
+    assert.equal(receipt.sourceAttestationStatus,"SYNTHETIC_SANDBOX_ONLY");
     assert.equal(receipt.packetSha256,r.sha256);
   }finally{fs.rmSync(t.base,{recursive:true,force:true})}
 });
@@ -244,6 +267,74 @@ test("permission and ENOSPC faults never produce successful receipt",()=>{
       assert.equal(r.reason,reason);
       assert.equal(r.recorded,false);
     }
+  }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+
+test("nonempty provenance with empty packet bars hard rejects",()=>{
+  const p=packet(),prov=provenance();
+  p.completedBars["1m"]=[];
+  const r=validateCandleArchiveInput({packet:p,provenance:prov,trustResult:trust({provenance:prov})});
+  assert.ok(r.reasons.includes("CANDLE_PACKET_BAR_COUNT_MISMATCH_1m"));
+});
+
+test("packet OHLC mismatch against Engine11 source hard rejects",()=>{
+  const p=packet(),prov=provenance();
+  p.completedBars["5m"][0].high=7002;
+  const r=validateCandleArchiveInput({packet:p,provenance:prov,trustResult:trust({provenance:prov})});
+  assert.ok(r.reasons.includes("CANDLE_PACKET_BAR_MISMATCH_5m"));
+});
+
+test("source bar identity revision and digest mismatch reject",()=>{
+  const p=packet(),prov=provenance();
+  p.sourceBarReferences["10m"][0].sourceRevisionId="wrong";
+  p.sourceBarReferences["10m"][0].sourcePayloadDigest="c".repeat(64);
+  const r=validateCandleArchiveInput({packet:p,provenance:prov,trustResult:trust({provenance:prov})});
+  assert.ok(r.reasons.includes("CANDLE_PACKET_SOURCE_REFERENCE_MISMATCH_10m"));
+});
+
+test("receipt and digest crosslink mismatch reject",()=>{
+  const p=packet(),prov=provenance();
+  p.engine11ProvenanceReceiptId="wrong-receipt";
+  p.engine11ProvenanceDigest="d".repeat(64);
+  const r=validateCandleArchiveInput({packet:p,provenance:prov,trustResult:trust({provenance:prov})});
+  assert.ok(r.reasons.includes("CANDLE_PACKET_PROVENANCE_CROSSLINK_MISMATCH"));
+});
+
+test("source counts gaps and truncation mismatch reject",()=>{
+  const p=packet(),prov=provenance();
+  p.sourceCountsBeforeFiltering["1m"]=2;
+  p.gapState["5m"]="PARTIAL";
+  p.sourceFiltering["10m"].truncatedCount=1;
+  const r=validateCandleArchiveInput({packet:p,provenance:prov,trustResult:trust({provenance:prov})});
+  assert.ok(r.reasons.includes("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_1m"));
+  assert.ok(r.reasons.includes("CANDLE_PACKET_GAP_STATE_MISMATCH_5m"));
+  assert.ok(r.reasons.includes("CANDLE_PACKET_TRUNCATED_SOURCE_10m"));
+});
+
+test("valid agreed packet is accepted only with explicit sandbox trust mode",()=>{
+  const p=packet(),prov=provenance();
+  const synthetic=validateCandleArchiveInput({
+    packet:p,provenance:prov,trustResult:trust({provenance:prov})
+  });
+  assert.equal(synthetic.ok,true);
+  const unlabelled=validateCandleArchiveInput({
+    packet:p,provenance:prov,trustResult:{
+      verified:true,receiptId:prov.receiptId,digest:prov.signatureOrDigest.value
+    }
+  });
+  assert.equal(unlabelled.ok,false);
+  assert.ok(unlabelled.reasons.includes("CANDLE_SOURCE_PROVENANCE_UNVERIFIED"));
+});
+
+test("real source remains not attested unless trust verifier says REAL_SOURCE_ATTESTED",()=>{
+  const p=packet(),prov=provenance();
+  const t=temp();
+  try{
+    const w=createEngine12CandleArchiveWriter({root:t.root,enabled:true,trustVerifier:trust});
+    const r=w.record({packet:p,provenance:prov});
+    const receipt=JSON.parse(fs.readFileSync(r.receiptFile,"utf8"));
+    assert.equal(receipt.sourceAttestationStatus,"SYNTHETIC_SANDBOX_ONLY");
+    assert.notEqual(receipt.sourceAttestationStatus,"ATTESTED_REAL_SOURCE");
   }finally{fs.rmSync(t.base,{recursive:true,force:true})}
 });
 
