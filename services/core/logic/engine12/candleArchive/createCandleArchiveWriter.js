@@ -75,10 +75,19 @@ export function validateCandleArchiveInput({packet,provenance,trustResult}={}){
       const filtering=packet?.sourceFiltering?.[tf];
       const map=packet?.sourceTimeframeMap?.[tf];
       const refs=packet?.sourceBarReferences?.[tf];
-      if(before!==coverage.observedCount||after!==coverage.acceptedCount||
-         filtering?.observedCount!==coverage.observedCount||
+      // Forming observations are not rejected completed candles. They are
+      // excluded from the completed-only source/coverage comparison.
+      if(before!==filtering?.observedCount||
+         after!==coverage.acceptedCount||
          filtering?.acceptedCount!==coverage.acceptedCount||
-         filtering?.rejectedCount!==coverage.rejectedCount)
+         filtering?.completedCount!==coverage.observedCount||
+         filtering?.rejectedCount!==coverage.rejectedCount||
+         filtering?.rejectedCount!==0||
+         filtering?.invalidCount!==0||
+         filtering?.completionUnknownCount!==0||
+         !Number.isSafeInteger(filtering?.formingCount)||
+         filtering.formingCount<0||filtering.formingCount>1||
+         filtering.observedCount!==filtering.completedCount+filtering.formingCount)
         reasons.push("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_"+tf);
       if(filtering?.truncatedCount!==0)
         reasons.push("CANDLE_PACKET_TRUNCATED_SOURCE_"+tf);
@@ -141,7 +150,17 @@ function fsyncDir(dir,ops){
   try{ops.fsyncSync(fd)}finally{ops.closeSync(fd)}
 }
 function writeExclusiveFile(file,bytes,ops){
-  ops.mkdirSync(path.dirname(file),{recursive:true});
+  // The archive namespace must never become readable by other users.
+  const directory=path.dirname(file);
+  ops.mkdirSync(directory,{recursive:true,mode:0o700});
+  const archiveRoot=path.dirname(path.dirname(directory));
+  for(const dir of [archiveRoot,path.dirname(directory),directory]){
+    const mode=ops.statSync(dir).mode & 0o777;
+    if((mode & 0o077)!==0){
+      const error=new Error("CANDLE_ARCHIVE_DIRECTORY_PERMISSIONS");
+      error.code="EACCES";throw error;
+    }
+  }
   const tmp=file+"."+process.pid+"."+Date.now()+".pending";
   let fd;
   try{
@@ -167,7 +186,7 @@ export function createEngine12CandleArchiveWriter({
   trustVerifier=()=>({verified:false,receiptId:null}),
   fsOps=fs,
   maxRecordBytes=1024*1024,
-  maxArchiveBytes=10*1024*1024*1024,
+  maxArchiveBytes=1024*1024*1024,
   faultInjector=()=>{},
 }={}){
   const fault=stage=>faultInjector(stage);
@@ -184,10 +203,27 @@ export function createEngine12CandleArchiveWriter({
     }
     return total;
   }
+  function checkDiskHeadroom(){
+    // The whole mount, not merely this archive folder, determines safe headroom.
+    // Conservative unavailable/invalid measurements must never permit writes.
+    if(typeof fsOps.statfsSync!=="function")return "CANDLE_ARCHIVE_DISK_HEALTH_UNVERIFIED";
+    try{
+      const s=fsOps.statfsSync(path.dirname(root));
+      const blocks=Number(s.blocks),available=Number(s.bavail);
+      if(!Number.isFinite(blocks)||blocks<=0||
+         !Number.isFinite(available)||available<0||available>blocks)
+         return "CANDLE_ARCHIVE_DISK_HEALTH_UNVERIFIED";
+      if((blocks-available)/blocks>=0.70)
+         return "CANDLE_ARCHIVE_WHOLE_DISK_STOP_THRESHOLD";
+      return null;
+    }catch{return "CANDLE_ARCHIVE_DISK_HEALTH_UNVERIFIED";}
+  }
   function record({packet,provenance}={}){
     if(!enabled)return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_DISABLED"};
     if(!fsOps.existsSync(path.dirname(root)))
       return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_MOUNT_MISSING"};
+    const diskStop=checkDiskHeadroom();
+    if(diskStop)return {ok:false,recorded:false,reason:diskStop};
     const trustResult=trustVerifier({provenance,packet});
     const valid=validateCandleArchiveInput({packet,provenance,trustResult});
     if(!valid.ok)return {ok:false,recorded:false,reason:valid.reasons[0],reasons:valid.reasons};
