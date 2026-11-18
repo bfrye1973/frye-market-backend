@@ -75,10 +75,19 @@ export function validateCandleArchiveInput({packet,provenance,trustResult}={}){
       const filtering=packet?.sourceFiltering?.[tf];
       const map=packet?.sourceTimeframeMap?.[tf];
       const refs=packet?.sourceBarReferences?.[tf];
-      if(before!==coverage.observedCount||after!==coverage.acceptedCount||
-         filtering?.observedCount!==coverage.observedCount||
+      // Forming observations are not rejected completed candles. They are
+      // excluded from the completed-only source/coverage comparison.
+      if(before!==filtering?.observedCount||
+         after!==coverage.acceptedCount||
          filtering?.acceptedCount!==coverage.acceptedCount||
-         filtering?.rejectedCount!==coverage.rejectedCount)
+         filtering?.completedCount!==coverage.observedCount||
+         filtering?.rejectedCount!==coverage.rejectedCount||
+         filtering?.rejectedCount!==0||
+         filtering?.invalidCount!==0||
+         filtering?.completionUnknownCount!==0||
+         !Number.isSafeInteger(filtering?.formingCount)||
+         filtering.formingCount<0||filtering.formingCount>1||
+         filtering.observedCount!==filtering.completedCount+filtering.formingCount)
         reasons.push("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_"+tf);
       if(filtering?.truncatedCount!==0)
         reasons.push("CANDLE_PACKET_TRUNCATED_SOURCE_"+tf);
