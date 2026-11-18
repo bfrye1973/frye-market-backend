@@ -4,6 +4,8 @@
 // Only complete bid+ask book images are ranked. Unknown update format fails closed.
 // Research only: no execution, no inferred hidden stops or calibrated probabilities.
 
+import {createEngine18FixedPriceLedger} from './engine18FixedPriceDepthLedger.js';
+
 const ROOT=/^XCME:ES\.[HMUZ]\d{2}$/;
 const TICK=0.25;
 const MAX_LEVELS=100;
@@ -59,7 +61,8 @@ export function parseIronbeamV2DepthFrame(frame,{symbol="XCME:ES.Z26"}={}){
 
 export function createEngine18Level2ZoneReader({
  symbol="XCME:ES.Z26",minObservations=3,topN=12,
- maxHistory=180,depthMultiplier=1.5,allowDelayedResearch=true
+ maxHistory=180,depthMultiplier=1.5,allowDelayedResearch=true,
+ minDurationMs=30000,maxFrameGapMs=10000
 }={}){
  if(!validSymbol(symbol))throw Error("ENGINE18_ES_CONTRACT_REQUIRED");
  if(!Number.isInteger(minObservations)||minObservations<1||minObservations>1000||
@@ -68,21 +71,27 @@ export function createEngine18Level2ZoneReader({
    !Number.isFinite(depthMultiplier)||depthMultiplier<1)
    throw Error("ENGINE18_BAD_READER_OPTIONS");
  let images=0,received=0,rejected=0,lastBook=null,lastReceivedMs=null;
- const history=[];let lastZones=[];
+ const history=[];
+ const ledger=createEngine18FixedPriceLedger({symbol,minImages:minObservations,
+  depthMultiplier,minDurationMs,maxFrameGapMs});
  function observe(frame,{receivedAtMs=Date.now()}={}){
   if(!Number.isSafeInteger(receivedAtMs)||receivedAtMs<=0)throw Error("ENGINE18_BAD_RECEIVE_CLOCK");
   received++;
   const parsed=parseIronbeamV2DepthFrame(frame,{symbol});
-  if(!parsed.ok){rejected++;return {accepted:false,reason:parsed.reason};}
+  if(!parsed.ok){rejected++;ledger.invalidate();return {accepted:false,reason:parsed.reason};}
   // Exchange timestamps must be monotonic. Never rewind live research.
   if(lastBook&&parsed.eventTimeMs<lastBook.eventTimeMs){
-   rejected++;return {accepted:false,reason:"OUT_OF_ORDER_BOOK"};
+   rejected++;ledger.invalidate();return {accepted:false,reason:"OUT_OF_ORDER_BOOK"};
   }
   // Only one observation per unique book image; don't fake persistence from repeats.
   const signature=JSON.stringify([...parsed.bids,...parsed.asks].map(
     x=>[x.side,x.priceTicks,x.size,x.orderCount]));
-  if(lastBook?.signature===signature) return {accepted:false,reason:"UNCHANGED_DEPTH"};
+  if(lastBook?.signature===signature) {
+   // A repeated identical market frame is not a distinct image; do not fabricate persistence.
+   return {accepted:false,reason:"UNCHANGED_DEPTH"};
+  }
   images++;lastReceivedMs=receivedAtMs;lastBook={...parsed,signature};
+  ledger.observe(parsed,receivedAtMs);
   history.push({eventTimeMs:parsed.eventTimeMs,receivedAtMs,
     levels:[...parsed.bids,...parsed.asks]});
   if(history.length>maxHistory)history.shift();
@@ -103,45 +112,34 @@ export function createEngine18Level2ZoneReader({
    "Level 2 changes cannot identify individual order cancellations",
    "No hidden stops or guaranteed price targets",
    "Requires further feed entitlement and latency verification"]};
-  if(!lastBook){result.reason="NO_VALID_DEPTH_IMAGES";return result;}
-  if(history.length<minObservations){result.reason="INSUFFICIENT_OBSERVATIONS";return result;}
+  if(!lastBook){
+   result.reason="NO_VALID_DEPTH_IMAGES";
+   result.diagnostics=ledger.snapshot({nowMs,topN}).diagnostics;
+   return result;
+  }
+  if(history.length<minObservations){
+   result.reason="INSUFFICIENT_OBSERVATIONS";
+   result.diagnostics=ledger.snapshot({nowMs,topN}).diagnostics;
+   return result;
+  }
   const age=result.ageMs;
   const realtimeEligible=feedTier==="LIVE_VERIFIED"&&age>=0&&age<=maxAgeMs;
   if(!realtimeEligible&&!allowDelayedResearch){
    result.reason="FEED_FRESHNESS_NOT_VERIFIED";return result;
   }
   if(age<0){result.reason="FUTURE_EXCHANGE_TIMESTAMP";return result;}
-  const all=[...lastBook.bids,...lastBook.asks];
-  const sideMedian=side=>{
-   const a=all.filter(x=>x.side===side).map(x=>x.size).sort((a,b)=>a-b);
-   return a.length?(a.length%2?a[(a.length-1)/2]:(a[a.length/2-1]+a[a.length/2])/2):null;
-  };
-  const medians={BID:sideMedian("BID"),ASK:sideMedian("ASK")};
-  const qualifying=all.filter(l=>l.size>=Math.max(1,medians[l.side]*depthMultiplier));
-  const zones=qualifying.map(level=>{
-   let seen=0,first=null,last=null,maxSize=0;
-   // Observation frequency, not elapsed time or order-ID persistence.
-   for(const item of history){
-    const match=item.levels.find(x=>x.side===level.side&&x.priceTicks===level.priceTicks&&x.size>0);
-    if(match){seen++;first??=item.eventTimeMs;last=item.eventTimeMs;maxSize=Math.max(maxSize,match.size);}
-   }
-   return {side:level.side,price:level.price,priceTicks:level.priceTicks,
-     visibleContracts:level.size,visibleOrderCount:level.orderCount,
-     impliedSize:level.impliedSize,relativeToSideMedian:medians[level.side]>0
-       ?Number((level.size/medians[level.side]).toFixed(2)):null,
-     observedInImages:seen,observationShare:Number((seen/history.length).toFixed(3)),
-     firstObservedExchangeMs:first,lastObservedExchangeMs:last,maxObservedSize:maxSize,
-     distanceFromTouchTicks:level.side==="BID"
-       ?lastBook.bids[0].priceTicks-level.priceTicks
-       :level.priceTicks-lastBook.asks[0].priceTicks,
-     isHiddenStop:false,individualOrdersIdentified:false};
-  }).filter(z=>z.observedInImages>=minObservations)
-   .sort((a,b)=>b.visibleContracts-a.visibleContracts||
-      b.observationShare-a.observationShare||
-      a.distanceFromTouchTicks-b.distanceFromTouchTicks).slice(0,topN);
-  result.usable=true;result.displayOnly=!realtimeEligible;result.reason=realtimeEligible?null:"RESEARCH_ONLY_FRESHNESS_NOT_VERIFIED";
-  result.zones=zones;lastZones=zones;
+  const observed=ledger.snapshot({nowMs,topN});
+  const qualified=observed.zones;
+  // Anchored prior evidence may remain after price exits top-ten.
+  // A LAST_SEEN zone MUST NOT be interpreted as still resting at that price.
+  result.zones=qualified;
+  result.diagnostics=observed.diagnostics;
+  result.usable=true;
+  result.displayOnly=!realtimeEligible;
+  result.reason=qualified.length===0?
+   observed.diagnostics.noCandidateReason:
+   realtimeEligible?null:'RESEARCH_ONLY_FRESHNESS_NOT_VERIFIED';
   return result;
  }
- return Object.freeze({observe,snapshot});
+ return Object.freeze({observe,snapshot,invalidate:()=>ledger.invalidate()});
 }
