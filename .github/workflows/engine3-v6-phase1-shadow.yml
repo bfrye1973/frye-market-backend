@@ -61,3 +61,19 @@ jobs:
           if(!Number.isFinite(base.failed)||!Number.isFinite(head.failed))process.exit(1);
           if(head.failed>base.failed)process.exit(1);
           NODE
+
+      - name: Report introduced legacy failures for debugging
+        if: always()
+        shell: bash
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          const names=p=>fs.existsSync(p)?
+            fs.readFileSync(p,'utf8').split(/\\r?\\n/).filter(x=>x.startsWith('not ok '))
+              .map(x=>x.replace(/^not ok \\d+ - /,'')) : [];
+          const old=names('/tmp/engine3-base/services/core/engine3-legacy-result.tap');
+          const now=names('engine3-legacy-result.tap');
+          const older=new Set(old);
+          console.log('NEW_LEGACY_FAILURE_NAMES',JSON.stringify(now.filter(n=>!older.has(n)).slice(0,30)));
+          console.log('BASE_COUNT',old.length,'HEAD_COUNT',now.length);
+          NODE
