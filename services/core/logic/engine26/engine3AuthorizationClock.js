@@ -160,6 +160,8 @@ function makeInjectedError(code, message) {
 function writeStoreAtomic({
   filePath,
   store,
+  streamKeyValue = null,
+  proposedRecord = null,
   fsOps = fs,
   faultInjection = null,
 } = {}) {
@@ -168,6 +170,8 @@ function writeStoreAtomic({
   const temporaryPath =
     `${filePath}.${process.pid}.${Date.now()}.tmp`;
   let lockFd = null;
+  let lockOwned = false;
+  let lockInode = null;
 
   try {
     fsOps.mkdirSync(directory, { recursive: true });
@@ -180,6 +184,74 @@ function writeStoreAtomic({
     }
 
     lockFd = fsOps.openSync(lockPath, "wx");
+    lockOwned = true;
+
+    try {
+      const lockStat = fsOps.fstatSync(lockFd);
+      lockInode = lockStat?.ino ?? null;
+    } catch {}
+
+    fsOps.writeFileSync(
+      lockFd,
+      JSON.stringify({
+        pid: process.pid,
+        acquiredAt: new Date().toISOString(),
+      }),
+      "utf8"
+    );
+
+    /*
+     * Re-read the durable head while holding the lock. The earlier read used
+     * by resolveEngine3AuthorizationClock is only an observation. This locked
+     * read is authoritative for deciding whether the proposed write is stale.
+     */
+    const lockedRead = readStore(filePath, fsOps);
+    if (!lockedRead.ok) {
+      throw makeInjectedError(
+        "EREADBACK",
+        `locked durable-head read failed: ${lockedRead.status}`
+      );
+    }
+
+    if (streamKeyValue && proposedRecord) {
+      const durableRecord =
+        lockedRead.store?.records?.[streamKeyValue] || null;
+      const durableAsOf =
+        normalizeIso(durableRecord?.sourceAsOf);
+      const proposedAsOf =
+        normalizeIso(proposedRecord?.sourceAsOf);
+
+      if (
+        durableAsOf !== null &&
+        proposedAsOf !== null &&
+        durableAsOf > proposedAsOf
+      ) {
+        return {
+          ok: false,
+          status: "STALE_WRITE_BLOCKED",
+          warnings: [
+            diagnostic(
+              "ENGINE26_ENGINE3_AUTH_CLOCK_STALE_WRITE_BLOCKED",
+              {
+                durableSourceAsOf: durableAsOf,
+                proposedSourceAsOf: proposedAsOf,
+              }
+            ),
+          ],
+          durableStore:
+            lockedRead.store,
+        };
+      }
+
+      store = {
+        ...lockedRead.store,
+        version: VERSION,
+        records: {
+          ...(lockedRead.store?.records || {}),
+          [streamKeyValue]: proposedRecord,
+        },
+      };
+    }
 
     if (faultInjection === "EACCES_BEFORE_WRITE") {
       throw makeInjectedError(
@@ -300,8 +372,25 @@ function writeStoreAtomic({
     } catch {}
 
     try {
-      if (fsOps.existsSync(lockPath)) {
-        fsOps.unlinkSync(lockPath);
+      if (
+        lockOwned === true &&
+        fsOps.existsSync(lockPath)
+      ) {
+        let stillOwnsPath = true;
+
+        if (lockInode !== null) {
+          try {
+            stillOwnsPath =
+              fsOps.statSync(lockPath)?.ino ===
+              lockInode;
+          } catch {
+            stillOwnsPath = false;
+          }
+        }
+
+        if (stillOwnsPath) {
+          fsOps.unlinkSync(lockPath);
+        }
       }
     } catch {}
   }
@@ -483,6 +572,8 @@ export function resolveEngine3AuthorizationClock({
   const write = writeStoreAtomic({
     filePath,
     store: nextStore,
+    streamKeyValue: key,
+    proposedRecord: record,
     fsOps,
     faultInjection,
   });
@@ -503,7 +594,9 @@ export function resolveEngine3AuthorizationClock({
       engine3AuthorizationStorageStatus:
         write.status,
       engine3AuthorizationPersistenceMode:
-        "FAIL_CLOSED_WRITE_FAILURE",
+        write.status === "STALE_WRITE_BLOCKED"
+          ? "READ_ONLY_STALE_WRITER"
+          : "FAIL_CLOSED_WRITE_FAILURE",
       engine3AuthorizationPersisted: false,
       engine3AuthorizationWarnings: [
         ...(read.warnings || []),
