@@ -8969,8 +8969,18 @@ if (isEsIntradayScalp) {
   };
   // First pass determines eligible post-activation bars and frozen geometry.
   // Does not grant direction.
+  const priorV6Direction = priorV6?.canonicalDirection ?? "NEUTRAL";
+  const priorDirectional = ["LONG","SHORT"].includes(priorV6Direction) &&
+    priorV6?.convictionState !== "INVALIDATED";
   const phase2Filter = buildEngine3V6Phase2Evidence({
-    ...activationArgsV6,observedDirection:"NEUTRAL",
+    ...activationArgsV6,
+    observedDirection:priorDirectional?priorV6Direction:"NEUTRAL",
+    priorReactionAnchor:priorDirectional
+      ?priorV6?.phase2ReactionAnchor??null:null,
+    priorAnchorDirection:priorDirectional
+      ?priorV6?.phase2AnchorDirection??null:null,
+    priorReactionSite:priorDirectional
+      ?priorV6?.phase2ReactionSite??null:null,
   });
   // Recompute v6 control from strictly eligible bars using the existing
   // v5 evidence algorithms. DO NOT reuse canonical v5 control from old bars.
@@ -8978,7 +8988,6 @@ if (isEsIntradayScalp) {
     phase2Evidence:phase2Filter,normalizedZoneInput:zoneInputV6,
     evaluationTimeMs,
   });
-  const priorV6Direction = priorV6?.canonicalDirection ?? "NEUTRAL";
   const observedV6Direction = priorV6Direction === "LONG" ||
     priorV6Direction === "SHORT" ? priorV6Direction :
     phase2Causal.qualified ? phase2Causal.observedDirection : "NEUTRAL";
