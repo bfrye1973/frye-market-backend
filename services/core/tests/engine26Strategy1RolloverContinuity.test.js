@@ -78,6 +78,8 @@ test(
 
       const initial = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -128,6 +130,8 @@ test(
       // previousLocationCandidate=null intentionally simulates a restart.
       const recovered = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -163,6 +167,8 @@ test(
       // First target-zone entry closes Block 1 only.
       const partial = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -191,6 +197,8 @@ test(
       // Midpoint finishes the trip and resets Engine 26A to NEUTRAL.
       const completed = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -257,6 +265,8 @@ test(
 
       const oldShort = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -276,6 +286,8 @@ test(
 
       const wrongShort = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -341,6 +353,8 @@ test(
 
       const reconciled = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
@@ -393,6 +407,8 @@ test(
 
       const nextSnapshot = buildEngine26A({
         manualZonesFilePath: FROZEN_MANUAL_ZONES_PATH,
+        manualZonesApplyRollover:
+          process.env.ES_MANUAL_ZONE_ROLL_ADJUSTMENT !== "0",
         symbol: "ES",
         strategyId: "intraday_scalp@10m",
         timeframe: "10m",
