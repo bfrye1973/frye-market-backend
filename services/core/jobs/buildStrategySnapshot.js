@@ -58,6 +58,8 @@ import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVeri
 import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
 import { buildEngine3V6Phase2Evidence } from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
 import { buildEngine3V6CausalControl } from "../logic/engine3/v6/buildEngine3V6CausalControl.js";
+import { buildEngine3V6ResearchTrace } from "../logic/engine3/v6/buildEngine3V6ResearchTrace.js";
+import { inspectEngine26AuthorizationContract } from "../logic/engine3/v6/inspectEngine26AuthorizationContract.js";
 import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
@@ -9021,6 +9023,27 @@ if (isEsIntradayScalp) {
     policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
       deteriorationTimeoutMs:12*60000},
   });
+  // Phase3 research diagnostics are isolated output only. They do not feed
+  // the v6 reducer, canonical v5, Engine4 or Engine6.
+  const engine3V6AuthorizationReadiness = inspectEngine26AuthorizationContract({
+    handoff:engine26ReactionHandoff,candidate:engine26LocationCandidate,
+    normalizedZoneInput:zoneInputV6,evaluationTimeMs,
+    priorActivation:priorV6?.phase2ActivationRun??null,
+  });
+  const engine3V6ResearchTrace = buildEngine3V6ResearchTrace({
+    evaluationTimeMs,symbol,strategyId:s.strategyId,
+    priorShadow:priorV6,shadow:engine3V6Shadow,
+    phase2Evidence:engine3V6Phase2Evidence,
+    phase2Causal,engine26:engine26ReactionHandoff,
+    phase1Comparison:{
+      canonicalDirection:priorV6?.canonicalDirection??"NEUTRAL",
+      v5CanonicalDirection:engine3V5?.canonical?.canonical?.direction??"NEUTRAL",
+    },
+  });
+  patchedConfluence.context.reaction.engine3V6AuthorizationReadiness =
+    engine3V6AuthorizationReadiness;
+  patchedConfluence.context.reaction.engine3V6ResearchTrace =
+    engine3V6ResearchTrace;
   patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
   patchedConfluence.context.reaction.engine3V6Phase2Evidence =
     {...engine3V6Phase2Evidence,causalPriceControl:{
