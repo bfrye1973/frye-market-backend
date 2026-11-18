@@ -47,10 +47,16 @@ export function validateCandleArchiveInput({packet,provenance,trustResult}={}){
   if(provenance?.sourceHealth?.state!=="HEALTHY")
     reasons.push("CANDLE_SOURCE_HEALTH_UNVERIFIED");
   if(provenance?.signatureOrDigest?.signatureStatus!=="INDEPENDENTLY_VERIFIED"||
-     trustResult?.verified!==true)
+     trustResult?.verified!==true||
+     !["SYNTHETIC_SANDBOX","REAL_SOURCE_ATTESTED"].includes(trustResult?.verificationMode))
     reasons.push("CANDLE_SOURCE_PROVENANCE_UNVERIFIED");
-  if(trustResult?.receiptId!==provenance?.receiptId)
+  if(trustResult?.receiptId!==provenance?.receiptId||
+     trustResult?.digest!==provenance?.signatureOrDigest?.value)
     reasons.push("CANDLE_SOURCE_RECEIPT_DIGEST_MISMATCH");
+  if(packet?.engine11ProvenanceSchema!==provenance?.schema||
+     packet?.engine11ProvenanceReceiptId!==provenance?.receiptId||
+     packet?.engine11ProvenanceDigest!==provenance?.signatureOrDigest?.value)
+    reasons.push("CANDLE_PACKET_PROVENANCE_CROSSLINK_MISMATCH");
 
   const packetBars=packet?.completedBars||{};
   for(const [tf,duration] of Object.entries(TF_MS)){
@@ -66,19 +72,40 @@ export function validateCandleArchiveInput({packet,provenance,trustResult}={}){
     }else{
       const before=packet?.sourceCountsBeforeFiltering?.[tf];
       const after=packet?.sourceCountsAfterFiltering?.[tf];
-      const map=packet?.timeframeSourceMap?.[tf];
-      if(before!==coverage.observedCount||after!==coverage.acceptedCount)
+      const filtering=packet?.sourceFiltering?.[tf];
+      const map=packet?.sourceTimeframeMap?.[tf];
+      const refs=packet?.sourceBarReferences?.[tf];
+      if(before!==coverage.observedCount||after!==coverage.acceptedCount||
+         filtering?.observedCount!==coverage.observedCount||
+         filtering?.acceptedCount!==coverage.acceptedCount||
+         filtering?.rejectedCount!==coverage.rejectedCount)
         reasons.push("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_"+tf);
+      if(filtering?.truncatedCount!==0)
+        reasons.push("CANDLE_PACKET_TRUNCATED_SOURCE_"+tf);
+      if(packet?.gapState?.[tf]!==coverage.coverageState)
+        reasons.push("CANDLE_PACKET_GAP_STATE_MISMATCH_"+tf);
       if(map!==provenance?.timeframeSourceMap?.[tf])
         reasons.push("CANDLE_PACKET_TIMEFRAME_MAP_MISMATCH_"+tf);
       if(packetBars[tf].length!==bars.length)
         reasons.push("CANDLE_PACKET_BAR_COUNT_MISMATCH_"+tf);
+      if(!Array.isArray(refs)||refs.length!==bars.length)
+        reasons.push("CANDLE_PACKET_SOURCE_REFERENCE_COUNT_MISMATCH_"+tf);
       else{
         for(let i=0;i<bars.length;i++){
-          const a=packetBars[tf][i], b=bars[i];
+          const a=packetBars[tf][i], b=bars[i], r=refs[i];
           if(a?.startMs!==b?.startMs||a?.endMs!==b?.endMs||
              ["open","high","low","close"].some(k=>a?.[k]!==b?.[k]))
             reasons.push("CANDLE_PACKET_BAR_MISMATCH_"+tf);
+          if(r?.sourceBarId!==b?.sourceBarId||
+             r?.sourceRevisionId!==b?.sourceRevisionId||
+             r?.sourcePayloadDigest!==b?.sourcePayloadDigest||
+             r?.sourceContract!==b?.sourceContract||
+             r?.providerEventId!==(b?.providerEventId??null)||
+             r?.firstReceivedAtMs!==b?.firstReceivedAtMs||
+             r?.availableAtMs!==b?.availableAtMs||
+             r?.completionObservedAtMs!==b?.completionObservedAtMs||
+             r?.finality!==b?.finality)
+            reasons.push("CANDLE_PACKET_SOURCE_REFERENCE_MISMATCH_"+tf);
         }
       }
     }
@@ -166,7 +193,14 @@ export function createEngine12CandleArchiveWriter({
     if(!valid.ok)return {ok:false,recorded:false,reason:valid.reasons[0],reasons:valid.reasons};
 
     const envelope={schema:ENGINE12_CANDLE_ARCHIVE_SCHEMA,writerVersion:"engine12.candleArchiveWriter.v1",
-      recordedPayload:{packet,provenance},sourceTrust:{verified:true,receiptId:trustResult.receiptId}};
+      recordedPayload:{packet,provenance},sourceTrust:{
+        verified:true,
+        receiptId:trustResult.receiptId,
+        digest:trustResult.digest,
+        verificationMode:trustResult.verificationMode,
+        sourceAttestationStatus:trustResult.verificationMode==="REAL_SOURCE_ATTESTED"?
+          "ATTESTED_REAL_SOURCE":"SYNTHETIC_SANDBOX_ONLY"
+      }};
     const bytes=Buffer.from(canonicalJson(envelope)+"\n");
     if(bytes.length>maxRecordBytes)return {ok:false,recorded:false,reason:"CANDLE_ARCHIVE_RECORD_TOO_LARGE"};
     if(treeBytes(root)+bytes.length>maxArchiveBytes)
@@ -218,6 +252,8 @@ export function createEngine12CandleArchiveWriter({
         packetSha256:digest,dedupeIdentity:identity,dataFile,byteSize:bytes.length,
         evaluationTimeMs:packet.evaluationTimeMs,engine11ProvenanceReceiptId:provenance.receiptId,
         engine11ProvenanceDigest:provenance.signatureOrDigest.value,
+        sourceAttestationStatus:trustResult.verificationMode==="REAL_SOURCE_ATTESTED"?
+          "ATTESTED_REAL_SOURCE":"SYNTHETIC_SANDBOX_ONLY",
         engine26:{candidateId:packet?.engine26?.candidateId??null,zoneId:packet?.engine26?.zoneId??null,
           engine3AuthorizationStartedAt:packet?.engine26?.engine3AuthorizationStartedAt??null},
         engine22:{publishedAt:packet?.engine22?.publishedAt??null,
@@ -264,7 +300,10 @@ export function createEngine12CandleArchiveWriter({
         const receipt={schema:"engine12.es.candleArchiveReceipt.v1",status:"RECORDED_VERIFIED",
           packetSha256:digest,dedupeIdentity:identity,dataFile:file,byteSize:bytes.length,
           evaluationTimeMs:packet.evaluationTimeMs,engine11ProvenanceReceiptId:provenance.receiptId,
-          engine11ProvenanceDigest:provenance.signatureOrDigest.value,readbackSha256:digest,
+          engine11ProvenanceDigest:provenance.signatureOrDigest.value,
+          sourceAttestationStatus:trustResult.verificationMode==="REAL_SOURCE_ATTESTED"?
+            "ATTESTED_REAL_SOURCE":"SYNTHETIC_SANDBOX_ONLY",
+          readbackSha256:digest,
           recoveredAfterRestart:true,verifiedAtUtc:new Date().toISOString()};
         try{
           const wr=writeExclusiveFile(receiptFile,Buffer.from(canonicalJson(receipt)+"\n"),fsOps);
