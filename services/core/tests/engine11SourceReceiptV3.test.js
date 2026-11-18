@@ -64,7 +64,9 @@ test('selected rows link by exact second to original provider byte digest',()=>{
  assert.equal(refs[0].sourceRevisionId,'OBSERVED_SHA256:'+a.observations[0].rowDigest);
  assert.equal(refs[0].sourceTrustVerified,false);
  assert.throws(()=>bindSelectedBarsToReceipt(a,[{time:1795000060}]),/V3_SELECTED_BAR_SOURCE_MISSING/);
- assert.throws(()=>bindSelectedBarsToReceipt(a,[{time:1795000000},{time:1795000000}]),
+ const same={time:1795000000,open:6000,high:6002,
+   low:5999,close:6001,volume:14};
+ assert.throws(()=>bindSelectedBarsToReceipt(a,[same,same]),
    /V3_DUPLICATE_SELECTED_BAR/);
 });
 test('paged or conflicting provider evidence must fail closed for selected rows',()=>{
