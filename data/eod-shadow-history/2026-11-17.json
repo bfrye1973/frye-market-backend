@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-18T03:31:37.747041+00:00",
+  "updated_at_utc": "2026-11-18T13:24:55.378694+00:00",
   "completedSessionDate": "2026-11-17",
   "score": 20.1,
   "state": "BEARISH",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-17",
-      "close": 7375.0,
-      "ma10": 7489.7,
-      "ma20": 7588.0375,
+      "close": 7373.25,
+      "ma10": 7489.525,
+      "ma20": 7587.95,
       "ma10Prior": 7525.65,
       "ma20Prior": 7609.3,
       "ma10Upsloping": false,
@@ -272,19 +272,19 @@
       }
     },
     "large": {
-      "members": 893,
+      "members": 888,
       "nh": 90,
-      "nl": 234,
+      "nl": 232,
       "up": 1,
       "down": 30,
-      "breadth_pct": 27.78,
+      "breadth_pct": 27.95,
       "momentum_pct": 3.23,
       "prior": {
         "nh": 94,
-        "nl": 108,
+        "nl": 107,
         "up": 2,
         "down": 14,
-        "breadth_pct": 46.53,
+        "breadth_pct": 46.77,
         "momentum_pct": 12.5
       }
     },
@@ -298,27 +298,27 @@
       "momentum_pct": 15.0,
       "prior": {
         "nh": 81,
-        "nl": 203,
+        "nl": 202,
         "up": 5,
         "down": 24,
-        "breadth_pct": 28.52,
+        "breadth_pct": 28.62,
         "momentum_pct": 17.24
       }
     },
     "small": {
-      "members": 3458,
+      "members": 3463,
       "nh": 258,
-      "nl": 1418,
+      "nl": 1420,
       "up": 68,
       "down": 206,
-      "breadth_pct": 15.39,
+      "breadth_pct": 15.38,
       "momentum_pct": 24.82,
       "prior": {
         "nh": 284,
-        "nl": 1136,
+        "nl": 1138,
         "up": 61,
         "down": 137,
-        "breadth_pct": 20.0,
+        "breadth_pct": 19.97,
         "momentum_pct": 30.81
       }
     },
