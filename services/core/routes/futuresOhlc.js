@@ -24,7 +24,7 @@
 
 import express from "express";
 import { performance } from "node:perf_hooks";
-import { captureReceiptV3 } from "../logic/engine11/sourceReceiptV3/captureReceiptV3.js";
+import { captureReceiptV3, bindSelectedBarsToReceipt } from "../logic/engine11/sourceReceiptV3/captureReceiptV3.js";
 
 const router = express.Router();
 export default router;
@@ -500,7 +500,11 @@ async function fetchFuturesAggs({
   }
 
   const selectedBars = dedup.length > limit ? dedup.slice(-limit) : dedup;
-  return evidence ? { bars: selectedBars, engine11Receipt } : selectedBars;
+  if (!evidence) return selectedBars;
+  // A paginated first page must never be represented as complete evidence.
+  // The existing default behavior is intentionally unchanged.
+  const selectedBarReferences = bindSelectedBarsToReceipt(engine11Receipt, selectedBars);
+  return { bars: selectedBars, engine11Receipt, selectedBarReferences };
 }
 
 router.get("/", async (req, res) => {
@@ -565,7 +569,8 @@ router.get("/", async (req, res) => {
 
     res.setHeader("Cache-Control", "no-store");
 
-    return res.json(evidence ? { bars, engine11Receipt: result.engine11Receipt } : bars);
+    return res.json(evidence ? { bars, engine11Receipt: result.engine11Receipt,
+      selectedBarReferences: result.selectedBarReferences } : bars);
   } catch (e) {
     console.error("[/api/v1/futures/ohlc] error:", e?.stack || e);
 
