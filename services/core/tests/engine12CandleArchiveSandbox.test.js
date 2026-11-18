@@ -11,8 +11,17 @@ import {
 const evalMs=Date.parse("2026-11-18T15:00:00Z");
 
 function packet(){
+  const durations={"1m":60000,"5m":300000,"10m":600000};
+  const completedBars={},sourceCountsBeforeFiltering={},sourceCountsAfterFiltering={},timeframeSourceMap={};
+  for(const [tf,dur] of Object.entries(durations)){
+    const start=evalMs-dur-5000;
+    completedBars[tf]=[{startMs:start,endMs:start+dur,open:7000,high:7001,low:6999,close:7000.25}];
+    sourceCountsBeforeFiltering[tf]=1;
+    sourceCountsAfterFiltering[tf]=1;
+    timeframeSourceMap[tf]="MASSIVE_"+tf;
+  }
   return {
-    schema:"engine3.v6.rawBarPacket.preparation.v1",
+    schema:"engine3.v6.rawBarPacket.preparation.v2",
     mode:"NOT_RECORDING",
     symbol:"ES",
     strategyId:"intraday_scalp@10m",
@@ -27,7 +36,10 @@ function packet(){
       publicationRevision:3,
       modelFingerprint:"m".repeat(64)
     },
-    completedBars:{"1m":[],"5m":[],"10m":[]}
+    sourceCountsBeforeFiltering,
+    sourceCountsAfterFiltering,
+    timeframeSourceMap,
+    completedBars
   };
 }
 
