@@ -91,6 +91,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     lastObservedSize:e.lastObservedSize,
     visibleOrderCount:e.lastObservedOrderCount,
     observedInImages:e.observedImages,
+    observationShare:frames?Number((e.observedImages/frames).toFixed(3)):0,
     observedPersistenceMs:e.coveredElapsedMs,
     firstObservedAtMs:e.firstSeenMs,lastObservedAtMs:e.lastSeenMs,
     ageSinceObservedMs:nowMs-e.lastSeenMs,
