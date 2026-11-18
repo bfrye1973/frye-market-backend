@@ -75,3 +75,21 @@ test('paged or conflicting provider evidence must fail closed for selected rows'
  assert.throws(()=>bindSelectedBarsToReceipt(conflicting,[{time:1795000000}]),
    /V3_CONFLICTING_SOURCE_REVISIONS/);
 });
+
+test('same timestamp but altered source OHLCV is never accepted',()=>{
+ const receipt=make(source());
+ for(const altered of [
+   {time:1795000000,open:6001,high:6002,low:5999,close:6001,volume:14},
+   {time:1795000000,open:6000,high:6002,low:5999,close:6001,volume:15},
+   {time:1795000000,open:6000,high:6002,low:5999,close:6000,volume:14},
+ ]) {
+   assert.throws(()=>bindSelectedBarsToReceipt(receipt,[altered]),
+     /V3_SELECTED_BAR_OHLCV_MISMATCH/);
+ }
+});
+test('invalid source OHLCV and imprecise window alignment fail closed',()=>{
+ assert.throws(()=>make(Buffer.from('{"results":[{"window_start":1795000000000000000,"open":6003,"high":6002,"low":5999,"close":6001,"volume":14}]}')),
+   /V3_SOURCE_OHLCV_INVALID/);
+ assert.throws(()=>make(Buffer.from('{"results":[{"window_start":1795000000000000001,"open":6000,"high":6002,"low":5999,"close":6001,"volume":14}]}')),
+   /V3_INVALID_WINDOW_ALIGNMENT/);
+});
