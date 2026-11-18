@@ -24,3 +24,18 @@ test("Phase2 uses only Engine26 owned authorization timestamp",()=>{
  assert.ok(region.includes("engine3AuthorizationStartedAt"));
  assert.ok(!region.includes("candidateLifecycleStartTime"));
 });
+
+test("production snapshot publishes exact control geometry source and Engine26 immutability evidence",()=>{
+ const sourceAt=source.indexOf("patchedConfluence.context.reaction.engine3V6Phase2Evidence =");
+ assert.ok(sourceAt>=0);
+ const excerpt=source.slice(sourceAt,sourceAt+1100);
+ for(const property of ["controlGeometrySource:phase2Causal.controlGeometrySource",
+  "engine26Zone:phase2Causal.engine26Zone",
+  "engine3ControlLens:phase2Causal.engine3ControlLens",
+  "controlGeometryEligible:phase2Causal.controlGeometryEligible"]){
+  assert.ok(excerpt.includes(property),property);
+ }
+ const handoff=source.indexOf("const engine3Strategy1Handoff =");
+ assert.ok(handoff>sourceAt);
+ assert.doesNotMatch(source.slice(handoff,handoff+600),/engine3ControlLens|phase2Causal/);
+});
