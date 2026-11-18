@@ -58,6 +58,8 @@ import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVeri
 import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
 import { buildEngine3V6Phase2Evidence } from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
 import { buildEngine3V6CausalControl } from "../logic/engine3/v6/buildEngine3V6CausalControl.js";
+import { buildEngine3V6ResearchTrace } from "../logic/engine3/v6/buildEngine3V6ResearchTrace.js";
+import { inspectEngine26AuthorizationContract } from "../logic/engine3/v6/inspectEngine26AuthorizationContract.js";
 import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
@@ -8952,14 +8954,28 @@ if (isEsIntradayScalp) {
   const candidateIdV6 = engine26LocationCandidate?.candidateId ?? null;
   const zoneIdV6 = engine26LocationCandidate?.zoneId ?? null;
   const zoneInputV6 = engine3V5?.normalizedZoneInput ?? null;
+  // Source-owned authorization is admissible only when Engine26's
+  // persisted clock, as-of time and identity all pass the Phase3 contract.
+  // A failed clock remains ENGINE3_OBSERVED in shadow; never borrow a
+  // timestamp from a corrupt, historical or unpersisted source.
+  const engine3V6AuthorizationReadiness = inspectEngine26AuthorizationContract({
+    handoff:engine26ReactionHandoff,candidate:engine26LocationCandidate,
+    normalizedZoneInput:zoneInputV6,evaluationTimeMs,
+    priorActivation:priorV6?.phase2ActivationRun??null,
+  });
+  const authoritativeV6Activation =
+    engine3V6AuthorizationReadiness.status==="AUTHORITATIVE_TIMESTAMP_VALID"
+      ? engine3V6AuthorizationReadiness.authoritativeTimestampMs : null;
   const activationArgsV6 = {
-    priorActivation: priorV6?.phase2ActivationRun ?? null,
+    // Do not carry a prior ENGINE26_AUTHORIZED run through source-health loss.
+    // Observed activation remains the only fallback in shadow.
+    priorActivation:authoritativeV6Activation===null &&
+      priorV6?.phase2ActivationRun?.source==="ENGINE26_AUTHORIZED"
+        ?null:priorV6?.phase2ActivationRun??null,
     candidateId: candidateIdV6,
     zoneId: zoneIdV6,
     eligible: zoneInputV6?.eligible === true,
-    authorizedStartedAt:
-      engine26ReactionHandoff?.engine3AuthorizationStartedAt ??
-      engine26LocationCandidate?.engine3AuthorizationStartedAt ?? null,
+    authorizedStartedAt:authoritativeV6Activation,
     zone: zoneInputV6?.zone ?? null,
     bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
     bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
@@ -9021,6 +9037,23 @@ if (isEsIntradayScalp) {
     policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
       deteriorationTimeoutMs:12*60000},
   });
+  // Phase3 research diagnostics are isolated output only. They do not feed
+  // the v6 reducer, canonical v5, Engine4 or Engine6.
+
+  const engine3V6ResearchTrace = buildEngine3V6ResearchTrace({
+    evaluationTimeMs,symbol,strategyId:s.strategyId,
+    priorShadow:priorV6,shadow:engine3V6Shadow,
+    phase2Evidence:engine3V6Phase2Evidence,
+    phase2Causal,engine26:engine26ReactionHandoff,
+    phase1Comparison:{
+      canonicalDirection:priorV6?.canonicalDirection??"NEUTRAL",
+      v5CanonicalDirection:engine3V5?.canonical?.canonical?.direction??"NEUTRAL",
+    },
+  });
+  patchedConfluence.context.reaction.engine3V6AuthorizationReadiness =
+    engine3V6AuthorizationReadiness;
+  patchedConfluence.context.reaction.engine3V6ResearchTrace =
+    engine3V6ResearchTrace;
   patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
   patchedConfluence.context.reaction.engine3V6Phase2Evidence =
     {...engine3V6Phase2Evidence,causalPriceControl:{
