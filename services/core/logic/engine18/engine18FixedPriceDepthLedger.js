@@ -53,6 +53,8 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
      e.relativeSum+=l.size/medians[l.side];e.relativeSamples++;
      if(l.size>=Math.max(1,medians[l.side]*depthMultiplier)){
       e.qualifyingImages++;e.currentQualifyingImages++;
+     }else{
+      e.currentQualifyingImages=0; // currently weak size breaks concentration streak
      }
     }
    }else{
