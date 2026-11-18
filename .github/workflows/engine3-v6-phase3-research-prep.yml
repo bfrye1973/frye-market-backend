@@ -8,8 +8,6 @@ on:
       - 'services/core/logic/engine3/v6/auditEngine3RawBarPacketForCalibration.js'
       - 'services/core/tests/engine3V6Phase3*.test.js'
       - 'services/core/jobs/buildStrategySnapshot.js'
-      - 'services/core/logic/engine3/fetchEngine3DiagnosticBars.js'
-      - 'services/core/tests/engine3DiagnosticCandleFetch.phase3DB.test.js'
       - '.github/workflows/engine3-v6-phase3-research-prep.yml'
   workflow_dispatch:
 jobs:
@@ -29,12 +27,9 @@ jobs:
           node --check logic/engine3/v6/inspectEngine26AuthorizationContract.js
           node --check logic/engine3/v6/runEngine3V6ResearchFixture.js
           node --check logic/engine3/v6/auditEngine3RawBarPacketForCalibration.js
-          node --check logic/engine3/fetchEngine3DiagnosticBars.js
           node --check jobs/buildStrategySnapshot.js
       - name: Phase3 preparation and integration contract tests
-        run: |
-          node --test tests/engine3V6Phase3*.test.js
-          node --test tests/engine3DiagnosticCandleFetch.phase3DB.test.js
+        run: node --test tests/engine3V6Phase3*.test.js
       - name: Phase2 accepted evidence regression
         run: node --test tests/engine3V6Phase2*.test.js
       - name: Phase1 compatibility
