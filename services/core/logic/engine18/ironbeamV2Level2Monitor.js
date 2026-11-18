@@ -29,6 +29,11 @@ export function startEngine18IronbeamLevel2Monitor({
    zoneSummary:(()=>{const s=zoneReader.snapshot({feedTier:"UNVERIFIED"});
      return {usable:s.usable,reason:s.reason,images:s.images,
        zoneCount:s.zones.length,lastReceivedMs:s.lastReceivedMs,
+       noCandidateReason:s.diagnostics?.noCandidateReason??null,
+       ledgerPrices:s.diagnostics?.ledgerPrices??0,
+       activeObservedPrices:s.diagnostics?.activeObservedPrices??0,
+       durationQualified:s.diagnostics?.durationQualified??0,
+       lastValidDepthAgeMs:s.diagnostics?.lastValidDepthAgeMs??null,
        displayOnly:true,level3:false};})()});
  const notify=()=>{try{onStatus(safeStatus());}catch{}};
  const stopConnection=()=>{if(watchdog){clearInterval(watchdog);watchdog=null;}
