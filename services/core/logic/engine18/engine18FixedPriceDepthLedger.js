@@ -19,7 +19,10 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
  };
  function observe(book,receivedMs){
   if(!book?.ok||book.symbol!==symbol||!Number.isSafeInteger(receivedMs)||receivedMs<=0){
-   invalid++;previous=null;for(const e of entries.values())e.coverageState=STATES.UNKNOWN;
+   invalid++;previous=null;for(const e of entries.values()){
+   e.coverageState=STATES.UNKNOWN;e.currentContinuousMs=0;
+   e.consecutiveObservations=0;
+  }
    return;
   }
   frames++;lastGoodReceiveMs=receivedMs;
@@ -33,9 +36,13 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    if(l){
     const prev=contiguous?previous.byKey.get(e.key):null;
     const delta=contiguous&&prev?receivedMs-previous.receivedMs:0;
-    if(delta>0&&prev.size>0&&l.size>0)e.coveredElapsedMs+=delta;
-    if(prev&&delta>0&&prev.size>0&&l.size>0)e.consecutiveObservations++;
-    else e.consecutiveObservations=1;
+    if(delta>0&&prev.size>0&&l.size>0){
+     e.coveredElapsedMs+=delta;e.currentContinuousMs+=delta;
+     e.longestContinuousMs=Math.max(e.longestContinuousMs,e.currentContinuousMs);
+     e.consecutiveObservations++;
+    }else{
+     e.currentContinuousMs=0;e.consecutiveObservations=1;
+    }
     e.coverageState=l.size===0?STATES.ZERO:STATES.COVERED;
     e.lastSeenMs=receivedMs;e.lastObservedSize=l.size;
     e.lastObservedOrderCount=l.orderCount;
@@ -48,7 +55,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     }
    }else{
     e.coverageState=coverage(e,e.side,book);
-    e.consecutiveObservations=0;
+    e.consecutiveObservations=0;e.currentContinuousMs=0;
    }
   }
   for(const l of all){
@@ -57,7 +64,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    entries.set(key,{key,side:l.side,price:l.price,priceTicks:l.priceTicks,
     firstSeenMs:receivedMs,lastSeenMs:receivedMs,lastPositiveMs:l.size>0?receivedMs:null,
     lastCoverageAtMs:receivedMs,observedImages:1,consecutiveObservations:1,
-    coveredElapsedMs:0,coverageState:l.size===0?STATES.ZERO:STATES.COVERED,
+    coveredElapsedMs:0,currentContinuousMs:0,longestContinuousMs:0,coverageState:l.size===0?STATES.ZERO:STATES.COVERED,
     lastObservedSize:l.size,lastObservedOrderCount:l.orderCount,maxObservedSize:l.size,
     relativeSum:medians[l.side]>0?l.size/medians[l.side]:0,
     relativeSamples:medians[l.side]>0?1:0,
@@ -70,8 +77,9 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    for(const e of candidates.slice(0,entries.size-maxPrices))entries.delete(e.key);
   }
   // Old evidence is never interpreted as currently resting.
-  for(const e of entries.values())if(receivedMs-e.lastSeenMs>maxElapsedMs)
-   e.coverageState=STATES.UNKNOWN;
+  for(const e of entries.values())if(receivedMs-e.lastSeenMs>maxElapsedMs){
+   e.coverageState=STATES.UNKNOWN;e.currentContinuousMs=0;
+  }
  }
  function invalidate(){
   invalid++;previous=null;lastGoodReceiveMs=null;
@@ -83,6 +91,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     e.observedImages>=minImages&&e.coveredElapsedMs>=minDurationMs&&
     nowMs>=e.lastSeenMs&&nowMs-e.lastSeenMs<=maxElapsedMs);
   const candidates=eligible.filter(e=>e.coverageState===STATES.COVERED &&
+    e.currentContinuousMs>=minDurationMs&&e.consecutiveObservations>=minImages&&
     nowMs-e.lastSeenMs<=maxFrameGapMs).sort((a,b)=>b.coveredElapsedMs-a.coveredElapsedMs||
       b.maxObservedSize-a.maxObservedSize||b.qualifyingImages-a.qualifyingImages)
    .slice(0,topN).map(e=>({
@@ -92,7 +101,9 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     visibleOrderCount:e.lastObservedOrderCount,
     observedInImages:e.observedImages,
     observationShare:frames?Number((e.observedImages/frames).toFixed(3)):0,
-    observedPersistenceMs:e.coveredElapsedMs,
+    observedPersistenceMs:e.currentContinuousMs,
+    cumulativeCoveredMs:e.coveredElapsedMs,
+    longestContinuousMs:e.longestContinuousMs,
     firstObservedAtMs:e.firstSeenMs,lastObservedAtMs:e.lastSeenMs,
     ageSinceObservedMs:nowMs-e.lastSeenMs,
     maxObservedSize:e.maxObservedSize,
@@ -115,6 +126,8 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    durationQualified,imagesQualified,strengthQualified,
    candidateCount:candidates.length,historicalQualifiedPrices:eligible.length,
    lastSeenButOutOfCoverage:eligible.filter(e=>e.coverageState!==STATES.COVERED).length,
+   eligibleCurrentStreaks:eligible.filter(e=>e.currentContinuousMs>=minDurationMs&&
+     e.consecutiveObservations>=minImages&&e.coverageState===STATES.COVERED).length,
    minDurationMs,minImages,maxFrameGapMs,
    lastValidDepthAgeMs:age,elapsedBasis:'HOST_RECEIVED_MONOTONICITY_UNVERIFIED',
    denominator:'VALID_DISTINCT_DEPTH_IMAGES',
@@ -122,6 +135,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     !imagesQualified?'INSUFFICIENT_PRICE_OBSERVATIONS':
     !durationQualified?'INSUFFICIENT_COVERED_ELAPSED_TIME':
     !strengthQualified?'NO_REPEATED_DISPLAYED_CONCENTRATION':
+    eligible.some(e=>e.coverageState===STATES.COVERED)?'CURRENT_PRICE_STREAK_TOO_SHORT':
     eligible.length?'QUALIFIED_LEVELS_NOT_IN_CURRENT_BOOK':'CANDIDATES_EXPIRED_OR_OUTSIDE_WINDOW'}};
  }
  return Object.freeze({observe,invalidate,snapshot});
