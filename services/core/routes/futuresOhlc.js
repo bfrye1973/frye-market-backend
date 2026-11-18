@@ -271,8 +271,6 @@ async function resolveFuturesContract(productCode) {
   url.searchParams.set("product_code", cleanCode);
   url.searchParams.set("apiKey", POLY_KEY);
 
-  const requestStartedAtMs = Date.now();
-  const requestStartMono = performance.now();
   const r = await fetch(url.toString(), {
     cache: "no-store",
     headers: { Accept: "application/json" },
@@ -429,6 +427,8 @@ async function fetchFuturesAggs({
   url.searchParams.set("limit", "50000");
   url.searchParams.set("apiKey", POLY_KEY);
 
+  const requestStartedAtMs = Date.now();
+  const requestStartMono = performance.now();
   const r = await fetch(url.toString(), {
     cache: "no-store",
     headers: { Accept: "application/json" },
