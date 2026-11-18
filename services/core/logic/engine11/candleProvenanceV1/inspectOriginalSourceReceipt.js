@@ -79,7 +79,14 @@ export function inspectOriginalSourceReceipt({
      unsigned.firstByteAtMs!==receipt?.firstByteAtMs||
      unsigned.bodyCompletedAtMs!==receipt?.bodyCompletedAtMs||
      unsigned.requestToFirstByteMonoMs!==receipt?.requestToFirstByteMonoMs||
-     unsigned.requestToBodyMonoMs!==receipt?.requestToBodyMonoMs)
+     unsigned.requestToBodyMonoMs!==receipt?.requestToBodyMonoMs||
+     unsigned.clockQuality!==receipt?.clockQuality||
+     unsigned.maxUtcUncertaintyMs!==receipt?.maxUtcUncertaintyMs||
+     unsigned.independentClockSampleId!==receipt?.independentClockSampleId||
+     unsigned.entitlementMode!==receipt?.entitlementMode||
+     unsigned.storagePermissionVerified!==receipt?.storagePermissionVerified||
+     unsigned.providerFinality!==receipt?.providerFinality||
+     unsigned.finalityEvidenceId!==receipt?.finalityEvidenceId)
      bad("ENGINE11_SIGNED_ENVELOPE_CONTEXT_MISMATCH");
   if(!hex64(receipt?.unsignedEnvelopeSha256)||
      !unsigned||receipt.unsignedEnvelopeSha256!==sourceReceiptDigest(unsigned))
