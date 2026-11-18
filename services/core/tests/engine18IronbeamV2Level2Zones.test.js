@@ -16,10 +16,11 @@ test("v2 compact depth parses Level 2 size/count, never individual orders",()=>{
 });
 test("persistent visible bid/ask concentration requires multiple distinct images",()=>{
  const reader=createEngine18Level2ZoneReader({minObservations:3,minDurationMs:0});
- assert.equal(reader.observe(frame(110,90,now)).accepted,true);
+ assert.equal(reader.observe(frame(110,90,now),{receivedAtMs:now}).accepted,true);
  assert.equal(reader.snapshot({nowMs:now+200}).usable,false);
- assert.equal(reader.observe(frame(110,90,now)).reason,"UNCHANGED_DEPTH");
- reader.observe(frame(111,91,now+100));reader.observe(frame(112,92,now+200));
+ assert.equal(reader.observe(frame(110,90,now),{receivedAtMs:now+1}).reason,"UNCHANGED_DEPTH");
+ reader.observe(frame(111,91,now+100),{receivedAtMs:now+100});
+ reader.observe(frame(112,92,now+200),{receivedAtMs:now+200});
  const s=reader.snapshot({nowMs:now+250,feedTier:"UNVERIFIED"});
  assert.equal(s.usable,true);assert.equal(s.displayOnly,true);
  assert.equal(s.zones.length,2);
