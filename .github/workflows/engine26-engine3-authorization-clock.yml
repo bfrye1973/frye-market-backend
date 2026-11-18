@@ -1,6 +1,9 @@
 name: Engine26 Engine3 Authorization Clock
 
 on:
+  push:
+    branches:
+      - engine26/issue-341-engine3-authorization-clock
   pull_request:
     branches: [main]
     paths:
