@@ -4,19 +4,34 @@
 import http from 'node:http';
 import {probeRithmicTest} from './engine18RithmicTestProbe.js';
 import {probeRithmicDbo} from './engine18RithmicDboEntitlementProbe.js';
+import {runConformance} from './engine18RithmicConformanceTest.js';
 const port=Number(process.env.PORT||10000);
 const host='0.0.0.0';
-const status={phase:'STARTING',readOnly:true,attempts:0,completed:false};
+const status={phase:'STARTING',readOnly:true,attempts:0,completed:false,connected:false};
 function limitedText(x){return typeof x==='string'&&/^[0-9]{1,6}$/.test(x)?x:'UNRECOGNIZED'}
 const app=http.createServer((req,res)=>{
  if(req.url!=='/health'||req.method!=='GET'){res.writeHead(404);res.end();return;}
  res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});
  // Do not expose system names, vendor codes, credential details, or market data.
  res.end(JSON.stringify({service:'engine18.rithmicTestProbe.v1',phase:status.phase,
-  readOnly:true,completed:status.completed}));
+  readOnly:true,completed:status.completed,connected:status.connected}));
 });
 app.listen(port,host,()=>{
  console.log('RITHMIC_TEST_SERVICE_READY readOnly=true noRecorder=true noTrading=true');
+ if(process.env.RITHMIC_TEST_CONFORMANCE_LOGIN_ENABLED==='YES'){
+  if(status.attempts++)return;
+  status.phase='CONFORMANCE_STARTING';
+  console.log('RITHMIC_CONFORMANCE_SESSION_START requestedPlant=ORDER_PLANT trading=false');
+  runConformance({maxRunMs:2*60*60*1000,onStatus:state=>{
+    status.phase=state.phase;status.connected=state.connected===true;
+    if(state.phase==='CONNECTED'&&state.heartbeatResponses===0)
+      console.log('RITHMIC_CONFORMANCE_CONNECTED authenticated=true plant=ORDER_PLANT readOnly=true');
+    if(state.phase==='STOPPED')console.log('RITHMIC_CONFORMANCE_STOP '+state.stopReason);
+  }}).catch(()=>{status.phase='CONFORMANCE_FAILED';status.connected=false;
+    console.log('RITHMIC_CONFORMANCE_FAILED sanitized');
+  }).finally(()=>{status.completed=true;status.connected=false;});
+  return;
+ }
  if(process.env.RITHMIC_TEST_CONNECT_ENABLED!=='YES'){
   status.phase='DISABLED';status.completed=true;
   console.log('RITHMIC_TEST_CONNECT_DISABLED');
