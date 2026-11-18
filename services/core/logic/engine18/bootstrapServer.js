@@ -106,16 +106,31 @@ const service = http.createServer((req,res) => {
       research?.usable && Number.isFinite(research.lastExchangeMs) &&
       now-research.lastExchangeMs>=0 &&
       now-research.lastExchangeMs<=15000;
-    const zones=fresh?(research?.zones||[]).slice(0,8)
+    const zones=fresh?(research?.zones||[]).filter(z=>
+      z.currentlyInBook===true&&z.coverageState==="IN_COVERAGE"&&
+      Number.isSafeInteger(z.visibleContracts)&&z.visibleContracts>0).slice(0,8)
       .map(z=>({side:z.side,price:z.price,visibleContracts:z.visibleContracts,
-        observedInImages:z.observedInImages,observationShare:z.observationShare})):[];
+        observedInImages:z.observedInImages,observedPersistenceMs:z.observedPersistenceMs,
+        coverageState:"IN_COVERAGE",evidenceLabel:"OBSERVED_CURRENT_BOOK"})):[];
     res.writeHead(200);res.end(JSON.stringify({
       schema:"engine18.chartLiquidityDemo.v1",symbol:"XCME:ES.Z26",
       available:!!fresh,mode:"DEMO_RESEARCH_ONLY",tier:"UNVERIFIED",
       level:2,executionEligible:false,displayOnly:true,
       source:"IRONBEAM_V2_AGGREGATED_DEPTH",
       asOfUnixMs:research?.lastExchangeMs||null,
-      reason:fresh?null:"STALE_OR_UNVERIFIED_DEMO_DEPTH",
+      reason:!fresh?"STALE_OR_UNVERIFIED_DEMO_DEPTH":
+        zones.length?null:(research?.diagnostics?.noCandidateReason||"NO_QUALIFYING_DEPTH"),
+      diagnostics:research?.diagnostics?{
+        ledgerPrices:research.diagnostics.ledgerPrices,
+        activeObservedPrices:research.diagnostics.activeObservedPrices,
+        historicalQualifiedPrices:research.diagnostics.historicalQualifiedPrices,
+        lastSeenButOutOfCoverage:research.diagnostics.lastSeenButOutOfCoverage,
+        candidateCount:zones.length,
+        minDurationMs:research.diagnostics.minDurationMs,
+        lastValidDepthAgeMs:research.diagnostics.lastValidDepthAgeMs,
+        elapsedBasis:research.diagnostics.elapsedBasis,
+        noCandidateReason:research.diagnostics.noCandidateReason
+      }:null,
       zones
     }));return;
   }
