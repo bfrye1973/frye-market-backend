@@ -45,6 +45,9 @@ import {
   buildEngine26LocationView,
   buildEngine26LogicalZoneKey,
 } from "./engine26ZoneContract.js";
+import {
+  resolveEngine3AuthorizationClock,
+} from "./engine3AuthorizationClock.js";
 
 const DEFAULT_TICK_SIZE = 0.25;
 const DEFAULT_MONITORING_RANGE_POINTS = 25;
@@ -3325,6 +3328,17 @@ function buildWaitingHandoff(
       null,
 
     authorizeEngine3Evaluation: false,
+    engine3AuthorizationStartedAt: null,
+    engine3AuthorizationSourceAsOf:
+      candidate?.snapshotTime ?? null,
+    engine3AuthorizationIdentity: {
+      candidateId:
+        candidate?.candidateId ?? null,
+      zoneId:
+        candidate?.zoneId ?? null,
+    },
+    engine3AuthorizationContinuous: false,
+    engine3AuthorizationActive: false,
 
     reasonCodes: [
       "ENGINE26_REACTION_OBSERVER_ALWAYS_ACTIVE",
@@ -6223,6 +6237,26 @@ export function buildEngine26ReactionHandoff({
     candidateLifecycleStartTime:
       candidate.candidateLifecycleStartTime ?? null,
 
+    engine3AuthorizationStartedAt:
+      candidate.engine3AuthorizationStartedAt ?? null,
+    engine3AuthorizationSourceAsOf:
+      candidate.engine3AuthorizationSourceAsOf ??
+      candidate.snapshotTime ??
+      snapshotTime ??
+      null,
+    engine3AuthorizationIdentity:
+      candidate.engine3AuthorizationIdentity ?? {
+        candidateId:
+          candidate.candidateId ?? null,
+        zoneId:
+          candidate.zoneId ?? null,
+      },
+    engine3AuthorizationContinuous:
+      candidate.engine3AuthorizationContinuous === true,
+    engine3AuthorizationActive:
+      evaluationAuthorized === true &&
+      candidate.engine3AuthorizationActive !== false,
+
     directionalEvidence:
       candidate.directionalEvidence ?? null,
 
@@ -6417,12 +6451,71 @@ export function buildEngine26A(
         }
       : null;
 
-  const engine26LocationCandidate =
+  let engine26LocationCandidate =
     buildEngine26LocationCandidate({
       ...input,
       selectionPurpose:
         "STRATEGY1_CHILD",
     });
+
+  /*
+   * Resolve Engine 3 authorization continuity from the exact Engine 26
+   * authorization decision. This is a separate source-owned clock and must
+   * never be substituted with candidateLifecycleStartTime.
+   */
+  const provisionalEngine26ReactionHandoff =
+    buildEngine26ReactionHandoff({
+      locationCandidate:
+        engine26LocationCandidate,
+      snapshotTime:
+        input.snapshotTime,
+    });
+
+  const engine3AuthorizationClock =
+    resolveEngine3AuthorizationClock({
+      symbol:
+        engine26LocationCandidate?.symbol ??
+        input.symbol,
+      strategyId:
+        engine26LocationCandidate?.strategyId ??
+        input.strategyId,
+      candidateId:
+        engine26LocationCandidate?.candidateId ??
+        null,
+      zoneId:
+        engine26LocationCandidate?.zoneId ??
+        null,
+      authorized:
+        provisionalEngine26ReactionHandoff
+          ?.authorizeEngine3Evaluation === true,
+      sourceAsOf:
+        engine26LocationCandidate?.snapshotTime ??
+        input.snapshotTime ??
+        null,
+      filePath:
+        input.engine3AuthorizationMemoryFilePath,
+      persist:
+        input.persistMemory !== false,
+    });
+
+  engine26LocationCandidate = {
+    ...engine26LocationCandidate,
+    engine3AuthorizationStartedAt:
+      engine3AuthorizationClock
+        .engine3AuthorizationStartedAt,
+    engine3AuthorizationSourceAsOf:
+      engine3AuthorizationClock
+        .engine3AuthorizationSourceAsOf,
+    engine3AuthorizationIdentity:
+      engine3AuthorizationClock
+        .engine3AuthorizationIdentity,
+    engine3AuthorizationContinuous:
+      engine3AuthorizationClock
+        .engine3AuthorizationContinuous,
+    engine3AuthorizationActive:
+      engine3AuthorizationClock
+        .engine3AuthorizationActive,
+  };
 
   const engine26ReactionHandoff =
     buildEngine26ReactionHandoff({
@@ -6529,6 +6622,21 @@ export function buildEngine26A(
     candidateLifecycleStartTime:
       engine26LocationCandidate
         ?.candidateLifecycleStartTime ?? null,
+    engine3AuthorizationStartedAt:
+      engine26LocationCandidate
+        ?.engine3AuthorizationStartedAt ?? null,
+    engine3AuthorizationSourceAsOf:
+      engine26LocationCandidate
+        ?.engine3AuthorizationSourceAsOf ?? null,
+    engine3AuthorizationIdentity:
+      engine26LocationCandidate
+        ?.engine3AuthorizationIdentity ?? null,
+    engine3AuthorizationContinuous:
+      engine26LocationCandidate
+        ?.engine3AuthorizationContinuous === true,
+    engine3AuthorizationActive:
+      engine26LocationCandidate
+        ?.engine3AuthorizationActive === true,
     directionalEvidence:
       engine26LocationCandidate?.directionalEvidence ?? null,
     ema10Posture:
