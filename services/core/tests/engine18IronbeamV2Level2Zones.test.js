@@ -15,11 +15,12 @@ test("v2 compact depth parses Level 2 size/count, never individual orders",()=>{
  assert.equal(p.bids[0].individualOrders,false);
 });
 test("persistent visible bid/ask concentration requires multiple distinct images",()=>{
- const reader=createEngine18Level2ZoneReader({minObservations:3});
- assert.equal(reader.observe(frame(110,90,now)).accepted,true);
+ const reader=createEngine18Level2ZoneReader({minObservations:3,minDurationMs:0});
+ assert.equal(reader.observe(frame(110,90,now),{receivedAtMs:now}).accepted,true);
  assert.equal(reader.snapshot({nowMs:now+200}).usable,false);
- assert.equal(reader.observe(frame(110,90,now)).reason,"UNCHANGED_DEPTH");
- reader.observe(frame(111,91,now+100));reader.observe(frame(112,92,now+200));
+ assert.equal(reader.observe(frame(110,90,now),{receivedAtMs:now+1}).reason,"UNCHANGED_DEPTH");
+ reader.observe(frame(111,91,now+100),{receivedAtMs:now+100});
+ reader.observe(frame(112,92,now+200),{receivedAtMs:now+200});
  const s=reader.snapshot({nowMs:now+250,feedTier:"UNVERIFIED"});
  assert.equal(s.usable,true);assert.equal(s.displayOnly,true);
  assert.equal(s.zones.length,2);
@@ -37,7 +38,7 @@ test("invalid, gapped/partial, crossed and off-tick books cannot be trusted",()=
  assert.equal(reader.snapshot({nowMs:now+100}).usable,false);
 });
 test("rejects outdated depth when real-time is required; no hidden stop assertions",()=>{
- const reader=createEngine18Level2ZoneReader({minObservations:1,allowDelayedResearch:false});
+ const reader=createEngine18Level2ZoneReader({minObservations:1,minDurationMs:0,allowDelayedResearch:false});
  reader.observe(frame());
  const snap=reader.snapshot({nowMs:now+60000,feedTier:"LIVE_VERIFIED"});
  assert.equal(snap.usable,false);assert.equal(snap.reason,"FEED_FRESHNESS_NOT_VERIFIED");
