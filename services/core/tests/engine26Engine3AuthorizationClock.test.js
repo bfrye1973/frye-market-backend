@@ -8,6 +8,7 @@ import path from "node:path";
 
 import {
   resolveEngine3AuthorizationClock,
+  DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH,
 } from "../logic/engine26/engine3AuthorizationClock.js";
 
 import {
@@ -108,6 +109,18 @@ test(
       assert.equal(
         first.clock.engine3AuthorizationContinuous,
         false
+      );
+      assert.equal(
+        first.clock.engine3AuthorizationSourceReady,
+        true
+      );
+      assert.equal(
+        first.clock.engine3AuthorizationStorageStatus,
+        "BOOTSTRAP_WRITE_VERIFIED"
+      );
+      assert.equal(
+        first.clock.engine3AuthorizationPersisted,
+        true
       );
 
       const second = resolveFromCandidate({
@@ -367,6 +380,32 @@ test(
         historicalAsOf.clock.engine3AuthorizationContinuous,
         false
       );
+      assert.equal(
+        historicalAsOf.clock.engine3AuthorizationPersistenceMode,
+        "READ_ONLY_HISTORICAL"
+      );
+      assert.equal(
+        historicalAsOf.clock.engine3AuthorizationPersisted,
+        false
+      );
+      assert.equal(
+        historicalAsOf.clock.engine3AuthorizationSourceReady,
+        false
+      );
+
+      const durable = JSON.parse(
+        fs.readFileSync(filePath, "utf8")
+      );
+      const durableRecord =
+        durable.records["ES::intraday_scalp@10m"];
+      assert.equal(
+        durableRecord.sourceAsOf,
+        "2026-11-18T14:00:00.000Z"
+      );
+      assert.equal(
+        durableRecord.engine3AuthorizationStartedAt,
+        "2026-11-18T14:00:00.000Z"
+      );
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -417,6 +456,189 @@ test(
         candidateId: "C1",
         zoneId: "Z1",
       }
+    );
+  }
+);
+
+
+test(
+  "Engine26 authorization clock defaults to the Engine26 persistent-volume namespace",
+  () => {
+    assert.equal(
+      DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH,
+      process.env.ENGINE26_ENGINE3_AUTHORIZATION_CLOCK_PATH ||
+        path.join(
+          process.env.ENGINE26_PERSISTENT_STATE_ROOT ||
+            "/var/data/engine26",
+          "engine3-authorization-clock.json"
+        )
+    );
+    assert.match(
+      DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH,
+      /^\/var\/data\/engine26\//
+    );
+    assert.doesNotMatch(
+      DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH,
+      /\/replay\//
+    );
+  }
+);
+
+test(
+  "Engine26 corrupt authorization state fails closed and is not silently overwritten",
+  () => {
+    const { dir, filePath } = makeClockPath();
+    try {
+      fs.writeFileSync(
+        filePath,
+        "{not-json",
+        "utf8"
+      );
+
+      const result = resolveEngine3AuthorizationClock({
+        symbol: "ES",
+        strategyId: "intraday_scalp@10m",
+        candidateId: "C1",
+        zoneId: "Z1",
+        authorized: true,
+        sourceAsOf: "2026-11-18T13:00:00.000Z",
+        filePath,
+        persist: true,
+      });
+
+      assert.equal(
+        result.engine3AuthorizationStartedAt,
+        null
+      );
+      assert.equal(
+        result.engine3AuthorizationSourceReady,
+        false
+      );
+      assert.equal(
+        result.engine3AuthorizationStorageHealthy,
+        false
+      );
+      assert.equal(
+        result.engine3AuthorizationPersistenceMode,
+        "FAIL_CLOSED_UNTRUSTED_STORAGE"
+      );
+      assert.equal(
+        fs.readFileSync(filePath, "utf8"),
+        "{not-json"
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+);
+
+for (const faultCase of [
+  ["ENOSPC_BEFORE_WRITE", "DISK_FULL"],
+  ["EACCES_BEFORE_WRITE", "PERMISSION_DENIED"],
+  ["CRASH_AFTER_TEMP_WRITE", "INTERRUPTED_WRITE"],
+  ["LOCK_HELD", "CONCURRENT_WRITER_BLOCKED"],
+  ["READBACK_CORRUPT", "READBACK_FAILED"],
+]) {
+  test(
+    `Engine26 authorization persistence fails closed for ${faultCase[0]}`,
+    () => {
+      const { dir, filePath } = makeClockPath();
+      try {
+        const result = resolveEngine3AuthorizationClock({
+          symbol: "ES",
+          strategyId: "intraday_scalp@10m",
+          candidateId: "C1",
+          zoneId: "Z1",
+          authorized: true,
+          sourceAsOf: "2026-11-18T13:00:00.000Z",
+          filePath,
+          persist: true,
+          faultInjection: faultCase[0],
+        });
+
+        assert.equal(
+          result.engine3AuthorizationStartedAt,
+          null
+        );
+        assert.equal(
+          result.engine3AuthorizationSourceReady,
+          false
+        );
+        assert.equal(
+          result.engine3AuthorizationStorageHealthy,
+          false
+        );
+        assert.equal(
+          result.engine3AuthorizationStorageStatus,
+          faultCase[1]
+        );
+        assert.equal(
+          result.engine3AuthorizationPersisted,
+          false
+        );
+
+        const leftovers = fs
+          .readdirSync(dir)
+          .filter(
+            (name) =>
+              name.endsWith(".tmp") ||
+              name.endsWith(".lock")
+          );
+        assert.deepEqual(leftovers, []);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    }
+  );
+}
+
+test(
+  "Engine26 handoff exposes consumer-readable storage health metadata",
+  () => {
+    const handoff = buildEngine26ReactionHandoff({
+      locationCandidate: candidate({
+        engine3AuthorizationStartedAt:
+          "2026-11-18T13:00:00.000Z",
+        engine3AuthorizationSourceAsOf:
+          "2026-11-18T13:05:00.000Z",
+        engine3AuthorizationIdentity: {
+          candidateId: "C1",
+          zoneId: "Z1",
+        },
+        engine3AuthorizationContinuous: true,
+        engine3AuthorizationActive: true,
+        engine3AuthorizationSourceReady: true,
+        engine3AuthorizationStorageHealthy: true,
+        engine3AuthorizationStorageStatus:
+          "WRITE_READBACK_VERIFIED",
+        engine3AuthorizationPersistenceMode:
+          "PERSISTENT_MONOTONIC",
+        engine3AuthorizationPersisted: true,
+        engine3AuthorizationWarnings: [],
+      }),
+      snapshotTime:
+        "2026-11-18T13:05:00.000Z",
+    });
+
+    assert.equal(
+      handoff.engine3AuthorizationSourceReady,
+      true
+    );
+    assert.equal(
+      handoff.engine3AuthorizationStorageHealthy,
+      true
+    );
+    assert.equal(
+      handoff.engine3AuthorizationStorageStatus,
+      "WRITE_READBACK_VERIFIED"
+    );
+    assert.equal(
+      handoff.engine3AuthorizationPersistenceMode,
+      "PERSISTENT_MONOTONIC"
+    );
+    assert.equal(
+      handoff.engine3AuthorizationPersisted,
+      true
     );
   }
 );
