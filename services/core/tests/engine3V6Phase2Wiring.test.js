@@ -39,3 +39,14 @@ test("production snapshot publishes exact control geometry source and Engine26 i
  assert.ok(handoff>sourceAt);
  assert.doesNotMatch(source.slice(handoff,handoff+600),/engine3ControlLens|phase2Causal/);
 });
+
+test("held direction supplies frozen reaction-site identity to FIRST causal-control pass",()=>{
+ const start=source.indexOf("const phase2Filter = buildEngine3V6Phase2Evidence");
+ const end=source.indexOf("const phase2Causal = buildEngine3V6CausalControl",start);
+ assert.ok(start>=0&&end>start);
+ const first=source.slice(start,end);
+ assert.match(first,/observedDirection:priorDirectional\?priorV6Direction:"NEUTRAL"/);
+ assert.match(first,/priorReactionSite:priorDirectional/);
+ assert.match(first,/priorAnchorDirection:priorDirectional/);
+ assert.match(first,/priorReactionAnchor:priorDirectional/);
+});
