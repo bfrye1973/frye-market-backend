@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { performance } from 'node:perf_hooks';
-import { captureReceiptV3 } from '../logic/engine11/sourceReceiptV3/captureReceiptV3.js';
+import { captureReceiptV3,bindSelectedBarsToReceipt } from '../logic/engine11/sourceReceiptV3/captureReceiptV3.js';
 
 const routeSource=readFileSync(new URL('../routes/futuresOhlc.js',import.meta.url),'utf8');
 function buildIsolatedRoute(enabled) {
@@ -16,7 +16,7 @@ function buildIsolatedRoute(enabled) {
   }],status:'OK'});
   const context={
     express:{Router:()=>({get:(_path,fn)=>{handler=fn;}})},
-    captureReceiptV3,performance,URL,Buffer,Response,Date,Number,Map,
+    captureReceiptV3,bindSelectedBarsToReceipt,performance,URL,Buffer,Response,Date,Number,Map,
     String,Object,Array,Math,JSON,console,Error,
     process:{env:{POLYGON_API:'SYNTHETIC_SECRET',ES_CONTRACT_OVERRIDE:physical,
       ENGINE11_SOURCE_RECEIPT_V3_ENABLED:enabled?'1':'0'}},
@@ -32,7 +32,7 @@ function buildIsolatedRoute(enabled) {
   const script=routeSource
     .replace('import express from "express";','')
     .replace('import { performance } from "node:perf_hooks";','')
-    .replace('import { captureReceiptV3 } from "../logic/engine11/sourceReceiptV3/captureReceiptV3.js";','')
+    .replace('import { captureReceiptV3, bindSelectedBarsToReceipt } from "../logic/engine11/sourceReceiptV3/captureReceiptV3.js";','')
     .replace('export default router;','');
   vm.runInNewContext(script,context,{filename:'futuresOhlc.js',timeout:1500});
   assert.equal(typeof handler,'function');
@@ -66,6 +66,11 @@ test('enabled evidence reuses the same provider call and returns no source body'
   const receipt=shadow.body.engine11Receipt;
   assert.equal(receipt.physicalContract,'ESZ6');
   assert.equal(receipt.observations.length,1);
+  assert.equal(receipt.engine3ConsumptionVerified,false);
+  assert.equal(receipt.sourceMode,'REST_AGGREGATE_OBSERVED');
+  assert.equal(shadow.body.selectedBarReferences.length,1);
+  assert.equal(shadow.body.selectedBarReferences[0].receiptId,receipt.receiptId);
+  assert.equal(shadow.body.selectedBarReferences[0].sourcePayloadDigest,receipt.observations[0].rowDigest);
   assert.ok(receipt.bodyCompletedAtMs>=receipt.requestStartedAtMs);
   assert.ok(receipt.bodyCompletedAtMs>=receipt.firstByteAtMs);
   assert.equal(receipt.bodyRetained,false);
