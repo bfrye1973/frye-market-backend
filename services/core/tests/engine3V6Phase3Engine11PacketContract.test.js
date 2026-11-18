@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {buildEngine3RawBarArchivePacket as packet}
+import {buildEngine3RawBarArchivePacket as packet, buildEngine3CandleArchiveWriterHandoff as handoff}
  from "../logic/engine3/v6/buildEngine3RawBarArchivePacket.js";
 const now=Date.parse("2026-11-18T14:00:00.000Z");
 const durations={"1m":60000,"5m":300000,"10m":600000};
@@ -86,4 +86,54 @@ test("no raw packet can be prepared from invalid OHLC or nonexistent/empty array
  assert.equal(failed.recordingActivated,false);
  assert.equal(failed.calibrationAdmissible,false);
  assert.equal(packet({...input(),bars10m:[]}).packet.gapState["10m"],"UNKNOWN");
+});
+
+test("Engine12 writer input is prepared only for exact complete synthetic envelope",()=>{
+ const prov=syntheticReceipt();
+ for(const tf of Object.keys(durations))prov.coverage[tf].coverageState="COMPLETE";
+ const prepared=packet({...input(),engine11Provenance:prov});
+ const out=handoff({prepared,engine11Provenance:prov});
+ assert.equal(out.ok,true);
+ assert.equal(out.writerInput.packet.schema,"engine3.v6.rawBarPacket.preparation.v2");
+ assert.equal(out.writerInput.provenance,prov);
+ assert.equal(out.recordingActivated,false);
+ assert.equal(out.writerInvoked,false);
+ assert.equal(out.calibrationAdmissible,false);
+ assert.equal(out.sourceEvidenceVerified,false);
+});
+test("Engine12 handoff rejects absent provenance, incomplete coverage, mismatched OHLC and source references",()=>{
+ const prov=syntheticReceipt();
+ for(const tf of Object.keys(durations))prov.coverage[tf].coverageState="COMPLETE";
+ const prepared=packet({...input(),engine11Provenance:prov});
+ assert.equal(handoff({prepared,engine11Provenance:null}).ok,false);
+ const incomplete=structuredClone(prov);
+ incomplete.coverage["1m"].coverageState="PARTIAL";
+ assert.equal(handoff({prepared,engine11Provenance:incomplete}).reasonCode,
+  "CANDLE_SOURCE_COVERAGE_INCOMPLETE_1m");
+ const changed=structuredClone(prov);
+ changed.bars["5m"][0].close=7600.25;
+ assert.equal(handoff({prepared,engine11Provenance:changed}).reasonCode,
+  "CANDLE_SOURCE_BAR_REFERENCE_MISMATCH_5m");
+ const tampered=structuredClone(prepared);
+ tampered.packet.sourceBarReferences["10m"][0].sourceRevisionId="r2";
+ assert.equal(handoff({prepared:tampered,engine11Provenance:prov}).reasonCode,
+  "CANDLE_SOURCE_BAR_REFERENCE_MISMATCH_10m");
+ const digest=structuredClone(prepared);
+ digest.packet.engine26.zoneId="UNEXPECTED";
+ assert.equal(handoff({prepared:digest,engine11Provenance:prov}).reasonCode,
+  "ENGINE3_PACKET_DIGEST_MISMATCH");
+});
+test("Engine12 handoff cannot elevate filtered-to-zero, truncated or untrusted bootstrap packet",()=>{
+ const prov=syntheticReceipt();
+ for(const tf of Object.keys(durations))prov.coverage[tf].coverageState="COMPLETE";
+ const prepared=packet({...input(),engine11Provenance:prov});
+ const truncated=structuredClone(prepared);
+ truncated.packet.sourceFiltering["1m"].truncatedCount=1;
+ assert.equal(handoff({prepared:truncated,engine11Provenance:prov}).reasonCode,
+  "CANDLE_SOURCE_COVERAGE_INCOMPLETE_1m");
+ const missing=packet(input());
+ assert.equal(handoff({prepared:missing,engine11Provenance:prov}).ok,false);
+ const empty=structuredClone(prepared);
+ empty.packet.completedBars["5m"]=[];
+ assert.equal(handoff({prepared:empty,engine11Provenance:prov}).ok,false);
 });
