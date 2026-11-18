@@ -18,10 +18,13 @@ test("Phase2 consumes post-activation control before v6 shadow reducer",()=>{
  assert.doesNotMatch(source.slice(handoff,handoff+600),/phase2Causal|engine3V6Phase2Evidence/);
 });
 test("Phase2 uses only Engine26 owned authorization timestamp",()=>{
- const p=source.indexOf("const activationArgsV6 =");
+ const readiness=source.indexOf("const engine3V6AuthorizationReadiness =");
+ const p=source.indexOf("const activationArgsV6 =",readiness);
  const c=source.indexOf("const phase2Filter =",p);
- const region=source.slice(p,c);
- assert.ok(region.includes("engine3AuthorizationStartedAt"));
+ const region=source.slice(readiness,c);
+ assert.ok(region.includes("inspectEngine26AuthorizationContract"));
+ assert.ok(region.includes("authoritativeV6Activation"));
+ assert.ok(region.includes('status==="AUTHORITATIVE_TIMESTAMP_VALID"'));
  assert.ok(!region.includes("candidateLifecycleStartTime"));
 });
 
