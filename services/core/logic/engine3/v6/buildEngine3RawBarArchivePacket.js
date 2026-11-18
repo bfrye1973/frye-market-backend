@@ -37,10 +37,13 @@ function collect(bars,tf,now,limit){
  // plausible subset. The source attestor must explain all exclusions.
  const invalidCompleted=completed.length-values.length-truncated;
  if(invalidCompleted>0)return {error:"CANDLE_SOURCE_FILTERED_INVALID_"+tf};
- const formingCount=truth.formingBar?1:0;
+ const completionUnknownCount=truth.completionUnknownBars?.length??0;
+ const formingCount=bars.length-completed.length-completionUnknownCount;
+ if(completionUnknownCount!==0||formingCount<0||formingCount>1)
+   return {error:"CANDLE_SOURCE_COMPLETION_CLASSIFICATION_INVALID_"+tf};
  const counts={observedCount:bars.length,completedCount:completed.length,
-  acceptedCount:values.length,rejectedCount:Math.max(0,bars.length-completed.length),
-  formingCount,truncatedCount:truncated};
+  acceptedCount:values.length,rejectedCount:0,
+  formingCount,completionUnknownCount,invalidCount:0,truncatedCount:truncated};
  return {values,counts};
 }
 function matchProvenanceBars(provenance,tf,values,now){
@@ -109,8 +112,8 @@ export function buildEngine3RawBarArchivePacket({
   sourceTimeframeMap[tf]=engine11Provenance?.timeframeSourceMap?.[tf]??null;
   if(declared&&(
     declared.acceptedCount!==after[tf]||
-    declared.observedCount!==before[tf]||
-    declared.rejectedCount!==before[tf]-after[tf]||
+    declared.observedCount!==filtered[tf].completedCount||
+    declared.rejectedCount!==0||
     !Array.isArray(declared.gaps)||declared.gapCount!==declared.gaps.length))
     return rejected("CANDLE_SOURCE_COVERAGE_COUNT_MISMATCH_"+tf);
  }
@@ -192,10 +195,15 @@ export function buildEngine3CandleArchiveWriterHandoff({
   const refs=packet?.sourceBarReferences?.[tf];
   if(!Array.isArray(bars)||!Array.isArray(src)||!Array.isArray(refs)||
      bars.length===0||bars.length!==src.length||refs.length!==src.length||
-     counts?.truncatedCount!==0||packet?.sourceCountsBeforeFiltering?.[tf]!==bars.length||
+     counts?.truncatedCount!==0||counts?.invalidCount!==0||
+     counts?.completionUnknownCount!==0||counts?.formingCount>1||
+     counts?.observedCount!==counts?.completedCount+counts?.formingCount||
+     counts?.completedCount!==bars.length||
+     packet?.sourceCountsBeforeFiltering?.[tf]!==counts.observedCount||
      packet?.sourceCountsAfterFiltering?.[tf]!==bars.length||
      coverage?.coverageState!=="COMPLETE"||coverage?.gapCount!==0||
-     coverage?.acceptedCount!==bars.length||coverage?.observedCount!==bars.length||
+     coverage?.acceptedCount!==bars.length||
+     coverage?.observedCount!==counts.completedCount||
      coverage?.rejectedCount!==0||packet?.gapState?.[tf]!=="COMPLETE"||
      !text(packet?.sourceTimeframeMap?.[tf]))
     return rejected("CANDLE_SOURCE_COVERAGE_INCOMPLETE_"+tf);
