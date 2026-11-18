@@ -1,61 +1,167 @@
-// Preparation only: deterministic bounded raw-bar archive packet; NO disk writes.
-// Engine12 owns canonical Replay and Engine12/18 own eventual recorder activation.
+// Phase3 preparation: deterministic bounded original-as-of ES raw bar packet.
+// In-memory only; Engine11 owns upstream provenance and Engine12 owns durable
+// storage, receipt verification, retention, activation and immutable readback.
 import {createHash} from "node:crypto";
 import {deriveCandleCompletionTruth} from "../candleCompletionTruth.js";
-const finite=x=>typeof x==="number"&&Number.isFinite(x)?x:null;
+
+const frames=Object.freeze({"1m":60000,"5m":300000,"10m":600000});
+const finite=x=>typeof x==="number"&&Number.isFinite(x);
+const integer=x=>Number.isSafeInteger(x)&&x>0;
+const text=x=>typeof x==="string"&&x.trim().length>0;
 const iso=x=>typeof x==="string"&&Number.isFinite(Date.parse(x))?x:null;
-function barsAsOf(bars,timeframe,evalMs,limit){
- const truth=deriveCandleCompletionTruth({bars,timeframe,evaluationTimeMs:evalMs});
- const dur=timeframe==="1m"?60000:timeframe==="5m"?300000:600000;
- const list=(truth.completedBars||[]).slice(-limit).map(b=>{
-  const t=finite(Number(b?.time??b?.t??b?.tSec));
-  const [open,high,low,close]=[b?.open,b?.high,b?.low,b?.close].map(v=>finite(Number(v)));
-  return {startMs:t===null?null:t*1000,endMs:t===null?null:t*1000+dur,
-   open,high,low,close};
- }).filter(b=>b.startMs!==null&&b.endMs<=evalMs&&
-   [b.open,b.high,b.low,b.close].every(v=>v!==null)&&
-   b.low<=b.open&&b.open<=b.high&&b.low<=b.close&&b.close<=b.high);
- return list;
+const sha=x=>createHash("sha256").update(x).digest("hex");
+const rejected=(reason,extra={})=>({ok:false,recordingActivated:false,
+ calibrationAdmissible:false,sourceEvidenceVerified:false,reasonCode:reason,...extra});
+const parseBar=(b,duration)=> {
+ const t=Number(b?.time??b?.t??b?.tSec);
+ const open=Number(b?.open),high=Number(b?.high),
+   low=Number(b?.low),close=Number(b?.close);
+ if(!finite(t)||!Number.isSafeInteger(t*1000)||t<=0||
+    ![open,high,low,close].every(finite)||high<low||
+    open>high||open<low||close>high||close<low)return null;
+ return {startMs:t*1000,endMs:t*1000+duration,open,high,low,close};
+};
+function collect(bars,tf,now,limit){
+ if(!Array.isArray(bars))return {error:"CANDLE_SOURCE_BARS_INVALID_"+tf};
+ const duration=frames[tf],truth=deriveCandleCompletionTruth({
+   bars,timeframe:tf,evaluationTimeMs:now});
+ const completed=truth.completedBars||[];
+ const truncated=Math.max(0,completed.length-limit);
+ const bounded=completed.slice(-limit);
+ const values=bounded.map(b=>parseBar(b,duration));
+ const invalid=values.some(b=>!b||b.endMs>now);
+ if(invalid)return {error:"CANDLE_SOURCE_BAR_INVALID_OR_FUTURE_"+tf};
+ const unique=new Set(values.map(b=>b.startMs));
+ if(unique.size!==values.length)return {error:"CANDLE_SOURCE_DUPLICATE_"+tf};
+ // Reject malformed completed candles rather than silently returning only a
+ // plausible subset. The source attestor must explain all exclusions.
+ const invalidCompleted=completed.length-values.length-truncated;
+ if(invalidCompleted>0)return {error:"CANDLE_SOURCE_FILTERED_INVALID_"+tf};
+ const formingCount=truth.formingBar?1:0;
+ const counts={observedCount:bars.length,completedCount:completed.length,
+  acceptedCount:values.length,rejectedCount:Math.max(0,bars.length-completed.length),
+  formingCount,truncatedCount:truncated};
+ return {values,counts};
+}
+function matchProvenanceBars(provenance,tf,values,now){
+ const source=provenance?.bars?.[tf];
+ if(!Array.isArray(source)||source.length!==values.length)
+   return {reason:"CANDLE_SOURCE_BAR_REFERENCE_COUNT_MISMATCH_"+tf};
+ const references=[];
+ for(let i=0;i<values.length;i++){
+  const bar=values[i],p=source[i];
+  if(!p||p.timeframe!==tf||p.startMs!==bar.startMs||p.endMs!==bar.endMs||
+     ["open","high","low","close"].some(k=>p[k]!==bar[k])||
+     !text(p.sourceBarId)||!text(p.sourceRevisionId)||!text(p.sourcePayloadDigest)||
+     !text(p.sourceContract))
+    return {reason:"CANDLE_SOURCE_BAR_REFERENCE_MISMATCH_"+tf};
+  if(!integer(p.firstReceivedAtMs)||!integer(p.availableAtMs)||
+     !integer(p.completionObservedAtMs)||p.firstReceivedAtMs>p.availableAtMs||
+     p.availableAtMs>now||p.completionObservedAtMs>now||p.finality!=="CONFIRMED"||
+     p.clockStatus!=="VERIFIED"||p.sourceHealth!=="HEALTHY")
+    return {reason:"CANDLE_BAR_UNAVAILABLE_ASOF_OR_NOT_FINAL_"+tf};
+  references.push({sourceBarId:p.sourceBarId,sourceRevisionId:p.sourceRevisionId,
+   sourcePayloadDigest:p.sourcePayloadDigest,sourceContract:p.sourceContract,
+   providerEventId:p.providerEventId??null,
+   firstReceivedAtMs:p.firstReceivedAtMs,availableAtMs:p.availableAtMs,
+   completionObservedAtMs:p.completionObservedAtMs,finality:p.finality});
+ }
+ return {references};
 }
 export function buildEngine3RawBarArchivePacket({
  evaluationTimeMs=null,symbol="ES",strategyId="intraday_scalp@10m",
  bars1m=[],bars5m=[],bars10m=[],engine26=null,engine22=null,
- activation=null,maxBarsPerTf=200,maxBytes=500000,
+ activation=null,engine11Provenance=null,maxBarsPerTf=200,maxBytes=500000,
 }={}){
- const t=finite(evaluationTimeMs);
- const limit=Math.max(1,Math.min(2000,Math.floor(maxBarsPerTf)));
- if(t===null||symbol!=="ES"||strategyId!=="intraday_scalp@10m")
-  return {ok:false,recordingActivated:false,reasonCode:"INVALID_ARCHIVE_CONTEXT"};
+ if(!integer(evaluationTimeMs)||symbol!=="ES"||
+   strategyId!=="intraday_scalp@10m"||
+   !integer(maxBarsPerTf)||!integer(maxBytes))
+   return rejected("INVALID_ARCHIVE_CONTEXT");
+ const limit=Math.min(2000,maxBarsPerTf),max=Math.min(1000000,maxBytes);
+ const inputs={"1m":bars1m,"5m":bars5m,"10m":bars10m};
+ const bars={},before={},after={},filtered={},refs={};
+ for(const tf of Object.keys(frames)){
+  const c=collect(inputs[tf],tf,evaluationTimeMs,limit);
+  if(c.error)return rejected(c.error);
+  bars[tf]=c.values;before[tf]=c.counts.observedCount;
+  after[tf]=c.counts.acceptedCount;filtered[tf]=c.counts;
+  if(engine11Provenance){
+   const m=matchProvenanceBars(engine11Provenance,tf,c.values,evaluationTimeMs);
+   if(m.reason)return rejected(m.reason);
+   refs[tf]=m.references;
+  }else refs[tf]=[];
+ }
+ // A verified Engine11 source receipt must cover the same instant, all
+ // timeframes and every omitted/incomplete source interval. Never invent
+ // receipt times or source coverage from the candle close boundary.
+ if(engine11Provenance &&
+   (engine11Provenance.schema!=="engine11.es.completedCandleProvenance.v1"||
+    engine11Provenance.symbol!=="ES"||
+    engine11Provenance.evaluationTimeMs!==evaluationTimeMs||
+    !text(engine11Provenance.receiptId)||
+    !text(engine11Provenance.signatureOrDigest?.value)))
+   return rejected("CANDLE_SOURCE_PROVENANCE_IDENTITY_MISMATCH");
+ const coverage={},gapState={},sourceTimeframeMap={};
+ for(const tf of Object.keys(frames)){
+  const declared=engine11Provenance?.coverage?.[tf];
+  coverage[tf]=declared?{...declared}:null;
+  gapState[tf]=declared?.coverageState??"UNKNOWN";
+  sourceTimeframeMap[tf]=engine11Provenance?.timeframeSourceMap?.[tf]??null;
+  if(declared&&(
+    declared.acceptedCount!==after[tf]||
+    declared.observedCount!==before[tf]||
+    declared.rejectedCount!==before[tf]-after[tf]||
+    !Array.isArray(declared.gaps)||declared.gapCount!==declared.gaps.length))
+    return rejected("CANDLE_SOURCE_COVERAGE_COUNT_MISMATCH_"+tf);
+ }
  const publication=engine22?.authorizedWorkingStructure??null;
  const publishedAt=iso(publication?.publishedAt);
- // A current publication must not be silently substituted into past Replay.
- const validPublication=publishedAt!==null&&Date.parse(publishedAt)<=t;
- const body={schema:"engine3.v6.rawBarPacket.preparation.v1",mode:"NOT_RECORDING",
-  symbol,strategyId,evaluationTimeMs:t,
+ const validPublication=publishedAt!==null&&Date.parse(publishedAt)<=evaluationTimeMs;
+ // Caller-side digest is a pointer only. Independent Engine11 origin,
+ // source raw bytes and Engine12 readback MUST be separately verified.
+ const sourceProof=engine11Provenance?{
+  schema:engine11Provenance.schema,receiptId:engine11Provenance.receiptId,
+  signatureOrDigest:engine11Provenance.signatureOrDigest??null,
+  providerId:engine11Provenance.providerId??null,
+  feedId:engine11Provenance.feedId??null,
+  entitlementMode:engine11Provenance.entitlementMode??"UNKNOWN",
+  sourceMode:engine11Provenance.sourceMode??"UNKNOWN",
+  physicalContract:engine11Provenance.physicalContract??null,
+  priceBasis:engine11Provenance.priceBasis??null,
+  rollPolicy:engine11Provenance.rollPolicy??null,
+  sourceFingerprint:engine11Provenance.sourceFingerprint??null,
+ }:null;
+ const body={schema:"engine3.v6.rawBarPacket.preparation.v2",mode:"NOT_RECORDING",
+  symbol,strategyId,evaluationTimeMs,
   engine26:{candidateId:engine26?.candidateId??null,zoneId:engine26?.zoneId??null,
    zone:engine26?.entryZone??null,
    engine3AuthorizationStartedAt:engine26?.engine3AuthorizationStartedAt??null,
    observedActivationStartedAtMs:activation?.activationStartedAtMs??null,
    activationSource:activation?.activationSource??"UNAVAILABLE"},
-  engine22:validPublication?{schema:publication.schema,
-   publishedAt,publicationRevision:publication.publicationRevision??null,
+  engine22:validPublication?{schema:publication.schema,publishedAt,
+   publicationRevision:publication.publicationRevision??null,
    modelFingerprint:publication.modelFingerprint??null,
    submicro:publication.degrees?.submicro??null,
    micro:publication.degrees?.micro??null}:null,
   engine22PublicationAsOfValid:validPublication,
-  completedBars:{
-   "1m":barsAsOf(bars1m,"1m",t,limit),
-   "5m":barsAsOf(bars5m,"5m",t,limit),
-   "10m":barsAsOf(bars10m,"10m",t,limit),
-  }};
- const json=JSON.stringify(body);
- const byteSize=Buffer.byteLength(json,"utf8");
- const max=finite(maxBytes)??500000;
- if(byteSize>max)return {ok:false,recordingActivated:false,
-  reasonCode:"ARCHIVE_PACKET_SIZE_LIMIT",byteSize,maxBytes:max};
- return {ok:true,recordingActivated:false,packet:body,
-  sha256:createHash("sha256").update(json).digest("hex"),
-  byteSize,dedupeKey:[symbol,strategyId,t].join("|"),
-  reasonCode:"ARCHIVE_PACKET_PREPARED_NOT_RECORDED"};
+  engine11ProvenanceReceiptId:sourceProof?.receiptId??null,
+  engine11ProvenanceDigest:sourceProof?.signatureOrDigest?.value??null,
+  engine11ProvenanceSchema:sourceProof?.schema??null,
+  provenance:sourceProof,
+  sourceCountsBeforeFiltering:before,
+  sourceCountsAfterFiltering:after,
+  sourceFiltering:filtered,
+  coverage,gapState,sourceTimeframeMap,
+  sourceBarReferences:refs,
+  completedBars:bars};
+ const json=JSON.stringify(body),byteSize=Buffer.byteLength(json,"utf8");
+ if(byteSize>max)return rejected("ARCHIVE_PACKET_SIZE_LIMIT",{byteSize,maxBytes:max});
+ const receiptVerified=false; // Engine3 never certifies Engine11 origin.
+ return {ok:true,recordingActivated:false,calibrationAdmissible:false,
+  sourceEvidenceVerified:receiptVerified,packet:body,
+  sha256:sha(json),byteSize,dedupeKey:[symbol,strategyId,evaluationTimeMs].join("|"),
+  reasonCode:engine11Provenance?
+    "ARCHIVE_PACKET_PREPARED_PROVENANCE_NOT_INDEPENDENTLY_VERIFIED":
+    "ARCHIVE_PACKET_PREPARED_NO_ENGINE11_RECEIPT"};
 }
 export default buildEngine3RawBarArchivePacket;
