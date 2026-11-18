@@ -1,24 +1,33 @@
 // services/core/logic/engine26/engine3AuthorizationClock.js
 // Engine 26-owned continuity clock for Engine 3 evaluation authorization.
 //
-// Contract:
+// Production-safety contract:
+// - Uses an Engine26-owned persistent-volume namespace by default.
 // - engine3AuthorizationStartedAt is the first source as-of timestamp of the
 //   current uninterrupted authorized run for the same (candidateId, zoneId).
 // - It is independent of direction/contact and MUST NOT reuse
 //   candidateLifecycleStartTime.
 // - Any unauthorized/ineligible/terminal tick ends the run.
 // - Candidate/zone identity change starts a new run.
-// - State is persisted so process restart does not re-date a live run.
-// - A stored future record is never allowed to backdate an older as-of read.
+// - State is atomically persisted and read back before source readiness is true.
+// - Corrupt/unreadable state fails closed for continuity verification.
+// - Historical/out-of-order evaluation is read-only and cannot rewind live state.
 
 import fs from "node:fs";
 import path from "node:path";
 
+export const ENGINE26_PERSISTENT_STATE_ROOT =
+  process.env.ENGINE26_PERSISTENT_STATE_ROOT ||
+  "/var/data/engine26";
+
 export const DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH =
   process.env.ENGINE26_ENGINE3_AUTHORIZATION_CLOCK_PATH ||
-  "/opt/render/project/src/services/core/data/engine26/engine3-authorization-clock.json";
+  path.join(
+    ENGINE26_PERSISTENT_STATE_ROOT,
+    "engine3-authorization-clock.json"
+  );
 
-const VERSION = "engine26.engine3AuthorizationClock.v1";
+const VERSION = "engine26.engine3AuthorizationClock.v2";
 
 function normalizeIso(value) {
   if (!value) return null;
@@ -40,32 +49,262 @@ function emptyStore() {
   };
 }
 
-function readStore(filePath) {
+function diagnostic(code, details = {}) {
+  return {
+    code,
+    ...details,
+  };
+}
+
+function readStore(filePath, fsOps = fs) {
   try {
-    if (!fs.existsSync(filePath)) return emptyStore();
-    const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    if (!fsOps.existsSync(filePath)) {
+      return {
+        ok: true,
+        exists: false,
+        bootstrap: true,
+        status: "MISSING_BOOTSTRAP",
+        store: emptyStore(),
+        warnings: [
+          diagnostic(
+            "ENGINE26_ENGINE3_AUTH_CLOCK_BOOTSTRAP_NEW_STORE",
+            { filePath }
+          ),
+        ],
+      };
+    }
+
+    const raw = fsOps.readFileSync(filePath, "utf8");
+    if (!String(raw || "").trim()) {
+      return {
+        ok: false,
+        exists: true,
+        bootstrap: false,
+        status: "CORRUPT_EMPTY_STATE",
+        store: null,
+        warnings: [
+          diagnostic(
+            "ENGINE26_ENGINE3_AUTH_CLOCK_STATE_EMPTY",
+            { filePath }
+          ),
+        ],
+      };
+    }
+
+    const parsed = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      !parsed.records ||
+      typeof parsed.records !== "object" ||
+      Array.isArray(parsed.records)
+    ) {
+      return {
+        ok: false,
+        exists: true,
+        bootstrap: false,
+        status: "CORRUPT_INVALID_STATE",
+        store: null,
+        warnings: [
+          diagnostic(
+            "ENGINE26_ENGINE3_AUTH_CLOCK_STATE_INVALID",
+            { filePath }
+          ),
+        ],
+      };
+    }
+
     return {
-      version: parsed?.version || VERSION,
-      records:
-        parsed?.records && typeof parsed.records === "object"
-          ? parsed.records
-          : {},
+      ok: true,
+      exists: true,
+      bootstrap: false,
+      status: "READ_OK",
+      store: {
+        ...parsed,
+        version: parsed.version || VERSION,
+        records: { ...parsed.records },
+      },
+      warnings: [],
     };
-  } catch {
-    return emptyStore();
+  } catch (error) {
+    return {
+      ok: false,
+      exists: true,
+      bootstrap: false,
+      status: "READ_FAILED",
+      store: null,
+      warnings: [
+        diagnostic(
+          "ENGINE26_ENGINE3_AUTH_CLOCK_READ_FAILED",
+          {
+            filePath,
+            errorCode: error?.code || null,
+            message:
+              error instanceof Error
+                ? error.message
+                : String(error),
+          }
+        ),
+      ],
+    };
   }
 }
 
-function writeStore(filePath, store) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+function makeInjectedError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function writeStoreAtomic({
+  filePath,
+  store,
+  fsOps = fs,
+  faultInjection = null,
+} = {}) {
+  const directory = path.dirname(filePath);
+  const lockPath = `${filePath}.lock`;
   const temporaryPath =
     `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(
-    temporaryPath,
-    `${JSON.stringify(store, null, 2)}\n`,
-    "utf8"
-  );
-  fs.renameSync(temporaryPath, filePath);
+  let lockFd = null;
+
+  try {
+    fsOps.mkdirSync(directory, { recursive: true });
+
+    if (faultInjection === "LOCK_HELD") {
+      throw makeInjectedError(
+        "EEXIST",
+        "simulated concurrent writer lock"
+      );
+    }
+
+    lockFd = fsOps.openSync(lockPath, "wx");
+
+    if (faultInjection === "EACCES_BEFORE_WRITE") {
+      throw makeInjectedError(
+        "EACCES",
+        "simulated permission denied"
+      );
+    }
+
+    if (faultInjection === "ENOSPC_BEFORE_WRITE") {
+      throw makeInjectedError(
+        "ENOSPC",
+        "simulated disk full"
+      );
+    }
+
+    fsOps.writeFileSync(
+      temporaryPath,
+      `${JSON.stringify(store, null, 2)}\n`,
+      {
+        encoding: "utf8",
+        flag: "wx",
+      }
+    );
+
+    if (faultInjection === "CRASH_AFTER_TEMP_WRITE") {
+      throw makeInjectedError(
+        "ECRASH",
+        "simulated interruption after temp write"
+      );
+    }
+
+    const tempFd = fsOps.openSync(temporaryPath, "r");
+    try {
+      if (typeof fsOps.fsyncSync === "function") {
+        fsOps.fsyncSync(tempFd);
+      }
+    } finally {
+      fsOps.closeSync(tempFd);
+    }
+
+    fsOps.renameSync(temporaryPath, filePath);
+
+    if (faultInjection === "READBACK_CORRUPT") {
+      throw makeInjectedError(
+        "EREADBACK",
+        "simulated independent readback failure"
+      );
+    }
+
+    const readback = readStore(filePath, fsOps);
+    if (!readback.ok) {
+      throw makeInjectedError(
+        "EREADBACK",
+        `readback failed: ${readback.status}`
+      );
+    }
+
+    const expected =
+      JSON.stringify(store);
+    const observed =
+      JSON.stringify(readback.store);
+
+    if (expected !== observed) {
+      throw makeInjectedError(
+        "EREADBACK",
+        "readback verification mismatch"
+      );
+    }
+
+    return {
+      ok: true,
+      status: "WRITE_READBACK_VERIFIED",
+      warnings: [],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status:
+        error?.code === "EEXIST"
+          ? "CONCURRENT_WRITER_BLOCKED"
+          : error?.code === "ENOSPC"
+          ? "DISK_FULL"
+          : error?.code === "EACCES"
+          ? "PERMISSION_DENIED"
+          : error?.code === "EREADBACK"
+          ? "READBACK_FAILED"
+          : error?.code === "ECRASH"
+          ? "INTERRUPTED_WRITE"
+          : "WRITE_FAILED",
+      warnings: [
+        diagnostic(
+          "ENGINE26_ENGINE3_AUTH_CLOCK_WRITE_FAILED",
+          {
+            filePath,
+            errorCode: error?.code || null,
+            message:
+              error instanceof Error
+                ? error.message
+                : String(error),
+          }
+        ),
+      ],
+    };
+  } finally {
+    try {
+      if (
+        temporaryPath &&
+        fsOps.existsSync(temporaryPath)
+      ) {
+        fsOps.unlinkSync(temporaryPath);
+      }
+    } catch {}
+
+    try {
+      if (lockFd !== null) {
+        fsOps.closeSync(lockFd);
+      }
+    } catch {}
+
+    try {
+      if (fsOps.existsSync(lockPath)) {
+        fsOps.unlinkSync(lockPath);
+      }
+    } catch {}
+  }
 }
 
 export function resolveEngine3AuthorizationClock({
@@ -77,10 +316,37 @@ export function resolveEngine3AuthorizationClock({
   sourceAsOf,
   filePath = DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH,
   persist = true,
+  fsOps = fs,
+  faultInjection = null,
 } = {}) {
   const normalizedAsOf = normalizeIso(sourceAsOf);
   const key = streamKey({ symbol, strategyId });
-  const store = readStore(filePath);
+  const read = readStore(filePath, fsOps);
+
+  if (!read.ok) {
+    return {
+      engine3AuthorizationStartedAt: null,
+      engine3AuthorizationSourceAsOf: normalizedAsOf,
+      engine3AuthorizationIdentity: {
+        candidateId: candidateId || null,
+        zoneId: zoneId || null,
+      },
+      engine3AuthorizationContinuous: false,
+      engine3AuthorizationActive: authorized === true,
+      engine3AuthorizationSourceReady: false,
+      engine3AuthorizationStorageHealthy: false,
+      engine3AuthorizationStorageStatus: read.status,
+      engine3AuthorizationPersistenceMode:
+        "FAIL_CLOSED_UNTRUSTED_STORAGE",
+      engine3AuthorizationPersisted: false,
+      engine3AuthorizationWarnings:
+        read.warnings || [],
+      record: null,
+      store: null,
+    };
+  }
+
+  const store = read.store || emptyStore();
   const previous = store.records?.[key] || null;
 
   const identityValid =
@@ -97,20 +363,20 @@ export function resolveEngine3AuthorizationClock({
   const previousStartedAt =
     normalizeIso(previous?.engine3AuthorizationStartedAt);
 
-  const previousNotFromFuture =
-    previousSourceAsOf === null ||
-    normalizedAsOf === null ||
-    previousSourceAsOf <= normalizedAsOf;
+  const historicalEvaluation =
+    previousSourceAsOf !== null &&
+    normalizedAsOf !== null &&
+    previousSourceAsOf > normalizedAsOf;
 
   const sameUninterruptedRun =
     runAuthorized &&
+    !historicalEvaluation &&
     previous?.active === true &&
     previous?.candidateId === candidateId &&
     previous?.zoneId === zoneId &&
-    previousStartedAt !== null &&
-    previousNotFromFuture;
+    previousStartedAt !== null;
 
-  const engine3AuthorizationStartedAt =
+  const proposedStartedAt =
     runAuthorized
       ? (
           sameUninterruptedRun
@@ -125,7 +391,8 @@ export function resolveEngine3AuthorizationClock({
     candidateId: candidateId || null,
     zoneId: zoneId || null,
     active: runAuthorized,
-    engine3AuthorizationStartedAt,
+    engine3AuthorizationStartedAt:
+      proposedStartedAt,
     sourceAsOf: normalizedAsOf,
     lastAuthorizedAsOf:
       runAuthorized
@@ -146,21 +413,130 @@ export function resolveEngine3AuthorizationClock({
     },
   };
 
-  if (persist) {
-    writeStore(filePath, nextStore);
+  /*
+   * Historical/replay evaluations are intentionally read-only when the
+   * durable head is newer. This is the monotonic fence that prevents replay
+   * from rewinding live continuity storage.
+   */
+  if (historicalEvaluation) {
+    return {
+      engine3AuthorizationStartedAt:
+        proposedStartedAt,
+      engine3AuthorizationSourceAsOf:
+        normalizedAsOf,
+      engine3AuthorizationIdentity: {
+        candidateId: candidateId || null,
+        zoneId: zoneId || null,
+      },
+      engine3AuthorizationContinuous: false,
+      engine3AuthorizationActive: runAuthorized,
+      engine3AuthorizationSourceReady: false,
+      engine3AuthorizationStorageHealthy: true,
+      engine3AuthorizationStorageStatus:
+        "HISTORICAL_READ_ONLY",
+      engine3AuthorizationPersistenceMode:
+        "READ_ONLY_HISTORICAL",
+      engine3AuthorizationPersisted: false,
+      engine3AuthorizationWarnings: [
+        diagnostic(
+          "ENGINE26_ENGINE3_AUTH_CLOCK_MONOTONIC_WRITE_FENCE",
+          {
+            durableSourceAsOf:
+              previousSourceAsOf,
+            evaluationSourceAsOf:
+              normalizedAsOf,
+          }
+        ),
+      ],
+      record,
+      store,
+    };
+  }
+
+  if (!persist) {
+    return {
+      engine3AuthorizationStartedAt:
+        proposedStartedAt,
+      engine3AuthorizationSourceAsOf:
+        normalizedAsOf,
+      engine3AuthorizationIdentity: {
+        candidateId: candidateId || null,
+        zoneId: zoneId || null,
+      },
+      engine3AuthorizationContinuous:
+        sameUninterruptedRun,
+      engine3AuthorizationActive: runAuthorized,
+      engine3AuthorizationSourceReady: false,
+      engine3AuthorizationStorageHealthy: true,
+      engine3AuthorizationStorageStatus:
+        "READ_ONLY_NOT_PERSISTED",
+      engine3AuthorizationPersistenceMode:
+        "READ_ONLY",
+      engine3AuthorizationPersisted: false,
+      engine3AuthorizationWarnings:
+        read.warnings || [],
+      record,
+      store,
+    };
+  }
+
+  const write = writeStoreAtomic({
+    filePath,
+    store: nextStore,
+    fsOps,
+    faultInjection,
+  });
+
+  if (!write.ok) {
+    return {
+      engine3AuthorizationStartedAt: null,
+      engine3AuthorizationSourceAsOf:
+        normalizedAsOf,
+      engine3AuthorizationIdentity: {
+        candidateId: candidateId || null,
+        zoneId: zoneId || null,
+      },
+      engine3AuthorizationContinuous: false,
+      engine3AuthorizationActive: runAuthorized,
+      engine3AuthorizationSourceReady: false,
+      engine3AuthorizationStorageHealthy: false,
+      engine3AuthorizationStorageStatus:
+        write.status,
+      engine3AuthorizationPersistenceMode:
+        "FAIL_CLOSED_WRITE_FAILURE",
+      engine3AuthorizationPersisted: false,
+      engine3AuthorizationWarnings: [
+        ...(read.warnings || []),
+        ...(write.warnings || []),
+      ],
+      record: null,
+      store,
+    };
   }
 
   return {
-    engine3AuthorizationStartedAt,
-    engine3AuthorizationSourceAsOf: normalizedAsOf,
+    engine3AuthorizationStartedAt:
+      proposedStartedAt,
+    engine3AuthorizationSourceAsOf:
+      normalizedAsOf,
     engine3AuthorizationIdentity: {
       candidateId: candidateId || null,
       zoneId: zoneId || null,
     },
     engine3AuthorizationContinuous:
       sameUninterruptedRun,
-    engine3AuthorizationActive:
-      runAuthorized,
+    engine3AuthorizationActive: runAuthorized,
+    engine3AuthorizationSourceReady: true,
+    engine3AuthorizationStorageHealthy: true,
+    engine3AuthorizationStorageStatus:
+      read.bootstrap
+        ? "BOOTSTRAP_WRITE_VERIFIED"
+        : "WRITE_READBACK_VERIFIED",
+    engine3AuthorizationPersistenceMode:
+      "PERSISTENT_MONOTONIC",
+    engine3AuthorizationPersisted: true,
+    engine3AuthorizationWarnings:
+      read.warnings || [],
     record,
     store: nextStore,
   };
