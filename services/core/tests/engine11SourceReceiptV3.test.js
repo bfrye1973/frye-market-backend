@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {captureReceiptV3,sanitizeMassiveAggregateRequest} from
+import {captureReceiptV3,sanitizeMassiveAggregateRequest,bindSelectedBarsToReceipt} from
   '../logic/engine11/sourceReceiptV3/captureReceiptV3.js';
 import {parseBody,sha256} from '../logic/engine11/sourceObservationsV2/evidence.js';
 
@@ -53,4 +53,25 @@ test('v3 rejects unsanitized paginated URLs, never leaks keys',()=>{
  assert.throws(()=>make(bad),/V3_UNSAFE_ORIGIN/);
  const okay=Buffer.from('{"results":[],"next_url":"https://api.polygon.io/futures/v1/aggs/ESZ6?limit=100&apiKey=secret"}');
  assert.doesNotMatch(make(okay).nextUrl,/apiKey|secret/);
+});
+
+test('selected rows link by exact second to original provider byte digest',()=>{
+ const a=make(source());
+ const refs=bindSelectedBarsToReceipt(a,[{time:1795000000,open:6000,high:6002,
+   low:5999,close:6001,volume:14}]);
+ assert.equal(refs.length,1);
+ assert.equal(refs[0].receiptId,a.receiptId);
+ assert.equal(refs[0].sourceRevisionId,'OBSERVED_SHA256:'+a.observations[0].rowDigest);
+ assert.equal(refs[0].sourceTrustVerified,false);
+ assert.throws(()=>bindSelectedBarsToReceipt(a,[{time:1795000060}]),/V3_SELECTED_BAR_SOURCE_MISSING/);
+ assert.throws(()=>bindSelectedBarsToReceipt(a,[{time:1795000000},{time:1795000000}]),
+   /V3_DUPLICATE_SELECTED_BAR/);
+});
+test('paged or conflicting provider evidence must fail closed for selected rows',()=>{
+ const paged=make(Buffer.from('{"results":['+row()+'],"next_url":"https://api.polygon.io/futures/v1/aggs/ESZ6?limit=100"}'));
+ assert.throws(()=>bindSelectedBarsToReceipt(paged,[{time:1795000000}]),
+   /V3_PAGINATION_INCOMPLETE/);
+ const conflicting=make(Buffer.from('{"results":['+row(6001)+','+row(6000)+']}'));
+ assert.throws(()=>bindSelectedBarsToReceipt(conflicting,[{time:1795000000}]),
+   /V3_CONFLICTING_SOURCE_REVISIONS/);
 });
