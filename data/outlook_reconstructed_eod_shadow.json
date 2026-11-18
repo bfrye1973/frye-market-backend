@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-17T23:57:11.477599+00:00",
+  "updated_at_utc": "2026-11-18T02:09:01.430203+00:00",
   "completedSessionDate": "2026-11-17",
   "score": 20.1,
   "state": "BEARISH",
@@ -119,11 +119,11 @@
       "momentum_pct": 42.86
     },
     "Consumer Discretionary": {
-      "nh": 43,
+      "nh": 42,
       "nl": 149,
       "up": 5,
       "down": 21,
-      "breadth_pct": 22.4,
+      "breadth_pct": 21.99,
       "momentum_pct": 19.23
     },
     "Consumer Staples": {
@@ -143,12 +143,12 @@
       "momentum_pct": 0.0
     },
     "Financials": {
-      "nh": 95,
-      "nl": 213,
+      "nh": 94,
+      "nl": 212,
       "up": 27,
-      "down": 22,
-      "breadth_pct": 30.84,
-      "momentum_pct": 55.1
+      "down": 21,
+      "breadth_pct": 30.72,
+      "momentum_pct": 56.25
     },
     "Healthcare": {
       "nh": 82,
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-17",
-      "close": 7409.5,
-      "ma10": 7493.15,
-      "ma20": 7589.7625,
+      "close": 7380.25,
+      "ma10": 7490.225,
+      "ma20": 7588.3,
       "ma10Prior": 7525.65,
       "ma20Prior": 7609.3,
       "ma10Upsloping": false,
@@ -263,12 +263,12 @@
       "breadth_pct": 17.71,
       "momentum_pct": 21.68,
       "prior": {
-        "nh": 462,
-        "nl": 1450,
+        "nh": 460,
+        "nl": 1449,
         "up": 69,
-        "down": 176,
-        "breadth_pct": 24.16,
-        "momentum_pct": 28.16
+        "down": 175,
+        "breadth_pct": 24.1,
+        "momentum_pct": 28.28
       }
     },
     "large": {
@@ -314,12 +314,12 @@
       "breadth_pct": 15.39,
       "momentum_pct": 24.82,
       "prior": {
-        "nh": 286,
-        "nl": 1137,
+        "nh": 284,
+        "nl": 1136,
         "up": 61,
-        "down": 138,
-        "breadth_pct": 20.1,
-        "momentum_pct": 30.65
+        "down": 137,
+        "breadth_pct": 20.0,
+        "momentum_pct": 30.81
       }
     },
     "unknown": {
