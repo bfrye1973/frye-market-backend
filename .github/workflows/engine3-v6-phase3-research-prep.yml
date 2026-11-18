@@ -5,6 +5,7 @@ on:
       - 'services/core/logic/engine3/v6/buildEngine3V6ResearchTrace.js'
       - 'services/core/logic/engine3/v6/inspectEngine26AuthorizationContract.js'
       - 'services/core/logic/engine3/v6/runEngine3V6ResearchFixture.js'
+      - 'services/core/logic/engine3/v6/auditEngine3RawBarPacketForCalibration.js'
       - 'services/core/tests/engine3V6Phase3*.test.js'
       - 'services/core/jobs/buildStrategySnapshot.js'
       - '.github/workflows/engine3-v6-phase3-research-prep.yml'
@@ -25,6 +26,7 @@ jobs:
           node --check logic/engine3/v6/buildEngine3V6ResearchTrace.js
           node --check logic/engine3/v6/inspectEngine26AuthorizationContract.js
           node --check logic/engine3/v6/runEngine3V6ResearchFixture.js
+          node --check logic/engine3/v6/auditEngine3RawBarPacketForCalibration.js
           node --check jobs/buildStrategySnapshot.js
       - name: Phase3 preparation and integration contract tests
         run: node --test tests/engine3V6Phase3*.test.js
