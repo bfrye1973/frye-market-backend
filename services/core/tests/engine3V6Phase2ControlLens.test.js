@@ -109,3 +109,22 @@ test("whole-zone midpoint is not used after a wide lower site selection",()=>{
    edge.control.latestZoneCloseRelation!==original.control.latestZoneCloseRelation,true);
  assert.equal(edge.qualified,false,"far from lower site cannot qualify by whole-zone pressure");
 });
+
+for(const [direction,closes,expectedReaction] of [
+ ["LONG",[107,108,109],"IN_ZONE_PRESSURE_UP"],
+ ["SHORT",[109,108,107],"IN_ZONE_PRESSURE_DOWN"],
+]){
+ test("narrow "+direction+" real completed 5m reaction uses WHOLE_ZONE midline",()=>{
+  const narrow={id:"Z",zoneId:"Z",low:106,high:110,midline:108,widthPoints:4};
+  const bars=closes.map((close,i)=>
+    completed(now-(2-i)*5*m,5*m,close,Math.min(110,close+0.75),
+      Math.max(106,close-0.75),close));
+  const original=JSON.stringify(narrow);
+  const out=build({phase2Evidence:e("whole",false,narrow,bars),
+    normalizedZoneInput:zi(narrow),evaluationTimeMs:now});
+  assert.equal(out.controlGeometrySource,"WHOLE_ZONE");
+  assert.equal(out.validation5m.completed.reaction.reactionState,expectedReaction);
+  assert.deepEqual(out.engine3ControlLens,narrow);
+  assert.equal(JSON.stringify(narrow),original);
+ });
+}
