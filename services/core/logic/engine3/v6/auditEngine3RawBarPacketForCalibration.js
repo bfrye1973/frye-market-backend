@@ -56,6 +56,14 @@ export function auditEngine3RawBarPacketForCalibration({
    issues.push("BAR_SOURCE_PROVENANCE_NOT_VERIFIED");
  if(sourceEvidence?.observedAsOfTimeMs!==asOf)
    issues.push("BAR_SOURCE_ASOF_TIME_NOT_VERIFIED");
+ // A self-described feed ID is not proof: require a separately approved
+ // evidence attestation, explicit gap coverage and roll reconciliation.
+ if(sourceEvidence?.approvedSourceAttestation!==true||
+    !hasText(sourceEvidence?.attestationId)||
+    sourceEvidence?.gapCoverageVerified!==true||
+    sourceEvidence?.gapCount!==0||
+    sourceEvidence?.rollReconciliationVerified!==true)
+   issues.push("BAR_PROVENANCE_ATTESTATION_OR_COVERAGE_MISSING");
  if(storageReceipt?.writerOwnerApproved!==true||
     !hasText(storageReceipt?.owner)||!hasText(storageReceipt?.writerVersion)||
     !hasText(storageReceipt?.immutableNamespace))
@@ -64,12 +72,14 @@ export function auditEngine3RawBarPacketForCalibration({
     storageReceipt?.writeMode!=="EXCLUSIVE_NO_OVERWRITE"||
     storageReceipt?.restartReconciled!==true||
     storageReceipt?.diskFailureFailClosed!==true||
-    storageReceipt?.backpressureFailClosed!==true)
+    storageReceipt?.backpressureFailClosed!==true||
+    storageReceipt?.corruptionRecoveryTested!==true||
+    storageReceipt?.missingSourceFailClosed!==true)
    issues.push("DURABILITY_AND_FAILURE_SAFETY_UNVERIFIED");
  const body= p&&typeof p==="object"?JSON.stringify(p):null;
  const hash=body?createHash("sha256").update(body).digest("hex"):null;
  if(!hash||prepared?.sha256!==hash||storageReceipt?.sha256!==hash||
-    readback?.sha256!==hash)
+    readback?.sha256!==hash||readback?.independentVerifierApproved!==true)
    issues.push("END_TO_END_CHECKSUM_READBACK_UNVERIFIED");
  if(!hasText(prepared?.dedupeKey)||storageReceipt?.dedupeKey!==prepared?.dedupeKey||
     readback?.dedupeKey!==prepared?.dedupeKey)
