@@ -1,0 +1,34 @@
+name: Engine 3 v6 Phase 3 Research Preparation
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/buildEngine3V6ResearchTrace.js'
+      - 'services/core/logic/engine3/v6/inspectEngine26AuthorizationContract.js'
+      - 'services/core/logic/engine3/v6/runEngine3V6ResearchFixture.js'
+      - 'services/core/tests/engine3V6Phase3*.test.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - '.github/workflows/engine3-v6-phase3-research-prep.yml'
+  workflow_dispatch:
+jobs:
+  research-preparation:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax and no-execution preparation
+        run: |
+          node --check logic/engine3/v6/buildEngine3V6ResearchTrace.js
+          node --check logic/engine3/v6/inspectEngine26AuthorizationContract.js
+          node --check logic/engine3/v6/runEngine3V6ResearchFixture.js
+          node --check jobs/buildStrategySnapshot.js
+      - name: Phase3 preparation and integration contract tests
+        run: node --test tests/engine3V6Phase3*.test.js
+      - name: Phase2 accepted evidence regression
+        run: node --test tests/engine3V6Phase2*.test.js
+      - name: Phase1 compatibility
+        run: node --test tests/engine3V6Phase1*.test.js tests/engine3V6Engine10OpenTradeLock.test.js
