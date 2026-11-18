@@ -10,7 +10,12 @@ const normalized={eligible:true,zone:z,identity:{candidateId:"C",zoneId:"Z"}};
 const candidate={symbol:"ES",strategyId:"intraday_scalp@10m",
  candidateId:"C",zoneId:"Z"};
 const handoff={candidateId:"C",zoneId:"Z",authorizeEngine3Evaluation:true,
- terminalLifecycle:false,engine3AuthorizationStartedAt:new Date(t-6*m).toISOString()};
+ terminalLifecycle:false,engine3AuthorizationStartedAt:new Date(t-6*m).toISOString(),
+ engine3AuthorizationSourceAsOf:new Date(t).toISOString(),
+ engine3AuthorizationSourceReady:true,engine3AuthorizationStorageHealthy:true,
+ engine3AuthorizationPersisted:true,
+ engine3AuthorizationStorageStatus:"WRITE_READBACK_VERIFIED",
+ engine3AuthorizationPersistenceMode:"PERSISTENT_MONOTONIC"};
 const pre5=Array.from({length:17},(_,i)=>bar(t-(90-i*5)*m,5*m,7330,7335,7325,7330));
 const past=bar(t-5*m,5*m,7351,7355,7345,7348);
 const one=bar(t-m,m,7347,7352,7346,7348);
