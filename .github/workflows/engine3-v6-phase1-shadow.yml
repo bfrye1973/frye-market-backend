@@ -61,3 +61,19 @@ jobs:
           if(!Number.isFinite(base.failed)||!Number.isFinite(head.failed))process.exit(1);
           if(head.failed>base.failed)process.exit(1);
           NODE
+
+      - name: Temporary inspect legacy baseline TAP format
+        if: always()
+        run: |
+          node - <<'NODE'
+          const fs=require('fs');
+          for(const name of ['/tmp/engine3-base/services/core/engine3-legacy-result.tap','engine3-legacy-result.tap']){
+            if(!fs.existsSync(name)){console.log(name,'MISSING');continue}
+            const data=fs.readFileSync(name,'utf8');
+            console.log('TAP_FILE',name,'FIRST',JSON.stringify(data.slice(0,1500)));
+            const matches=data.split(/\\r?\\n/).filter(x=>
+              /not ok|✖|✘|failureType|error:|# fail/.test(x));
+            console.log('ERROR_LINES',JSON.stringify(matches.slice(0,25)));
+            console.log('ERROR_TAIL',JSON.stringify(matches.slice(-25)));
+          }
+          NODE
