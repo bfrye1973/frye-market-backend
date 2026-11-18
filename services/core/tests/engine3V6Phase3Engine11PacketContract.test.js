@@ -137,3 +137,52 @@ test("Engine12 handoff cannot elevate filtered-to-zero, truncated or untrusted b
  empty.packet.completedBars["5m"]=[];
  assert.equal(handoff({prepared:empty,engine11Provenance:prov}).ok,false);
 });
+
+test("P0: three completed plus one forming is valid structural handoff, never trusted",()=>{
+ const prov=syntheticReceipt(),data=input();
+ for(const [tf,duration] of Object.entries(durations)){
+   const completed=[3,2,1].map(n=>({...sample(tf),time:(now-n*duration)/1000}));
+   data[tf==="1m"?"bars1m":tf==="5m"?"bars5m":"bars10m"]=[
+     ...completed,{...sample(tf),time:now/1000}
+   ];
+   const template=prov.bars[tf][0];
+   prov.bars[tf]=completed.map((b,i)=>({
+      ...template,sourceBarId:"B-"+tf+"-"+i,
+      startMs:b.time*1000,endMs:b.time*1000+duration,
+   }));
+   prov.coverage[tf]={observedCount:3,acceptedCount:3,rejectedCount:0,
+      gapCount:0,gaps:[],coverageState:"COMPLETE"};
+ }
+ const prepared=packet({...data,engine11Provenance:prov});
+ assert.equal(prepared.ok,true,prepared.reasonCode);
+ for(const tf of Object.keys(durations)){
+   const counts=prepared.packet.sourceFiltering[tf];
+   assert.equal(counts.observedCount,4);
+   assert.equal(counts.completedCount,3);
+   assert.equal(counts.formingCount,1);
+   assert.equal(counts.rejectedCount,0);
+   assert.equal(counts.completionUnknownCount,0);
+   assert.equal(prepared.packet.completedBars[tf].length,3);
+ }
+ const out=handoff({prepared,engine11Provenance:prov});
+ assert.equal(out.ok,true,out.reasonCode);
+ assert.equal(out.sourceEvidenceVerified,false);
+ assert.equal(out.calibrationAdmissible,false);
+ assert.equal(out.recordingActivated,false);
+});
+test("P0: second forming candle and coverage gaps remain strict failures",()=>{
+ const d=input();
+ d.bars1m=[sample("1m"),{...sample("1m"),time:now/1000},
+   {...sample("1m"),time:(now+durations["1m"])/1000}];
+ assert.equal(packet(d).reasonCode,
+   "CANDLE_SOURCE_COMPLETION_CLASSIFICATION_INVALID_1m");
+ const prov=syntheticReceipt();
+ for(const tf of Object.keys(durations))prov.coverage[tf].coverageState="COMPLETE";
+ prov.coverage["5m"].gapCount=1;
+ prov.coverage["5m"].gaps=[{startMs:now-2*durations["5m"],
+  endMs:now-durations["5m"],reason:"MISSING"}];
+ const prepared=packet({...input(),engine11Provenance:prov});
+ assert.equal(prepared.ok,true,prepared.reasonCode);
+ assert.equal(handoff({prepared,engine11Provenance:prov}).reasonCode,
+   "CANDLE_SOURCE_COVERAGE_INCOMPLETE_5m");
+});
