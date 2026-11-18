@@ -24,7 +24,7 @@ export function auditEngine3RawBarPacketForCalibration({
  const asOf=p?.evaluationTimeMs;
  if(prepared?.ok!==true||p?.mode!=="NOT_RECORDING"||!validTime(asOf))
    issues.push("PREPARED_PACKET_INVALID");
- if(prepared?.recordingActivated!==false||p?.schema!=="engine3.v6.rawBarPacket.preparation.v1")
+ if(prepared?.recordingActivated!==false||p?.schema!=="engine3.v6.rawBarPacket.preparation.v2")
    issues.push("PREPARATION_VS_RECORDING_STATE_UNVERIFIED");
  const bars=p?.completedBars;
  for(const tf of types){
@@ -37,6 +37,26 @@ export function auditEngine3RawBarPacketForCalibration({
    }
    // A nonempty packet may still be too sparse; do not certify completeness.
    if(bars[tf].length===0)issues.push("EMPTY_TIMEFRAME_"+tf);
+   const before=p?.sourceCountsBeforeFiltering?.[tf];
+   const after=p?.sourceCountsAfterFiltering?.[tf];
+   const counts=p?.sourceFiltering?.[tf];
+   const coverage=p?.coverage?.[tf];
+   if(!Number.isSafeInteger(before)||before<0||
+      !Number.isSafeInteger(after)||after!==bars[tf].length||
+      counts?.observedCount!==before||counts?.acceptedCount!==after||
+      counts?.rejectedCount!==before-counts?.completedCount||
+      counts?.truncatedCount!==0||
+      before!==after||
+      coverage?.coverageState!=="COMPLETE"||
+      coverage?.gapCount!==0||p?.gapState?.[tf]!=="COMPLETE")
+      issues.push("SOURCE_FILTER_COUNTS_OR_COVERAGE_UNVERIFIED_"+tf);
+   if(!Array.isArray(p?.sourceBarReferences?.[tf])||
+      p.sourceBarReferences[tf].length!==bars[tf].length||
+      p.sourceBarReferences[tf].some(b=>!hasText(b.sourceBarId)||
+       !hasText(b.sourceRevisionId)||!hasText(b.sourcePayloadDigest)||
+       !hasText(b.sourceContract)||!validTime(b.availableAtMs)||
+       b.availableAtMs>asOf||b.finality!=="CONFIRMED"))
+      issues.push("SOURCE_BAR_REFS_OR_ASOF_UNVERIFIED_"+tf);
  }
  if(!hasText(p?.engine26?.candidateId)||!hasText(p?.engine26?.zoneId))
    issues.push("MISSING_ENGINE26_IDENTITY");
@@ -49,6 +69,16 @@ export function auditEngine3RawBarPacketForCalibration({
  if(activationSource==="ENGINE26_AUTHORIZED" &&
    !validTime(authorized)&&!(typeof authorized==="string"&&Number.isFinite(Date.parse(authorized))))
    issues.push("ENGINE26_AUTHORIZATION_TIMESTAMP_MISSING");
+ if(!hasText(p?.engine11ProvenanceReceiptId)||
+    !hasText(p?.engine11ProvenanceDigest)||
+    p?.engine11ProvenanceSchema!=="engine11.es.completedCandleProvenance.v1"||
+    p?.provenance?.receiptId!==p?.engine11ProvenanceReceiptId||
+    p?.provenance?.signatureOrDigest?.value!==p?.engine11ProvenanceDigest)
+   issues.push("ENGINE11_PROVENANCE_RECEIPT_MISSING_OR_MISMATCH");
+ if(sourceEvidence?.independentRawReceiptVerified!==true||
+    sourceEvidence?.verifiedEngine11ReceiptId!==p?.engine11ProvenanceReceiptId||
+    sourceEvidence?.verifiedEngine11Digest!==p?.engine11ProvenanceDigest)
+   issues.push("ENGINE11_INDEPENDENT_ORIGIN_NOT_VERIFIED");
  if(!hasText(sourceEvidence?.provider)||!hasText(sourceEvidence?.feedId)||
    !hasText(sourceEvidence?.contractId)||!hasText(sourceEvidence?.priceBasis)||
    !hasText(sourceEvidence?.rollPolicy)||!hasText(sourceEvidence?.clockProvenance)||
