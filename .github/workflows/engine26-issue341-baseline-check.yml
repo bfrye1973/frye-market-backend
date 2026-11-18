@@ -1,0 +1,24 @@
+name: Engine26 Issue341 Baseline Regression
+
+on:
+  push:
+    branches:
+      - engine26/issue-341-baseline-check
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Current main Engine26 rollover regression baseline
+        run: |
+          node --test \
+            tests/engine26Strategy1RolloverContinuity.test.js \
+            tests/engine26Strategy1LocationEvent.test.js \
+            tests/engine26Strategy1V2BidirectionalRotation.test.js
