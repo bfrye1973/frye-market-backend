@@ -23,7 +23,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
    return;
   }
   frames++;lastGoodReceiveMs=receivedMs;
-  const all=[...book.bids,...book.asks];
+  const all=[...book.bids,...book.asks,...(book.zeroLevels||[])];
   const byKey=new Map(all.map(l=>[KEY(l.side,l.priceTicks),l]));
   const medians={BID:MEDIAN(book.bids.map(x=>x.size)),ASK:MEDIAN(book.asks.map(x=>x.size))};
   const contiguous=previous!==null&&receivedMs>previous.receivedMs&&
@@ -102,13 +102,14 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     evidenceLabel:e.coverageState===STATES.COVERED?'OBSERVED_CURRENT_BOOK':'LAST_SEEN_NOT_CURRENT'
    }));
   const active=fresh().filter(e=>e.coverageState===STATES.COVERED).length;
+  const explicitZero=fresh().filter(e=>e.coverageState===STATES.ZERO).length;
   const durationQualified=fresh().filter(e=>e.coveredElapsedMs>=minDurationMs).length;
   const imagesQualified=fresh().filter(e=>e.observedImages>=minImages).length;
   const strengthQualified=fresh().filter(e=>e.qualifyingImages>=minImages).length;
   const age=lastGoodReceiveMs===null?null:nowMs-lastGoodReceiveMs;
   return {zones:candidates,diagnostics:{
    ledgerPrices:entries.size,validImages:frames,rejectedImages:invalid,
-   activeObservedPrices:active,outOfCoveragePrices:fresh().filter(e=>e.coverageState===STATES.OUT).length,
+   activeObservedPrices:active,explicitZeroPrices:explicitZero,outOfCoveragePrices:fresh().filter(e=>e.coverageState===STATES.OUT).length,
    unknownPrices:fresh().filter(e=>e.coverageState===STATES.UNKNOWN).length,
    durationQualified,imagesQualified,strengthQualified,
    candidateCount:candidates.length,historicalQualifiedPrices:eligible.length,
