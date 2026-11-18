@@ -11976,13 +11976,31 @@ if (String(symbol || "").toUpperCase() === "ES") {
       "5m":engine3DiagnosticBars?.fiveMinute?.engine11SourceEvidence??null,
       "10m":tenMinuteSourceEvidence,
     };
-    const allPresent=Object.values(evidenceSources).every(source=>
+    const decisionComputedAtMs=Date.now();
+    const evidenceBars={
+      "1m":engine3DiagnosticBars?.oneMinute?.bars||[],
+      "5m":engine3DiagnosticBars?.fiveMinute?.bars||[],
+      "10m":emaPosture?.tenMinute?.bars||[],
+    };
+    const allPresent=Object.entries(evidenceSources).every(([tf,source])=>
       source?.receipt?.schema==="engine11.es.originalSourceReceipt.v3"&&
-      Array.isArray(source.selectedBarReferences));
+      source.receipt.frame===tf&&Array.isArray(source.selectedBarReferences)&&
+      source.selectedBarReferences.length===evidenceBars[tf].length);
+    const contracts=new Set(Object.values(evidenceSources)
+      .map(source=>source?.receipt?.physicalContract).filter(Boolean));
+    const contractConsistent=contracts.size===1;
+    const receiptChronologyValid=Object.values(evidenceSources).every(source=>
+      Number.isSafeInteger(source?.receipt?.bodyCompletedAtMs)&&
+      Number.isSafeInteger(source?.consumerReceivedAtMs)&&
+      source.receipt.bodyCompletedAtMs<=source.consumerReceivedAtMs&&
+      source.consumerReceivedAtMs<=decisionComputedAtMs);
+    const status=!allPresent?"SOURCE_RECEIPT_INCOMPLETE":
+      !contractConsistent?"SOURCE_CONTRACT_MISMATCH":
+      !receiptChronologyValid?"SOURCE_RECEIPT_CHRONOLOGY_INVALID":
+      "OBSERVED_UNVERIFIED";
     result.engine3SourceEvidenceShadow={
       schema:"engine3.shadowSourceReceiptLink.v1",mode:"READ_ONLY",
-      status:allPresent?"OBSERVED_UNVERIFIED":"SOURCE_RECEIPT_INCOMPLETE",
-      evaluationTimeMs,decisionComputedAtMs:Date.now(),
+      status,evaluationTimeMs,decisionComputedAtMs,
       sources:evidenceSources,
       sourceEvidenceVerified:false,engine3ConsumptionAttested:false,
       calibrationAdmissible:false,recordingActivated:false,writerInvoked:false,
