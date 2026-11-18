@@ -44,16 +44,18 @@ export function parseIronbeamV2DepthFrame(frame,{symbol="XCME:ES.Z26"}={}){
    return {side,price,priceTicks:ticks,size,orderCount:count,
      impliedSize:Number.isSafeInteger(implied)&&implied>=0?implied:null,
      eventTimeMs:t,individualOrders:false};
-  }).filter(x=>x.size>0).sort((a,b)=>side==="BID"?b.priceTicks-a.priceTicks:a.priceTicks-b.priceTicks);
+  }).sort((a,b)=>side==="BID"?b.priceTicks-a.priceTicks:a.priceTicks-b.priceTicks);
  };
  let bids,asks;
  try{bids=parseSide(r.b,"BID");asks=parseSide(r.a,"ASK");}
  catch{return {ok:false,reason:"INVALID_DEPTH_LEVEL",symbol};}
+ const zeroLevels=[...bids,...asks].filter(x=>x.size===0);
+ bids=bids.filter(x=>x.size>0);asks=asks.filter(x=>x.size>0);
  if(!bids.length||!asks.length)return {ok:false,reason:"ONE_SIDED_OR_EMPTY_BOOK",symbol};
  if(bids[0].priceTicks>=asks[0].priceTicks)
    return {ok:false,reason:"CROSSED_OR_LOCKED_BOOK",symbol};
  return {ok:true,schema:"engine18.ironbeam.v2.depth.v1",symbol,
-   source:"IRONBEAM_V2_AGGREGATED_LEVEL2",bids,asks,
+   source:"IRONBEAM_V2_AGGREGATED_LEVEL2",bids,asks,zeroLevels,
    eventTimeMs:Math.max(...bids.map(x=>x.eventTimeMs),...asks.map(x=>x.eventTimeMs)),
    bestBid:bids[0].price,bestAsk:asks[0].price,
    noExecution:true,level3:false};
