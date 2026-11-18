@@ -20,7 +20,7 @@ function packet(){
     sourceCountsBeforeFiltering[tf]=1;
     sourceCountsAfterFiltering[tf]=1;
     sourceFiltering[tf]={observedCount:1,completedCount:1,acceptedCount:1,rejectedCount:0,
-      formingCount:0,truncatedCount:0};
+      formingCount:0,completionUnknownCount:0,invalidCount:0,truncatedCount:0};
     sourceTimeframeMap[tf]="MASSIVE_"+tf;
     gapState[tf]="COMPLETE";
     sourceBarReferences[tf]=[{
@@ -348,4 +348,58 @@ test("orphan receipt fails closed instead of inventing missing data",()=>{
     const second=w.record({packet:packet(),provenance:provenance()});
     assert.equal(second.reason,"CANDLE_ARCHIVE_ORPHAN_RECEIPT");
   }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+
+test("proposed Engine12 0700 directories and 0600 files",()=>{
+ const t=temp();
+ try{
+   const w=createEngine12CandleArchiveWriter({root:t.root,enabled:true,trustVerifier:trust});
+   const r=w.record({packet:packet(),provenance:provenance()});
+   assert.equal(r.ok,true);
+   for(const dir of [t.root,path.dirname(path.dirname(r.dataFile)),
+     path.dirname(r.dataFile),path.dirname(path.dirname(r.receiptFile)),
+     path.dirname(r.receiptFile)]){
+     assert.equal(fs.statSync(dir).mode & 0o077,0,dir);
+   }
+   assert.equal(fs.statSync(r.dataFile).mode & 0o077,0);
+ }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+test("proposed Engine12 stops at 70 percent whole-disk usage",()=>{
+ const t=temp();
+ try{
+   const fake={...fs,statfsSync:()=>({blocks:100,bavail:30})};
+   const w=createEngine12CandleArchiveWriter({
+     root:t.root,enabled:true,trustVerifier:trust,fsOps:fake
+   });
+   const r=w.record({packet:packet(),provenance:provenance()});
+   assert.equal(r.reason,"CANDLE_ARCHIVE_WHOLE_DISK_STOP_THRESHOLD");
+   assert.equal(fs.existsSync(t.root),false);
+ }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+test("proposed Engine12 rejects missing disk-health evidence",()=>{
+ const t=temp();
+ try{
+   const fake={...fs,statfsSync:undefined};
+   const w=createEngine12CandleArchiveWriter({
+     root:t.root,enabled:true,trustVerifier:trust,fsOps:fake
+   });
+   assert.equal(w.record({packet:packet(),provenance:provenance()}).reason,
+     "CANDLE_ARCHIVE_DISK_HEALTH_UNVERIFIED");
+ }finally{fs.rmSync(t.base,{recursive:true,force:true})}
+});
+test("proposed Engine12 accepts one forming bar outside completed coverage",()=>{
+ const p=packet(),prov=provenance();
+ for(const tf of ["1m","5m","10m"]){
+   p.sourceCountsBeforeFiltering[tf]=2;
+   p.sourceFiltering[tf].observedCount=2;
+   p.sourceFiltering[tf].formingCount=1;
+ }
+ assert.equal(validateCandleArchiveInput({
+   packet:p,provenance:prov,trustResult:trust({provenance:prov})
+ }).ok,true);
+ const bad=structuredClone(p);
+ bad.sourceFiltering["5m"].formingCount=2;
+ assert.ok(validateCandleArchiveInput({
+   packet:bad,provenance:prov,trustResult:trust({provenance:prov})
+ }).reasons.includes("CANDLE_PACKET_SOURCE_COUNT_MISMATCH_5m"));
 });
