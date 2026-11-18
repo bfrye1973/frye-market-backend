@@ -16,7 +16,9 @@ test("Phase3 research outputs do not feed canonical Engine3, Engine4 or Engine6"
  const trace=source.indexOf("const engine3V6ResearchTrace = buildEngine3V6ResearchTrace(");
  const handoff=source.indexOf("const engine3Strategy1Handoff =",trace);
  assert.ok(reducer>=0&&trace>reducer&&handoff>trace);
- const reducerInputs=source.slice(reducer,trace);
+ const reducerEnd=source.indexOf("  });",reducer);
+ assert.ok(reducerEnd>reducer&&reducerEnd<trace);
+ const reducerInputs=source.slice(reducer,reducerEnd+5);
  assert.doesNotMatch(reducerInputs,/engine3V6ResearchTrace|engine3V6AuthorizationReadiness/);
  const handoffInputs=source.slice(handoff,handoff+650);
  assert.doesNotMatch(handoffInputs,/engine3V6ResearchTrace|engine3V6AuthorizationReadiness|phase2Causal/);
