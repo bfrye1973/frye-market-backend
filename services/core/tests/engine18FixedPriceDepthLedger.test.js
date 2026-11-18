@@ -120,7 +120,7 @@ test('strong historical size does not qualify currently weak depth at same price
  // A new continuous price interval can still be visible but no longer a concentration.
  for(let i=1;i<=7;i++){
   const t=T0+30000+i*5000;
-  r.observe(frame(t,{big:20+i*.01}),{receivedAtMs:t});
+  r.observe(frame(t,{big:20+i}),{receivedAtMs:t});
  }
  snap=r.snapshot({nowMs:T0+65001});
  assert.equal(snap.zones.some(z=>z.side==='BID'&&z.price===7500),false);
