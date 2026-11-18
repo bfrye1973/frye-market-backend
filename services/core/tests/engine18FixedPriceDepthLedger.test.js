@@ -52,10 +52,18 @@ test('when fixed price leaves moving MBP ladder, it is historical only, NOT rest
  // Reappearing positive depth does not retroactively fill the uncovered interval.
  r.observe(frame(shift+5000,{big:135}),{receivedAtMs:shift+5000});
  s=r.snapshot({nowMs:shift+5001});
+ assert.equal(s.zones.some(z=>z.side==='BID'&&z.price===7500),false,
+  'one returning book image must not inherit the prior 30-second persistence');
+ for(let i=1;i<=6;i++){
+  const t=shift+5000+i*5000;
+  r.observe(frame(t,{big:135+i}),{receivedAtMs:t});
+ }
+ s=r.snapshot({nowMs:shift+35001});
  const b=s.zones.find(z=>z.side==='BID'&&z.price===7500);
  assert.ok(b);
  assert.equal(b.observedPersistenceMs,30000);
- assert.equal(b.visibleContracts,135);
+ assert.ok(b.cumulativeCoveredMs>=60000);
+ assert.equal(b.visibleContracts,141);
 });
 test('large temporal gap cannot be counted as resting-time persistence',()=>{
  const r=createEngine18Level2ZoneReader({minObservations:3,minDurationMs:30000});
