@@ -8954,14 +8954,24 @@ if (isEsIntradayScalp) {
   const candidateIdV6 = engine26LocationCandidate?.candidateId ?? null;
   const zoneIdV6 = engine26LocationCandidate?.zoneId ?? null;
   const zoneInputV6 = engine3V5?.normalizedZoneInput ?? null;
+  // Source-owned authorization is admissible only when Engine26's
+  // persisted clock, as-of time and identity all pass the Phase3 contract.
+  // A failed clock remains ENGINE3_OBSERVED in shadow; never borrow a
+  // timestamp from a corrupt, historical or unpersisted source.
+  const engine3V6AuthorizationReadiness = inspectEngine26AuthorizationContract({
+    handoff:engine26ReactionHandoff,candidate:engine26LocationCandidate,
+    normalizedZoneInput:zoneInputV6,evaluationTimeMs,
+    priorActivation:priorV6?.phase2ActivationRun??null,
+  });
+  const authoritativeV6Activation =
+    engine3V6AuthorizationReadiness.status==="AUTHORITATIVE_TIMESTAMP_VALID"
+      ? engine3V6AuthorizationReadiness.authoritativeTimestampMs : null;
   const activationArgsV6 = {
     priorActivation: priorV6?.phase2ActivationRun ?? null,
     candidateId: candidateIdV6,
     zoneId: zoneIdV6,
     eligible: zoneInputV6?.eligible === true,
-    authorizedStartedAt:
-      engine26ReactionHandoff?.engine3AuthorizationStartedAt ??
-      engine26LocationCandidate?.engine3AuthorizationStartedAt ?? null,
+    authorizedStartedAt:authoritativeV6Activation,
     zone: zoneInputV6?.zone ?? null,
     bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
     bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
@@ -9025,11 +9035,7 @@ if (isEsIntradayScalp) {
   });
   // Phase3 research diagnostics are isolated output only. They do not feed
   // the v6 reducer, canonical v5, Engine4 or Engine6.
-  const engine3V6AuthorizationReadiness = inspectEngine26AuthorizationContract({
-    handoff:engine26ReactionHandoff,candidate:engine26LocationCandidate,
-    normalizedZoneInput:zoneInputV6,evaluationTimeMs,
-    priorActivation:priorV6?.phase2ActivationRun??null,
-  });
+
   const engine3V6ResearchTrace = buildEngine3V6ResearchTrace({
     evaluationTimeMs,symbol,strategyId:s.strategyId,
     priorShadow:priorV6,shadow:engine3V6Shadow,
