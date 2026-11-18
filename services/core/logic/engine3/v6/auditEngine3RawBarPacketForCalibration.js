@@ -44,9 +44,15 @@ export function auditEngine3RawBarPacketForCalibration({
    if(!Number.isSafeInteger(before)||before<0||
       !Number.isSafeInteger(after)||after!==bars[tf].length||
       counts?.observedCount!==before||counts?.acceptedCount!==after||
-      counts?.rejectedCount!==before-counts?.completedCount||
+      counts?.rejectedCount!==0||
+      counts?.completionUnknownCount!==0||counts?.invalidCount!==0||
+      !Number.isSafeInteger(counts?.formingCount)||counts.formingCount<0||
+      counts.formingCount>1||
+      before!==counts?.completedCount+counts?.formingCount||
+      after!==counts?.completedCount||
       counts?.truncatedCount!==0||
-      before!==after||
+      coverage?.observedCount!==counts?.completedCount||
+      coverage?.rejectedCount!==0||coverage?.acceptedCount!==after||
       coverage?.coverageState!=="COMPLETE"||
       coverage?.gapCount!==0||p?.gapState?.[tf]!=="COMPLETE")
       issues.push("SOURCE_FILTER_COUNTS_OR_COVERAGE_UNVERIFIED_"+tf);
