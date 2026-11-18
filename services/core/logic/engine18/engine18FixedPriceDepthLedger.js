@@ -115,7 +115,8 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
     ageSinceObservedMs:nowMs-e.lastSeenMs,
     maxObservedSize:e.maxObservedSize,
     relativeToSideMedian:e.relativeSamples?Number((e.relativeSum/e.relativeSamples).toFixed(2)):null,
-    coverageState:e.coverageState,currentRestingLiquidityVerified:e.coverageState===STATES.COVERED,
+    coverageState:e.coverageState,currentBookObserved:e.coverageState===STATES.COVERED,
+    currentRestingLiquidityVerified:false, // only an observed MBP image, not venue-level order proof
     currentlyInBook:e.coverageState===STATES.COVERED,
     isHiddenStop:false,individualOrdersIdentified:false,
     evidenceLabel:e.coverageState===STATES.COVERED?'OBSERVED_CURRENT_BOOK':'LAST_SEEN_NOT_CURRENT'
@@ -137,7 +138,7 @@ export function createEngine18FixedPriceLedger({symbol,maxPrices=3000,maxElapsed
      e.consecutiveObservations>=minImages&&e.currentQualifyingImages>=minImages&&
      e.coverageState===STATES.COVERED).length,
    minDurationMs,minImages,maxFrameGapMs,
-   lastValidDepthAgeMs:age,elapsedBasis:'HOST_RECEIVED_MONOTONICITY_UNVERIFIED',
+   lastValidDepthAgeMs:age,elapsedBasis:'HOST_WALL_RECEIVE_MS_UNVERIFIED',
    denominator:'VALID_DISTINCT_DEPTH_IMAGES',
    noCandidateReason:candidates.length?null:!frames?'NO_VALID_DEPTH':
     !imagesQualified?'INSUFFICIENT_PRICE_OBSERVATIONS':
