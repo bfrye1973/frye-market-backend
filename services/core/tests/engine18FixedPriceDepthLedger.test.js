@@ -108,3 +108,21 @@ test('no duplicate image can fake 30-second longevity',()=>{
  const s=r.snapshot({nowMs:T0+1002});
  assert.equal(s.zones.length,0);
 });
+
+test('strong historical size does not qualify currently weak depth at same price',()=>{
+ const r=createEngine18Level2ZoneReader({minObservations:3,minDurationMs:30000});
+ for(let i=0;i<7;i++){
+  const t=T0+i*5000;
+  r.observe(frame(t,{big:125+i}),{receivedAtMs:t});
+ }
+ let snap=r.snapshot({nowMs:T0+30001});
+ assert.ok(snap.zones.some(z=>z.side==='BID'&&z.price===7500));
+ // A new continuous price interval can still be visible but no longer a concentration.
+ for(let i=1;i<=7;i++){
+  const t=T0+30000+i*5000;
+  r.observe(frame(t,{big:20+i*.01}),{receivedAtMs:t});
+ }
+ snap=r.snapshot({nowMs:T0+65001});
+ assert.equal(snap.zones.some(z=>z.side==='BID'&&z.price===7500),false);
+ assert.equal(snap.diagnostics.activeObservedPrices>0,true);
+});
