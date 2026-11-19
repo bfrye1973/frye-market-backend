@@ -67,3 +67,22 @@ test("future Engine26 source as-of fails closed even when timestamp itself is hi
  assert.equal(r.status,"ENGINE26_SOURCE_ASOF_IN_FUTURE");
  assert.equal(r.authoritativeTimestampMs,null);
 });
+
+test("Engine26 health booleans cannot override an untrusted persistence mode",()=>{
+ const started=new Date(t-60000).toISOString();
+ for(const mode of ["READ_ONLY_HISTORICAL","READ_ONLY_STALE_WRITER",
+  "FAIL_CLOSED_WRITE_FAILURE","READ_ONLY",null]){
+  const r=inspect({...valid,handoff:{...valid.handoff,
+   engine3AuthorizationStartedAt:started,engine3AuthorizationPersistenceMode:mode}});
+  assert.equal(r.status,"ENGINE26_PERSISTENCE_MODE_UNVERIFIED");
+  assert.equal(r.authoritativeTimestampMs,null);
+  assert.equal(r.observedFallbackAllowed,true);
+ }
+});
+test("source as-of earlier than authorization cannot be authoritative",()=>{
+ const r=inspect({...valid,handoff:{...valid.handoff,
+  engine3AuthorizationStartedAt:new Date(t-30000).toISOString(),
+  engine3AuthorizationSourceAsOf:new Date(t-60000).toISOString()}});
+ assert.equal(r.status,"ENGINE26_SOURCE_ASOF_BEFORE_AUTHORIZATION");
+ assert.equal(r.authoritativeTimestampMs,null);
+});
