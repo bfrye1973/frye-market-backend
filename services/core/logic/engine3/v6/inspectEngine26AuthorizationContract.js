@@ -66,10 +66,10 @@ export function inspectEngine26AuthorizationContract({
    !storageHealthy?"ENGINE26_STORAGE_UNHEALTHY":
    !persisted?"ENGINE26_AUTHORIZATION_NOT_PERSISTED":
    !persistenceModeValid?"ENGINE26_PERSISTENCE_MODE_UNVERIFIED":
-   sourceAsOfBeforeAuthorization?"ENGINE26_SOURCE_ASOF_BEFORE_AUTHORIZATION":
    sourceAsOfFuture?"ENGINE26_SOURCE_ASOF_IN_FUTURE":
    conflict?"ENGINE26_SOURCE_TIMESTAMP_CONFLICT":
    after?"AUTHORIZATION_TIMESTAMP_IN_FUTURE":
+   sourceAsOfBeforeAuthorization?"ENGINE26_SOURCE_ASOF_BEFORE_AUTHORIZATION":
    continuityChanged?"ENGINE26_CONTINUITY_CHANGED_WITHOUT_RUN_RESET":
    "ENGINE26_SOURCE_TIME_UNVERIFIED",
   authoritativeTimestampMs:valid?published:null,
