@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-19T12:34:07.385523+00:00",
+  "updated_at_utc": "2026-11-19T14:58:35.638028+00:00",
   "completedSessionDate": "2026-11-18",
   "score": 20.4,
   "state": "BEARISH",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "YELLOW",
       "sessionDate": "2026-11-18",
-      "close": 7424.0,
-      "ma10": 7493.325,
-      "ma20": 7572.3125,
+      "close": 7400.75,
+      "ma10": 7491.0,
+      "ma20": 7571.15,
       "ma10Prior": 7486.225,
       "ma20Prior": 7586.3,
       "ma10Upsloping": true,
@@ -272,54 +272,54 @@
       }
     },
     "large": {
-      "members": 884,
+      "members": 888,
       "nh": 48,
-      "nl": 355,
+      "nl": 353,
       "up": 4,
       "down": 31,
-      "breadth_pct": 11.91,
+      "breadth_pct": 11.97,
       "momentum_pct": 11.43,
       "prior": {
         "nh": 88,
-        "nl": 230,
+        "nl": 228,
         "up": 1,
         "down": 30,
-        "breadth_pct": 27.67,
+        "breadth_pct": 27.85,
         "momentum_pct": 3.23
       }
     },
     "mid": {
       "members": 1101,
       "nh": 81,
-      "nl": 431,
+      "nl": 435,
       "up": 7,
-      "down": 22,
-      "breadth_pct": 15.82,
-      "momentum_pct": 24.14,
+      "down": 23,
+      "breadth_pct": 15.7,
+      "momentum_pct": 23.33,
       "prior": {
         "nh": 77,
-        "nl": 332,
+        "nl": 336,
         "up": 6,
-        "down": 32,
-        "breadth_pct": 18.83,
-        "momentum_pct": 15.79
+        "down": 34,
+        "breadth_pct": 18.64,
+        "momentum_pct": 15.0
       }
     },
     "small": {
-      "members": 3466,
+      "members": 3462,
       "nh": 225,
-      "nl": 1456,
+      "nl": 1454,
       "up": 71,
-      "down": 149,
-      "breadth_pct": 13.38,
-      "momentum_pct": 32.27,
+      "down": 148,
+      "breadth_pct": 13.4,
+      "momentum_pct": 32.42,
       "prior": {
         "nh": 254,
-        "nl": 1420,
+        "nl": 1418,
         "up": 55,
-        "down": 206,
-        "breadth_pct": 15.17,
-        "momentum_pct": 21.07
+        "down": 204,
+        "breadth_pct": 15.19,
+        "momentum_pct": 21.24
       }
     },
     "unknown": {
