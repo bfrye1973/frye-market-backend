@@ -2,12 +2,12 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-18T23:31:25.818239+00:00",
+  "updated_at_utc": "2026-11-19T01:43:38.143724+00:00",
   "completedSessionDate": "2026-11-18",
-  "score": 20.5,
+  "score": 20.4,
   "state": "BEARISH",
   "breadthScore": 15.0,
-  "momentumScore": 26.1,
+  "momentumScore": 25.8,
   "sectorCards": [
     {
       "sector": "Communication Services",
@@ -20,11 +20,11 @@
     },
     {
       "sector": "Consumer Discretionary",
-      "breadth_pct": 21.63,
-      "momentum_pct": 45.0,
-      "nh": 61,
+      "breadth_pct": 21.35,
+      "momentum_pct": 42.11,
+      "nh": 60,
       "nl": 221,
-      "up": 9,
+      "up": 8,
       "down": 11
     },
     {
@@ -47,12 +47,12 @@
     },
     {
       "sector": "Financials",
-      "breadth_pct": 12.14,
-      "momentum_pct": 44.26,
-      "nh": 59,
-      "nl": 427,
-      "up": 27,
-      "down": 34
+      "breadth_pct": 11.98,
+      "momentum_pct": 44.07,
+      "nh": 58,
+      "nl": 426,
+      "up": 26,
+      "down": 33
     },
     {
       "sector": "Healthcare",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "YELLOW",
       "sessionDate": "2026-11-18",
-      "close": 7365.5,
-      "ma10": 7487.475,
-      "ma20": 7569.3875,
+      "close": 7367.75,
+      "ma10": 7487.7,
+      "ma20": 7569.5,
       "ma10Prior": 7486.225,
       "ma20Prior": 7586.3,
       "ma10Upsloping": true,
@@ -256,12 +256,12 @@
   "capGroups": {
     "all": {
       "members": 5470,
-      "nh": 357,
-      "nl": 2246,
-      "up": 84,
-      "down": 204,
-      "breadth_pct": 13.71,
-      "momentum_pct": 29.17,
+      "nh": 355,
+      "nl": 2245,
+      "up": 82,
+      "down": 203,
+      "breadth_pct": 13.65,
+      "momentum_pct": 28.77,
       "prior": {
         "nh": 420,
         "nl": 1985,
@@ -272,54 +272,54 @@
       }
     },
     "large": {
-      "members": 888,
+      "members": 884,
       "nh": 48,
-      "nl": 357,
+      "nl": 355,
       "up": 4,
       "down": 31,
-      "breadth_pct": 11.85,
+      "breadth_pct": 11.91,
       "momentum_pct": 11.43,
       "prior": {
         "nh": 88,
-        "nl": 232,
+        "nl": 230,
         "up": 1,
         "down": 30,
-        "breadth_pct": 27.5,
+        "breadth_pct": 27.67,
         "momentum_pct": 3.23
       }
     },
     "mid": {
-      "members": 1100,
+      "members": 1101,
       "nh": 81,
-      "nl": 435,
+      "nl": 431,
       "up": 7,
-      "down": 24,
-      "breadth_pct": 15.7,
-      "momentum_pct": 22.58,
+      "down": 22,
+      "breadth_pct": 15.82,
+      "momentum_pct": 24.14,
       "prior": {
         "nh": 77,
-        "nl": 335,
+        "nl": 332,
         "up": 6,
-        "down": 34,
-        "breadth_pct": 18.69,
-        "momentum_pct": 15.0
+        "down": 32,
+        "breadth_pct": 18.83,
+        "momentum_pct": 15.79
       }
     },
     "small": {
-      "members": 3463,
-      "nh": 227,
-      "nl": 1451,
-      "up": 73,
-      "down": 148,
-      "breadth_pct": 13.53,
-      "momentum_pct": 33.03,
+      "members": 3466,
+      "nh": 225,
+      "nl": 1456,
+      "up": 71,
+      "down": 149,
+      "breadth_pct": 13.38,
+      "momentum_pct": 32.27,
       "prior": {
         "nh": 254,
-        "nl": 1415,
+        "nl": 1420,
         "up": 55,
-        "down": 204,
-        "breadth_pct": 15.22,
-        "momentum_pct": 21.24
+        "down": 206,
+        "breadth_pct": 15.17,
+        "momentum_pct": 21.07
       }
     },
     "unknown": {
