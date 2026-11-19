@@ -1,0 +1,66 @@
+name: Engine3 E11 E12 E26 Combined Offline Release Candidate
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/**'
+      - 'services/core/logic/engine11/**'
+      - 'services/core/logic/engine12/**'
+      - 'services/core/logic/engine26/**'
+      - 'services/core/routes/futuresOhlc.js'
+      - 'services/core/jobs/buildStrategySnapshot.js'
+      - 'services/core/tests/engine3V6*.test.js'
+      - 'services/core/tests/engine11*test.js'
+      - 'services/core/tests/engine12CandleArchiveSandbox.test.js'
+      - 'services/core/tests/engine26Engine3AuthorizationClock.test.js'
+      - 'services/core/tests/engine26Strategy1RolloverContinuity.test.js'
+      - '.github/workflows/engine3-combined-release-offline.yml'
+  workflow_dispatch:
+jobs:
+  offline:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    env:
+      ENGINE3_V5_ENGINE10_PAPER_LOCK_ENABLED: "0"
+      ENGINE11_SOURCE_RECEIPT_V3_ENABLED: "0"
+      ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED: "0"
+      ENGINE12_CANDLE_ARCHIVE_ENABLED: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax
+        run: |
+          node --check services/core/jobs/buildStrategySnapshot.js
+          node --check services/core/routes/futuresOhlc.js
+          node --check services/core/logic/engine26/engine3AuthorizationClock.js
+          node --check services/core/logic/engine12/candleArchive/createCandleArchiveWriter.js
+      - name: Prove canonical v5 lock and source/candle recorders OFF
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const s=fs.readFileSync('services/core/jobs/buildStrategySnapshot.js','utf8');
+          if(!s.includes('ENGINE3_V5_ENGINE10_PAPER_LOCK_ENABLED === "1"'))throw Error('V5_ENGINE10_LOCK_GATE_MISSING');
+          if(!s.includes('ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED === "1"'))throw Error('E3_SHADOW_GATE_MISSING');
+          const r=fs.readFileSync('services/core/routes/futuresOhlc.js','utf8');
+          if(!r.includes('ENGINE11_SOURCE_RECEIPT_V3_ENABLED'))throw Error('E11_SOURCE_GATE_MISSING');
+          const w=fs.readFileSync('services/core/logic/engine12/candleArchive/createCandleArchiveWriter.js','utf8');
+          if(!w.includes('ENGINE12_CANDLE_ARCHIVE_ENABLED'))throw Error('E12_ARCHIVE_GATE_MISSING');
+          console.log('RELEASE_CANDIDATE_OFF_BY_DEFAULT_GATES_PRESENT');
+          NODE
+      - name: Engine 3 V6 focused and compatibility
+        run: node --test services/core/tests/engine3V6*.test.js
+      - name: Engine 11 original-source provenance and shadow
+        run: |
+          node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js services/core/tests/engine11ReceiptRouteSafety.test.js services/core/tests/engine11ShadowObservation.test.js services/core/tests/engine11SourceConsumptionTiming.test.js services/core/tests/engine11SourceReceiptV3.test.js
+      - name: Engine 12 immutable sandbox
+        run: node --test services/core/tests/engine12CandleArchiveSandbox.test.js
+      - name: Engine 26 authorization and Strategy 1 regression
+        run: |
+          node --test services/core/tests/engine26Engine3AuthorizationClock.test.js services/core/tests/engine26Strategy1RolloverContinuity.test.js
+      - name: Engine26 Engine3 cross-process restart and source-health gates (temp sandbox only)
+        run: node --test services/core/tests/engine26Engine3CrossProcessPersistence.test.js
+      - name: Three-engine synthetic-only no-producer integration
+        run: node --test services/core/tests/engine11P0ThreeEngineIntegration.test.js

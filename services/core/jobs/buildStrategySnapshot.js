@@ -53,6 +53,14 @@ import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidat
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
+import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
+import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVerifiedEngine10PaperLock } from "../logic/engine3/v6/engine3Engine10VerifiedLockStore.js";
+import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
+import { buildEngine3V6Phase2Evidence } from "../logic/engine3/v6/buildEngine3V6Phase2Evidence.js";
+import { buildEngine3V6CausalControl } from "../logic/engine3/v6/buildEngine3V6CausalControl.js";
+import { buildEngine3V6ResearchTrace } from "../logic/engine3/v6/buildEngine3V6ResearchTrace.js";
+import { inspectEngine26AuthorizationContract } from "../logic/engine3/v6/inspectEngine26AuthorizationContract.js";
+import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -4230,6 +4238,7 @@ async function buildEma10Posture({
   label,
   limit = 120,
   evaluationTimeMs = null,
+  includeSourceEvidence = false,
 }) {
   const path = ohlcPathForSymbol(symbol);
   const u = new URL(`${CORE_BASE}${path}`);
@@ -4237,8 +4246,10 @@ async function buildEma10Posture({
   u.searchParams.set("symbol", symbol);
   u.searchParams.set("timeframe", tf);
   u.searchParams.set("limit", String(limit));
+  if(includeSourceEvidence===true&&tf==="10m")u.searchParams.set("evidence","1");
 
   const r = await fetchJson(u.toString(), 15000);
+  const consumerReceivedAtMs=Date.now();
   const bars = normalizeOhlcBars(r?.json);
 
 const completionTruth =
@@ -4313,6 +4324,17 @@ return {
   lastBarTime: lastBar ? barTime(lastBar) : null,
   barCount: bars.length,
   bars,
+  ...(includeSourceEvidence===true&&tf==="10m"?{
+    engine11SourceEvidence:{
+      schema:"engine3.shadowSourceTransport.v1",
+      trustStatus:"UNVERIFIED",
+      receipt:r?.json?.engine11Receipt??null,
+      selectedBarReferences:Array.isArray(r?.json?.selectedBarReferences)
+        ?r.json.selectedBarReferences:[],
+      consumerReceivedAtMs,engine3ConsumptionAttested:false,
+      calibrationAdmissible:false,recordingActivated:false,
+    }
+  }:{}),
   ...(completionTruth
   ? {
       completedBars: completionTruth.completedBars,
@@ -4331,6 +4353,8 @@ return {
 }
 
 async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
+  const includeSourceEvidence =
+    process.env.ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED === "1";
   const [tenMinute, oneHour, fourHour, daily] = await Promise.all([
     buildEma10Posture({
       symbol,
@@ -4338,6 +4362,7 @@ async function buildEmaPostureBlock(symbol, evaluationTimeMs = null) {
       label: "10m EMA10 Trigger Layer",
       limit: 120,
       evaluationTimeMs,
+      includeSourceEvidence,
     }).catch((err) => ({
       ok: false,
       symbol,
@@ -8558,6 +8583,7 @@ attachEngine4AuthorizedReactionParticipation({
       : null;
 
 let engine26OpenPaperTrades = [];
+let engine26OpenPaperTradesReadSucceeded = false;
 let engine10OpenEsFamilyTrades = [];
 
 if (isEsIntradayScalp) {
@@ -8569,12 +8595,14 @@ if (isEsIntradayScalp) {
       accountMode: "PAPER",
     });
 
-    engine26OpenPaperTrades = Array.isArray(openPaperResp?.trades)
+    engine26OpenPaperTradesReadSucceeded = Array.isArray(openPaperResp?.trades);
+    engine26OpenPaperTrades = engine26OpenPaperTradesReadSucceeded
       ? openPaperResp.trades
       : [];
   } catch (err) {
     console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
     engine26OpenPaperTrades = [];
+    engine26OpenPaperTradesReadSucceeded = false;
   }
 
   try {
@@ -8873,8 +8901,36 @@ if (isEsIntradayScalp) {
     engine3ReactionConfirmation10m,
   };
 
+// Verify OPEN PAPER lifecycle from the existing Engine10 Journal read.
+// This never infers direction from Engine3, Engine26 or the wave count.
+// A transient Engine10 journal failure or ambiguous multiple-OPEN result
+// must not erase a recently VERIFIED open-paper direction without evidence.
+// REVIEW-ONLY canonical v5 behavior change; Manager approval required before merge.
+const priorVerifiedEngine10Lock = loadVerifiedEngine10PaperLock();
+const engine3OpenPaperLock = resolveEngine10OpenPaperDirection({
+  trades: engine26OpenPaperTrades,
+  readSucceeded: engine26OpenPaperTradesReadSucceeded,
+  priorVerifiedLock: priorVerifiedEngine10Lock.lock,
+  evaluationTimeMs,
+  symbol,
+  strategyId: s.strategyId,
+});
+if (engine3OpenPaperLock.lifecycleVerified === true) {
+  if (engine3OpenPaperLock.openTradeActive === true) {
+    saveVerifiedEngine10PaperLock({ result: engine3OpenPaperLock });
+  } else {
+    // Only a successfully read empty OPEN list clears a stored verified lock.
+    clearVerifiedEngine10PaperLock();
+  }
+}
 const engine3V5 =
   buildEngine3V5Shadow({
+    // Canonical-v5 Engine10 PAPER lock requires its own owner release approval.
+    // OFF by default: retain the unmodified v5 builder arguments from main.
+    ...(process.env.ENGINE3_V5_ENGINE10_PAPER_LOCK_ENABLED === "1" ? {
+      openTradeActive: engine3OpenPaperLock.openTradeActive,
+      lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
+    } : {}),
     engine26LocationCandidate,
     engine26ReactionHandoff,
 
@@ -8909,6 +8965,142 @@ const engine3V5 =
 
 patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
+patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
+  engine3OpenPaperLock;
+// Engine3 v6 Phase 1: separate READ_ONLY shadow; v5 remains canonical.
+// The shadow is never consulted by Engine4, Engine6, or downstream handoffs.
+if (isEsIntradayScalp) {
+  const savedShadow = loadEngine3V6Phase1ShadowState();
+  const priorV6 = savedShadow.found ? savedShadow.state : null;
+  const candidateIdV6 = engine26LocationCandidate?.candidateId ?? null;
+  const zoneIdV6 = engine26LocationCandidate?.zoneId ?? null;
+  const zoneInputV6 = engine3V5?.normalizedZoneInput ?? null;
+  // Source-owned authorization is admissible only when Engine26's
+  // persisted clock, as-of time and identity all pass the Phase3 contract.
+  // A failed clock remains ENGINE3_OBSERVED in shadow; never borrow a
+  // timestamp from a corrupt, historical or unpersisted source.
+  const engine3V6AuthorizationReadiness = inspectEngine26AuthorizationContract({
+    handoff:engine26ReactionHandoff,candidate:engine26LocationCandidate,
+    normalizedZoneInput:zoneInputV6,evaluationTimeMs,
+    priorActivation:priorV6?.phase2ActivationRun??null,
+  });
+  const authoritativeV6Activation =
+    engine3V6AuthorizationReadiness.status==="AUTHORITATIVE_TIMESTAMP_VALID"
+      ? engine3V6AuthorizationReadiness.authoritativeTimestampMs : null;
+  const activationArgsV6 = {
+    // Do not carry a prior ENGINE26_AUTHORIZED run through source-health loss.
+    // Observed activation remains the only fallback in shadow.
+    priorActivation:authoritativeV6Activation===null &&
+      priorV6?.phase2ActivationRun?.source==="ENGINE26_AUTHORIZED"
+        ?null:priorV6?.phase2ActivationRun??null,
+    candidateId: candidateIdV6,
+    zoneId: zoneIdV6,
+    eligible: zoneInputV6?.eligible === true,
+    authorizedStartedAt:authoritativeV6Activation,
+    zone: zoneInputV6?.zone ?? null,
+    bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    policy: {wideMultiplier:2,bandFraction:0.25,
+      bandFloorPoints:1,atrPeriod:14,observedUncertaintyMs:180000},
+  };
+  // First pass determines eligible post-activation bars and frozen geometry.
+  // Does not grant direction.
+  const priorV6Direction = priorV6?.canonicalDirection ?? "NEUTRAL";
+  const priorDirectional = ["LONG","SHORT"].includes(priorV6Direction) &&
+    priorV6?.convictionState !== "INVALIDATED";
+  const phase2Filter = buildEngine3V6Phase2Evidence({
+    ...activationArgsV6,
+    observedDirection:priorDirectional?priorV6Direction:"NEUTRAL",
+    priorReactionAnchor:priorDirectional
+      ?priorV6?.phase2ReactionAnchor??null:null,
+    priorAnchorDirection:priorDirectional
+      ?priorV6?.phase2AnchorDirection??null:null,
+    priorReactionSite:priorDirectional
+      ?priorV6?.phase2ReactionSite??null:null,
+  });
+  // Recompute v6 control from strictly eligible bars using the existing
+  // v5 evidence algorithms. DO NOT reuse canonical v5 control from old bars.
+  const phase2Causal = buildEngine3V6CausalControl({
+    phase2Evidence:phase2Filter,normalizedZoneInput:zoneInputV6,
+    evaluationTimeMs,
+  });
+  const observedV6Direction = priorV6Direction === "LONG" ||
+    priorV6Direction === "SHORT" ? priorV6Direction :
+    phase2Causal.qualified ? phase2Causal.observedDirection : "NEUTRAL";
+  const priorAnchorAllowed = priorV6?.convictionState !== "INVALIDATED" &&
+    priorV6Direction === observedV6Direction;
+  const engine3V6Phase2Evidence = buildEngine3V6Phase2Evidence({
+    ...activationArgsV6,
+    observedDirection:observedV6Direction,
+    priorReactionAnchor:priorAnchorAllowed
+      ?priorV6?.phase2ReactionAnchor ?? null:null,
+    priorAnchorDirection:priorAnchorAllowed
+      ?priorV6?.phase2AnchorDirection ?? null:null,
+    priorReactionSite:priorAnchorAllowed
+      ?priorV6?.phase2ReactionSite ?? null:null,
+    progressExtreme:priorV6?.progressExtreme ?? null,
+    establishingNow:phase2Causal.qualified && priorV6Direction === "NEUTRAL",
+  });
+  // Phase1 reducer remains the ONLY v6 direction state machine;
+  // Phase2 provides its independent, causally scoped evidence/seed.
+  const engine3V6Shadow = buildEngine3V6Phase1Shadow({
+    priorState:priorV6,
+    v5:engine3V5,
+    causalControl:phase2Causal,
+    phase2Evidence:engine3V6Phase2Evidence,
+    candidateId:candidateIdV6,zoneId:zoneIdV6,
+    bars1m:engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m:engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    openTradeActive:engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection:engine3OpenPaperLock.lockedTradeDirection,
+    policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
+      deteriorationTimeoutMs:12*60000},
+  });
+  // Phase3 research diagnostics are isolated output only. They do not feed
+  // the v6 reducer, canonical v5, Engine4 or Engine6.
+
+  const engine3V6ResearchTrace = buildEngine3V6ResearchTrace({
+    evaluationTimeMs,symbol,strategyId:s.strategyId,
+    priorShadow:priorV6,shadow:engine3V6Shadow,
+    phase2Evidence:engine3V6Phase2Evidence,
+    phase2Causal,engine26:engine26ReactionHandoff,
+    phase1Comparison:{
+      canonicalDirection:priorV6?.canonicalDirection??"NEUTRAL",
+      v5CanonicalDirection:engine3V5?.canonical?.canonical?.direction??"NEUTRAL",
+    },
+  });
+  patchedConfluence.context.reaction.engine3V6AuthorizationReadiness =
+    engine3V6AuthorizationReadiness;
+  patchedConfluence.context.reaction.engine3V6ResearchTrace =
+    engine3V6ResearchTrace;
+  patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
+  patchedConfluence.context.reaction.engine3V6Phase2Evidence =
+    {...engine3V6Phase2Evidence,causalPriceControl:{
+      controlState:phase2Causal.control?.controlState??"NO_CONTROL",
+      quality:phase2Causal.control?.quality??"WEAK",
+      qualified:phase2Causal.qualified,
+      source:phase2Causal.controlSource,
+      controlGeometrySource:phase2Causal.controlGeometrySource,
+      controlGeometryEligible:phase2Causal.controlGeometryEligible,
+      engine26Zone:phase2Causal.engine26Zone,
+      engine3ControlLens:phase2Causal.engine3ControlLens,
+      reasonCodes:phase2Causal.reasonCodes,
+    }};
+  patchedConfluence.context.reaction.engine3V6ShadowPersistence =
+    saveEngine3V6Phase1ShadowState({state:{
+      ...engine3V6Shadow,
+      phase2ActivationRun:engine3V6Phase2Evidence.activationRun,
+      phase2ReactionAnchor:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.reactionAnchor,
+      phase2AnchorDirection:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.anchorDirection,
+      phase2ReactionSite:engine3V6Shadow.invalidatedNow
+        ?null:engine3V6Phase2Evidence.reactionSite,
+    }});
+}
+
 
 if (isEsIntradayScalp) {
   saveEngine3V5CanonicalState({
@@ -10268,6 +10460,8 @@ async function buildEngine2State(symbol) {
 async function buildSnapshot() {
   console.log("Starting strategy snapshot build...");
   const evaluationTimeMs = Date.now();
+  const engine3SourceEvidenceEnabled =
+    process.env.ENGINE3_SOURCE_EVIDENCE_SHADOW_ENABLED === "1";
 
   const previousSnapshot = loadPreviousSnapshotSafe();
   const engine25Context = loadEngine25Context();
@@ -10356,6 +10550,7 @@ String(symbol || "").toUpperCase() === "ES"
       limit: 120,
       coreBase: CORE_BASE,
       fetchJson,
+      includeSourceEvidence:engine3SourceEvidenceEnabled,
     })
   : Promise.resolve({
       oneMinute: {
@@ -10416,6 +10611,12 @@ console.log("Engine21 alignment fetched");
   marketMeter.layers.oneHourEma10 = emaPosture?.oneHour || null;
   marketMeter.layers.fourHourEma10 = emaPosture?.fourHour || null;
   marketMeter.layers.dailyEma10 = emaPosture?.daily || null; 
+  const tenMinuteSourceEvidence=engine3SourceEvidenceEnabled
+    ? emaPosture?.tenMinute?.engine11SourceEvidence??null : null;
+  // Strip the new receipt sidecar from the market/strategy object so only
+  // the dedicated shadow diagnostic is new; trading inputs remain unchanged.
+  if(engine3SourceEvidenceEnabled&&emaPosture?.tenMinute)
+    delete emaPosture.tenMinute.engine11SourceEvidence;
   const result = {
   ok: true,
   symbol,
@@ -11775,6 +11976,42 @@ if (String(symbol || "").toUpperCase() === "ES") {
     }
   }
 
+  if(engine3SourceEvidenceEnabled&&String(symbol||"").toUpperCase()==="ES"){
+    const evidenceSources={
+      "1m":engine3DiagnosticBars?.oneMinute?.engine11SourceEvidence??null,
+      "5m":engine3DiagnosticBars?.fiveMinute?.engine11SourceEvidence??null,
+      "10m":tenMinuteSourceEvidence,
+    };
+    const decisionComputedAtMs=Date.now();
+    const evidenceBars={
+      "1m":engine3DiagnosticBars?.oneMinute?.bars||[],
+      "5m":engine3DiagnosticBars?.fiveMinute?.bars||[],
+      "10m":emaPosture?.tenMinute?.bars||[],
+    };
+    const allPresent=Object.entries(evidenceSources).every(([tf,source])=>
+      source?.receipt?.schema==="engine11.es.originalSourceReceipt.v3"&&
+      source.receipt.frame===tf&&Array.isArray(source.selectedBarReferences)&&
+      source.selectedBarReferences.length===evidenceBars[tf].length);
+    const contracts=new Set(Object.values(evidenceSources)
+      .map(source=>source?.receipt?.physicalContract).filter(Boolean));
+    const contractConsistent=contracts.size===1;
+    const receiptChronologyValid=Object.values(evidenceSources).every(source=>
+      Number.isSafeInteger(source?.receipt?.bodyCompletedAtMs)&&
+      Number.isSafeInteger(source?.consumerReceivedAtMs)&&
+      source.receipt.bodyCompletedAtMs<=source.consumerReceivedAtMs&&
+      source.consumerReceivedAtMs<=decisionComputedAtMs);
+    const status=!allPresent?"SOURCE_RECEIPT_INCOMPLETE":
+      !contractConsistent?"SOURCE_CONTRACT_MISMATCH":
+      !receiptChronologyValid?"SOURCE_RECEIPT_CHRONOLOGY_INVALID":
+      "OBSERVED_UNVERIFIED";
+    result.engine3SourceEvidenceShadow={
+      schema:"engine3.shadowSourceReceiptLink.v1",mode:"READ_ONLY",
+      status,evaluationTimeMs,decisionComputedAtMs,
+      sources:evidenceSources,
+      sourceEvidenceVerified:false,engine3ConsumptionAttested:false,
+      calibrationAdmissible:false,recordingActivated:false,writerInvoked:false,
+    };
+  }
   fs.mkdirSync(DATA_DIR, { recursive: true });
   fs.writeFileSync(SNAPSHOT_FILE, JSON.stringify(result, null, 2));
   console.log("Strategy snapshot written:", SNAPSHOT_FILE);

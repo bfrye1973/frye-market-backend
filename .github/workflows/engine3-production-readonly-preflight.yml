@@ -1,0 +1,66 @@
+name: Engine3 Production Readonly Preflight
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/engine3-production-readonly-preflight.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Query only public read-only production endpoints
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          const base='https://frye-market-backend-1.onrender.com';
+          const paths=[
+            '/api/health',
+            '/api/v1/dashboard-snapshot?symbol=ES',
+            '/api/v1/engine28a/pipeline-doctor?symbol=ES'
+          ];
+          const now=Date.now();
+          let failures=0;
+          for (const p of paths) {
+            const controller=new AbortController();
+            const t=setTimeout(()=>controller.abort(),12000);
+            try {
+              const response=await fetch(base+p,{headers:{'Accept':'application/json','Cache-Control':'no-store'},signal:controller.signal});
+              const data=await response.json().catch(()=>null);
+              const topKeys=data&&typeof data==='object'?Object.keys(data).slice(0,35):[];
+              const findings={
+                endpoint:p.split('?')[0],
+                http:response.status,
+                ok:data?.ok??null,
+                schema:data?.schema??null,
+                timestamp:data?.timestamp??data?.generatedAt??data?.asOf??data?.updatedAt??null,
+                pipelineStatus:data?.pipelineStatus??data?.diagnosis?.pipelineStatus??null,
+                rootCause:data?.rootCause??null,
+                failureType:data?.failureType??null,
+                proof:data?.proof??null,
+                stages:data?.stages??null,
+                snapshotTime:data?.snapshotTime??data?.now??null,
+                strategyKeys:data?.strategies&&typeof data.strategies==='object'?Object.keys(data.strategies).slice(0,8):[],
+                strategy1:data?.strategies?.['intraday_scalp@10m']?{
+                  keys:Object.keys(data.strategies['intraday_scalp@10m']).slice(0,45),
+                  engine3:data.strategies['intraday_scalp@10m'].engine3??null,
+                  reaction:data.strategies['intraday_scalp@10m'].reaction??null,
+                  direction:data.strategies['intraday_scalp@10m'].direction??null,
+                  snapshotTime:data.strategies['intraday_scalp@10m'].snapshotTime??null
+                }:null,
+                firstFailingEngine:data?.firstFailingEngine??data?.diagnosis?.firstFailingEngine??null,
+                engine3State:data?.engine3?.state??data?.strategy?.engine3?.state??data?.strategy?.reaction?.state??null,
+                topKeys,
+                checkedAt:new Date().toISOString()
+              };
+              console.log(JSON.stringify(findings));
+              if(!response.ok || !data || data.ok===false)failures++;
+            } catch(e){
+              failures++;
+              console.log(JSON.stringify({endpoint:p.split('?')[0],error:String(e?.message||e).slice(0,180),checkedAt:new Date().toISOString()}));
+            } finally {clearTimeout(t);}
+          }
+          if(failures){console.error('Preflight did not verify all three endpoints: '+failures+' issue(s)');process.exitCode=1;}
+          NODE

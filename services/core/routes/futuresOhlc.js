@@ -23,6 +23,8 @@
 //   FUTURES_NQ_CONTRACT_OVERRIDE=NQU6
 
 import express from "express";
+import { performance } from "node:perf_hooks";
+import { captureReceiptV3, bindSelectedBarsToReceipt } from "../logic/engine11/sourceReceiptV3/captureReceiptV3.js";
 
 const router = express.Router();
 export default router;
@@ -405,6 +407,9 @@ async function fetchFuturesAggs({
   startDate,
   endDate,
   limit,
+  evidence = false,
+  evidenceFrame = null,
+  resolver = null,
 }) {
   if (!POLY_KEY) {
     throw new Error("Missing Polygon API key");
@@ -422,6 +427,8 @@ async function fetchFuturesAggs({
   url.searchParams.set("limit", "50000");
   url.searchParams.set("apiKey", POLY_KEY);
 
+  const requestStartedAtMs = Date.now();
+  const requestStartMono = performance.now();
   const r = await fetch(url.toString(), {
     cache: "no-store",
     headers: { Accept: "application/json" },
@@ -432,7 +439,49 @@ async function fetchFuturesAggs({
     throw new Error(`Polygon futures aggs ${r.status} ${txt}`);
   }
 
-  const data = await readJsonResponse(r, "Polygon futures aggs");
+  // Explicitly opted-in shadow-only evidence path; default legacy REST bytes and
+  // normalized bars remain unchanged. This only processes already-fetched bytes.
+  // No in-memory cache or persistent body store is enabled.
+  let engine11Receipt = null;
+  let data;
+  if (evidence) {
+    if (!r.body) throw new Error("Massive evidence response has no body");
+    const reader = r.body.getReader();
+    const chunks = [];
+    let total = 0;
+    let firstByteAtMs = null;
+    let firstByteMono = null;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        if (firstByteAtMs === null) {
+          firstByteAtMs = Date.now();
+          firstByteMono = performance.now();
+        }
+        total += value.byteLength;
+        if (total > 8 * 1024 * 1024) throw new Error("Massive evidence body too large");
+        chunks.push(Buffer.from(value));
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bodyCompletedAtMs = Date.now();
+    const bodyCompleteMono = performance.now();
+    const rawBody = Buffer.concat(chunks);
+    engine11Receipt = captureReceiptV3({
+      request: url.toString(), body: rawBody,
+      physicalContract: resolvedSymbol, frame: evidenceFrame,
+      requestStartedAtMs, firstByteAtMs, bodyCompletedAtMs,
+      requestToFirstByteMonoMs: firstByteMono - requestStartMono,
+      requestToBodyMonoMs: bodyCompleteMono - requestStartMono,
+      resolver,
+    });
+    data = JSON.parse(rawBody.toString("utf8"));
+  } else {
+    data = await readJsonResponse(r, "Polygon futures aggs");
+  }
   const arr = Array.isArray(data?.results) ? data.results : [];
 
   const bars = arr
@@ -450,7 +499,12 @@ async function fetchFuturesAggs({
     }
   }
 
-  return dedup.length > limit ? dedup.slice(-limit) : dedup;
+  const selectedBars = dedup.length > limit ? dedup.slice(-limit) : dedup;
+  if (!evidence) return selectedBars;
+  // A paginated first page must never be represented as complete evidence.
+  // The existing default behavior is intentionally unchanged.
+  const selectedBarReferences = bindSelectedBarsToReceipt(engine11Receipt, selectedBars);
+  return { bars: selectedBars, engine11Receipt, selectedBarReferences };
 }
 
 router.get("/", async (req, res) => {
@@ -477,13 +531,22 @@ router.get("/", async (req, res) => {
     const startDate = formatDateUTC(startMs);
     const endDate = formatDateUTC(endMs + 24 * 60 * 60 * 1000);
 
-    const bars = await fetchFuturesAggs({
+    // OFF by default: even evidence=1 does nothing without explicit feature flag.
+    // No external data capture or additional vendor request is introduced.
+    const evidence = process.env.ENGINE11_SOURCE_RECEIPT_V3_ENABLED === "1" &&
+      String(req.query.evidence || "") === "1" &&
+      ["1m", "5m", "10m"].includes(tf);
+    const result = await fetchFuturesAggs({
       resolvedSymbol,
       resolution,
       startDate,
       endDate,
       limit,
+      evidence,
+      evidenceFrame: evidence ? tf : null,
+      resolver: evidence ? resolver : null,
     });
+    const bars = evidence ? result.bars : result;
 
     if (String(req.query.debug || "") === "1") {
       return res.json({
@@ -506,7 +569,8 @@ router.get("/", async (req, res) => {
 
     res.setHeader("Cache-Control", "no-store");
 
-    return res.json(bars);
+    return res.json(evidence ? { bars, engine11Receipt: result.engine11Receipt,
+      selectedBarReferences: result.selectedBarReferences } : bars);
   } catch (e) {
     console.error("[/api/v1/futures/ohlc] error:", e?.stack || e);
 
