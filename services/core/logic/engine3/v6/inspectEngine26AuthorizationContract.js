@@ -37,8 +37,11 @@ export function inspectEngine26AuthorizationContract({
    handoff?.engine3AuthorizationStorageHealthy===true;
  const persisted=
    handoff?.engine3AuthorizationPersisted===true;
+ const persistenceMode=
+   handoff?.engine3AuthorizationPersistenceMode??null;
+ const persistenceModeValid=persistenceMode==="PERSISTENT_MONOTONIC";
  const sourceHealthValid=
-   sourceReady&&storageHealthy&&persisted;
+   sourceReady&&storageHealthy&&persisted&&persistenceModeValid;
 
  const sourceAsOf=milliseconds(
    handoff?.engine3AuthorizationSourceAsOf??
@@ -47,9 +50,12 @@ export function inspectEngine26AuthorizationContract({
  );
  const sourceAsOfFuture=
    sourceAsOf!==null&&at!==null&&sourceAsOf>at;
+ const sourceAsOfBeforeAuthorization=
+   sourceAsOf!==null&&published!==null&&sourceAsOf<published;
 
  const valid=active&&published!==null&&at!==null&&!after&&!conflict&&
-   !continuityChanged&&sourceHealthValid&&!sourceAsOfFuture;
+   !continuityChanged&&sourceHealthValid&&!sourceAsOfFuture&&
+   !sourceAsOfBeforeAuthorization;
  return {
   schema:"engine3.v6.engine26AuthorizationReadiness.v2",mode:"SHADOW_DIAGNOSTIC_ONLY",
   candidateId,zoneId,evaluationTimeMs:at,
@@ -59,6 +65,8 @@ export function inspectEngine26AuthorizationContract({
    !sourceReady?"ENGINE26_SOURCE_NOT_READY":
    !storageHealthy?"ENGINE26_STORAGE_UNHEALTHY":
    !persisted?"ENGINE26_AUTHORIZATION_NOT_PERSISTED":
+   !persistenceModeValid?"ENGINE26_PERSISTENCE_MODE_UNVERIFIED":
+   sourceAsOfBeforeAuthorization?"ENGINE26_SOURCE_ASOF_BEFORE_AUTHORIZATION":
    sourceAsOfFuture?"ENGINE26_SOURCE_ASOF_IN_FUTURE":
    conflict?"ENGINE26_SOURCE_TIMESTAMP_CONFLICT":
    after?"AUTHORIZATION_TIMESTAMP_IN_FUTURE":
@@ -69,7 +77,7 @@ export function inspectEngine26AuthorizationContract({
   sourceHealth:{
    sourceReady,storageHealthy,persisted,
    storageStatus:handoff?.engine3AuthorizationStorageStatus??null,
-   persistenceMode:handoff?.engine3AuthorizationPersistenceMode??null,
+   persistenceMode,
    sourceAsOfTimeMs:sourceAsOf,
   },
   externalOwner:"ENGINE26",
