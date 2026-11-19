@@ -91,3 +91,38 @@ test("cross-process historical replay cannot rewind durable head or elevate time
   assert.equal(accepted(historical,"2026-11-18T14:01:00.000Z").authoritativeTimestampMs,null);
  }finally{fs.rmSync(dir,{recursive:true,force:true})}
 });
+
+test("Engine26 honors explicit persistent-path environment override in a fresh process",()=>{
+ const {dir,filePath}=isolated();
+ try{
+  const script=`import {DEFAULT_ENGINE3_AUTHORIZATION_CLOCK_PATH as selected} from ${JSON.stringify(moduleUrl)};
+  console.log(JSON.stringify({selected}));`;
+  const p=spawnSync(process.execPath,["--input-type=module","--eval",script],{
+   cwd:root,encoding:"utf8",timeout:10000,
+   env:{...process.env,ENGINE26_PERSISTENT_STATE_ROOT:path.join(dir,"wrong-root"),
+    ENGINE26_ENGINE3_AUTHORIZATION_CLOCK_PATH:filePath}
+  });
+  assert.equal(p.status,0,p.stderr||p.stdout);
+  assert.equal(JSON.parse(p.stdout.trim()).selected,filePath);
+  assert.equal(fs.existsSync(filePath),false,"import alone never writes state");
+  assert.equal(fs.existsSync(path.join(dir,"wrong-root")),false);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
+test("Engine26 cross-process candidate and zone transitions reset authorization start",()=>{
+ const {dir,filePath}=isolated();
+ try{
+  invoke(filePath,start);
+  const next=invoke(filePath,"2026-11-18T13:01:00.000Z",{candidateId:"C2"});
+  assert.equal(next.engine3AuthorizationStartedAt,"2026-11-18T13:01:00.000Z");
+  assert.equal(next.engine3AuthorizationContinuous,false);
+  const changedZone=invoke(filePath,"2026-11-18T13:02:00.000Z",{candidateId:"C2",zoneId:"Z2"});
+  assert.equal(changedZone.engine3AuthorizationStartedAt,"2026-11-18T13:02:00.000Z");
+  assert.equal(changedZone.engine3AuthorizationContinuous,false);
+  const terminal=invoke(filePath,"2026-11-18T13:03:00.000Z",{authorized:false,candidateId:"C2",zoneId:"Z2"});
+  assert.equal(terminal.engine3AuthorizationStartedAt,null);
+  assert.equal(terminal.engine3AuthorizationPersisted,true);
+  const fresh=invoke(filePath,"2026-11-18T13:04:00.000Z",{candidateId:"C2",zoneId:"Z2"});
+  assert.equal(fresh.engine3AuthorizationStartedAt,"2026-11-18T13:04:00.000Z");
+  assert.equal(fresh.engine3AuthorizationContinuous,false);
+ }finally{fs.rmSync(dir,{recursive:true,force:true})}
+});
