@@ -1,7 +1,7 @@
 {
   "version": "5m-deltas-r12.8",
-  "deltasUpdatedAt": "2026-11-19T08:40:51.118413+00:00",
-  "sourceUpdatedAt": "2026-11-19T08:34:32Z",
+  "deltasUpdatedAt": "2026-11-19T08:45:59.561173+00:00",
+  "sourceUpdatedAt": "2026-11-19T08:45:33Z",
   "deltas": {
     "sectors": {
       "Information Technology": {
@@ -11,7 +11,7 @@
         "netTilt": 27.96
       },
       "Health Care": {
-        "netTilt": 8.33
+        "netTilt": 10.65
       },
       "Communication Services": {
         "netTilt": 10.0
