@@ -43,6 +43,13 @@ jobs:
                 stages:data?.stages??null,
                 snapshotTime:data?.snapshotTime??data?.now??null,
                 strategyKeys:data?.strategies&&typeof data.strategies==='object'?Object.keys(data.strategies).slice(0,8):[],
+                strategy1:data?.strategies?.['intraday_scalp@10m']?{
+                  keys:Object.keys(data.strategies['intraday_scalp@10m']).slice(0,45),
+                  engine3:data.strategies['intraday_scalp@10m'].engine3??null,
+                  reaction:data.strategies['intraday_scalp@10m'].reaction??null,
+                  direction:data.strategies['intraday_scalp@10m'].direction??null,
+                  snapshotTime:data.strategies['intraday_scalp@10m'].snapshotTime??null
+                }:null,
                 firstFailingEngine:data?.firstFailingEngine??data?.diagnosis?.firstFailingEngine??null,
                 engine3State:data?.engine3?.state??data?.strategy?.engine3?.state??data?.strategy?.reaction?.state??null,
                 topKeys,
