@@ -60,5 +60,7 @@ jobs:
       - name: Engine 26 authorization and Strategy 1 regression
         run: |
           node --test services/core/tests/engine26Engine3AuthorizationClock.test.js services/core/tests/engine26Strategy1RolloverContinuity.test.js
+      - name: Engine26 Engine3 cross-process restart and source-health gates (temp sandbox only)
+        run: node --test services/core/tests/engine26Engine3CrossProcessPersistence.test.js
       - name: Three-engine synthetic-only no-producer integration
         run: node --test services/core/tests/engine11P0ThreeEngineIntegration.test.js
