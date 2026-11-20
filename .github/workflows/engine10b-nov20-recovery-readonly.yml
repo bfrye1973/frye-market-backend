@@ -1,0 +1,24 @@
+name: Engine 10B November 20 Recovery Read-Only Audit
+on:
+  push:
+    branches:
+      - engine10b-nov20-recovery-accounting-readonly
+  pull_request:
+    paths:
+      - "services/core/scripts/auditEngine10BNov20RecoveryReadOnly.js"
+      - ".github/workflows/engine10b-nov20-recovery-readonly.yml"
+permissions:
+  contents: read
+jobs:
+  audit-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Validate isolated read-only audit syntax
+        run: node --check services/core/scripts/auditEngine10BNov20RecoveryReadOnly.js
+      - name: Verify audit remains free of runtime mutation interfaces
+        run: |
+          ! grep -Eq '(writeFile|renameSync|unlinkSync|updateEngine8RealFillAccountWatermark|deliverToEngine10|fetch\(|exec\(|spawn\()' services/core/scripts/auditEngine10BNov20RecoveryReadOnly.js
