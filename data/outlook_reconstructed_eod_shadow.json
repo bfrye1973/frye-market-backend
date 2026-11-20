@@ -2,12 +2,12 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-19T23:42:23.350447+00:00",
+  "updated_at_utc": "2026-11-20T01:41:35.827611+00:00",
   "completedSessionDate": "2026-11-19",
-  "score": 13.3,
+  "score": 13.2,
   "state": "BEARISH",
   "breadthScore": 13.2,
-  "momentumScore": 13.4,
+  "momentumScore": 13.2,
   "sectorCards": [
     {
       "sector": "Communication Services",
@@ -65,21 +65,21 @@
     },
     {
       "sector": "Industrials",
-      "breadth_pct": 15.7,
-      "momentum_pct": 29.63,
+      "breadth_pct": 16.25,
+      "momentum_pct": 28.0,
       "nh": 46,
-      "nl": 247,
-      "up": 8,
-      "down": 19
+      "nl": 237,
+      "up": 7,
+      "down": 18
     },
     {
       "sector": "Materials",
-      "breadth_pct": 3.63,
+      "breadth_pct": 3.78,
       "momentum_pct": 0.0,
       "nh": 7,
-      "nl": 186,
+      "nl": 178,
       "up": 0,
-      "down": 54
+      "down": 50
     },
     {
       "sector": "Real Estate",
@@ -160,18 +160,18 @@
     },
     "Industrials": {
       "nh": 46,
-      "nl": 240,
+      "nl": 230,
       "up": 10,
-      "down": 25,
-      "breadth_pct": 16.08,
-      "momentum_pct": 28.57
+      "down": 24,
+      "breadth_pct": 16.67,
+      "momentum_pct": 29.41
     },
     "Materials": {
       "nh": 2,
-      "nl": 176,
+      "nl": 169,
       "up": 0,
-      "down": 32,
-      "breadth_pct": 1.12,
+      "down": 29,
+      "breadth_pct": 1.17,
       "momentum_pct": 0.0
     },
     "Real Estate": {
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-19",
-      "close": 7182.75,
-      "ma10": 7447.05,
-      "ma20": 7535.75,
+      "close": 7175.25,
+      "ma10": 7446.3,
+      "ma20": 7535.375,
       "ma10Prior": 7469.175,
       "ma20Prior": 7560.2375,
       "ma10Upsloping": false,
@@ -257,35 +257,35 @@
     "all": {
       "members": 5470,
       "nh": 363,
-      "nl": 2379,
-      "up": 56,
-      "down": 294,
-      "breadth_pct": 13.24,
-      "momentum_pct": 16.0,
+      "nl": 2361,
+      "up": 55,
+      "down": 289,
+      "breadth_pct": 13.33,
+      "momentum_pct": 15.99,
       "prior": {
         "nh": 350,
-        "nl": 2237,
+        "nl": 2220,
         "up": 79,
-        "down": 200,
-        "breadth_pct": 13.53,
-        "momentum_pct": 28.32
+        "down": 196,
+        "breadth_pct": 13.62,
+        "momentum_pct": 28.73
       }
     },
     "large": {
       "members": 888,
       "nh": 50,
-      "nl": 432,
+      "nl": 424,
       "up": 5,
-      "down": 88,
-      "breadth_pct": 10.37,
-      "momentum_pct": 5.38,
+      "down": 84,
+      "breadth_pct": 10.55,
+      "momentum_pct": 5.62,
       "prior": {
         "nh": 46,
-        "nl": 353,
+        "nl": 346,
         "up": 4,
-        "down": 31,
-        "breadth_pct": 11.53,
-        "momentum_pct": 11.43
+        "down": 28,
+        "breadth_pct": 11.73,
+        "momentum_pct": 12.5
       }
     },
     "mid": {
@@ -308,18 +308,18 @@
     "small": {
       "members": 3462,
       "nh": 223,
-      "nl": 1455,
-      "up": 47,
-      "down": 161,
-      "breadth_pct": 13.29,
-      "momentum_pct": 22.6,
+      "nl": 1445,
+      "up": 46,
+      "down": 160,
+      "breadth_pct": 13.37,
+      "momentum_pct": 22.33,
       "prior": {
         "nh": 224,
-        "nl": 1445,
+        "nl": 1435,
         "up": 68,
-        "down": 145,
-        "breadth_pct": 13.42,
-        "momentum_pct": 31.92
+        "down": 144,
+        "breadth_pct": 13.5,
+        "momentum_pct": 32.08
       }
     },
     "unknown": {
