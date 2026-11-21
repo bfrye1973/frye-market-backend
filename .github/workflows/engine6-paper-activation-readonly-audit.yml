@@ -1,0 +1,41 @@
+name: Engine6 PAPER activation read-only snapshot audit (test only)
+on:
+  push:
+    branches: [engine6-paper-readonly-activation-audit-nov17]
+  pull_request:
+    paths: [".github/workflows/engine6-paper-activation-readonly-audit.yml"]
+permissions:
+  contents: read
+jobs:
+  inspect-current-snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: GET ES snapshot without production mutation or secrets
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          const url='https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES&includeContext=1';
+          const response=await fetch(url,{signal:AbortSignal.timeout(15000),headers:{accept:'application/json'}});
+          console.log('HTTP',response.status);
+          if(!response.ok)process.exit(1);
+          const data=await response.json();
+          const s=data.strategies?.['intraday_scalp@10m']??{};
+          console.log('rootKeys',Object.keys(data).slice(0,30));
+          console.log('strategyKeys',Object.keys(s).filter(k=>/engine|funnel|strategy/i.test(k)));
+          for(const key of ['engine26Location','engine26InstitutionalLocation','engine26Candidate','engine26ZoneCandidate','engine3','engine3Strategy1','engine3PaperQualification','engine4','engine4Participation','engine4PaperParticipation','engine6PaperPermission','engine6Permission','engine7SizingPreview','engine7PositionSizing','engine7FinalSizing','engine8PaperOrder','engine8CanonicalPaperOrder','engine9OfficialManagementPlan','engine6ENoTradeFunnel']){
+            const v=s[key];if(v==null)continue;
+            let o={};
+            for(const f of ['candidateId','zoneId','planId','decision','permission','status','state','allowed','qualified','confirmed','reason','reasonCodes','blockers','executable','finalContracts','dollarsPerPoint','riskBudgetDollars','instrument','managementReady','official','firstFailedGate','gates','active'])if(v[f]!==undefined)o[f]=v[f];
+            console.log(key,JSON.stringify(o).slice(0,2400));
+          }
+          for(const [key,v] of Object.entries(s)){
+            if(!v||typeof v!=='object'||!(/engine3|engine4|engine6|engine7|engine8|engine9|funnel|engine26/i.test(key)))continue;
+            if(['engine26Location','engine26InstitutionalLocation','engine26Candidate','engine26ZoneCandidate','engine3','engine3Strategy1','engine3PaperQualification','engine4','engine4Participation','engine4PaperParticipation','engine6PaperPermission','engine6Permission','engine7SizingPreview','engine7PositionSizing','engine7FinalSizing','engine8PaperOrder','engine8CanonicalPaperOrder','engine9OfficialManagementPlan','engine6ENoTradeFunnel'].includes(key))continue;
+            let o={};for(const f of ['candidateId','zoneId','decision','status','allowed','qualified','confirmed','reasonCodes','blockers','finalContracts','dollarsPerPoint','executable','firstFailedGate'])if(v[f]!==undefined)o[f]=v[f];
+            if(Object.keys(o).length)console.log('OTHER',key,JSON.stringify(o).slice(0,1400));
+          }
+          JS
