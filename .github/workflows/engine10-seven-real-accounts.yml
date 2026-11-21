@@ -22,6 +22,9 @@ jobs:
       - name: Syntax checks
         run: |
           node --check services/core/logic/journal/tradeJournalStore.js
+          node --check services/core/logic/journal/oct29ChronologicalRecoveryPlan.js
+          node --check services/core/scripts/preflightEngine10BOct29ChronologicalRecovery.js
+          node --check services/core/scripts/applyEngine10BOct29ChronologicalRecovery.js
           node --check services/core/logic/journal/journalMaintenanceGuard.js
           node --check services/core/logic/journal/realAccountClassification.js
           node --check services/core/logic/journal/verifiedPrecutoverProvenance.js
@@ -44,6 +47,7 @@ jobs:
       - name: Seven account contract tests
         run: |
           node --test services/core/tests/engine10SevenRealAccountClassification.test.js
+          node --test services/core/tests/engine10BOct29ChronologicalRecovery.test.js
           node --test services/core/tests/engine10VerifiedPrecutoverProvenance.test.js
           node --test services/core/tests/engine10Oct22ClassificationMigration.test.js
           node --test services/core/tests/engine10RealPerformanceSections.test.js
