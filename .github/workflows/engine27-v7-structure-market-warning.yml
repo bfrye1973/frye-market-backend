@@ -1,0 +1,20 @@
+name: Engine27 V7 Structure Market Warning
+on:
+  push:
+    branches: [engine27-v7-structure-market-warning-20261031]
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/confirmation/**"
+      - "services/core/tests/engine27StructureMarketWarning.test.js"
+      - "src/components/engine27/StructureMarketConfirmationPanel.jsx"
+      - ".github/workflows/engine27-v7-structure-market-warning.yml"
+jobs:
+  warning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/core/tests/engine27StructureMarketWarning.test.js
+      - run: node --check services/core/logic/engine27/confirmation/buildStructureMarketWarning.js
