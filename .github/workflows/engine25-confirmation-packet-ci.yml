@@ -1,0 +1,32 @@
+name: engine25-confirmation-packet-ci
+
+on:
+  push:
+    branches:
+      - engine25-confirmation-packet-v1
+  pull_request:
+    paths:
+      - "services/core/logic/engine25/buildConfirmationPacket.js"
+      - "services/core/routes/engine25ConfirmationPacket.js"
+      - "services/core/tests/engine25ConfirmationPacket.test.js"
+      - "scripts/research_engine25_confirmation_oct29_replay.mjs"
+      - "services/core/server.js"
+      - ".github/workflows/engine25-confirmation-packet-ci.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Confirmation packet regression tests
+        run: node --test services/core/tests/engine25ConfirmationPacket.test.js
+      - name: Syntax check replay harness
+        run: node --check scripts/research_engine25_confirmation_oct29_replay.mjs
+      - name: Syntax check route
+        run: node --check services/core/routes/engine25ConfirmationPacket.js
+      - name: Syntax check builder
+        run: node --check services/core/logic/engine25/buildConfirmationPacket.js
