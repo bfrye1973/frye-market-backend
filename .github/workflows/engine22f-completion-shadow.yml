@@ -1,0 +1,19 @@
+name: Engine22F Completion Shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/completion/**"
+      - "services/core/tests/engine22FCompletionWatch.test.js"
+      - ".github/workflows/engine22f-completion-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  completion:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/completion/evaluateCompletionWatch.js
+      - run: node --test services/core/tests/engine22FCompletionWatch.test.js services/core/tests/engine22V3WaveCompletion.test.js services/core/tests/engine22V3WaveTransition.test.js
