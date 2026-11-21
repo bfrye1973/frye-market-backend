@@ -1,0 +1,19 @@
+name: Engine22G-H Transition Publication Shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/transitions/**"
+      - "services/core/logic/engine22/publication/**"
+      - "services/core/tests/engine22GHShadow.test.js"
+      - ".github/workflows/engine22gh-shadow.yml"
+permissions:
+  contents: read
+jobs:
+  transition-publication:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22GHShadow.test.js services/core/tests/engine22V3WaveTransition.test.js services/core/tests/engine22V3ProtectedContracts.test.js
