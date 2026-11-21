@@ -1,0 +1,15 @@
+name: Engine27 Live Seven Invalidation Audit
+on:
+  pull_request:
+    paths:
+      - "services/core/scripts/auditEngine27SevenInvalidationsPublic.js"
+      - ".github/workflows/engine27-live-invalidation-audit.yml"
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node services/core/scripts/auditEngine27SevenInvalidationsPublic.js
