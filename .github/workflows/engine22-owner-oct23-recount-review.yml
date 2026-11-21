@@ -1,0 +1,18 @@
+name: Engine22 Owner Oct23 Recount Review
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildOwnerOct23RecountProposal.js"
+      - "services/core/tests/engine22OwnerOct23RecountProposal.test.js"
+      - ".github/workflows/engine22-owner-oct23-recount-review.yml"
+permissions:
+  contents: read
+jobs:
+  isolated-proposal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22OwnerOct23RecountProposal.test.js services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js
