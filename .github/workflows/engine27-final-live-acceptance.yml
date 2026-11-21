@@ -1,0 +1,15 @@
+name: Engine27 Final Live Acceptance
+on:
+  pull_request:
+    paths:
+      - "services/core/scripts/auditEngine27FinalLiveAcceptance.js"
+      - ".github/workflows/engine27-final-live-acceptance.yml"
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node services/core/scripts/auditEngine27FinalLiveAcceptance.js
