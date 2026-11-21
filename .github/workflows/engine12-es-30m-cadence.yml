@@ -1,0 +1,20 @@
+name: Engine12 ES 30-minute Replay Cadence
+on:
+  pull_request:
+    paths:
+      - "services/core/jobs/archiveEsReplaySnapshot.js"
+      - "services/core/logic/engine12/thirtyMinuteReplayCadence.js"
+      - "services/core/tests/engine12ThirtyMinuteReplayCadence.test.js"
+      - ".github/workflows/engine12-es-30m-cadence.yml"
+permissions:
+  contents: read
+jobs:
+  archive-cadence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/jobs/archiveEsReplaySnapshot.js
+      - run: node --test services/core/tests/engine12ThirtyMinuteReplayCadence.test.js services/core/tests/engine12EsFuturesSessionGuard.test.js services/core/tests/engine12Engine27ReplayPreservation.test.js
