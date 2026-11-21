@@ -1,0 +1,46 @@
+name: Engine11 Candle Provenance Contract — isolated synthetic acceptance
+on:
+  pull_request:
+    paths:
+      - 'docs/engine11/ENGINE11_ES_COMPLETED_CANDLE_PROVENANCE_CONTRACT_V1_2026-11-18.md'
+      - 'services/core/logic/engine11/candleProvenanceV1/**'
+      - 'services/core/logic/engine11/sourceReceiptV3/**'
+      - 'services/core/logic/engine11/sourceObservationsV2/**'
+      - 'services/core/logic/engine11/rawCandles/**'
+      - 'services/core/tests/engine11SourceReceiptV3.test.js'
+      - 'services/core/tests/engine11ReceiptRouteSafety.test.js'
+      - 'services/core/tests/engine11SourceConsumptionTiming.test.js'
+      - 'services/core/tests/engine11ShadowObservation.test.js'
+      - 'services/core/routes/futuresOhlc.js'
+      - 'services/core/tests/engine11CandleProvenanceContractV1.test.js'
+      - 'services/core/tests/engine11IndependentOriginalBytePreflight.test.js'
+      - '.github/workflows/engine11-candle-provenance-contract.yml'
+jobs:
+  preflight-synthetic:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify pure fail-closed Engine11 provenance (synthetic fixtures ONLY)
+        run: node --test services/core/tests/engine11CandleProvenanceContractV1.test.js services/core/tests/engine11IndependentOriginalBytePreflight.test.js services/core/tests/engine11SourceReceiptV3.test.js services/core/tests/engine11ReceiptRouteSafety.test.js services/core/tests/engine11SourceConsumptionTiming.test.js services/core/tests/engine11ShadowObservation.test.js
+      - name: Validate route syntax without provider connection
+        run: node --check services/core/routes/futuresOhlc.js
+      - name: Verify no real recorder side effects in changed validator
+        run: |
+          node --input-type=module - <<'NODE'
+          import fs from 'node:fs';
+          const files=['services/core/logic/engine11/candleProvenanceV1/inspectProvenance.js',
+                       'services/core/logic/engine11/candleProvenanceV1/inspectOriginalSourceReceipt.js'];
+          for(const path of files){
+            const code=fs.readFileSync(path,'utf8');
+            for(const word of ['writeFile(', 'createWriteStream(', 'mkdir(', 'fetch(', 'spawn(']){
+              if(code.includes(word))throw Error('ENGINE11_PROVENANCE_PREFLIGHT_SIDE_EFFECT_'+word);
+            }
+          }
+          console.log('ENGINE11_CANDLE_PROVENANCE_DESIGN_ONLY_NO_WRITER');
+          NODE
