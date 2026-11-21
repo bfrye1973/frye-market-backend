@@ -1,0 +1,22 @@
+name: Engine18B Gate1 Synthetic Recorder
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/gate1RawRecorder.js'
+      - 'services/core/tests/engine18Gate1RawRecorder.test.js'
+      - '.github/workflows/engine18b-gate1-recorder.yml'
+  push:
+    branches:
+      - engine18b-gate1-recorder-synthetic-20261110
+jobs:
+  synthetic-recorder:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check services/core/logic/engine18/gate1RawRecorder.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js

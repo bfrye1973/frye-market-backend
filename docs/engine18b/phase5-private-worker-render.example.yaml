@@ -1,0 +1,31 @@
+# PROPOSAL ONLY — never apply until manager acceptance and exact billing check.
+# Placed under docs so Render does not auto-discover or provision this file.
+services:
+  - type: worker
+    name: frye-engine18-recorder-private-proposed
+    runtime: node
+    region: oregon
+    plan: starter
+    branch: engine18-liquidity-intelligence-foundation-20261109
+    autoDeploy: false
+    buildCommand: npm install
+    # Existing guard exits nonzero EVEN IF a future operator changes the flag.
+    # A separately reviewed real worker entrypoint will replace this only
+    # after private disk, credentials, restore and limited trial authorization.
+    startCommand: node services/core/logic/engine18/engine18Phase4DeploymentGuard.js
+    disk:
+      name: engine18-private-recorder-data-proposed
+      mountPath: /var/data/engine18-recorder
+      sizeGB: 50
+    envVars:
+      - key: ENGINE18_RAW_CAPTURE_ENABLED
+        value: "0"
+      - key: ENGINE18_PRIVATE_BACKUP_ENABLED
+        value: "0"
+      - key: ENGINE18_CLOCK_QUALITY
+        value: UNVERIFIED
+      - key: ENGINE18_CME_CALENDAR_QUALITY
+        value: UNVERIFIED
+# Credentials, encryption key material and any live Ironbeam endpoint MUST NOT
+# be committed to source or this template. Existing /var/data/replay 100GB
+# production disk is NOT referenced and must remain untouched.

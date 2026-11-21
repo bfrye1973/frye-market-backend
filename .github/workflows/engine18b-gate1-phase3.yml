@@ -1,0 +1,21 @@
+name: Engine18B Gate1 Phase3 Synthetic Readiness
+on:
+  push:
+    branches: [engine18b-gate1-phase3-readiness-20261110]
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/engine18Phase3Readiness.js'
+      - 'services/core/logic/engine18/engine18BoundedReplayScan.js'
+      - 'services/core/tests/engine18Phase3Readiness.test.js'
+      - '.github/workflows/engine18b-gate1-phase3.yml'
+jobs:
+  phase3-synthetic:
+    runs-on: ubuntu-latest
+    permissions: {contents: read}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - run: node --check services/core/logic/engine18/engine18Phase3Readiness.js
+      - run: node --check services/core/logic/engine18/engine18BoundedReplayScan.js
+      - run: node --test services/core/tests/engine18Gate1RawRecorder.test.js services/core/tests/engine18Phase2Preparation.test.js services/core/tests/engine18Phase3Readiness.test.js
