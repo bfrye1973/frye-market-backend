@@ -53,6 +53,10 @@ import { buildReactionValidation5m } from "../logic/engine3/buildReactionValidat
 import { buildReactionConfirmation10m } from "../logic/engine3/buildReactionConfirmation10m.js";
 import { buildStrategy1Readiness } from "../logic/engine3/buildStrategy1Readiness.js";
 import { buildEngine3V5Shadow } from "../logic/engine3/v5/buildEngine3V5Shadow.js";
+import { resolveEngine10OpenPaperDirection } from "../logic/engine3/v6/resolveEngine10OpenPaperDirection.js";
+import { loadVerifiedEngine10PaperLock, saveVerifiedEngine10PaperLock, clearVerifiedEngine10PaperLock } from "../logic/engine3/v6/engine3Engine10VerifiedLockStore.js";
+import { buildEngine3V6Phase1Shadow } from "../logic/engine3/v6/buildEngine3V6Phase1Shadow.js";
+import { loadEngine3V6Phase1ShadowState, saveEngine3V6Phase1ShadowState } from "../logic/engine3/v6/engine3V6Phase1ShadowStore.js";
 import { buildEngine3Strategy1Handoff } from "../logic/engine3/v5/buildEngine3Strategy1Handoff.js";
 import { enrichCurrentLifecycleWithLivePriceAction } from "../logic/engine22/wave/lifecycle/enrich/enrichCurrentLifecycleWithLivePriceAction.js";
 import { buildAiTradeCopilotRead } from "../logic/aiTradeCopilot/buildAiTradeCopilotRead.js";
@@ -8558,6 +8562,7 @@ attachEngine4AuthorizedReactionParticipation({
       : null;
 
 let engine26OpenPaperTrades = [];
+let engine26OpenPaperTradesReadSucceeded = false;
 let engine10OpenEsFamilyTrades = [];
 
 if (isEsIntradayScalp) {
@@ -8569,12 +8574,14 @@ if (isEsIntradayScalp) {
       accountMode: "PAPER",
     });
 
-    engine26OpenPaperTrades = Array.isArray(openPaperResp?.trades)
+    engine26OpenPaperTradesReadSucceeded = Array.isArray(openPaperResp?.trades);
+    engine26OpenPaperTrades = engine26OpenPaperTradesReadSucceeded
       ? openPaperResp.trades
       : [];
   } catch (err) {
     console.error("[E26 OPEN PAPER TRADE CHECK ERROR]", err);
     engine26OpenPaperTrades = [];
+    engine26OpenPaperTradesReadSucceeded = false;
   }
 
   try {
@@ -8873,8 +8880,32 @@ if (isEsIntradayScalp) {
     engine3ReactionConfirmation10m,
   };
 
+// Verify OPEN PAPER lifecycle from the existing Engine10 Journal read.
+// This never infers direction from Engine3, Engine26 or the wave count.
+// A transient Engine10 journal failure or ambiguous multiple-OPEN result
+// must not erase a recently VERIFIED open-paper direction without evidence.
+// REVIEW-ONLY canonical v5 behavior change; Manager approval required before merge.
+const priorVerifiedEngine10Lock = loadVerifiedEngine10PaperLock();
+const engine3OpenPaperLock = resolveEngine10OpenPaperDirection({
+  trades: engine26OpenPaperTrades,
+  readSucceeded: engine26OpenPaperTradesReadSucceeded,
+  priorVerifiedLock: priorVerifiedEngine10Lock.lock,
+  evaluationTimeMs,
+  symbol,
+  strategyId: s.strategyId,
+});
+if (engine3OpenPaperLock.lifecycleVerified === true) {
+  if (engine3OpenPaperLock.openTradeActive === true) {
+    saveVerifiedEngine10PaperLock({ result: engine3OpenPaperLock });
+  } else {
+    // Only a successfully read empty OPEN list clears a stored verified lock.
+    clearVerifiedEngine10PaperLock();
+  }
+}
 const engine3V5 =
   buildEngine3V5Shadow({
+    openTradeActive: engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
     engine26LocationCandidate,
     engine26ReactionHandoff,
 
@@ -8909,6 +8940,34 @@ const engine3V5 =
 
 patchedConfluence.context.reaction.engine3V5 =
   engine3V5;
+patchedConfluence.context.reaction.engine3OpenPaperLockDiagnostic =
+  engine3OpenPaperLock;
+// Engine3 v6 Phase 1: separate READ_ONLY shadow; v5 remains canonical.
+// The shadow is never consulted by Engine4, Engine6, or downstream handoffs.
+if (isEsIntradayScalp) {
+  const savedShadow = loadEngine3V6Phase1ShadowState();
+  const engine3V6Shadow = buildEngine3V6Phase1Shadow({
+    priorState: savedShadow.found ? savedShadow.state : null,
+    v5: engine3V5,
+    candidateId: engine26LocationCandidate?.candidateId ?? null,
+    zoneId: engine26LocationCandidate?.zoneId ?? null,
+    bars1m: engine3DiagnosticBars?.oneMinute?.bars || [],
+    bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
+    evaluationTimeMs,
+    openTradeActive: engine3OpenPaperLock.openTradeActive,
+    lockedTradeDirection: engine3OpenPaperLock.lockedTradeDirection,
+    policy: {
+      // Manager-approved SHADOW hypotheses only; not v5 thresholds.
+      invalidationCloses1m: 2,
+      deteriorationEvidenceCount: 2,
+      deteriorationTimeoutMs: 12 * 60 * 1000,
+    },
+  });
+  patchedConfluence.context.reaction.engine3V6Shadow = engine3V6Shadow;
+  patchedConfluence.context.reaction.engine3V6ShadowPersistence =
+    saveEngine3V6Phase1ShadowState({ state: engine3V6Shadow });
+}
+
 
 if (isEsIntradayScalp) {
   saveEngine3V5CanonicalState({
