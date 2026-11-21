@@ -1,0 +1,31 @@
+name: Engine22E T1.1 History Contracts
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/history/**"
+      - "services/core/tests/engine22HistoryContract.test.js"
+      - ".github/workflows/engine22e-t11-contract-validation.yml"
+permissions:
+  contents: read
+jobs:
+  history-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Syntax validation
+        run: |
+          node --check services/core/logic/engine22/history/historyContract.js
+          node --check services/core/logic/engine22/history/provenanceClassifier.js
+          node --check services/core/tests/engine22HistoryContract.test.js
+      - name: Focused Engine22E and existing V3 contract regressions
+        run: |
+          node --test \
+            services/core/tests/engine22HistoryContract.test.js \
+            services/core/tests/engine22V3CanonicalStructure.test.js \
+            services/core/tests/engine22V3OwnerBootstrap.test.js \
+            services/core/tests/engine22SevenDegreeInvalidationsReadiness.test.js \
+            services/core/tests/engine22MinuteMinorOwnerAnchors.test.js
