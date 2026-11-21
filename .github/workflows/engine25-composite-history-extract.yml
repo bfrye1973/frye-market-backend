@@ -1,0 +1,28 @@
+name: engine25-composite-history-extract
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - engine25-eod-spreadsheet-reconstruction
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch current composite history
+        run: |
+          set -euo pipefail
+          curl -fsS "https://frye-market-backend-1.onrender.com/api/v1/engine25/composite-overlay-6mo" > /tmp/composite.json
+          python - <<'PY'
+          import json
+          src=json.load(open("/tmp/composite.json"))
+          rows=src.get("rows") or src.get("data",{}).get("rows") or []
+          wanted={"2026-10-24","2026-10-25","2026-10-26","2026-10-27","2026-10-28","2026-10-29","2026-10-30"}
+          out=[r for r in rows if r.get("date") in wanted or r.get("latestEodDate") in wanted]
+          open("/tmp/composite-history.json","w").write(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: composite-history
+          path: /tmp/composite-history.json
