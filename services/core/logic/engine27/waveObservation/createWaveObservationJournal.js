@@ -1,0 +1,139 @@
+// Engine27 V6 append-only observation journal. Isolated research module: not wired into production.
+// Engine22 is the only wave authority; never synthesize missing history/approvals.
+import fs from "node:fs";
+import path from "node:path";
+import {createHash} from "node:crypto";
+import {readAuthorizedWorkingStructure, DEGREE_ORDER} from "../v2/readAuthorizedWorkingStructure.js";
+
+const hash = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const timestamp = value => typeof value === "string" && Number.isFinite(Date.parse(value)) ? value : null;
+const recordSchema = "engine27.waveObservation.v1";
+const physicalContract = value => typeof value === "string" && /^ES[FGHJKMNQUVXZ]\d{1,2}$/.test(value) ? value : null;
+const clone = value => JSON.parse(JSON.stringify(value));
+// Source identity must be supplied from the original Replay file bytes, not
+// inferred from a re-serialized HTTP response.
+function replayIdentity(value) {
+  if (value == null) return {ok:true,value:null};
+  const {date,time,path:sourcePath,sha256,snapshotTimeUtc,hashBasis}=value;
+  const expected="/var/data/replay/es/"+date+"/"+time+".json";
+  const valid=/^\d{4}-\d{2}-\d{2}$/.test(date??"") && /^\d{4}$/.test(time??"")
+    && sourcePath===expected && /^[a-f0-9]{64}$/.test(sha256??"")
+    && timestamp(snapshotTimeUtc) && hashBasis==="ORIGINAL_REPLAY_FILE_BYTES";
+  return valid ? {ok:true,value:clone({date,time,path:sourcePath,sha256,snapshotTimeUtc,hashBasis})}
+    : {ok:false,value:null};
+}
+
+export function projectWaveObservation(snapshot, {observedAt, physicalEsContract=null, sourceReplay=null, marketEvidence=null, zoneContext=null, reactionEvidence=null, participationEvidence=null}={}) {
+  const observed = timestamp(observedAt);
+  if (!observed) return {ok:false,reason:"OBSERVATION_TIME_REQUIRED",events:[]};
+  const replay=replayIdentity(sourceReplay);
+  if (!replay.ok) return {ok:false,reason:"INVALID_OR_UNVERIFIED_REPLAY_IDENTITY",events:[]};
+  const auth = readAuthorizedWorkingStructure(snapshot);
+  if (!auth.available) return {ok:false,reason:auth.reasonCode,events:[]};
+  const p = auth.publication;
+  const degrees = DEGREE_ORDER.map(degree => {
+    const m = p.degrees[degree];
+    // No fallback to legacy count, and no invented publication/approval timestamps.
+    return {
+      degree,activeWave:m.activeWave,direction:m.direction,stage:m.stage??null,
+      parentDegree:m.parentDegree??null,parentWave:m.parentWave??null,
+      modelVersion:m.modelVersion??null,modelRevision:m.modelRevision??null,
+      countId:m.countId??null,sourcePath:m.sourcePath??null,selectionRevision:p.publicationRevision??null,
+      selectionStatus:m.selectionStatus??null,ownerApprovalReference:m.ownerApprovalReference??null,
+      approvedAt:timestamp(m.approvedAt),effectiveAt:timestamp(m.effectiveAt),priceEventAt:timestamp(m.priceEventAt),
+      anchors:m.anchors??null,levels:clone(m.levels??[]),review:clone(m.review??null),
+      officialInvalidation:clone(m.officialInvalidation??null),completionConfirmed:m.completionConfirmed===true,
+      previousModelVersion:m.previousModelVersion??null
+    };
+  });
+  const sourceTime = timestamp(p.publishedAt);
+  return {ok:true,reason:null,source:{
+    schema:p.schema,modelFingerprint:p.modelFingerprint,evidenceFingerprint:p.evidenceFingerprint??null,
+    publicationId:p.publicationId??null,publicationTime:sourceTime,
+    selectionApprovalReference:p.selectionApprovalReference??null,
+    pointInTimeAsOfAvailable:p.pointInTimeAsOfAvailable===true,
+    snapshotTime:timestamp(snapshot?.snapshotTime)??timestamp(snapshot?.now)??timestamp(snapshot?.ts)??null
+  },observedAt:observed,sourceReplay:replay.value,physicalEsContract:physicalContract(physicalEsContract),
+  // Unknown is explicitly unknown; optional evidence cannot be backfilled into prior records.
+  marketEvidence:marketEvidence?clone(marketEvidence):null,
+  zoneContext:zoneContext?clone(zoneContext):null,
+  reactionEvidence:reactionEvidence?clone(reactionEvidence):null,
+  participationEvidence:participationEvidence?clone(participationEvidence):null,degrees};
+}
+
+export function createWaveObservationJournal({root="/var/data/replay/engine27/wave-observations"}={}) {
+  const directory=path.join(root,"events"), lock=path.join(root,".writer-lock");
+  function existing() {
+    if(!fs.existsSync(directory))return [];
+    return fs.readdirSync(directory).filter(x=>/^\d{13}-[a-f0-9]{64}\.json$/.test(x))
+      .sort().map(name=>JSON.parse(fs.readFileSync(path.join(directory,name),"utf8")));
+  }
+  function append(snapshot,options={}) {
+    const projected=projectWaveObservation(snapshot,options);
+    if(!projected.ok)return {ok:false,reason:projected.reason,stored:0,duplicates:0};
+    fs.mkdirSync(directory,{recursive:true});
+    try {fs.mkdirSync(lock);} catch(e) {
+      if(e?.code==="EEXIST")return {ok:false,reason:"WAVE_JOURNAL_WRITER_BUSY",stored:0,duplicates:0};
+      throw e;
+    }
+    let stored=0, duplicates=0;
+    try {
+      if(fs.readdirSync(directory).some(name=>name.endsWith('.pending')))return {ok:false,reason:'INCOMPLETE_PENDING_EVENT_REQUIRES_RECOVERY',stored,duplicates};
+      const prior=new Map();
+      const all=existing();
+      for(const old of all)if(DEGREE_ORDER.includes(old.degree)){
+       const source=Date.parse(old.sourceObservedAt??old.sourceReplay?.snapshotTimeUtc??old.source?.snapshotTime??old.observedAt);
+       const current=prior.get(old.degree);
+       const latest=current?Date.parse(current.sourceObservedAt??current.sourceReplay?.snapshotTimeUtc??current.source?.snapshotTime??current.observedAt):-Infinity;
+       if(source>latest)prior.set(old.degree,old);
+      }
+      for(const wave of projected.degrees) {
+        const contents={wave,physicalEsContract:projected.physicalEsContract,
+          marketEvidence:projected.marketEvidence,zoneContext:projected.zoneContext,
+          reactionEvidence:projected.reactionEvidence,participationEvidence:projected.participationEvidence};
+        // Routine changing market context must not itself create a new wave event.
+        const stateHash=hash(wave);
+        const previous=prior.get(wave.degree)??null;
+        const sourceObservedAt=projected.sourceReplay?.snapshotTimeUtc??projected.source.snapshotTime??projected.observedAt;
+        const previousSource=previous?Date.parse(previous.sourceObservedAt??previous.sourceReplay?.snapshotTimeUtc??previous.source?.snapshotTime??previous.observedAt):null;
+        const late=previousSource!==null&&Date.parse(sourceObservedAt)<previousSource;
+        if(projected.sourceReplay&&all.some(e=>e.degree===wave.degree&&
+           e.sourceReplay?.sha256===projected.sourceReplay.sha256&&
+           e.sourceReplay?.path===projected.sourceReplay.path)){duplicates++;continue;}
+        if(!late&&previous?.stateHash===stateHash){duplicates++;continue;}
+        const observedMs=Date.parse(projected.observedAt);
+        const lastMs=previous?Date.parse(previous.observedAt):null;
+        if(lastMs!==null && observedMs<=lastMs)return {ok:false,reason:"OUT_OF_ORDER_OBSERVATION",stored,duplicates};
+        const eventId=hash({degree:wave.degree,stateHash,previousEventId:late?null:previous?.eventId??null,
+          sourceObservedAt,sourceReplaySha256:projected.sourceReplay?.sha256??null});
+        const event={schema:recordSchema,eventId,degree:wave.degree,sourceReplay:projected.sourceReplay,
+          eventType:late?"LATE_HISTORICAL_SOURCE_OBSERVATION":
+            previous?"WORKING_EVIDENCE_CHANGED":"INITIAL_VERIFIED_OBSERVATION",
+          previousEventId:late?null:previous?.eventId??null,
+          sourceObservedAt,stateHash,observedAt:projected.observedAt,
+          ingestedAt:projected.observedAt,retrospectiveIngestion:projected.sourceReplay!==null&&
+           projected.sourceReplay.snapshotTimeUtc!==projected.observedAt,
+          source:projected.source,...contents,noTradingAuthority:true,noWaveAuthority:true};
+        const filename=String(observedMs).padStart(13,"0")+"-"+eventId+".json";
+        const target=path.join(directory,filename), tmp=target+".pending";
+        // A complete, fsynced temp is atomically linked into the immutable event namespace.
+        const fd=fs.openSync(tmp,"wx");
+        try {fs.writeFileSync(fd,JSON.stringify(event)+"\n");fs.fsyncSync(fd);}
+        finally {fs.closeSync(fd);}
+        try{fs.linkSync(tmp,target);}catch(e){if(e?.code!=="EEXIST")throw e;}
+        finally{fs.unlinkSync(tmp);}
+        const dirfd=fs.openSync(directory,"r");
+        try{fs.fsyncSync(dirfd);}finally{fs.closeSync(dirfd);}
+        if(!late)prior.set(wave.degree,event);
+        all.push(event);stored++;
+      }
+      return {ok:true,stored,duplicates,reason:null};
+    } finally {fs.rmdirSync(lock);}
+  }
+  return Object.freeze({append,readEvents:()=>existing(),
+    readSourceChronology:()=>existing().sort((a,b)=>
+      Date.parse(a.sourceObservedAt??a.sourceReplay?.snapshotTimeUtc??a.observedAt)-
+      Date.parse(b.sourceObservedAt??b.sourceReplay?.snapshotTimeUtc??b.observedAt)),
+    storagePath:directory,
+    retention:"PERMANENT_UNTIL_EXPLICIT_OWNER_AUTHORIZED_ARCHIVE_MIGRATION"});
+}
