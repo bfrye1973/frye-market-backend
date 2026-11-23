@@ -18,6 +18,7 @@ export function buildEngine29DownstreamContext(output) {
     output?.squeezeV2Observation?.timestamp ?? null;
   const observationId = output?.squeezeV2Observation?.observationId ?? null;
   const timestamp = output?.timestamp ?? null;
+  const squeezeObs = output?.squeezeV2Observation || null;
   const ageMs = sourceTimestamp && Number.isFinite(Date.parse(sourceTimestamp)) &&
     Number.isFinite(Date.parse(timestamp))
     ? Math.max(0, Date.parse(timestamp) - Date.parse(sourceTimestamp))
@@ -33,22 +34,36 @@ export function buildEngine29DownstreamContext(output) {
     sourceTimestamp,
     observationAgeMs: ageMs,
     lanes: {
-      parentMove: { dataDegraded: parent == null, state: parent?.state ?? null,
-        direction: parent?.direction ?? null, parent, freshness: parent?.freshness ?? null },
-      oneHour: { state: output?.tacticalState ?? null, dataDegraded: output?.tacticalState == null },
-      thirtyMinute: { state: output?.fastTacticalState ?? null, dataDegraded: output?.fastTacticalState == null },
-      liveTenMinute: { ...live, dataDegraded: !live, freshness: quality.esLiveMonitorFreshness ?? null },
+      parentMove: { dataDegraded: parent == null || parent?.stale === true ||
+        quality.esThirtyMinuteFreshness?.stale === true, state: parent?.state ?? null,
+        direction: parent?.direction ?? null, parent,
+        freshness: quality.esThirtyMinuteFreshness ?? parent?.freshness ?? null },
+      oneHour: { state: output?.tacticalState ?? null,
+        freshness: quality.esOneHourFreshness ?? null,
+        dataDegraded: output?.tacticalState == null || quality.esOneHourFreshness?.stale === true },
+      thirtyMinute: { state: output?.fastTacticalState ?? null,
+        freshness: quality.esThirtyMinuteFreshness ?? null,
+        dataDegraded: output?.fastTacticalState == null || quality.esThirtyMinuteFreshness?.stale === true },
+      liveTenMinute: { ...live, dataDegraded: !live || quality.esLiveMonitorFreshness?.stale === true,
+        freshness: quality.esLiveMonitorFreshness ?? null },
       broadConfirmation: move.character?.broadConfirmation ?? null,
       squeeze: { campaign: squeeze, observationId, sourceTimestamp, observationAgeMs: ageMs,
-        dataDegraded: !squeeze },
-      liquidity: { ...character.liquidity, dataDegraded: !character.liquidity,
+        freshness: { ageMs, sourceTimestamp, reasonCodes: squeezeObs?.reasonCodes || [] },
+        dataDegraded: !squeeze || squeezeObs?.available !== true || squeezeObs?.dataDegraded === true },
+      liquidity: { ...character.liquidity,
+        freshness: quality.esLiveMonitorFreshness ?? null,
+        dataDegraded: !character.liquidity || quality.esLiveMonitorFreshness?.stale === true,
         eligibleForEngine4: false, reason: "P0_REPAIR_AND_REGRESSION_PENDING" },
       trap: { ...character.trap, campaign: output?.trapCampaign ?? null,
-        dataDegraded: !character.trap, eligibleForEngine4: false,
+        freshness: quality.esLiveMonitorFreshness ?? null,
+        dataDegraded: !character.trap || quality.esLiveMonitorFreshness?.stale === true, eligibleForEngine4: false,
         reason: "P0_REPAIR_AND_REGRESSION_PENDING" },
       engine25Participation: { ...output?.structuralParticipation,
+        freshness: output?.structuralParticipation?.freshness ?? null,
         dataDegraded: output?.structuralParticipation?.available !== true },
-      ratesDuration: { ...output?.groups?.ratesDuration?.structural,
+      ratesDuration: { structural: output?.groups?.ratesDuration?.structural ?? null,
+        oneHour: output?.groups?.ratesDuration?.tactical ?? null,
+        thirtyMinute: output?.groups?.ratesDuration?.fastTactical ?? null,
         dataDegraded: (quality.degradedGroups || []).includes("ratesDuration") },
     },
     engine26ZoneId: trap?.auctionEvent?.engine26ZoneId ??
