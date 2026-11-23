@@ -18,6 +18,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { updateEngine12StorageHealthSafe } from "../logic/engine12/storageHealth.js";
+import { selectEngine29ReplayContext } from "../logic/engine29/replayContextSelection.js";
 
 const AZ_TZ = "America/Phoenix";
 const EXCHANGE_TZ = "America/Chicago";
@@ -818,7 +819,9 @@ function buildCanonicalReplaySnapshot(
 
     // Copy the same normalized object used by live Engine 29 consumers.
     // Preserve its original observation timestamp; never imply this is a replay-time recomputation.
-    engine29DownstreamContext: readJsonSafe(ENGINE29_FILE)?.downstreamContext ?? null,
+    engine29DownstreamContext: selectEngine29ReplayContext(
+      readJsonSafe(ENGINE29_FILE), snapshotTime
+    ),
 
     // Engine 27 canonical Replay preservation:
     // preserve the complete already-built root object unchanged.
