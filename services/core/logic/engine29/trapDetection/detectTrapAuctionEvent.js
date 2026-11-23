@@ -313,19 +313,24 @@ function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars 
     if (level?.eventEligible === false) continue;
 
     const isRange = level.side === "BOTH";
+    const lo = Math.min(finite(level.lo), finite(level.hi));
+    const hi = Math.max(finite(level.lo), finite(level.hi));
+    const overlaps = isRange && bar.high >= lo && bar.low <= hi;
     let approach = isRange ? rangeApproach(level, tenMinuteBars, thirtyMinuteBars) : null;
-    if (isRange && approach && priorApproach?.engine26ZoneId === level.id &&
-        Math.min(finite(level.lo), finite(level.hi)) === priorApproach.zoneLo &&
-        Math.max(finite(level.lo), finite(level.hi)) === priorApproach.zoneHi &&
-        priorApproach.firstTouchTime <= approach.firstTouchTime) {
-      // Only retain identity while the same contiguous entry is ongoing.
-      const uninterrupted = tenMinuteBars.filter((item) =>
-        item.time >= priorApproach.firstTouchTime && item.time <= bar.time)
-        .every((item) => item.high >= Math.min(level.lo, level.hi) &&
-                          item.low <= Math.max(level.lo, level.hi));
-      if (uninterrupted) approach = {
-        ...priorApproach, side: priorApproach.approachDirection === "UP" ? "HIGH" : "LOW"
-      };
+    if (isRange && overlaps && priorApproach?.engine26ZoneId === level.id &&
+        lo === priorApproach.zoneLo && hi === priorApproach.zoneHi &&
+        Number.isFinite(priorApproach.firstTouchTime)) {
+      // Hold the recorded approach when price remains inside a zone. Do not
+      // require every subsequent candle to recross the entry boundary.
+      const since = tenMinuteBars.filter((item) =>
+        item.time >= priorApproach.firstTouchTime && item.time <= bar.time);
+      const uninterrupted = since.length > 0 &&
+        since.every((item) => item.high >= lo && item.low <= hi);
+      if (uninterrupted && (!approach ||
+          priorApproach.firstTouchTime <= approach.firstTouchTime)) {
+        approach = { ...priorApproach,
+          side: priorApproach.approachDirection === "UP" ? "HIGH" : "LOW" };
+      }
     }
     if (isRange && !approach) continue;
     const side = approach?.side ?? levelSide(level, bar);
@@ -336,7 +341,9 @@ function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars 
     if (!Number.isFinite(boundary)) continue;
 
     const isTested = tested(bar, effectiveLevel, side);
-    if (!isTested) continue;
+    // A locked, still-active zone interaction stays identified while price
+    // resides within the range; it is NOT a fresh sweep or acceptance loss.
+    if (!isTested && !(isRange && overlaps && approach)) continue;
 
     const distance = side === "HIGH"
       ? Math.abs(finite(bar.high) - boundary)
