@@ -111,6 +111,7 @@ import {
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
 import { buildEngine4V2Shadow } from "../logic/engine4/v2/buildEngine4V2Shadow.js";
 import { loadEngine4V2ShadowState, saveEngine4V2ShadowState } from "../logic/engine4/v2/engine4V2ShadowStore.js";
+import { selectEngine29ReplayContext } from "../logic/engine29/replayContextSelection.js";
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
@@ -8998,6 +8999,12 @@ patchedConfluence.context.reaction.paperScalpReaction =
       zoneId: engine26LocationCandidate?.zoneId ?? null,
       priorState: engine4V2Prior.found ? engine4V2Prior.state : null,
       engine29: engine25Context?.intradayMacro?.engine29Parity?.engine29 ?? null,
+      // Canonical Engine 29 downstream contract, selected with the same
+      // no-lookahead rule Engine 12 Replay uses.
+      engine29Downstream: selectEngine29ReplayContext(
+        loadJsonFileSafe(`${DATA_DIR}/engine29-cross-market-stress.json`),
+        new Date(Number.isFinite(evaluationTimeMs) ? evaluationTimeMs : Date.now()).toISOString()
+      ),
     });
     patchedConfluence.context.volume = patchedConfluence.context.volume || {};
     patchedConfluence.context.volume.engine4V2Shadow = engine4V2Shadow;

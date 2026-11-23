@@ -4,6 +4,7 @@ on:
     paths:
       - "services/core/logic/engine4/v2/**"
       - "services/core/tests/engine4V2Shadow.test.js"
+      - "services/core/tests/engine4V2Engine29Consumption.test.js"
       - "services/core/jobs/buildStrategySnapshot.js"
       - ".github/workflows/engine4-v2-shadow.yml"
   workflow_dispatch:
@@ -21,4 +22,4 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check jobs/buildStrategySnapshot.js
       - run: node --check logic/engine4/v2/buildEngine4V2Shadow.js
-      - run: node --test tests/engine4V2Shadow.test.js tests/engine4Participation5m.independentAuthority.test.js tests/engine4ParticipationAuthority.phaseE.test.js
+      - run: node --test tests/engine4V2Shadow.test.js tests/engine4V2Engine29Consumption.test.js tests/engine4Participation5m.independentAuthority.test.js tests/engine4ParticipationAuthority.phaseE.test.js

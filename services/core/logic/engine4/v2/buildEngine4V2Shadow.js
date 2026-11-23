@@ -16,6 +16,7 @@
 // exits or execution, and nothing downstream may read it as a gate. Canonical
 // Engine 4 v1 is unchanged.
 
+import { readEngine29ForEngine4, classifyClimaxWithEngine29 } from "./readEngine29ForEngine4.js";
 import { deriveCandleCompletionTruth } from "../../engine3/candleCompletionTruth.js";
 
 export const ENGINE4_V2_VERSION = "engine4.v2.participationShadow.v1";
@@ -94,6 +95,7 @@ export function buildEngine4V2Shadow({
   zoneId = null,
   priorState = null,
   engine29 = null,
+  engine29Downstream = null,
   policy = null,
 } = {}) {
   const P = { ...ENGINE4_V2_DEFAULT_POLICY, ...(policy || {}) };
@@ -225,10 +227,26 @@ export function buildEngine4V2Shadow({
     forming5m = { barTime: forming.t, elapsedFraction: round(elapsed), volume: forming.v, pacedRelVol: round(forming.v / elapsed / baseline), authority: "DIAGNOSTIC_ONLY" };
   }
 
-  const engine29Context = trendFromEngine29(engine29, num(evaluationTimeMs));
-  const trendAlignment = !engine29Context.available || dir === "NEUTRAL" ? "UNAVAILABLE"
-    : engine29Context.trend === "FLAT" ? "NEUTRAL"
-    : (engine29Context.trend === "UP") === (dir === "LONG") ? "WITH_TREND" : "AGAINST_TREND";
+  // Engine 29: prefer the canonical downstream contract (per-lane freshness,
+  // anti-lookahead). The legacy parity read remains only as a fallback.
+  let engine29Context;
+  if (engine29Downstream) {
+    engine29Context = readEngine29ForEngine4({ context: engine29Downstream, evaluationTimeMs: num(evaluationTimeMs), direction: dir });
+    engine29Context.source = "engine29.downstreamContext.v1";
+  } else {
+    const legacy = trendFromEngine29(engine29, num(evaluationTimeMs));
+    const trendAlignment = !legacy.available || dir === "NEUTRAL" ? "UNAVAILABLE"
+      : legacy.trend === "FLAT" ? "NEUTRAL"
+      : (legacy.trend === "UP") === (dir === "LONG") ? "WITH_TREND" : "AGAINST_TREND";
+    engine29Context = { ...legacy, trendAlignment, authority: "CONTEXT_ONLY", source: legacy.source ?? "engine29Parity.legacy" };
+  }
+  for (const w of warnings) {
+    if (w.code === "CLIMAX_VOLUME" || w.code === "CAPITULATION_AT_ZONE") {
+      w.engine29Read = engine29Downstream ? classifyClimaxWithEngine29(barDir, engine29Context) : "UNCLASSIFIED";
+    }
+  }
+  if (engine29Context.trendAlignment === "AGAINST_TREND") reasonCodes.push("ENGINE4_V2_E29_AGAINST_TREND_CONTEXT");
+  if (engine29Context.squeezeVsSetup === "AGAINST_SETUP") reasonCodes.push("ENGINE4_V2_E29_SQUEEZE_AGAINST_SETUP_CONTEXT");
 
   const out = {
     ...base,
@@ -254,7 +272,7 @@ export function buildEngine4V2Shadow({
       atZone,
     },
     forming5m,
-    engine29Context: { ...engine29Context, trendAlignment, authority: "CONTEXT_ONLY" },
+    engine29Context: { ...engine29Context, authority: "CONTEXT_ONLY" },
     reasonCodes,
     completedBarCount: completed.length,
   };
