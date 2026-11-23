@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildRatesDurationGroup } from "../logic/engine29/groups/buildRatesDurationGroup.js";
 import { buildEngine29DownstreamContext } from "../logic/engine29/downstreamContext.js";
+import { resolveEngine29StructuralState } from "../logic/engine29/aggregate/resolveStructuralState.js";
+import { resolveEngine29TacticalState } from "../logic/engine29/aggregate/resolveTacticalState.js";
 
 const view = { classification: { state:"HEALTHY",confidence:"HIGH",stage:"NONE" },
   latest: { close:100,time:Date.parse("2026-11-23T16:00:00Z") },
@@ -75,4 +77,22 @@ test("production Nov23 stale FRED 1W rates must fail closed instead of reporting
  assert.equal(group.structural.members.find(m=>m.canonicalSymbol==="US10Y").unavailableReason,"SOURCE_STALE");
  assert.equal(group.tactical.dataDegraded,true);
  assert.equal(group.fastTactical.dataDegraded,true);
+});
+
+test("degraded rates cannot vote in 1W or 1H aggregate even if TLT alone is confirmed",()=>{
+ const bundle={groups:{
+  ratesDuration:{
+    structural:{state:"CONFIRMED",dataDegraded:true,confidence:"LOW"},
+    tactical:{state:"CONFIRMED",dataDegraded:true,confidence:"LOW"}
+  },
+  breadth:{structural:{state:"HEALTHY",confidence:"HIGH"},tactical:{state:"HEALTHY"}},
+  leadership:{structural:{state:"HEALTHY",confidence:"HIGH"},tactical:{state:"HEALTHY"}},
+  credit:{structural:{state:"HEALTHY",confidence:"HIGH"},tactical:{state:"HEALTHY"}}
+ }};
+ const structural=resolveEngine29StructuralState(bundle);
+ const tactical=resolveEngine29TacticalState(bundle,{underlyingPressure:{state:"NEUTRAL"}});
+ assert.equal(structural.states.ratesDuration,null);
+ assert.equal(tactical.states.ratesDuration,null);
+ assert.ok(!structural.confirmedGroups.includes("ratesDuration"));
+ assert.ok(!tactical.confirmedGroups.includes("ratesDuration"));
 });
