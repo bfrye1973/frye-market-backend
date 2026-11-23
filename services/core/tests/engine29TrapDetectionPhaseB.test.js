@@ -273,7 +273,7 @@ test("low sweep alone is a liquidity event, not a bear trap", () => {
   assert.equal(result.failedAcceptance, false);
 });
 
-test("low sweep + completed 30m reclaim creates bear trap-side failed acceptance", () => {
+test("same-bar low sweep and reclaim without prior accepted close is rejection, not bear trap", () => {
   const t = 1_800_000_000_000;
 
   const result = detectEngine29TrapAuctionEvent({
@@ -312,20 +312,14 @@ test("low sweep + completed 30m reclaim creates bear trap-side failed acceptance
     now: t + 3_600_000,
   });
 
-  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.BEAR);
-  assert.equal(result.failedAcceptance, true);
-  assert.equal(result.reclaimObserved, true);
-  assert.equal(
-    result.auctionResult,
-    ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_LOW
-  );
-  assert.equal(
-    result.liquidityEvent.state,
-    ENGINE29_LIQUIDITY_EVENT_STATES.RECLAIMED_LOW
-  );
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+  assert.equal(result.auctionClassification, "REJECTION");
+  assert.equal(result.failedAcceptance, false);
+  assert.equal(result.reclaimObserved, false);
+  assert.equal(result.liquidityEvent.state, ENGINE29_LIQUIDITY_EVENT_STATES.SWEEP_LOW);
 });
 
-test("high sweep + completed 30m failure creates bull trap-side failed acceptance", () => {
+test("same-bar high sweep and failure without prior accepted close is rejection, not bull trap", () => {
   const t = 1_800_000_000_000;
 
   const result = detectEngine29TrapAuctionEvent({
@@ -360,12 +354,10 @@ test("high sweep + completed 30m failure creates bull trap-side failed acceptanc
     now: t + 3_600_000,
   });
 
-  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.BULL);
-  assert.equal(result.failedAcceptance, true);
-  assert.equal(
-    result.auctionResult,
-    ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_HIGH
-  );
+  assert.equal(result.trapSide, ENGINE29_TRAP_SIDES.NONE);
+  assert.equal(result.auctionClassification, "REJECTION");
+  assert.equal(result.failedAcceptance, false);
+  assert.equal(result.reclaimObserved, false);
 });
 
 test("10m reclaim without completed 30m failure is TRAP_WATCH only", () => {
