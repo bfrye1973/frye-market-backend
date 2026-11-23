@@ -49,8 +49,8 @@ export function buildEngine29TrapLaneFreshness({
     (zone.type !== "INSTITUTIONAL_ZONE" || event?.engine26ZoneId)
   );
   const tenCompleted = ten?.completed === true &&
-    Number.isFinite(Number(ten.completedBarTime));
-  const thirtyCompleted = Number.isFinite(Number(acceptance?.time));
+    Number.isFinite(ten.completedBarTime);
+  const thirtyCompleted = Number.isFinite(acceptance?.time);
   // Engine25 itself owns the participation freshness decision.
   const primaryUsable = primary?.available === true &&
     primary?.source?.currentTrapConfirmationUsable === true &&
