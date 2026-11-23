@@ -255,3 +255,23 @@ test("repeated refresh for same completed 10m never advances trap campaign", () 
   assert.equal(advanced.campaign.observationCount, 2);
   assert.equal(advanced.campaign.highestState, ENGINE29_TRAP_STATES.TRAP_CONFIRMED);
 });
+
+test("distinct Engine26 institutional zone IDs cannot share trap campaign identity", () => {
+  const t = Date.parse("2026-11-23T17:00:00Z");
+  const firstDetection = detection(ENGINE29_TRAP_STATES.TRAP_WATCH);
+  firstDetection.auctionEvent.liquidityLevel = {
+    id: "E26-zone-A", type: "INSTITUTIONAL_ZONE", boundary: 7295.75,
+    lo: 7295.75, hi: 7335, source: "ENGINE26"
+  };
+  firstDetection.auctionEvent.approachDirection = "UP";
+  firstDetection.auctionEvent.approachOrigin = "BELOW";
+  firstDetection.auctionEvent.firstTouchTime = t - 600_000;
+  const first = buildEngine29TrapCampaign({trapDetection:firstDetection,now:t});
+  const otherDetection = structuredClone(firstDetection);
+  otherDetection.auctionEvent.liquidityLevel.id = "E26-zone-B";
+  const other = buildEngine29TrapCampaign({trapDetection:otherDetection,now:t});
+  assert.notEqual(first.campaign.identityKey,other.campaign.identityKey);
+  assert.notEqual(first.campaign.campaignId,other.campaign.campaignId);
+  assert.equal(first.campaign.location.zoneId,"E26-zone-A");
+  assert.equal(first.campaign.location.approachOrigin,"BELOW");
+});
