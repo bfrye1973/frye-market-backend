@@ -30,6 +30,11 @@ jobs:
           const response=await get('/api/v1/engine29/cross-market-stress');
           const data=response?.data ?? null;
           assert.equal(response.ok,true);
+          console.log('LIVE_SNAPSHOT_HEADER',JSON.stringify({
+            timestamp:data?.timestamp,fileModifiedAt:response?.fileModifiedAt,
+            version:data?.version,hasDownstream:!!data?.downstreamContext,
+            topLevelKeys:Object.keys(data||{}).slice(0,40)
+          }));
           assert.equal(data?.downstreamContext?.schema,'engine29.downstreamContext.v1');
           const live=data.downstreamContext;
           assert.deepEqual(live.lanes.parentMove.parent,data.marketCharacter.move.parent);
