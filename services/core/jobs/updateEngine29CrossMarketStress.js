@@ -43,6 +43,25 @@ function readPriorMoveParent() {
   }
 }
 
+function readPriorTrapApproach() {
+  if (!fs.existsSync(OUTPUT_FILE)) return null;
+  try {
+    const previous = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+    const event = previous?.trapDetection?.auctionEvent;
+    if (!event?.engine26ZoneId || !event?.approachOrigin || !event?.firstTouchTime) return null;
+    return {
+      engine26ZoneId: event.engine26ZoneId,
+      approachDirection: event.approachDirection,
+      approachOrigin: event.approachOrigin,
+      entryBoundary: event.entryBoundary,
+      liquidityLocation: event.liquidityLocation,
+      firstTouchTime: event.firstTouchTime,
+      zoneLo: event.liquidityLevel?.lo ?? null,
+      zoneHi: event.liquidityLevel?.hi ?? null,
+    };
+  } catch { return null; }
+}
+
 function writeJsonAtomic(filePath, value) {
   const tempPath = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   fs.writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -125,6 +144,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   const output = await buildEngine29CrossMarketStress({
     now,
     priorMoveParent,
+    priorTrapApproach: readPriorTrapApproach(),
   });
 
   const priorSqueezeCampaign =
