@@ -1,0 +1,27 @@
+name: Engine29 P0 367 isolated tests
+on:
+  push:
+    branches:
+      - engine29/p0-point-in-time-367
+  workflow_dispatch:
+jobs:
+  engine29-p0:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check module syntax
+        run: |
+          node --check services/core/logic/engine29/trapDetection/detectTrapAuctionEvent.js
+          node --check services/core/logic/engine29/downstreamContext.js
+          node --check services/core/logic/engine29/trapDetection/buildTrapCampaign.js
+      - name: Focused P0 tests
+        working-directory: services/core
+        run: |
+          node --test tests/engine29DownstreamContext.test.js tests/engine29TrapCompleted10m.test.js tests/engine29ApproachAndRejection.test.js
+      - name: Existing Parent/Squeeze/Trap regressions
+        working-directory: services/core
+        run: |
+          node --test tests/engine29MoveV2Authority.test.js tests/engine29SqueezeV2Scoring.test.js tests/engine29TrapCampaign.test.js tests/engine29TrapDetectionPhaseB.test.js
