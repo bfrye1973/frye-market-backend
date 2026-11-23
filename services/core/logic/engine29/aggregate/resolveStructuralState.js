@@ -29,7 +29,11 @@ const INDEPENDENT_NON_CREDIT = Object.freeze([
 ]);
 
 function stateOf(groupBundle, key) {
-  return groupBundle?.groups?.[key]?.structural?.state ?? null;
+  const group = groupBundle?.groups?.[key]?.structural;
+  // Daily-only FRED rates cannot supply a confirmed 1H or 1W rates vote
+  // when required yield members are stale/missing. Other groups are untouched.
+  if (key === "ratesDuration" && group?.dataDegraded === true) return null;
+  return group?.state ?? null;
 }
 
 function confidenceOf(groupBundle, key) {
