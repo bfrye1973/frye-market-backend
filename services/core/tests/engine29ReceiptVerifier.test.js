@@ -152,3 +152,45 @@ test("missing or invalid archived context fails closed with no secrets",()=>{
   assert.ok(!JSON.stringify(v.body).includes("CONFIDENTIAL_MARKET_DATA_DO_NOT_RETURN"));
  }finally{x.cleanup();}
 });
+
+test("HTTP verifier requires configured header token; query token never authenticates",async()=>{
+ const {default:express}=await import("express");
+ const {default:route}=await import("../routes/engine29ReceiptVerify.js");
+ const app=express();app.use("/api/v1",route);
+ const server=await new Promise((resolve,reject)=>{
+   const running=app.listen(0,"127.0.0.1",()=>resolve(running));
+   running.on("error",reject);
+ });
+ const base="http://127.0.0.1:"+server.address().port+"/api/v1/engine29/receipt-verify";
+ const prev=process.env.ENGINE_CRON_TOKEN;
+ const secret="API_HEADER_SECRET_SHOULD_NEVER_BE_RETURNED";
+ try{
+  delete process.env.ENGINE_CRON_TOKEN;
+  let r=await fetch(base+"?date="+DATE+"&filename="+encodeURIComponent(NAME));
+  assert.equal(r.status,503);
+  assert.equal((await r.json()).reason,"VERIFY_AUTH_NOT_CONFIGURED");
+
+  process.env.ENGINE_CRON_TOKEN=secret;
+  r=await fetch(base+"?token="+encodeURIComponent(secret));
+  assert.equal(r.status,401);
+  assert.equal((await r.json()).reason,"UNAUTHORIZED");
+  r=await fetch(base,{headers:{"X-ENGINE-CRON-TOKEN":"invalid"}});
+  assert.equal(r.status,401);
+  const wrong=await r.text();
+  assert.ok(!wrong.includes(secret));
+
+  r=await fetch(base+"?filename=..%2Fetc%2Fpasswd&date="+DATE+
+   "&replayDate="+DATE+"&replayTime="+TIME,{
+   headers:{"X-ENGINE-CRON-TOKEN":secret}});
+  assert.equal(r.status,400);
+  const response=await r.text();
+  assert.ok(response.includes("INVALID_IDENTIFIER"));
+  assert.ok(!response.includes(secret));
+  assert.ok(!response.includes("passwd"));
+  assert.ok(!response.includes("/var/data"));
+ }finally{
+  if(prev===undefined)delete process.env.ENGINE_CRON_TOKEN;
+  else process.env.ENGINE_CRON_TOKEN=prev;
+  await new Promise((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
+ }
+});
