@@ -47,7 +47,14 @@ function identityFrom(trapDetection) {
   }
 
   return {
-    key: [side, String(level.type), boundary.toFixed(2)].join("|"),
+    // Distinct Engine26 institutional zones may share the same edge.
+    // Keep the exact zone identity so a trap cannot migrate between zones.
+    key: [side, String(level.type), boundary.toFixed(2),
+      level.type === "INSTITUTIONAL_ZONE" ? String(level.id || "UNKNOWN_ZONE") : ""].join("|"),
+    zoneId: level.type === "INSTITUTIONAL_ZONE" ? level.id ?? null : null,
+    approachDirection: trapDetection?.auctionEvent?.approachDirection ?? null,
+    approachOrigin: trapDetection?.auctionEvent?.approachOrigin ?? null,
+    firstTouchTime: trapDetection?.auctionEvent?.firstTouchTime ?? null,
     side,
     type: String(level.type),
     timeframe: level.timeframe ?? null,
