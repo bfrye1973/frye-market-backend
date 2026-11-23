@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { persistEngineRuntimeFiles } from "../logic/durableEngineRuntimeState.js";
+import { buildEngine29DownstreamContext, recordEngine29DownstreamContext } from "../logic/engine29/downstreamContext.js";
 import {
   buildEngine29CrossMarketStress,
   buildEngine29TrapCampaign,
@@ -183,6 +184,10 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
     );
   }
 
+  // Record the exact context served to live downstream consumers BEFORE overwriting latest.
+  output.downstreamContext = buildEngine29DownstreamContext(output);
+  const downstreamReceiptFile = recordEngine29DownstreamContext(output.downstreamContext);
+  console.log(`[engine29] IMMUTABLE_CONTEXT ${downstreamReceiptFile}`);
   writeJsonAtomic(OUTPUT_FILE, output);
 
   const persistence = persistEngineRuntimeFiles({
