@@ -20,7 +20,7 @@ jobs:
       - name: Focused P0 tests
         working-directory: services/core
         run: |
-          node --test tests/engine29DownstreamContext.test.js tests/engine29TrapCompleted10m.test.js tests/engine29ApproachAndRejection.test.js tests/engine29P0ZoneMatrix.test.js
+          node --test tests/engine29DownstreamContext.test.js tests/engine29TrapCompleted10m.test.js tests/engine29ApproachAndRejection.test.js tests/engine29P0ZoneMatrix.test.js tests/engine29ReplayContextSelection.test.js tests/engine29RatesDurationIsolation.test.js
       - name: Existing Parent/Squeeze/Trap regressions
         working-directory: services/core
         run: |
