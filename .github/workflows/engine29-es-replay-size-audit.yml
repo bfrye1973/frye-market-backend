@@ -1,0 +1,21 @@
+name: Engine29 ES Replay Response Size Audit
+on:
+  push:
+    branches:
+      - audit/engine29-final-disk-proof-20261123
+  workflow_dispatch:
+jobs:
+  read-only:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Inspect bounded ES Replay size only
+        run: |
+          node --input-type=module <<'JS'
+          const url="https://frye-market-backend-1.onrender.com/api/v1/replay/es/snapshot?date=2026-11-23&time=1209";
+          const response=await fetch(url,{signal:AbortSignal.timeout(30000)});
+          const bytes=new Uint8Array(await response.arrayBuffer());
+          console.log("ENGINE29_ES_REPLAY_SIZE",JSON.stringify({status:response.status,httpResponseBytes:bytes.length,contentLength:response.headers.get("content-length")}));
+          if(!response.ok)process.exit(1);
+          JS
