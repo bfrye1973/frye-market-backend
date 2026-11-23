@@ -59,3 +59,20 @@ test("rates diagnostics name unavailable FRED source separately for 1W, 1H and 3
  assert.equal(tf.oneWeek.members.US10Y.reason,"AVAILABLE");
  assert.equal(tf.oneHour.members.TLT.reason,"AVAILABLE");
 });
+
+test("production Nov23 stale FRED 1W rates must fail closed instead of reporting healthy availability",()=>{
+ const staleView={...view,freshness:{stale:true,ageMs:410586097,maxAgeMs:345600000,reason:"AGE_EXCEEDED"}};
+ const symbols={
+   US10Y:{...sym("US10Y",true,false,false),structural:staleView},
+   US30Y:{...sym("US30Y",true,false,false),structural:staleView},
+   TLT:sym("TLT",true,true,true),
+ };
+ const group=buildRatesDurationGroup(symbols);
+ assert.equal(group.structural.dataDegraded,true);
+ assert.deepEqual(group.structural.missingRequiredMembers.sort(),["US10Y","US30Y"]);
+ assert.equal(group.structural.subgroups.YIELD_BLOCK.state,null);
+ assert.equal(group.structural.subgroups.DURATION_BLOCK.state,"HEALTHY");
+ assert.equal(group.structural.members.find(m=>m.canonicalSymbol==="US10Y").unavailableReason,"SOURCE_STALE");
+ assert.equal(group.tactical.dataDegraded,true);
+ assert.equal(group.fastTactical.dataDegraded,true);
+});
