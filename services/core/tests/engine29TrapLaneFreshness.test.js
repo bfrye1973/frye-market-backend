@@ -45,23 +45,35 @@ test("complete sourced evidence is current without changing trade authority",()=
  assert.equal(r.sources.completed30m.completed,true);
  assert.equal(r.sources.location.zoneId,"E26-1");
 });
+// A setup can be absent with entirely healthy sources.
 for(const [name,change,blocker] of [
  ["forming-only 10m",(_q,d)=>{d.auctionEvent.tenMinuteEvidence.completed=false;},"COMPLETED_10M_REQUIRED"],
- ["stale ES 10m",(q)=>{q.esLiveMonitorFreshness.stale=true;},"SOURCE_STALE"],
  ["missing completed 30m",(_q,d)=>{d.auctionEvent.acceptance30m=null;},"COMPLETED_30M_REQUIRED"],
- ["completed 30m but no proven prior acceptance loss",(_q,d)=>{d.auctionEvent.acceptance30m.priorAcceptanceFailure=false;},"PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN"],
+ ["no proven prior acceptance loss",(_q,d)=>{d.auctionEvent.acceptance30m.priorAcceptanceFailure=false;},"PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN"],
+ ["no eligible zone",(_q,d)=>{d.auctionEvent.liquidityLevel.eventEligible=false;},"ELIGIBLE_LOCATION_REQUIRED"],
+]) {
+ test("missing trap setup is not data degradation: "+name,()=>{
+  const r=evaluate(change);
+  assert.equal(r.usableForConfirmation,false);
+  assert.equal(r.dataDegraded,false);
+  assert.deepEqual(r.freshnessBlockedBy,[]);
+  assert.ok(r.confirmationBlockedBy.includes(blocker),JSON.stringify(r.confirmationBlockedBy));
+  assert.equal(r.eligibleForEngine4,false);
+ });
+}
+for(const [name,change,blocker] of [
+ ["stale ES 10m",(q)=>{q.esLiveMonitorFreshness.stale=true;},"SOURCE_STALE"],
  ["stale ES 30m",(q)=>{q.esThirtyMinuteFreshness.stale=true;},"SOURCE_STALE"],
  ["stale Engine29 1H",(q)=>{q.esOneHourFreshness.stale=true;},"SOURCE_STALE"],
- ["Engine25 primary stale",(_q,d)=>{d.participation.primary.source.currentTrapConfirmationUsable=false;},"ENGINE25_CURRENT_PRIMARY_REQUIRED"],
- ["missing secondary",(_q,d)=>{d.participation.secondary.blocks={};},"ENGINE29_SECONDARY_EVIDENCE_MISSING"],
- ["no eligible zone",(_q,d)=>{d.auctionEvent.liquidityLevel.eventEligible=false;},"ELIGIBLE_LOCATION_REQUIRED"],
+ ["Engine25 primary stale",(_q,d)=>{d.participation.primary.source.currentTrapConfirmationUsable=false;},"ENGINE25_PRIMARY_SOURCE_NOT_CURRENT_OR_UNVERIFIED"],
+ ["missing secondary",(_q,d)=>{d.participation.secondary.blocks={};},"ENGINE29_SECONDARY_SOURCE_UNAVAILABLE"],
  ["unverified 10m freshness",(q)=>{q.esLiveMonitorFreshness=null;},"FRESHNESS_UNVERIFIED"],
 ]) {
- test("trap freshness fail-closed: "+name,()=>{
+ test("genuine source invalidity degrades trap lane: "+name,()=>{
   const r=evaluate(change);
   assert.equal(r.usableForConfirmation,false);
   assert.equal(r.dataDegraded,true);
-  assert.ok(r.confirmationBlockedBy.includes(blocker),JSON.stringify(r.confirmationBlockedBy));
+  assert.ok(r.freshnessBlockedBy.includes(blocker),JSON.stringify(r.freshnessBlockedBy));
   assert.equal(r.eligibleForEngine4,false);
  });
 }
@@ -75,11 +87,34 @@ test("fresh ES 10m alone never makes trap freshness CURRENT",()=>{
  assert.equal(result.state,"DEGRADED");
  assert.equal(result.usableForConfirmation,false);
 });
-test("no active trap reports NO_ACTIVE_TRAP, with evidence metadata and no confirmation",()=>{
- const r=evaluate((_q,d)=>{d.state="NO_ACTIVE_TRAP";d.trapSide="NONE";});
+test("production-shaped healthy NO_ACTIVE_TRAP is not data-degraded with absent setup",()=>{
+ const r=evaluate((_q,d)=>{
+  d.state="NO_ACTIVE_TRAP";d.trapSide="NONE";
+  d.auctionEvent.acceptance30m=null;
+  d.auctionEvent.liquidityLevel=null;
+  d.auctionEvent.engine26ZoneId=null;
+  d.participation.primary=null;
+  d.participation.secondary={blocks:{},secondarySupportsTrap:false};
+ });
  assert.equal(r.state,"NO_ACTIVE_TRAP");
+ assert.equal(r.dataDegraded,false);
  assert.equal(r.usableForConfirmation,false);
+ assert.deepEqual(r.freshnessBlockedBy,[]);
+ assert.ok(r.confirmationBlockedBy.includes("PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN"));
+ assert.ok(r.confirmationBlockedBy.includes("ELIGIBLE_LOCATION_REQUIRED"));
  assert.equal(r.sources.completed10m.completed,true);
+});
+test("no trap with stale source remains NO_ACTIVE_TRAP but dataDegraded true",()=>{
+ const r=evaluate((q,d)=>{
+  d.state="NO_ACTIVE_TRAP";d.trapSide="NONE";
+  d.auctionEvent.acceptance30m=null;
+  d.auctionEvent.liquidityLevel=null;
+  q.esLiveMonitorFreshness.stale=true;
+ });
+ assert.equal(r.state,"NO_ACTIVE_TRAP");
+ assert.equal(r.dataDegraded,true);
+ assert.equal(r.usableForConfirmation,false);
+ assert.ok(r.freshnessBlockedBy.includes("SOURCE_STALE"));
 });
 test("published live downstream contract uses same Engine29-owned trap freshness",()=>{
  const {quality,detection}=fixture();
