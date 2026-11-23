@@ -215,3 +215,14 @@ test("invalid schema receipt still reports file existence without leaking conten
   assert.ok(!JSON.stringify(result.body).includes("CONFIDENTIAL_MARKET_DATA_DO_NOT_RETURN"));
  }finally{x.cleanup();}
 });
+
+test("missing ES Replay preserves receipt exists=true and fails closed",()=>{
+ const x=setup();try{
+  fs.unlinkSync(x.replayPath);
+  const v=verifyEngine29Receipt(x.input);
+  assert.equal(v.status,404);
+  assert.equal(v.body.exists,true);
+  assert.equal(v.body.verified,false);
+  assert.equal(v.body.reason,"REPLAY_NOT_FOUND");
+ }finally{x.cleanup();}
+});
