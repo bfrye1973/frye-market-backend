@@ -38,3 +38,24 @@ test("ratesDuration degradation is not automatically inherited by independent pa
  assert.equal(ctx.lanes.squeeze.dataDegraded,false);
  assert.equal(ctx.lanes.ratesDuration.dataDegraded,true);
 });
+
+test("rates diagnostics name unavailable FRED source separately for 1W, 1H and 30m",()=>{
+ const output={timestamp:"2026-11-23T17:00:00Z",groups:{ratesDuration:buildRatesDurationGroup({
+   US10Y:sym("US10Y",true,false,false),
+   US30Y:sym("US30Y",true,false,false),
+   TLT:sym("TLT",true,true,true)})},
+   symbols:{
+     US10Y:{...sym("US10Y",true,false,false),provider:"FRED",sourceSeriesId:"DGS10"},
+     US30Y:{...sym("US30Y",true,false,false),provider:"FRED",sourceSeriesId:"DGS30"},
+     TLT:{...sym("TLT",true,true,true),provider:"POLYGON",sourceSymbol:"TLT"}},
+   marketCharacter:{move:{}},dataQuality:{degradedGroups:["ratesDuration"]}};
+ const ctx=buildEngine29DownstreamContext(output);
+ const tf=ctx.lanes.ratesDuration.diagnostics.timeframes;
+ assert.equal(tf.oneWeek.dataDegraded,false);
+ assert.equal(tf.oneHour.dataDegraded,true);
+ assert.equal(tf.thirtyMinute.dataDegraded,true);
+ assert.equal(tf.oneHour.members.US10Y.reason,"FRED_DAILY_NO_VERIFIED_INTRADAY_SOURCE");
+ assert.equal(tf.thirtyMinute.members.US30Y.reason,"FRED_DAILY_NO_VERIFIED_INTRADAY_SOURCE");
+ assert.equal(tf.oneWeek.members.US10Y.reason,"AVAILABLE");
+ assert.equal(tf.oneHour.members.TLT.reason,"AVAILABLE");
+});
