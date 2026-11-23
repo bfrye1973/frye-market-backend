@@ -20,7 +20,6 @@ jobs:
           import assert from 'node:assert/strict';
           const base='https://frye-market-backend-1.onrender.com';
           const token=process.env.E29_VERIFIER_TOKEN;
-          if(!token){console.error('AUTH_SECRET_UNAVAILABLE');process.exit(2);}
           const date='2026-11-23';
           const filename='2026-11-23T19-12-04-931Z-d874bda5-7e9a-4617-bac3-4b21bd8282f5.json';
           const observedAt='2026-11-23T19:11:43.878Z';
@@ -39,6 +38,8 @@ jobs:
             }
           }
           if(!found){console.error('NO_MATCHING_ES_REPLAY_SNAPSHOT',{searchCount:times.length,observedAt});process.exit(3);}
+          console.log('MATCHED_REPLAY_METADATA',JSON.stringify({date,replayTime:found.time,replaySnapshotTime:found.snapshotTime,observationTime:observedAt}));
+          if(!token){console.error('AUTH_SECRET_UNAVAILABLE');process.exit(2);}
           const query=new URLSearchParams({date,filename,replayDate:date,replayTime:found.time});
           const endpoint='/api/v1/engine29/receipt-verify?'+query.toString();
           const unauthorized=await fetch(base+endpoint,{headers:{accept:'application/json'},signal:AbortSignal.timeout(20000)});
