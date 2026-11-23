@@ -51,6 +51,7 @@ export function buildEngine29TrapLaneFreshness({
   const tenCompleted = ten?.completed === true &&
     Number.isFinite(ten.completedBarTime);
   const thirtyCompleted = Number.isFinite(acceptance?.time);
+  const acceptanceFailureConfirmed = acceptance?.priorAcceptanceFailure === true;
   // Engine25 itself owns the participation freshness decision.
   const primaryUsable = primary?.available === true &&
     primary?.source?.currentTrapConfirmationUsable === true &&
@@ -68,7 +69,7 @@ export function buildEngine29TrapLaneFreshness({
       formingPresent: ten?.formingPresent === true },
     completed30m: { ...thirtySource, completed: thirtyCompleted,
       completedBarTime: acceptance?.time ?? null,
-      priorAcceptanceFailure: acceptance?.priorAcceptanceFailure === true },
+      priorAcceptanceFailure: acceptanceFailureConfirmed },
     oneHour: hourlySource,
     engine25Primary: {
       available: primary?.available === true,
@@ -92,6 +93,8 @@ export function buildEngine29TrapLaneFreshness({
       zoneId: event?.engine26ZoneId ?? null,
       source: zone?.source ?? null,
       type: zone?.type ?? null,
+      locationQuality: detection?.macroLiquidityMap?.locationQuality ??
+        detection?.locationQuality ?? null,
       reason: locationAvailable ? "LOCATION_AVAILABLE" : "LOCATION_UNVERIFIED",
     },
   };
@@ -103,6 +106,7 @@ export function buildEngine29TrapLaneFreshness({
     !tenCompleted ? "COMPLETED_10M_REQUIRED" : null,
     !thirtySource.current ? thirtySource.reason : null,
     !thirtyCompleted ? "COMPLETED_30M_REQUIRED" : null,
+    !acceptanceFailureConfirmed ? "PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN" : null,
     !hourlySource.current ? hourlySource.reason : null,
     !locationAvailable ? "ELIGIBLE_LOCATION_REQUIRED" : null,
     !primaryUsable ? "ENGINE25_CURRENT_PRIMARY_REQUIRED" : null,
