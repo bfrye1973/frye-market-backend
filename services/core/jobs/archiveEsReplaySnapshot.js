@@ -31,6 +31,7 @@ const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.resolve(CORE_DIR, "data");
 const SOURCE_FILE = path.join(DATA_DIR, "strategy-snapshot-es.json");
+const ENGINE29_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 
 // Render production:
 //   REPLAY_DATA_DIR=/var/data
@@ -814,6 +815,10 @@ function buildCanonicalReplaySnapshot(
     engine25Context:
       source?.engine25Context ??
       null,
+
+    // Copy the same normalized object used by live Engine 29 consumers.
+    // Preserve its original observation timestamp; never imply this is a replay-time recomputation.
+    engine29DownstreamContext: readJsonSafe(ENGINE29_FILE)?.downstreamContext ?? null,
 
     // Engine 27 canonical Replay preservation:
     // preserve the complete already-built root object unchanged.
