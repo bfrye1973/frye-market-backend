@@ -26,3 +26,18 @@ test("thin institutional zone preserves fixed entry edge",()=>{const x=run({leve
 test("gap wholly beyond zone is travel rather than a fabricated new sweep",()=>{const x=run({bars:[b(t,112,118,111,117)],prev:b(t-3_600_000,95,99,90,96),last:b(t-1_800_000,96,118,111,117)});assert.equal(x.trapSide,"NONE");assert.equal(x.liquidityEvent.state,"NO_LIQUIDITY_EVENT");});
 test("double test after a completed outside bar starts new first-touch identity",()=>{const x=run({bars:[b(t-1_200_000,95,105,93,97),b(t-600_000,97,99,90,95),b(t,95,105,92,97)],prev:b(t-3_600_000,95,99,90,96),last:b(t-1_800_000,96,105,92,97)});assert.equal(x.firstTouchTime,t);});
 test("locked approach from prior snapshot is retained only across continuous contact",()=>{const x=run({bars:[b(t-600_000,95,106,94,102),b(t,102,107,99,103)],prev:b(t-3_600_000,95,99,90,96),last:b(t-1_800_000,96,107,92,103),priorApproach:{engine26ZoneId:"z",zoneLo:100,zoneHi:110,firstTouchTime:t-600_000,approachDirection:"UP",approachOrigin:"BELOW",entryBoundary:100,liquidityLocation:"OVERHEAD"}});assert.equal(x.firstTouchTime,t-600_000);assert.equal(x.approachDirection,"UP");});
+
+test("continued inside-zone 10m bar preserves first-touch approach without fake new sweep",()=>{
+ const x=run({
+   bars:[b(t-600_000,95,106,94,103),b(t,104,107,102,105)],
+   prev:b(t-3_600_000,95,99,90,96),
+   last:b(t-1_800_000,96,106,92,104),
+   priorApproach:{engine26ZoneId:"z",zoneLo:100,zoneHi:110,firstTouchTime:t-600_000,
+     approachDirection:"UP",approachOrigin:"BELOW",entryBoundary:100,liquidityLocation:"OVERHEAD"}
+ });
+ assert.equal(x.engine26ZoneId,"z");
+ assert.equal(x.firstTouchTime,t-600_000);
+ assert.equal(x.approachDirection,"UP");
+ assert.equal(x.liquidityEvent.tested,false);
+ assert.equal(x.trapSide,"NONE");
+});
