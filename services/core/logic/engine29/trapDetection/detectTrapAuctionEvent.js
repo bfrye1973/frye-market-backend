@@ -306,14 +306,27 @@ function rangeApproach(level, completed10m, completed30m) {
   };
 }
 
-function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars = []) {
+function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars = [], priorApproach = null) {
   const testedLevels = [];
 
   for (const level of Array.isArray(levels) ? levels : []) {
     if (level?.eventEligible === false) continue;
 
     const isRange = level.side === "BOTH";
-    const approach = isRange ? rangeApproach(level, tenMinuteBars, thirtyMinuteBars) : null;
+    let approach = isRange ? rangeApproach(level, tenMinuteBars, thirtyMinuteBars) : null;
+    if (isRange && approach && priorApproach?.engine26ZoneId === level.id &&
+        Math.min(finite(level.lo), finite(level.hi)) === priorApproach.zoneLo &&
+        Math.max(finite(level.lo), finite(level.hi)) === priorApproach.zoneHi &&
+        priorApproach.firstTouchTime <= approach.firstTouchTime) {
+      // Only retain identity while the same contiguous entry is ongoing.
+      const uninterrupted = tenMinuteBars.filter((item) =>
+        item.time >= priorApproach.firstTouchTime && item.time <= bar.time)
+        .every((item) => item.high >= Math.min(level.lo, level.hi) &&
+                          item.low <= Math.max(level.lo, level.hi));
+      if (uninterrupted) approach = {
+        ...priorApproach, side: priorApproach.approachDirection === "UP" ? "HIGH" : "LOW"
+      };
+    }
     if (isRange && !approach) continue;
     const side = approach?.side ?? levelSide(level, bar);
     if (!side) continue;
@@ -379,6 +392,7 @@ export function detectEngine29TrapAuctionEvent({
   macroLiquidityMap = null,
   esAnchor = null,
   now = Date.now(),
+  priorApproach = null,
 } = {}) {
   // State-changing trap evidence is restricted to closed 10m candles.
   // A forming 10m bar may be displayed elsewhere but cannot alter trap identity.
@@ -421,7 +435,8 @@ export function detectEngine29TrapAuctionEvent({
     macroLiquidityMap.levels,
     liveBar,
     live10m,
-    bars30m
+    bars30m,
+    priorApproach
   );
 
   if (!candidate) {
