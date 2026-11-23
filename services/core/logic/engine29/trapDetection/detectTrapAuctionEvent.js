@@ -47,6 +47,7 @@ function completedBars(bars = [], durationMs, now = Date.now()) {
 
 function rangeBoundary(level, side) {
   if (!level) return null;
+  if (Number.isFinite(level.entryBoundary)) return level.entryBoundary;
 
   if (side === "HIGH") {
     return finite(level.hi ?? level.level);
@@ -273,19 +274,47 @@ function acceptedBeyond(bar, level, side) {
   return false;
 }
 
-function chooseCandidate(levels = [], bar) {
+// Derive a stable first-touch approach from completed evidence, not from the
+// side of the current candle's wick. Institutional range entry is its near edge.
+function rangeApproach(level, completed10m, completed30m) {
+  const lo = Math.min(finite(level.lo), finite(level.hi));
+  const hi = Math.max(finite(level.lo), finite(level.hi));
+  if (![lo, hi].every(Number.isFinite)) return null;
+  const bars = completed10m.filter((bar) => bar.high >= lo && bar.low <= hi);
+  if (!bars.length) return null;
+  const first = bars[0];
+  const prior = completed10m.filter((bar) => bar.time < first.time).at(-1);
+  const older30 = completed30m.filter((bar) => bar.time + 30 * 60 * 1000 <= first.time).at(-1);
+  const originPrice = finite(prior?.close) ?? finite(older30?.close) ?? finite(first.open);
+  const approachOrigin = originPrice < lo ? "BELOW" : originPrice > hi ? "ABOVE" : "INSIDE";
+  if (approachOrigin === "INSIDE") return null; // fail closed with no provable entry
+  const approachDirection = approachOrigin === "BELOW" ? "UP" : "DOWN";
+  return {
+    approachDirection, approachOrigin,
+    entryBoundary: approachOrigin === "BELOW" ? lo : hi,
+    liquidityLocation: approachOrigin === "BELOW" ? "OVERHEAD" : "UNDERLYING",
+    firstTouchTime: first.time,
+    side: approachOrigin === "BELOW" ? "HIGH" : "LOW",
+  };
+}
+
+function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars = []) {
   const testedLevels = [];
 
   for (const level of Array.isArray(levels) ? levels : []) {
     if (level?.eventEligible === false) continue;
 
-    const side = levelSide(level, bar);
+    const isRange = level.side === "BOTH";
+    const approach = isRange ? rangeApproach(level, tenMinuteBars, thirtyMinuteBars) : null;
+    if (isRange && !approach) continue;
+    const side = approach?.side ?? levelSide(level, bar);
     if (!side) continue;
+    const effectiveLevel = approach ? { ...level, entryBoundary: approach.entryBoundary } : level;
 
-    const boundary = rangeBoundary(level, side);
+    const boundary = rangeBoundary(effectiveLevel, side);
     if (!Number.isFinite(boundary)) continue;
 
-    const isTested = tested(bar, level, side);
+    const isTested = tested(bar, effectiveLevel, side);
     if (!isTested) continue;
 
     const distance = side === "HIGH"
@@ -293,7 +322,8 @@ function chooseCandidate(levels = [], bar) {
       : Math.abs(boundary - finite(bar.low));
 
     testedLevels.push({
-      level,
+      level: effectiveLevel,
+      approach,
       side,
       boundary,
       distance,
@@ -381,14 +411,16 @@ export function detectEngine29TrapAuctionEvent({
 
   const candidate = chooseCandidate(
     macroLiquidityMap.levels,
-    liveBar
+    liveBar,
+    live10m,
+    bars30m
   );
 
   if (!candidate) {
     return buildNoEvent(currentPrice);
   }
 
-  const { level, side, boundary } = candidate;
+  const { level, side, boundary, approach } = candidate;
 
   const liveTested = tested(liveBar, level, side);
   const liveSwept = swept(
@@ -415,13 +447,11 @@ export function detectEngine29TrapAuctionEvent({
   const priorAcceptanceFailure =
     priorAcceptedThenLost(bars30m, level, side);
 
-  const failedAcceptance =
-    thirtyMinuteFailedHold ||
-    priorAcceptanceFailure;
-
-  const reclaimObserved =
-    liveFailedHold ||
-    failedAcceptance;
+  // A single test-and-reject candle has no prior accepted auction.
+  // Only a completed 30m accepted close followed by a completed loss is a trap.
+  const failedAcceptance = priorAcceptanceFailure;
+  const rejectionObserved = (liveFailedHold || thirtyMinuteFailedHold) && !failedAcceptance;
+  const reclaimObserved = failedAcceptance;
 
   const trapSide =
     reclaimObserved
@@ -509,11 +539,22 @@ export function detectEngine29TrapAuctionEvent({
   if (priorAcceptanceFailure) {
     reasonCodes.push("PRIOR_30M_ACCEPTANCE_LOST");
   }
+  if (rejectionObserved) reasonCodes.push("REJECTION_WITHOUT_PRIOR_ACCEPTANCE_NOT_TRAP");
 
   return {
     version: "engine29.trapAuctionEvent.v2.threeLane",
     trapSide,
     currentPrice,
+    engine26ZoneId: level.side === "BOTH" ? level.id ?? null : null,
+    approachDirection: approach?.approachDirection ?? null,
+    approachOrigin: approach?.approachOrigin ?? null,
+    entryBoundary: approach?.entryBoundary ?? boundary,
+    liquidityLocation: approach?.liquidityLocation ?? null,
+    firstTouchTime: approach?.firstTouchTime ?? null,
+    auctionClassification: failedAcceptance ? "TRAP" : rejectionObserved ? "REJECTION" : "TEST_OR_ACCEPTANCE",
+    rejectionObserved,
+    trappedParticipants: failedAcceptance ? side === "HIGH" ? "BUYERS" : "SELLERS" : null,
+    failedDirection: failedAcceptance ? side === "HIGH" ? "UP" : "DOWN" : null,
 
     liquidityEvent: {
       state: liquidityEventState,
@@ -538,6 +579,8 @@ export function detectEngine29TrapAuctionEvent({
       source: level.source ?? null,
       side,
       boundary,
+      approachDirection: approach?.approachDirection ?? null,
+      approachOrigin: approach?.approachOrigin ?? null,
       lo: finite(level.lo),
       hi: finite(level.hi),
       level: finite(level.level),
