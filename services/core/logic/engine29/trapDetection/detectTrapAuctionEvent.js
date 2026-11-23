@@ -448,7 +448,7 @@ export function detectEngine29TrapAuctionEvent({
   );
 
   if (!candidate) {
-    return buildNoEvent(currentPrice);
+    return { ...buildNoEvent(currentPrice), tenMinuteEvidence };
   }
 
   const { level, side, boundary, approach } = candidate;
