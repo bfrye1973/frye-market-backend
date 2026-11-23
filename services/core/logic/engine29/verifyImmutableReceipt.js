@@ -10,7 +10,10 @@ const SCHEMA = "engine29.downstreamContext.v1";
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME = /^\d{4}$/;
 const RECEIPT = /^(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
-const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_RECEIPT_BYTES = 4 * 1024 * 1024;
+// ES Replay snapshots include strategy context beyond Engine29. Production
+// sample 2026-11-23 12:09 AZ was 6,404,916 bytes; cap Replay at 16 MiB.
+const MAX_REPLAY_BYTES = 16 * 1024 * 1024;
 const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
 // Stable key ordering makes identity independent of object insertion order.
 // No market logic is computed; arrays retain original order.
@@ -55,20 +58,20 @@ function ensureDirectory(directory, root) {
   const real = fs.realpathSync(directory);
   if (directory !== root && !below(real, fs.realpathSync(root))) throw new Error("UNSAFE_DIRECTORY");
 }
-function readRegularFile(file, root) {
+function readRegularFile(file, root, maxBytes) {
   const parent = path.dirname(file);
   ensureDirectory(root, root);
   ensureDirectory(parent, root);
   const info = fs.lstatSync(file);
   if (info.isSymbolicLink() || !info.isFile()) throw new Error("NON_REGULAR_FILE");
-  if (info.size > MAX_BYTES) throw new Error("FILE_TOO_LARGE");
+  if (info.size > maxBytes) throw new Error("FILE_TOO_LARGE");
   const real = fs.realpathSync(file);
   if (!below(real, fs.realpathSync(root))) throw new Error("UNSAFE_FILE_PATH");
   // NOFOLLOW and fstat ensure a link swap cannot silently redirect a read.
   const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
   try {
     const actual = fs.fstatSync(fd);
-    if (!actual.isFile() || actual.size > MAX_BYTES ||
+    if (!actual.isFile() || actual.size > maxBytes ||
       actual.dev !== info.dev || actual.ino !== info.ino) {
       throw new Error("NON_REGULAR_FILE");
     }
@@ -99,9 +102,9 @@ export function verifyEngine29Receipt({
   const receiptFile = path.join(receiptRoot, date, filename);
   const esFile = path.join(esRoot, replayDate, replayTime + ".json");
   let receiptBytes, replayBytes;
-  try { receiptBytes = readRegularFile(receiptFile, receiptRoot); }
+  try { receiptBytes = readRegularFile(receiptFile, receiptRoot, MAX_RECEIPT_BYTES); }
   catch (error) { return mapFsError(error); }
-  try { replayBytes = readRegularFile(esFile, esRoot); }
+  try { replayBytes = readRegularFile(esFile, esRoot, MAX_REPLAY_BYTES); }
   catch (error) { return mapFsError(error,true); }
 
   let receipt, replay;
