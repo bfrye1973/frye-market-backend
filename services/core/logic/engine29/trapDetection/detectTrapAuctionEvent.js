@@ -280,10 +280,14 @@ function rangeApproach(level, completed10m, completed30m) {
   const lo = Math.min(finite(level.lo), finite(level.hi));
   const hi = Math.max(finite(level.lo), finite(level.hi));
   if (![lo, hi].every(Number.isFinite)) return null;
-  const bars = completed10m.filter((bar) => bar.high >= lo && bar.low <= hi);
-  if (!bars.length) return null;
-  const first = bars[0];
-  const prior = completed10m.filter((bar) => bar.time < first.time).at(-1);
+  // Lock the current contiguous test, not a historical touch from hours ago.
+  let firstIndex = completed10m.length - 1;
+  if (firstIndex < 0 || completed10m[firstIndex].high < lo ||
+      completed10m[firstIndex].low > hi) return null;
+  while (firstIndex > 0 && completed10m[firstIndex - 1].high >= lo &&
+         completed10m[firstIndex - 1].low <= hi) firstIndex -= 1;
+  const first = completed10m[firstIndex];
+  const prior = completed10m[firstIndex - 1] || null;
   const older30 = completed30m.filter((bar) => bar.time + 30 * 60 * 1000 <= first.time).at(-1);
   const originPrice = finite(prior?.close) ?? finite(older30?.close) ?? finite(first.open);
   const approachOrigin = originPrice < lo ? "BELOW" : originPrice > hi ? "ABOVE" : "INSIDE";
