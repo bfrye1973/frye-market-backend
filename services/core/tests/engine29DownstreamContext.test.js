@@ -10,7 +10,8 @@ test("downstream context preserves canonical 30m parent independent of opposite 
     timestamp: "2026-11-23T16:00:00.000Z",
     dataDegraded: false,
     marketCharacter: {
-      move: { parent: { state: "CONTINUED", direction: "UP" },
+      move: { parent: { active: true, direction: "UP", reason: "PARENT_PERSISTED", startedAt: "2026-11-23T15:30:00Z" },
+        moveCharacter: "UPSIDE_MOVE_ACTIVE",
         liveCondition: { direction: "DOWN", state: "COUNTERTREND_SELLOFF_FADING" },
         character: { broadConfirmation: { state: "BROAD_CONFIRMED" } } },
       squeezeCampaign: { direction: "DOWN", state: "SQUEEZE_WATCH" },
@@ -23,6 +24,8 @@ test("downstream context preserves canonical 30m parent independent of opposite 
   const ctx = buildEngine29DownstreamContext(output);
   assert.equal(ctx.schema, "engine29.downstreamContext.v1");
   assert.equal(ctx.lanes.parentMove.direction, "UP");
+  assert.equal(ctx.lanes.parentMove.state, "UPSIDE_MOVE_ACTIVE");
+  assert.equal(Object.hasOwn(ctx.lanes.parentMove.parent, "state"), false);
   assert.equal(ctx.lanes.liveTenMinute.direction, "DOWN");
   assert.equal(ctx.lanes.squeeze.campaign.direction, "DOWN");
   assert.equal(ctx.lanes.liquidity.eligibleForEngine4, false);
@@ -46,4 +49,20 @@ test("point-in-time receipts never overwrite and are exact live contract bytes",
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("production-shaped parent state is copied only from moveCharacter, never a fabricated parent.state", () => {
+ for (const [direction, state] of [
+  ["UP", "UPSIDE_MOVE_ACTIVE"], ["DOWN", "DOWNSIDE_MOVE_ACTIVE"], ["FLAT", "NO_ACTIVE_MOVE"]
+ ]) {
+  const parent = { active: direction !== "FLAT", direction, reason: "NO_CHANGE",
+    lastQualifiedAt: "2026-11-23T17:00:00.000Z" };
+  const ctx = buildEngine29DownstreamContext({
+    timestamp:"2026-11-23T18:00:00.000Z",
+    marketCharacter:{move:{parent,moveCharacter:state}}
+  });
+  assert.equal(ctx.lanes.parentMove.state,state);
+  assert.strictEqual(ctx.lanes.parentMove.parent,parent);
+  assert.equal(Object.hasOwn(parent,"state"),false);
+ }
 });
