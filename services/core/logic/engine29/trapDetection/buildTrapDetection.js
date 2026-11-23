@@ -28,6 +28,7 @@ export async function buildEngine29TrapDetection({
   engine25Participation = null,
   moveCharacter = null,
   liveMonitor = null,
+  priorTrapApproach = null,
 } = {}) {
   const anchor =
     esAnchor ||
@@ -64,6 +65,7 @@ export async function buildEngine29TrapDetection({
     detectEngine29TrapAuctionEvent({
       macroLiquidityMap,
       esAnchor: anchor,
+      priorApproach: priorTrapApproach,
       now,
     });
 
@@ -121,6 +123,14 @@ export async function buildEngine29TrapDetection({
         "NO_ACTIVE_AUCTION",
       reclaimObserved:
         auctionEvent?.reclaimObserved === true,
+      rejectionObserved: auctionEvent?.rejectionObserved === true,
+      auctionClassification: auctionEvent?.auctionClassification ?? null,
+      approachDirection: auctionEvent?.approachDirection ?? null,
+      approachOrigin: auctionEvent?.approachOrigin ?? null,
+      liquidityLocation: auctionEvent?.liquidityLocation ?? null,
+      entryBoundary: auctionEvent?.entryBoundary ?? null,
+      engine26ZoneId: auctionEvent?.engine26ZoneId ?? null,
+      tenMinuteEvidence: auctionEvent?.tenMinuteEvidence ?? null,
     },
 
     moveCharacterLane: {
@@ -146,6 +156,13 @@ export async function buildEngine29TrapDetection({
         resolved.confirmationQuality,
       confirmationBlockedBy:
         resolved.confirmationBlockedBy,
+      trappedParticipants: auctionEvent?.trappedParticipants ?? null,
+      failedDirection: auctionEvent?.failedDirection ?? null,
+      approachDirection: auctionEvent?.approachDirection ?? null,
+      auctionLocation: auctionEvent?.liquidityLocation ?? null,
+      engine26ZoneId: auctionEvent?.engine26ZoneId ?? null,
+      auctionClassification: auctionEvent?.auctionClassification ?? null,
+      tenMinuteEvidence: auctionEvent?.tenMinuteEvidence ?? null,
     },
 
     macroLiquidityMap,

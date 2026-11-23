@@ -18,6 +18,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { updateEngine12StorageHealthSafe } from "../logic/engine12/storageHealth.js";
+import { selectEngine29ReplayContext } from "../logic/engine29/replayContextSelection.js";
 
 const AZ_TZ = "America/Phoenix";
 const EXCHANGE_TZ = "America/Chicago";
@@ -31,6 +32,7 @@ const __dirname = path.dirname(__filename);
 const CORE_DIR = path.resolve(__dirname, "..");
 const DATA_DIR = path.resolve(CORE_DIR, "data");
 const SOURCE_FILE = path.join(DATA_DIR, "strategy-snapshot-es.json");
+const ENGINE29_FILE = path.join(DATA_DIR, "engine29-cross-market-stress.json");
 
 // Render production:
 //   REPLAY_DATA_DIR=/var/data
@@ -814,6 +816,12 @@ function buildCanonicalReplaySnapshot(
     engine25Context:
       source?.engine25Context ??
       null,
+
+    // Copy the same normalized object used by live Engine 29 consumers.
+    // Preserve its original observation timestamp; never imply this is a replay-time recomputation.
+    engine29DownstreamContext: selectEngine29ReplayContext(
+      readJsonSafe(ENGINE29_FILE), snapshotTime
+    ),
 
     // Engine 27 canonical Replay preservation:
     // preserve the complete already-built root object unchanged.

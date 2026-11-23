@@ -6,6 +6,7 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { persistEngineRuntimeFiles } from "../logic/durableEngineRuntimeState.js";
+import { buildEngine29DownstreamContext, recordEngine29DownstreamContext } from "../logic/engine29/downstreamContext.js";
 import {
   buildEngine29CrossMarketStress,
   buildEngine29TrapCampaign,
@@ -40,6 +41,25 @@ function readPriorMoveParent() {
   } catch {
     return null;
   }
+}
+
+function readPriorTrapApproach() {
+  if (!fs.existsSync(OUTPUT_FILE)) return null;
+  try {
+    const previous = JSON.parse(fs.readFileSync(OUTPUT_FILE, "utf8"));
+    const event = previous?.trapDetection?.auctionEvent;
+    if (!event?.engine26ZoneId || !event?.approachOrigin || !event?.firstTouchTime) return null;
+    return {
+      engine26ZoneId: event.engine26ZoneId,
+      approachDirection: event.approachDirection,
+      approachOrigin: event.approachOrigin,
+      entryBoundary: event.entryBoundary,
+      liquidityLocation: event.liquidityLocation,
+      firstTouchTime: event.firstTouchTime,
+      zoneLo: event.liquidityLevel?.lo ?? null,
+      zoneHi: event.liquidityLevel?.hi ?? null,
+    };
+  } catch { return null; }
 }
 
 function writeJsonAtomic(filePath, value) {
@@ -124,6 +144,7 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
   const output = await buildEngine29CrossMarketStress({
     now,
     priorMoveParent,
+    priorTrapApproach: readPriorTrapApproach(),
   });
 
   const priorSqueezeCampaign =
@@ -183,6 +204,10 @@ export async function updateEngine29CrossMarketStress({ now = Date.now() } = {})
     );
   }
 
+  // Record the exact context served to live downstream consumers BEFORE overwriting latest.
+  output.downstreamContext = buildEngine29DownstreamContext(output);
+  const downstreamReceiptFile = recordEngine29DownstreamContext(output.downstreamContext);
+  console.log(`[engine29] IMMUTABLE_CONTEXT ${downstreamReceiptFile}`);
   writeJsonAtomic(OUTPUT_FILE, output);
 
   const persistence = persistEngineRuntimeFiles({

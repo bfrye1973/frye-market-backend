@@ -42,7 +42,10 @@ export function evaluateFreshness({
 
   if (timeframe === "1H") {
     maxAgeMs = isWeekendUtc(now) ? weekendHourlyMaxAgeMs : hourlyMaxAgeMs;
-  } else if (timeframe === "30m") {
+  } else if (timeframe === "30m" || timeframe === "10m") {
+    // 10m live evidence must not inherit the 96-hour DAILY allowance.
+    // Reuse the existing intraday freshness budget until a dedicated
+    // manager-approved 10m threshold is established.
     maxAgeMs = isWeekendUtc(now) ? weekendThirtyMinMaxAgeMs : thirtyMinMaxAgeMs;
   }
 

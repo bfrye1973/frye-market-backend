@@ -26,7 +26,11 @@ const GROUP_KEYS = Object.freeze([
 ]);
 
 function stateOf(groupBundle, key) {
-  return groupBundle?.groups?.[key]?.tactical?.state ?? null;
+  const group = groupBundle?.groups?.[key]?.tactical;
+  // Daily-only FRED rates cannot supply a confirmed 1H or 1W rates vote
+  // when required yield members are stale/missing. Other groups are untouched.
+  if (key === "ratesDuration" && group?.dataDegraded === true) return null;
+  return group?.state ?? null;
 }
 
 function isActive(state) {

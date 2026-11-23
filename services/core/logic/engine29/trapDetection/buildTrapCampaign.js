@@ -47,7 +47,14 @@ function identityFrom(trapDetection) {
   }
 
   return {
-    key: [side, String(level.type), boundary.toFixed(2)].join("|"),
+    // Distinct Engine26 institutional zones may share the same edge.
+    // Keep the exact zone identity so a trap cannot migrate between zones.
+    key: [side, String(level.type), boundary.toFixed(2),
+      level.type === "INSTITUTIONAL_ZONE" ? String(level.id || "UNKNOWN_ZONE") : ""].join("|"),
+    zoneId: level.type === "INSTITUTIONAL_ZONE" ? level.id ?? null : null,
+    approachDirection: trapDetection?.auctionEvent?.approachDirection ?? null,
+    approachOrigin: trapDetection?.auctionEvent?.approachOrigin ?? null,
+    firstTouchTime: trapDetection?.auctionEvent?.firstTouchTime ?? null,
     side,
     type: String(level.type),
     timeframe: level.timeframe ?? null,
@@ -110,6 +117,7 @@ function campaignId(identity, firstObservedAt) {
     identity.side,
     identity.type,
     identity.boundary.toFixed(2),
+    ...(identity.zoneId ? [encodeURIComponent(String(identity.zoneId))] : []),
     stamp,
   ].join("-");
 }
@@ -148,6 +156,13 @@ export function buildEngine29TrapCampaign({
   now = Date.now(),
 } = {}) {
   const timestamp = toIso(now);
+  const observationTime = trapDetection?.auctionEvent?.tenMinuteEvidence?.completedBarTime ?? null;
+  // Identical completed 10m evidence must not count as a new lifecycle observation.
+  if (observationTime !== null && priorCampaign?.lastCompleted10mTime === observationTime) {
+    return { version: "engine29.trapCampaign.v1", active: priorCampaign.active === true,
+      campaign: { ...priorCampaign, lastBuildAt: timestamp,
+        reasonCodes: [...new Set([...(priorCampaign.reasonCodes || []), "DUPLICATE_COMPLETED_10M_NO_STATE_ADVANCE"])] } };
+  }
   const identity = identityFrom(trapDetection);
   const detectionState =
     trapDetection?.state ?? ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP;
@@ -185,6 +200,7 @@ export function buildEngine29TrapCampaign({
         ...priorCampaign,
         active: remainsActive,
         lastBuildAt: timestamp,
+        lastCompleted10mTime: observationTime,
         currentDetectionState: ENGINE29_TRAP_STATES.NO_ACTIVE_TRAP,
         observationGapCount:
           Number(priorCampaign?.observationGapCount || 0) + 1,
@@ -261,6 +277,7 @@ export function buildEngine29TrapCampaign({
         firstObservedAt: timestamp,
         lastObservedAt: timestamp,
         lastBuildAt: timestamp,
+        lastCompleted10mTime: observationTime,
         observationCount: 1,
         observationGapCount: 0,
         competingObservationCount: 0,
@@ -308,6 +325,7 @@ export function buildEngine29TrapCampaign({
       ),
       lastObservedAt: timestamp,
       lastBuildAt: timestamp,
+      lastCompleted10mTime: observationTime,
       observationCount:
         Number(priorCampaign?.observationCount || 0) + 1,
       observationGapCount: 0,

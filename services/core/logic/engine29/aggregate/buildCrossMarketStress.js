@@ -222,6 +222,7 @@ export async function buildEngine29CrossMarketStress({
   groupBundle = null,
   moveCharacter = null,
   priorMoveParent = null,
+  priorTrapApproach = null,
   financialConditions = {},
   engine25Participation = null,
 } = {}) {
@@ -325,6 +326,7 @@ export async function buildEngine29CrossMarketStress({
     await buildEngine29TrapDetection({
       now,
       esAnchor,
+      priorTrapApproach,
       moveCharacter: move,
       liveMonitor,
     });
@@ -525,6 +527,9 @@ export async function buildEngine29CrossMarketStress({
 
       esLiveMonitorFreshness:
         move?.esLiveMonitorFreshness || null,
+      // Reuse Engine29 source freshness, not downstream-invented thresholds.
+      esOneHourFreshness: esAnchor?.tacticalFreshness || null,
+      esThirtyMinuteFreshness: esAnchor?.fastTacticalFreshness || null,
 
       liveMonitorAvailableSymbols:
         market?.summary
