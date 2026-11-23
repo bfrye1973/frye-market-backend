@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - engine29/readonly-receipt-verifier-20261123
+      - engine29/verifier-es-replay-bound-20261123
   workflow_dispatch:
 jobs:
   receipt-verifier:
