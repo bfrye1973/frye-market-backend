@@ -289,7 +289,11 @@ function rangeApproach(level, completed10m, completed30m) {
   const first = completed10m[firstIndex];
   const prior = completed10m[firstIndex - 1] || null;
   const older30 = completed30m.filter((bar) => bar.time + 30 * 60 * 1000 <= first.time).at(-1);
-  const originPrice = finite(prior?.close) ?? finite(older30?.close) ?? finite(first.open);
+  const originCandidates = [finite(prior?.close), finite(older30?.close), finite(first.open)];
+  // A completed 30m closing inside the zone does not erase a provable
+  // outside approach at the opening of the first completed 10m test.
+  const originPrice = originCandidates.find((price) =>
+    Number.isFinite(price) && (price < lo || price > hi));
   const approachOrigin = originPrice < lo ? "BELOW" : originPrice > hi ? "ABOVE" : "INSIDE";
   if (approachOrigin === "INSIDE") return null; // fail closed with no provable entry
   const approachDirection = approachOrigin === "BELOW" ? "UP" : "DOWN";
