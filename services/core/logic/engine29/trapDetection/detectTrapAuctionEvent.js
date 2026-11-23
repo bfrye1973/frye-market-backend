@@ -358,7 +358,8 @@ function chooseCandidate(levels = [], bar, tenMinuteBars = [], thirtyMinuteBars 
     });
   }
 
-  testedLevels.sort((a, b) => a.distance - b.distance);
+  testedLevels.sort((a, b) => a.distance - b.distance ||
+    String(a.level?.id ?? "").localeCompare(String(b.level?.id ?? "")));
   return testedLevels[0] || null;
 }
 
