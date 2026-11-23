@@ -20,6 +20,7 @@ test("Claude #366 rally into overhead zone then rejected is not a low sweep or b
  assert.equal(x.liquidityLocation,"OVERHEAD");
  assert.equal(x.liquidityEvent.side,"HIGH");
  assert.equal(x.auctionClassification,"REJECTION");
+ assert.equal(x.auctionResult,"REJECTED_HIGH");
  assert.equal(x.trapSide,"NONE");
  assert.equal(x.failedAcceptance,false);
  assert.equal(x.reclaimObserved,false);
@@ -64,4 +65,15 @@ test("approach from above classifies UNDERLYING test with LOW side, no false tra
  assert.equal(x.liquidityLocation,"UNDERLYING");
  assert.equal(x.liquidityEvent.side,"LOW");
  assert.equal(x.trapSide,"NONE");
+});
+
+test("symmetric downward failed push is a low rejection, never a trap",()=>{
+ const x=detect({live:bar(t,7340,7360,7320,7350),
+ previous30:bar(t-3_600_000,7360,7380,7340,7350),
+ current30:bar(t-1_800_000,7350,7370,7320,7350)});
+ assert.equal(x.approachDirection,"DOWN");
+ assert.equal(x.auctionClassification,"REJECTION");
+ assert.equal(x.auctionResult,"REJECTED_LOW");
+ assert.equal(x.trapSide,"NONE");
+ assert.equal(x.reclaimObserved,false);
 });
