@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { diagnoseEngine29RatesDuration } from "./ratesDurationDiagnostic.js";
 
 export const ENGINE29_DOWNSTREAM_SCHEMA = "engine29.downstreamContext.v1";
 
@@ -64,7 +65,8 @@ export function buildEngine29DownstreamContext(output) {
       ratesDuration: { structural: output?.groups?.ratesDuration?.structural ?? null,
         oneHour: output?.groups?.ratesDuration?.tactical ?? null,
         thirtyMinute: output?.groups?.ratesDuration?.fastTactical ?? null,
-        dataDegraded: (quality.degradedGroups || []).includes("ratesDuration") },
+        dataDegraded: (quality.degradedGroups || []).includes("ratesDuration"),
+        diagnostics: diagnoseEngine29RatesDuration(output) },
     },
     engine26ZoneId: trap?.auctionEvent?.engine26ZoneId ??
       trap?.auctionEvent?.liquidityLevel?.zoneId ?? null,
