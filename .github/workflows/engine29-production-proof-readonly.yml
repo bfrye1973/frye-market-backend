@@ -1,0 +1,77 @@
+name: Engine29 production post-deploy read-only proof
+on:
+  push:
+    branches:
+      - audit/engine29-production-proof-20261123
+  workflow_dispatch:
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Read-only live API and ES Replay proof
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {createHash} from 'node:crypto';
+          const base='https://frye-market-backend-1.onrender.com';
+          async function get(path) {
+            const res=await fetch(base+path,{headers:{accept:'application/json','cache-control':'no-store'},signal:AbortSignal.timeout(30000)});
+            if(!res.ok) throw Error(path+' HTTP_'+res.status);
+            return res.json();
+          }
+          const response=await get('/api/v1/engine29/cross-market-stress');
+          const data=response?.data ?? null;
+          assert.equal(response.ok,true);
+          assert.equal(data?.downstreamContext?.schema,'engine29.downstreamContext.v1');
+          const live=data.downstreamContext;
+          assert.deepEqual(live.lanes.parentMove.parent,data.marketCharacter.move.parent);
+          assert.equal(live.lanes.parentMove.state,data.marketCharacter.move.moveCharacter);
+          assert.equal(live.lanes.trap.eligibleForEngine4,false);
+          assert.equal(live.lanes.liquidity.eligibleForEngine4,false);
+          assert.equal(live.lanes.trap.freshness.owner,'ENGINE29');
+          assert.ok(Array.isArray(live.lanes.trap.freshness.freshnessBlockedBy));
+          assert.ok(Array.isArray(live.lanes.trap.freshness.confirmationBlockedBy));
+          assert.ok(live.lanes.trap.tenMinuteEvidence);
+          console.log('LIVE_API_CONTRACT_PASS',JSON.stringify({
+            timestamp:live.timestamp,parentMove:live.lanes.parentMove.state,
+            trap:live.lanes.trap.state,trapFreshness:live.lanes.trap.freshness.state,
+            trapDegraded:live.lanes.trap.freshness.dataDegraded,
+            trapEligibleForEngine4:live.lanes.trap.eligibleForEngine4,
+            liquidityEligibleForEngine4:live.lanes.liquidity.eligibleForEngine4
+          }));
+          const list=await get('/api/v1/replay/es/times?date=2026-11-23');
+          const times=(list.times||[]).slice(-24);
+          console.log('ES_REPLAY_TIMES',times.length,times.slice(-12));
+          let contexts=0,identical=0,lookahead=0;
+          for(const time of times) {
+            const snap=await get('/api/v1/replay/es/snapshot?date=2026-11-23&time='+encodeURIComponent(time));
+            const ctx=snap.engine29DownstreamContext;
+            if(!ctx) continue;
+            contexts++;
+            assert.equal(ctx.schema,'engine29.downstreamContext.v1');
+            assert.equal(ctx.lanes.trap.eligibleForEngine4,false);
+            assert.equal(ctx.lanes.liquidity.eligibleForEngine4,false);
+            const obs=Date.parse(ctx.timestamp), snapshot=Date.parse(snap.snapshotTime);
+            assert.ok(Number.isFinite(obs)&&Number.isFinite(snapshot));
+            if(obs>snapshot) lookahead++;
+            const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
+            if(ctx.timestamp===live.timestamp) {
+              assert.equal(digest(ctx),digest(live),'LIVE_REPLAY_IDENTITY_DRIFT');
+              identical++;
+            }
+            console.log('REPLAY_CONTEXT',JSON.stringify({time,snapshotTime:snap.snapshotTime,recordedAt:ctx.timestamp,hash:digest(ctx),sameAsLive:ctx.timestamp===live.timestamp}));
+          }
+          assert.equal(lookahead,0,'REPLAY_LOOKAHEAD_DETECTED');
+          console.log('REPLAY_PROOF_SUMMARY',JSON.stringify({
+            inspected:times.length,withEngine29Context:contexts,lookahead,exactCurrentLiveMatches:identical,
+            note:'Direct immutable receipt file hash requires disk access; this job only reads live and ES Replay APIs.'
+          }));
+          JS
