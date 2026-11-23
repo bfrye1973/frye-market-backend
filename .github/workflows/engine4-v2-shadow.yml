@@ -1,0 +1,24 @@
+name: engine4-v2-shadow
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine4/v2/**"
+      - "services/core/tests/engine4V2Shadow.test.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - ".github/workflows/engine4-v2-shadow.yml"
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: node --check jobs/buildStrategySnapshot.js
+      - run: node --check logic/engine4/v2/buildEngine4V2Shadow.js
+      - run: node --test tests/engine4V2Shadow.test.js tests/engine4Participation5m.independentAuthority.test.js tests/engine4ParticipationAuthority.phaseE.test.js

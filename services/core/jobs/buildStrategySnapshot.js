@@ -109,6 +109,8 @@ import {
 import {
   attachEngine4AuthorizedReactionParticipation,
 } from "../logic/engine4/buildAuthorizedReactionParticipation.js";
+import { buildEngine4V2Shadow } from "../logic/engine4/v2/buildEngine4V2Shadow.js";
+import { loadEngine4V2ShadowState, saveEngine4V2ShadowState } from "../logic/engine4/v2/engine4V2ShadowStore.js";
 import {
   preserveEngine6CandidateIdentity,
 } from "../logic/engine6/preserveCandidateIdentity.js";
@@ -8980,6 +8982,31 @@ patchedConfluence.context.reaction.paperScalpReaction =
     engine26LocationCandidate,
     engine26ReactionHandoff,
   });
+
+  // Engine 4 v2 SHADOW (issue #365): completed-5m participation, volume
+  // baseline, warnings and persistent confirmation. Diagnostic only; canonical
+  // Engine 4 v1 above is unchanged and nothing downstream reads this as a gate.
+  try {
+    const engine4V2Prior = loadEngine4V2ShadowState();
+    const engine4V2Shadow = buildEngine4V2Shadow({
+      bars5m: engine3DiagnosticBars?.fiveMinute?.bars || [],
+      evaluationTimeMs,
+      direction: engine3V5?.canonical?.canonical?.direction ?? "NEUTRAL",
+      zone: engine3V5?.normalizedZoneInput?.zone ?? null,
+      zoneEligible: engine3V5?.normalizedZoneInput?.eligible === true,
+      candidateId: engine26LocationCandidate?.candidateId ?? null,
+      zoneId: engine26LocationCandidate?.zoneId ?? null,
+      priorState: engine4V2Prior.found ? engine4V2Prior.state : null,
+      engine29: engine25Context?.intradayMacro?.engine29Parity?.engine29 ?? null,
+    });
+    patchedConfluence.context.volume = patchedConfluence.context.volume || {};
+    patchedConfluence.context.volume.engine4V2Shadow = engine4V2Shadow;
+    if (engine4V2Shadow.persistedState) {
+      saveEngine4V2ShadowState({ state: engine4V2Shadow.persistedState });
+    }
+  } catch (err) {
+    console.error("[E4 V2 SHADOW ERROR]", err);
+  }
 }
 
   // Engine 23 preliminary behavior context.
