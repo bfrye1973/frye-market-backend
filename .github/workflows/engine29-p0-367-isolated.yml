@@ -25,3 +25,7 @@ jobs:
         working-directory: services/core
         run: |
           node --test tests/engine29MoveV2Authority.test.js tests/engine29SqueezeV2Scoring.test.js tests/engine29TrapCampaign.test.js tests/engine29TrapDetectionPhaseB.test.js
+      - name: Entire Engine29 regression suite
+        working-directory: services/core
+        run: |
+          node --test tests/engine29*.test.js
