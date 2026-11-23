@@ -60,6 +60,7 @@ import engine25IntradayMacroRouter from "./routes/engine25IntradayMacro.js";
 import engine25CapUniverseRouter from "./routes/engine25CapUniverse.js";
 import engine29CrossMarketStressRouter from "./routes/engine29CrossMarketStress.js";
 import engine29ReceiptVerifyRouter from "./routes/engine29ReceiptVerify.js";
+import { runEngine29OneShotReceiptAudit } from "./logic/engine29/runOneShotReceiptAudit.js";
 import engine28APipelineDoctorRouter from "./routes/engine28APipelineDoctor.js";
 import engine6ENoTradeFunnelRouter from "./routes/engine6ENoTradeFunnel.js";
 import executionStateRouter from "./routes/executionState.js";
@@ -505,6 +506,19 @@ app.listen(PORT, HOST, () => {
   setTimeout(() => {
     runEngineRuntimeBootstrapIfMissing();
   }, 3500);
+
+  // One-shot opt-in disk proof: self-call the existing HEADER-AUTHENTICATED
+  // read-only verifier without disclosing ENGINE_CRON_TOKEN to external CI.
+  // Disabled in normal service operation.
+  if (process.env.ENGINE29_ONE_SHOT_RECEIPT_AUDIT === "1") {
+    setTimeout(() => {
+      runEngine29OneShotReceiptAudit().catch(() => {
+        console.error("[engine29-disk-audit]", JSON.stringify({
+          status:"BLOCKED", reason:"INTERNAL_AUDIT_FAILURE"
+        }));
+      });
+    }, 7000);
+  }
 
   // Engine 25 news startup contract:
   // REST recovery/backfill first -> persistent WebSocket second.
