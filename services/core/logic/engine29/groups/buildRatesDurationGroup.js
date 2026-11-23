@@ -34,10 +34,29 @@ function durationBlock(tlt) {
   return ENGINE29_GROUP_STATES.HEALTHY;
 }
 
+// Rates cannot use stale observations as if they were current evidence.
+function freshRatesMember(entry, timeframeKey) {
+  const member = memberSnapshot(entry, timeframeKey);
+  if (!member) return member;
+  const view = timeframeKey === "structural"
+    ? entry?.structural
+    : timeframeKey === "tactical" ? entry?.tactical : entry?.fastTactical;
+  if (view?.freshness?.stale !== true) return member;
+  return {
+    ...member,
+    available: false,
+    state: null,
+    stage: null,
+    freshnessStale: true,
+    freshness: view.freshness,
+    unavailableReason: "SOURCE_STALE",
+  };
+}
+
 function buildOne(symbols, timeframeKey) {
-  const y10 = memberSnapshot(symbols.US10Y, timeframeKey);
-  const y30 = memberSnapshot(symbols.US30Y, timeframeKey);
-  const tlt = memberSnapshot(symbols.TLT, timeframeKey);
+  const y10 = freshRatesMember(symbols.US10Y, timeframeKey);
+  const y30 = freshRatesMember(symbols.US30Y, timeframeKey);
+  const tlt = freshRatesMember(symbols.TLT, timeframeKey);
   const members = [y10, y30, tlt].filter(Boolean);
 
   const yieldState = yieldBlock(y10, y30);
