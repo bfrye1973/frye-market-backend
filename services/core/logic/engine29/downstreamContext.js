@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { diagnoseEngine29RatesDuration } from "./ratesDurationDiagnostic.js";
+import { buildEngine29TrapLaneFreshness } from "./trapDetection/buildTrapLaneFreshness.js";
 
 export const ENGINE29_DOWNSTREAM_SCHEMA = "engine29.downstreamContext.v1";
 
@@ -20,6 +21,11 @@ export function buildEngine29DownstreamContext(output) {
   const observationId = output?.squeezeV2Observation?.observationId ?? null;
   const timestamp = output?.timestamp ?? null;
   const squeezeObs = output?.squeezeV2Observation || null;
+  const trapFreshness = buildEngine29TrapLaneFreshness({
+    detection: trap,
+    dataQuality: quality,
+    structuralParticipation: output?.structuralParticipation || null,
+  });
   const ageMs = sourceTimestamp && Number.isFinite(Date.parse(sourceTimestamp)) &&
     Number.isFinite(Date.parse(timestamp))
     ? Math.max(0, Date.parse(timestamp) - Date.parse(sourceTimestamp))
@@ -36,7 +42,8 @@ export function buildEngine29DownstreamContext(output) {
     observationAgeMs: ageMs,
     lanes: {
       parentMove: { dataDegraded: parent == null || parent?.stale === true ||
-        quality.esThirtyMinuteFreshness?.stale === true, state: parent?.state ?? null,
+        quality.esThirtyMinuteFreshness?.stale === true,
+        state: move.moveCharacter ?? "NO_ACTIVE_MOVE",
         direction: parent?.direction ?? null, parent,
         freshness: quality.esThirtyMinuteFreshness ?? parent?.freshness ?? null },
       oneHour: { state: output?.tacticalState ?? null,
@@ -56,8 +63,9 @@ export function buildEngine29DownstreamContext(output) {
         dataDegraded: !character.liquidity || quality.esLiveMonitorFreshness?.stale === true,
         eligibleForEngine4: false, reason: "P0_REPAIR_AND_REGRESSION_PENDING" },
       trap: { ...character.trap, campaign: output?.trapCampaign ?? null,
-        freshness: quality.esLiveMonitorFreshness ?? null,
-        dataDegraded: !character.trap || quality.esLiveMonitorFreshness?.stale === true, eligibleForEngine4: false,
+        freshness: trapFreshness,
+        dataDegraded: !character.trap || trapFreshness.dataDegraded,
+        eligibleForEngine4: false,
         reason: "P0_REPAIR_AND_REGRESSION_PENDING" },
       engine25Participation: { ...output?.structuralParticipation,
         freshness: output?.structuralParticipation?.freshness ?? null,
