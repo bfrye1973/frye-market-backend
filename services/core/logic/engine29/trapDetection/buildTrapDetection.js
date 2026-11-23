@@ -28,6 +28,7 @@ export async function buildEngine29TrapDetection({
   engine25Participation = null,
   moveCharacter = null,
   liveMonitor = null,
+  priorTrapApproach = null,
 } = {}) {
   const anchor =
     esAnchor ||
@@ -64,6 +65,7 @@ export async function buildEngine29TrapDetection({
     detectEngine29TrapAuctionEvent({
       macroLiquidityMap,
       esAnchor: anchor,
+      priorApproach: priorTrapApproach,
       now,
     });
 
