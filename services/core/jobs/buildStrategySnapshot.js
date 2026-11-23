@@ -8982,7 +8982,6 @@ patchedConfluence.context.reaction.paperScalpReaction =
     engine26LocationCandidate,
     engine26ReactionHandoff,
   });
-}
 
   // Engine 4 v2 SHADOW (issue #365): completed-5m participation, volume
   // baseline, warnings and persistent confirmation. Diagnostic only; canonical
