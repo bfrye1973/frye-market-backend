@@ -1,0 +1,30 @@
+name: Engine29 controlled post-deploy refresh
+on:
+  push:
+    branches:
+      - audit/engine29-production-proof-20261123
+  workflow_dispatch:
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Trigger existing dashboard-safe Engine29 refresh and report status
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          const endpoint='https://frye-market-backend-1.onrender.com/api/v1/engine29/dashboard-refresh';
+          const response=await fetch(endpoint,{
+            method:'POST',headers:{accept:'application/json','content-type':'application/json'},
+            body:'{}',signal:AbortSignal.timeout(180000)});
+          const payload=await response.json().catch(()=>null);
+          console.log('ENGINE29_REFRESH_RESULT',JSON.stringify({
+            http:response.status,ok:payload?.ok,status:payload?.status,
+            startedAt:payload?.startedAt,finishedAt:payload?.finishedAt,
+            fileModifiedAt:payload?.fileModifiedAt,
+            summaryTimestamp:payload?.data?.timestamp,
+            error:payload?.error,detail:payload?.detail?.slice?.(0,600)
+          }));
+          if(!response.ok)process.exitCode=1;
+          JS
