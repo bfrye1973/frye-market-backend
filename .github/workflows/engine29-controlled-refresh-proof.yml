@@ -24,6 +24,8 @@ jobs:
             startedAt:payload?.startedAt,finishedAt:payload?.finishedAt,
             fileModifiedAt:payload?.fileModifiedAt,
             summaryTimestamp:payload?.data?.timestamp,
+            receiptEvidence:(payload?.logs?.stdoutTail||'').split('\\n')
+              .filter(x=>x.includes('IMMUTABLE_CONTEXT')||x.includes('DURABLE SAVE')),
             error:payload?.error,detail:payload?.detail?.slice?.(0,600)
           }));
           if(!response.ok)process.exitCode=1;
