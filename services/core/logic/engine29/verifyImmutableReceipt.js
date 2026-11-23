@@ -12,8 +12,18 @@ const TIME = /^\d{4}$/;
 const RECEIPT = /^(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 const MAX_BYTES = 4 * 1024 * 1024;
 const sha256 = (buffer) => crypto.createHash("sha256").update(buffer).digest("hex");
-const canonical = (obj) => Buffer.from(JSON.stringify(obj), "utf8");
-const fail = (reason, status = 422) => ({ status, body: { ok:false, exists:false, verified:false, exactMatch:false, reason } });
+// Stable key ordering makes identity independent of object insertion order.
+// No market logic is computed; arrays retain original order.
+function canonicalJson(value) {
+  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (value !== null && typeof value === "object") {
+    return "{" + Object.keys(value).sort().map(key =>
+      JSON.stringify(key) + ":" + canonicalJson(value[key])).join(",") + "}";
+  }
+  return JSON.stringify(value);
+}
+const canonical = (obj) => Buffer.from(canonicalJson(obj), "utf8");
+const fail = (reason, status = 422, exists = false) => ({ status, body: { ok:false, exists, verified:false, exactMatch:false, reason } });
 
 export function authenticateEngine29Verifier(headerToken, configuredToken) {
   const expected = String(configuredToken ?? "").trim();
@@ -96,23 +106,23 @@ export function verifyEngine29Receipt({
   try {
     receipt = JSON.parse(receiptBytes.toString("utf8"));
     replay = JSON.parse(replayBytes.toString("utf8"));
-  } catch { return fail("INVALID_JSON"); }
+  } catch { return fail("INVALID_JSON",422,true); }
   if (receipt?.schema !== SCHEMA || !receipt?.timestamp ||
     typeof receipt !== "object" || Array.isArray(receipt)) {
-    return fail("INVALID_RECEIPT_SCHEMA");
+    return fail("INVALID_RECEIPT_SCHEMA",422,true);
   }
   const archived = replay?.engine29DownstreamContext;
   if (archived?.schema !== SCHEMA || typeof archived !== "object" || Array.isArray(archived)) {
-    return fail("INVALID_REPLAY_CONTEXT");
+    return fail("INVALID_REPLAY_CONTEXT",422,true);
   }
   const receiptMs = Date.parse(receipt.timestamp);
   const archivedMs = Date.parse(archived.timestamp);
   const snapshotMs = Date.parse(replay.snapshotTime);
   if (![receiptMs, archivedMs, snapshotMs].every(Number.isFinite)) {
-    return fail("INVALID_TIMESTAMP");
+    return fail("INVALID_TIMESTAMP",422,true);
   }
   if (receiptMs > snapshotMs || archivedMs > snapshotMs) {
-    return fail("LOOKAHEAD_DETECTED",409);
+    return fail("LOOKAHEAD_DETECTED",409,true);
   }
 
   const receiptContextHash = sha256(canonical(receipt));
