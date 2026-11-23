@@ -289,9 +289,9 @@ function rangeApproach(level, completed10m, completed30m) {
   const first = completed10m[firstIndex];
   const prior = completed10m[firstIndex - 1] || null;
   const older30 = completed30m.filter((bar) => bar.time + 30 * 60 * 1000 <= first.time).at(-1);
-  const originCandidates = [finite(prior?.close), finite(older30?.close), finite(first.open)];
-  // A completed 30m closing inside the zone does not erase a provable
-  // outside approach at the opening of the first completed 10m test.
+  const originCandidates = [finite(prior?.close), finite(first.open), finite(older30?.close)];
+  // First completed 10m test opening outside is stronger approach evidence
+  // than a contemporaneous completed 30m close (which can be after first touch).
   const originPrice = originCandidates.find((price) =>
     Number.isFinite(price) && (price < lo || price > hi));
   const approachOrigin = originPrice < lo ? "BELOW" : originPrice > hi ? "ABOVE" : "INSIDE";
