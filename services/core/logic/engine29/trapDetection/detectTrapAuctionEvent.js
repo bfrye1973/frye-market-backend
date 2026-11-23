@@ -342,7 +342,12 @@ export function detectEngine29TrapAuctionEvent({
   esAnchor = null,
   now = Date.now(),
 } = {}) {
-  const live10m = sortBars(esAnchor?.liveMonitor?.bars);
+  // State-changing trap evidence is restricted to closed 10m candles.
+  // A forming 10m bar may be displayed elsewhere but cannot alter trap identity.
+  const all10m = sortBars(esAnchor?.liveMonitor?.bars);
+  const live10m = completedBars(all10m, 10 * 60 * 1000, now);
+  const forming10m = all10m.at(-1)?.time + 10 * 60 * 1000 > now
+    ? all10m.at(-1) : null;
   const bars30m = completedBars(
     esAnchor?.structure?.fastTactical?.bars,
     30 * 60 * 1000,
@@ -355,6 +360,8 @@ export function detectEngine29TrapAuctionEvent({
   );
 
   const liveBar = live10m.at(-1) || null;
+  const tenMinuteEvidence = { completed: Boolean(liveBar), formingPresent: Boolean(forming10m),
+    completedBarTime: liveBar?.time ?? null, formingBarTime: forming10m?.time ?? null };
   const completed30m = bars30m.at(-1) || null;
   const completed1h = bars1h.at(-1) || null;
 
@@ -369,7 +376,7 @@ export function detectEngine29TrapAuctionEvent({
     finite(completed1h?.close);
 
   if (!liveBar || !macroLiquidityMap?.levels?.length) {
-    return buildNoEvent(currentPrice);
+    return { ...buildNoEvent(currentPrice), tenMinuteEvidence };
   }
 
   const candidate = chooseCandidate(
@@ -548,7 +555,10 @@ export function detectEngine29TrapAuctionEvent({
           : null,
     },
 
+    tenMinuteEvidence,
     immediate10m: {
+      completed: true,
+      forming: false,
       time: liveBar.time ?? null,
       open: finite(liveBar.open),
       high: finite(liveBar.high),
