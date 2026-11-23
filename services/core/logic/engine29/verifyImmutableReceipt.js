@@ -75,13 +75,15 @@ function readRegularFile(file, root) {
     return fs.readFileSync(fd);
   } finally { fs.closeSync(fd); }
 }
-function mapFsError(error) {
+function mapFsError(error, receiptExists = false) {
   const code = error?.code || error?.message;
-  if (code === "ENOENT") return fail("NOT_FOUND",404);
+  if (code === "ENOENT") return fail(
+    receiptExists ? "REPLAY_NOT_FOUND" : "NOT_FOUND", 404, receiptExists
+  );
   if (code === "ELOOP" || code === "UNSAFE_DIRECTORY" ||
-    code === "NON_REGULAR_FILE" || code === "UNSAFE_FILE_PATH") return fail("UNSAFE_FILE",400);
-  if (code === "FILE_TOO_LARGE") return fail("FILE_TOO_LARGE",413);
-  return fail("FILE_READ_FAILED",500);
+    code === "NON_REGULAR_FILE" || code === "UNSAFE_FILE_PATH") return fail("UNSAFE_FILE",400,receiptExists);
+  if (code === "FILE_TOO_LARGE") return fail("FILE_TOO_LARGE",413,receiptExists);
+  return fail("FILE_READ_FAILED",500,receiptExists);
 }
 
 // Injected roots exist only for offline tests; HTTP route uses fixed production roots.
@@ -97,10 +99,10 @@ export function verifyEngine29Receipt({
   const receiptFile = path.join(receiptRoot, date, filename);
   const esFile = path.join(esRoot, replayDate, replayTime + ".json");
   let receiptBytes, replayBytes;
-  try {
-    receiptBytes = readRegularFile(receiptFile, receiptRoot);
-    replayBytes = readRegularFile(esFile, esRoot);
-  } catch (error) { return mapFsError(error); }
+  try { receiptBytes = readRegularFile(receiptFile, receiptRoot); }
+  catch (error) { return mapFsError(error); }
+  try { replayBytes = readRegularFile(esFile, esRoot); }
+  catch (error) { return mapFsError(error,true); }
 
   let receipt, replay;
   try {
