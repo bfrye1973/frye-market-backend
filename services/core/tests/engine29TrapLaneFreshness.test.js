@@ -49,6 +49,7 @@ for(const [name,change,blocker] of [
  ["forming-only 10m",(_q,d)=>{d.auctionEvent.tenMinuteEvidence.completed=false;},"COMPLETED_10M_REQUIRED"],
  ["stale ES 10m",(q)=>{q.esLiveMonitorFreshness.stale=true;},"SOURCE_STALE"],
  ["missing completed 30m",(_q,d)=>{d.auctionEvent.acceptance30m=null;},"COMPLETED_30M_REQUIRED"],
+ ["completed 30m but no proven prior acceptance loss",(_q,d)=>{d.auctionEvent.acceptance30m.priorAcceptanceFailure=false;},"PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN"],
  ["stale ES 30m",(q)=>{q.esThirtyMinuteFreshness.stale=true;},"SOURCE_STALE"],
  ["stale Engine29 1H",(q)=>{q.esOneHourFreshness.stale=true;},"SOURCE_STALE"],
  ["Engine25 primary stale",(_q,d)=>{d.participation.primary.source.currentTrapConfirmationUsable=false;},"ENGINE25_CURRENT_PRIMARY_REQUIRED"],
