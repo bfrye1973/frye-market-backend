@@ -1,0 +1,41 @@
+name: Engine29 Nov23 production provenance read-only
+on:
+  push:
+    branches:
+      - engine29/p0-point-in-time-367
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Read public production snapshot without refresh or mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 2 --max-time 35             'https://frye-market-backend-1.onrender.com/api/v1/engine29/cross-market-stress'             -o /tmp/engine29-live.json
+          jq -c '{
+            productionTimestamp: .data.timestamp,
+            schema: .data.version,
+            overallDataDegraded: .data.dataDegraded,
+            degradedGroups: .data.dataQuality.degradedGroups,
+            rateGroup: {
+              weekly: {degraded: .data.groups.ratesDuration.structural.dataDegraded,
+                missing: .data.groups.ratesDuration.structural.missingRequiredMembers},
+              oneHour: {degraded: .data.groups.ratesDuration.tactical.dataDegraded,
+                missing: .data.groups.ratesDuration.tactical.missingRequiredMembers},
+              thirtyMinute: {degraded: .data.groups.ratesDuration.fastTactical.dataDegraded,
+                missing: .data.groups.ratesDuration.fastTactical.missingRequiredMembers}
+            },
+            ratesSources: [
+              .data.symbols.US10Y, .data.symbols.US30Y, .data.symbols.TLT
+            ] | map(if . == null then null else {
+              symbol: .canonicalSymbol, provider, sourceSymbol, sourceSeriesId,
+              weekly: {sourceTime: .structural.latest.time, freshness: .structural.freshness},
+              oneHour: {sourceTime: .tactical.latest.time, freshness: .tactical.freshness},
+              thirtyMinute: {sourceTime: .fastTactical.latest.time, freshness: .fastTactical.freshness}
+            } end),
+            parentDirection: .data.marketCharacter.move.parent.direction,
+            squeezeDirection: .data.marketCharacter.squeezeCampaign.direction
+          }' /tmp/engine29-live.json
