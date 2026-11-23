@@ -117,6 +117,7 @@ function campaignId(identity, firstObservedAt) {
     identity.side,
     identity.type,
     identity.boundary.toFixed(2),
+    ...(identity.zoneId ? [encodeURIComponent(String(identity.zoneId))] : []),
     stamp,
   ].join("-");
 }
