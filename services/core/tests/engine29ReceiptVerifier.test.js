@@ -226,3 +226,23 @@ test("missing ES Replay preserves receipt exists=true and fails closed",()=>{
   assert.equal(v.body.reason,"REPLAY_NOT_FOUND");
  }finally{x.cleanup();}
 });
+
+test("production-sized ES Replay above 4 MiB is accepted below the 16 MiB Replay cap",()=>{
+ const x=setup();try{
+  const replay={...x.snapshot,nonEngine29Context:{padding:"a".repeat(5*1024*1024)}};
+  fs.writeFileSync(x.replayPath,JSON.stringify(replay));
+  assert.ok(fs.statSync(x.replayPath).size>4*1024*1024);
+  const v=verifyEngine29Receipt(x.input);
+  assert.equal(v.status,200);
+  assert.equal(v.body.exactMatch,true);
+ }finally{x.cleanup();}
+});
+test("oversized ES Replay and oversized receipt still fail bounded",()=>{
+ const x=setup();try{
+  fs.writeFileSync(x.replayPath,JSON.stringify({...x.snapshot,padding:"x".repeat(17*1024*1024)}));
+  assert.equal(verifyEngine29Receipt(x.input).body.reason,"FILE_TOO_LARGE");
+  fs.writeFileSync(x.replayPath,JSON.stringify(x.snapshot));
+  fs.writeFileSync(x.receiptPath,JSON.stringify({...x.context,padding:"x".repeat(5*1024*1024)}));
+  assert.equal(verifyEngine29Receipt(x.input).body.reason,"FILE_TOO_LARGE");
+ }finally{x.cleanup();}
+});
