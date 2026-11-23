@@ -101,25 +101,42 @@ export function buildEngine29TrapLaneFreshness({
 
   const noEvent = detection?.state === "NO_ACTIVE_TRAP" ||
     detection?.trapSide == null || detection?.trapSide === "NONE";
-  const blockedBy = [
+
+  // These distinguish broken SOURCE evidence from a perfectly healthy
+  // auction that simply never developed a qualifying trap setup.
+  // Always check underlying ES source feeds. Participation and secondary
+  // confirmation are required only when there is an active trap candidate;
+  // absence of a candidate must not manufacture degradation.
+  const freshnessBlockedBy = [
     !tenSource.current ? tenSource.reason : null,
-    !tenCompleted ? "COMPLETED_10M_REQUIRED" : null,
     !thirtySource.current ? thirtySource.reason : null,
+    !hourlySource.current ? hourlySource.reason : null,
+    !noEvent && !primaryUsable ? "ENGINE25_PRIMARY_SOURCE_NOT_CURRENT_OR_UNVERIFIED" : null,
+    !noEvent && !secondaryAvailable ? "ENGINE29_SECONDARY_SOURCE_UNAVAILABLE" : null,
+  ].filter(Boolean);
+
+  const confirmationBlockedBy = [
+    !tenCompleted ? "COMPLETED_10M_REQUIRED" : null,
     !thirtyCompleted ? "COMPLETED_30M_REQUIRED" : null,
     !acceptanceFailureConfirmed ? "PRIOR_30M_ACCEPTANCE_LOSS_NOT_PROVEN" : null,
-    !hourlySource.current ? hourlySource.reason : null,
     !locationAvailable ? "ELIGIBLE_LOCATION_REQUIRED" : null,
-    !primaryUsable ? "ENGINE25_CURRENT_PRIMARY_REQUIRED" : null,
-    !sources.engine29Secondary.current ? sources.engine29Secondary.reason : null,
+    !noEvent && !primaryUsable ? "ENGINE25_CURRENT_PRIMARY_REQUIRED" : null,
+    !noEvent && !sources.engine29Secondary.current ?
+      sources.engine29Secondary.reason : null,
   ].filter(Boolean);
-  const usableForConfirmation = blockedBy.length === 0;
+
+  const dataDegraded = freshnessBlockedBy.length > 0;
+  const usableForConfirmation = !noEvent &&
+    !dataDegraded && confirmationBlockedBy.length === 0;
+
   return {
     owner: "ENGINE29",
     authority: "TRAP_EVIDENCE_FRESHNESS_ONLY",
-    state: noEvent ? "NO_ACTIVE_TRAP" : usableForConfirmation ? "CURRENT" : "DEGRADED",
-    dataDegraded: !usableForConfirmation,
-    usableForConfirmation: !noEvent && usableForConfirmation,
-    confirmationBlockedBy: blockedBy,
+    state: noEvent ? "NO_ACTIVE_TRAP" : dataDegraded ? "DEGRADED" : "CURRENT",
+    dataDegraded,
+    usableForConfirmation,
+    freshnessBlockedBy,
+    confirmationBlockedBy,
     sources,
     // This cannot grant Engine4 use or trading authority.
     eligibleForEngine4: false,
