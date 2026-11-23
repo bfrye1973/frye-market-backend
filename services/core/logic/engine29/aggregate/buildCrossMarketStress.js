@@ -222,6 +222,7 @@ export async function buildEngine29CrossMarketStress({
   groupBundle = null,
   moveCharacter = null,
   priorMoveParent = null,
+  priorTrapApproach = null,
   financialConditions = {},
   engine25Participation = null,
 } = {}) {
@@ -325,6 +326,7 @@ export async function buildEngine29CrossMarketStress({
     await buildEngine29TrapDetection({
       now,
       esAnchor,
+      priorTrapApproach,
       moveCharacter: move,
       liveMonitor,
     });
