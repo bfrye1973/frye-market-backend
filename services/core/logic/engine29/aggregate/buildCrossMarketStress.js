@@ -527,6 +527,9 @@ export async function buildEngine29CrossMarketStress({
 
       esLiveMonitorFreshness:
         move?.esLiveMonitorFreshness || null,
+      // Reuse Engine29 source freshness, not downstream-invented thresholds.
+      esOneHourFreshness: esAnchor?.tacticalFreshness || null,
+      esThirtyMinuteFreshness: esAnchor?.fastTacticalFreshness || null,
 
       liveMonitorAvailableSymbols:
         market?.summary
