@@ -3,8 +3,8 @@
 // Engine 29 Squeeze v2 — Phase 2 pure deterministic scoring functions.
 //
 // IMPORTANT:
-// - Research / shadow implementation only.
-// - No production wiring.
+// - Production-wired pure scoring through observation -> campaign -> marketCharacter.squeezeCampaign.
+// - This module does not own campaign persistence or directional authority.
 // - Does not read or mutate Parent MOVE.
 // - Engine 25 values are consumed as canonical inputs and are not recalculated here.
 
