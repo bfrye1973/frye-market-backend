@@ -194,3 +194,24 @@ test("HTTP verifier requires configured header token; query token never authenti
   await new Promise((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
  }
 });
+
+test("same recorded context with reordered JSON keys is still an exact match",()=>{
+ const x=setup();try{
+  const reversed=Object.fromEntries(Object.entries(x.context).reverse().map(([key,value]) =>
+    [key,key==="lanes" ? Object.fromEntries(Object.entries(value).reverse()) : value]));
+  fs.writeFileSync(x.replayPath,JSON.stringify({...x.snapshot,engine29DownstreamContext:reversed}));
+  const v=verifyEngine29Receipt(x.input);
+  assert.equal(v.status,200);
+  assert.equal(v.body.exactMatch,true);
+  assert.equal(v.body.receiptContextSha256,v.body.replayContextSha256);
+ }finally{x.cleanup();}
+});
+test("invalid schema receipt still reports file existence without leaking contents",()=>{
+ const x=setup();try{
+  fs.writeFileSync(x.receiptPath,JSON.stringify({...x.context,schema:"unknown"}));
+  const result=verifyEngine29Receipt(x.input);
+  assert.equal(result.body.exists,true);
+  assert.equal(result.body.verified,false);
+  assert.ok(!JSON.stringify(result.body).includes("CONFIDENTIAL_MARKET_DATA_DO_NOT_RETURN"));
+ }finally{x.cleanup();}
+});
