@@ -33,3 +33,15 @@ test("forming bar cannot override latest completed ten-minute observation", () =
   assert.equal(r.tenMinuteEvidence.formingBarTime,t+600_000);
   assert.equal(r.immediate10m.high,7804);
 });
+
+test("completed 10m without selected liquidity candidate preserves evidence metadata", () => {
+ const completed = bar(t, 7700, 7702, 7698, 7701);
+ const forming = bar(t + 600_000, 7701, 7704, 7699, 7703);
+ const result = detect([completed,forming], t + 15*60_000);
+ assert.equal(result.trapSide,"NONE");
+ assert.equal(result.liquidityEvent.state,"NO_LIQUIDITY_EVENT");
+ assert.deepEqual(result.tenMinuteEvidence,{
+   completed:true, formingPresent:true,
+   completedBarTime:t, formingBarTime:t + 600_000
+ });
+});
