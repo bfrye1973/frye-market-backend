@@ -504,6 +504,11 @@ export function detectEngine29TrapAuctionEvent({
       side === "HIGH"
         ? ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_HIGH
         : ENGINE29_AUCTION_RESULTS.FAILED_ACCEPTANCE_LOW;
+  } else if (rejectionObserved) {
+    auctionResult =
+      side === "HIGH"
+        ? ENGINE29_AUCTION_RESULTS.REJECTED_HIGH
+        : ENGINE29_AUCTION_RESULTS.REJECTED_LOW;
   } else if (thirtyMinuteSwept && completed30m) {
     auctionResult =
       side === "HIGH"
