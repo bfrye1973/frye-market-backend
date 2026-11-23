@@ -53,7 +53,7 @@ jobs:
             liquidityEligibleForEngine4:live.lanes.liquidity.eligibleForEngine4
           }));
           const list=await get('/api/v1/replay/es/times?date=2026-11-23');
-          const times=(list.times||[]).slice(-24);
+          const times=(list.times||[]).slice(-48);
           console.log('ES_REPLAY_TIMES',times.length,times.slice(-12));
           let contexts=0,identical=0,lookahead=0;
           for(const time of times) {
@@ -75,6 +75,7 @@ jobs:
             console.log('REPLAY_CONTEXT',JSON.stringify({time,snapshotTime:snap.snapshotTime,recordedAt:ctx.timestamp,hash:digest(ctx),sameAsLive:ctx.timestamp===live.timestamp}));
           }
           assert.equal(lookahead,0,'REPLAY_LOOKAHEAD_DETECTED');
+          assert.ok(contexts>0,'NO_POST_DEPLOY_ENGINE29_CONTEXT_IN_ES_REPLAY');
           console.log('REPLAY_PROOF_SUMMARY',JSON.stringify({
             inspected:times.length,withEngine29Context:contexts,lookahead,exactCurrentLiveMatches:identical,
             note:'Direct immutable receipt file hash requires disk access; this job only reads live and ES Replay APIs.'
