@@ -28,6 +28,46 @@ export function buildEngine6AdvisoryContext({snapshot=null,engine25Participation
       ownerApprovalReference:wave.publication?.selectionApprovalReference??null,
       publishedAt:wave.publication?.publishedAt??null,
       selectionStatus:wave.publication?.status??"UNAVAILABLE",
+      // Clearly separated from the authorized selection: an owner wave hypothesis
+      // is never a live trend measurement or Engine6 LONG permission.
+      ownerResearch:(()=>{
+        const research=strategy?.engine22WaveStrategy?.currentWavelength?.ownerResearchContext;
+        if (research?.schema!=="engine22.ownerNov23ResearchContext.v1" ||
+            research?.noExecution!==true || research?.noPermissionCreated!==true)
+          return {available:false,reasonCode:"OWNER_RESEARCH_NOT_AVAILABLE"};
+        return {
+          available:true,source:"ENGINE22_OWNER_RESEARCH_ONLY",
+          observedOn:research.observedOn??null,
+          asOfUtc:research.asOfUtc??null,
+          pointInTimeAsOfAvailable:research.pointInTimeAsOfAvailable===true,
+          higherDegreeDirection:research.primary?.direction??null,
+          higherDegreeWave:research.primary?.activeWave??null,
+          higherDegreeStage:research.primary?.stage??null,
+          intermediateWorkingDirection:research.intermediate?.direction??null,
+          minorWorkingDirection:research.minor?.direction??null,
+          microWorkingDirection:research.micro?.direction??null,
+          microStage:research.micro?.stage??null,
+          intradayState:research.submicro?.stage??"UNRESOLVED",
+          screenshotOnly:true,notLive:true,noEntryPermission:true,
+          noVeto:true,noExecution:true
+        };
+      })(),
+      ownerWaveRoadmap:(()=>{
+        const m=strategy?.engine22WaveStrategy?.currentWavelength?.ownerWaveRoadmap;
+        if(m?.schema!=="engine22.ownerWaveRoadmap.v1" ||
+           m.noPermissionCreated!==true || m.noExecution!==true)
+          return {available:false,reasonCode:"OWNER_WAVE_ROADMAP_UNAVAILABLE"};
+        return {available:true,source:"ENGINE22_OWNER_RESEARCH_ONLY",
+          effectiveAtUtc:m.effectiveAtUtc,pointInTimeSourceVerified:false,
+          primary:{activeWave:m.primary?.activeWave??null,direction:m.primary?.direction??null,
+            stage:m.primary?.stage??null},
+          intermediate:{activeWave:m.intermediate?.activeWave??null,
+            direction:m.intermediate?.direction??null,stage:m.intermediate?.stage??null},
+          micro:{activeWave:m.micro?.activeWave??null,direction:m.micro?.direction??null,
+            stage:m.micro?.stage??null,completionConfirmed:m.micro?.completionConfirmed===true},
+          submicro:{direction:m.submicro?.direction??null,stage:m.submicro?.stage??null},
+          noEntryPermission:true,noVeto:true,noExecution:true,notLive:true};
+      })(),
       submicro:published(wave.publication?.degrees?.submicro),
       micro:published(wave.publication?.degrees?.micro)
     },
