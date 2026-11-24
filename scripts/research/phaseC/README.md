@@ -45,7 +45,7 @@ Packet shape: `{"rows":[{"replay": { "day":"2026-11-24",
 "fixture": { "normalizedZoneInput": {...},
 "engine26LocationCandidate": {...}, "engine26ReactionHandoff": {...},
 "bars1m": [...], "bars5m": [...],
-"evaluationTimeMs":179552?? }, "asOfReplayVerified":true}]}.
+"evaluationTimeMs": <exact epoch milliseconds from the same Replay snapshot> }, "asOfReplayVerified":true}]}.
 **The timestamp above is illustrative only; supply exact real ISO and matching
 epoch milliseconds from the original Replay file. Never infer them.**
 
