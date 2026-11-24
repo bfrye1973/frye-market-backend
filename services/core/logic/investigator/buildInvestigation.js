@@ -71,7 +71,16 @@ function buildPipeline({ timeline, blocker }) {
     if (engine === blockerEngine) {
       status = blocker.firstBlocker.status;
       statusSource = blocker.source === "ENGINE28A_RECORDED" ? "ENGINE28A_RECORDED_FIRST_BLOCKER" : "CANONICAL_FALLBACK";
-    } else if (recordedStages[engine] && (blockerIdx === -1 || idx < blockerIdx)) {
+    } else if (recordedStages[engine] && blocker.source === "ENGINE28A_RECORDED" && blockerIdx !== -1 && idx < blockerIdx) {
+      // Engine 28A evaluates in pipeline order and stops at the first failing
+      // stage. A recorded stage strictly upstream of its recorded first
+      // blocker is therefore one 28A itself passed. This uses 28A's recorded
+      // blocker position, not the stage word: production 28A has been
+      // observed writing e.g. "REACTION_CONFIRMED" for engine3 under the same
+      // contract label (Nov 24 Replay), which no name mapping may interpret.
+      status = "PASS";
+      statusSource = "ENGINE28A_RECORDED_UPSTREAM_OF_FIRST_BLOCKER";
+    } else if (recordedStages[engine] && blockerIdx === -1) {
       status = STAGE_STATE_MAP[recordedStages[engine]] || "UNKNOWN";
       statusSource = "ENGINE28A_RECORDED_STAGE";
     } else if (c.present) {
@@ -106,6 +115,7 @@ function buildPipeline({ timeline, blocker }) {
       status,
       statusSource,
       downstreamOfFirstBlocker: blockerIdx !== -1 && idx > blockerIdx,
+      engine28aRecordedStage: recordedStages[engine] ?? null,
       gate: c.gate,
       rawStatus: c.rawStatus,
       decision: c.decision,

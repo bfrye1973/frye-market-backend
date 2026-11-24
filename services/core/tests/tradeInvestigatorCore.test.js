@@ -1,7 +1,8 @@
 // services/core/tests/tradeInvestigatorCore.test.js
 //
 // Engine 12 Trade Investigator: extraction, authority, first blocker.
-// Fixtures are SYNTHETIC reproductions of documented Nov 24 outcomes.
+// Fixtures here are SYNTHETIC edge-case shapes. Real Nov 24 acceptance:
+// tradeInvestigatorRealNov24.test.js (production-hash-verified fixtures).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,7 +28,7 @@ test("pipeline order is the real canonical chain (26A,3,4,6,26B,7,9,8,10)", () =
   assert.deepEqual(body.knownAtDecision.pipeline.map((r) => r.engine), PIPELINE_ORDER);
 });
 
-test("Fixture 07:46 — Engine 3 first blocker from recorded Engine 28A", () => {
+test("SYNTHETIC 07:46-shape — Engine 3 first blocker from recorded Engine 28A", () => {
   const { httpStatus, body } = run(nov24Scenario(), { time: "0746" });
   assert.equal(httpStatus, 200);
   assert.equal(body.knownAtDecision.price.value, 7206.75);
@@ -45,7 +46,7 @@ test("Fixture 07:46 — Engine 3 first blocker from recorded Engine 28A", () => 
   assert.equal(body.provenance.registryEvidenceStatus, "PROVISIONAL_RETENTION_DERIVED");
 });
 
-test("Fixture 07:52 — Engine 4 first blocker; Engine 4 v2 shadow visible but not authority", () => {
+test("SYNTHETIC 07:52-shape — Engine 4 first blocker; Engine 4 v2 shadow visible but not authority", () => {
   const { body } = run(nov24Scenario(), { time: "0752" });
   assert.equal(body.knownAtDecision.price.value, 7223);
   assert.equal(body.knownAtDecision.firstBlocker.engine, "engine4");
@@ -64,7 +65,7 @@ test("Fixture 07:52 — Engine 4 first blocker; Engine 4 v2 shadow visible but n
   assert.equal(e3.shadow[0].version, "engine3.v6");
 });
 
-test("Fixture 10:16 — Engine 8 blocker, LONG, 3 contracts, no order created", () => {
+test("SYNTHETIC 10:16-shape — Engine 8 blocker, LONG, 3 contracts, no order created", () => {
   const { body } = run(nov24Scenario(), { time: "1016" });
   const k = body.knownAtDecision;
   assert.equal(k.firstBlocker.engine, "engine8");
@@ -86,7 +87,7 @@ test("Fixture 10:16 — Engine 8 blocker, LONG, 3 contracts, no order created", 
   assert.equal(row(body, "engine10").status, "NOT_REACHED");
 });
 
-test("Fixture 10:25 — later state selected exactly; a request between files uses the earlier file", () => {
+test("SYNTHETIC 10:25-shape — later state selected exactly; a request between files uses the earlier file", () => {
   const sc = nov24Scenario();
   const exact = run(sc, { time: "1025" }).body;
   assert.equal(exact.selection.selectedTime, "1025");

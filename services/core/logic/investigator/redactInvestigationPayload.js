@@ -28,11 +28,19 @@ function tag(value) {
   return "redacted:" + h;
 }
 
+// A single provider bar object (open/high/low/close in either naming).
+function isBarObject(o) {
+  const k = new Set(Object.keys(o));
+  return (k.has("open") && k.has("high") && k.has("low") && k.has("close")) ||
+    (k.has("o") && k.has("h") && k.has("l") && k.has("c"));
+}
+
 export function redactInvestigationPayload(value, depth = 0) {
   if (depth > 64) return "[REDACTED_DEPTH_LIMIT]";
   if (typeof value === "string") return value.replace(ACCOUNT_LABEL_VALUE, (m) => tag(m));
   if (Array.isArray(value)) return value.map((v) => redactInvestigationPayload(v, depth + 1));
   if (!value || typeof value !== "object") return value;
+  if (isBarObject(value)) return { redacted: "LICENSED_RAW_BAR_OMITTED" };
   const out = {};
   for (const [key, v] of Object.entries(value)) {
     if (REMOVE_KEY.test(key)) continue;
