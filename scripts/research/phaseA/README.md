@@ -7,17 +7,17 @@ Reproduces Claude's Phase A report (`claude/PHASE_A_EXPLORATORY_REPORT_2026-11-2
 ## Files
 - `phaseAHarness.core.js`: `pullReplayRows()` (compact as-of engine states from Engine 12 Replay) and `scorePhaseA()` (one scoring function for every comparator).
 - `runPhaseA.mjs`: Node 18+ runner.
-- `data/snapshot_ids.json`: the exact Replay snapshot IDs (`day → [HHMM…]`) and the bar cutoff used.
-- `data/bars_manifest.json`: count, range and **sha256** of the exact 5m bar text used. **Bar values are not committed** (Massive licensing hold; owner decision pending).
+- `data/inputs_manifest.json`: **the single input manifest.**
+  - Replay snapshot selection: a deterministic enumeration (per-day count + first/last HHMM from `/api/v1/replay/es/times`) plus the **sha256 of the exact 2,497-ID list**. The runner re-enumerates and **fails if the count or sha256 differ**.
+  - The 5m bar count, range, cutoff and **sha256**. The runner warns if your bars don't match. **Bar values are not committed** (Massive licensing hold; owner decision pending).
 - `data/phaseA_event_tape.json`: the exact output (every Engine 3 fresh call and every Engine 4 zone-defense event, with R).
 
 ## Run
 ```
 BASE=https://frye-market-backend-1.onrender.com \
-node scripts/research/phaseA/runPhaseA.mjs --snapshots scripts/research/phaseA/data/snapshot_ids.json \
-  [--bars your_bars_5m.csv] --out /tmp/phaseA_result.json
+node scripts/research/phaseA/runPhaseA.mjs [--bars your_bars_5m.csv] --out /tmp/phaseA_result.json
 ```
-- Without `--bars`, it fetches `/api/v1/futures/ohlc` live. **That route only serves a rolling 7-day window**, so older runs can't be reproduced bar for bar. Check `inputs.barsSha256` against `data/bars_manifest.json`.
+- Without `--bars`, it fetches `/api/v1/futures/ohlc` live. **That route only serves a rolling 7-day window**, so older runs can't be reproduced bar for bar. The runner compares the bars sha256 with `data/inputs_manifest.json` (`inputs.barsMatchManifest`).
 - **Engine 3 v6 / A-B-C comparators:** feed your own decision rows (same fields as `pullReplayRows`) into `scorePhaseA(rows, bars)`. This keeps the scoring function, exits, stops and targets identical.
 
 ## Rule (pre-registered; do not tune)
