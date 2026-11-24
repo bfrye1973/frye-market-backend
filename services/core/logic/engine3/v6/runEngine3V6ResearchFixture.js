@@ -6,6 +6,7 @@ import {buildEngine3V6CausalControl} from "./buildEngine3V6CausalControl.js";
 import {buildEngine3V6Phase1Shadow} from "./buildEngine3V6Phase1Shadow.js";
 import {buildEngine3V6ResearchTrace} from "./buildEngine3V6ResearchTrace.js";
 import {inspectEngine26AuthorizationContract} from "./inspectEngine26AuthorizationContract.js";
+import {attestCompleted5mBreakout} from "./attestCompleted5mBreakout.js";
 
 export function runEngine3V6ResearchFixture({
  normalizedZoneInput=null,engine26LocationCandidate=null,engine26ReactionHandoff=null,
@@ -45,9 +46,17 @@ export function runEngine3V6ResearchFixture({
   progressExtreme:priorShadow?.progressExtreme??null,
   establishingNow:causal.qualified&&!held,
  });
+ const breakoutAttestation=attestCompleted5mBreakout({
+  completed5mEligible:evidence.completed5mEligible,
+  zone:normalizedZoneInput?.zone,
+  direction:causal.observedDirection,
+  evaluationTimeMs,activationStartedAtMs:evidence.activationStartedAtMs,
+ });
+ const verifiedBreakout=breakoutAttestation.breakoutContext;
  const shadow=buildEngine3V6Phase1Shadow({
   priorState:priorShadow,v5,causalControl:causal,phase2Evidence:evidence,
   candidateId,zoneId,bars1m,bars5m,evaluationTimeMs,
+  breakoutContext:verifiedBreakout,
   policy:{invalidationCloses1m:2,deteriorationEvidenceCount:2,
     deteriorationTimeoutMs:720000,...policy?.stability},
   // No Engine10 lock in an offline fixture; never infer it from a v5 result.
