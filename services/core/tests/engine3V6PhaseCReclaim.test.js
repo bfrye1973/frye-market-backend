@@ -85,3 +85,22 @@ test("attested breakout context can be seeded without changing v5",()=>{
  assert.equal(x.noPermissionCreated,true);
  assert.equal(x.authoritativeDownstream,false);
 });
+
+test("Nov24-shaped LONG zone-top retest held is diagnostic, not entry permission",()=>{
+ const x=run(prior("LONG",7210.75),[bar(7215,7213.25,0,7217,7209)]);
+ assert.equal(x.canonicalDirection,"LONG");
+ assert.equal(x.breakoutEdgeRetestHeldNow,true);
+ assert.equal(x.invalidatedNow,false);
+ assert.equal(x.noPermissionCreated,true);
+ assert.ok(x.reasonCodes.includes("BREAKOUT_EDGE_RETEST_HELD_COMPLETED_5M"));
+});
+test("SHORT edge retest mirror is diagnostic only",()=>{
+ const x=run(prior("SHORT",7138),[bar(7133,7135,0,7139,7130)]);
+ assert.equal(x.canonicalDirection,"SHORT");
+ assert.equal(x.breakoutEdgeRetestHeldNow,true);
+ assert.equal(x.noExecution,true);
+});
+test("retest outside episode or future bar does not create signal",()=>{
+ const x=run(prior("LONG",7210.75),[bar(7215,7213.25,5*m,7217,7209)]);
+ assert.equal(x.breakoutEdgeRetestHeldNow,false);
+});
