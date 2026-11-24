@@ -1,3 +1,4 @@
+import {buildOwnerNov23ResearchContextV1} from "./buildOwnerNov23ResearchContextV1.js";
 import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
 import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
 // Engine 22C Phase 1 — Manager-locked wavelength intelligence.
@@ -1380,6 +1381,7 @@ export function buildCurrentWavelength({
     persistenceMode: "TOUCH_STATUS_SHOULD_PERSIST_AFTER_FIRST_TOUCH",
     persistenceNote: "Phase 1 records Manager-locked touch facts and current-price observations; it does not maintain historical touch state.",
     degrees,
+    ownerResearchContext:buildOwnerNov23ResearchContextV1(),
     alertsPreview: [], // Future Engine 13 integration only; no sends.
   };
 }
