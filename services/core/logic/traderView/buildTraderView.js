@@ -369,6 +369,9 @@ function buildStructure(node, price, nowMs) {
   const awsDeg = w?.authorizedWorkingStructure?.degrees || {};
   const rmRaw = w?.currentWavelength?.ownerWaveRoadmap || {};
 
+  // The card reads the Micro chart first (Strategy 1 trading degree), then Submicro, then the higher degrees.
+  const microLine = A.available ? describeDegrees(awsDeg, ["micro", "submicro"]) : null;
+  const higherLine = A.available ? describeDegrees(awsDeg, ["minor", "minute", "subminute"]) : null;
   const authLine = A.available ? describeDegrees(awsDeg, E22_AUTH_DEGREES) : null;
   // Research adds what the authorized trading degrees don't: the higher degrees.
   const resHigher = R.available ? describeDegrees(rmRaw, ["primary", "intermediate"]) : null;
@@ -376,10 +379,11 @@ function buildStructure(node, price, nowMs) {
   let label;
   if (rec.status === "UNKNOWN") label = "Wave count unknown";
   else if (rec.status === "RECOUNT_PENDING") label = "Authorized count missing — recount pending";
-  else label = authLine ? `${authLine.charAt(0).toUpperCase()}${authLine.slice(1)}` : "Wave structure";
+  else label = microLine ? microLine : (authLine ? `${authLine.charAt(0).toUpperCase()}${authLine.slice(1)}` : "Wave structure");
 
   const parts = [];
-  if (authLine) parts.push(`Authorized count (what Engine 6 and Engine 27 read${A.publicationRevision != null ? `, rev ${A.publicationRevision}` : ""}): ${authLine}.`);
+  if (microLine) parts.push(`Micro chart (authorized${A.publicationRevision != null ? `, rev ${A.publicationRevision}` : ""}, what Engine 6 and Engine 27 read): ${microLine}.`);
+  if (higherLine) parts.push(`Higher degrees: ${higherLine}.`);
   if (A.available && A.stale) parts.push(`This count is stale (published ${A.ageMs == null ? "at an unknown time" : `${Math.round(A.ageMs / 60000)} min ago`}).`);
   if (resHigher) parts.push(`Owner research, not confirmed: ${resHigher}.`);
   if (rec.status === "RECONCILIATION_PENDING") {
@@ -420,6 +424,7 @@ function buildStructure(node, price, nowMs) {
       authorizedWaveContext: A,
       researchWaveContext: R,
       reconciliation: rec,
+      focusDegree: "micro",
       chartMinutePanel: chartMinute,
       retiredHeadline: s.headline ? { text: s.headline, note: "Older trade-summary headline; not shown as the current count." } : null,
       displayWarnings: far.length ? [{ code: "LEVELS_FAR_FROM_PRICE", levels: far, meaning: "Some older Engine 22 trade-summary levels are more than 5% from price; the count may need an owner update." }] : [],
