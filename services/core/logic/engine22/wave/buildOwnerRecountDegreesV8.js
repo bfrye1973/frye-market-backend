@@ -2,7 +2,9 @@
 // earlier versioned models, touch records, history, or trading permissions.
 // Only a research working selection; no automatic wave-completion inference.
 export const OWNER_RECOUNT_V8_VERSION="engine22.ownerRecountNov23.v8";
-export function buildOwnerRecountDegreesV8(roadmap){
+export const OWNER_RECOUNT_V8_EFFECTIVE_AT="2026-11-24T06:36:00Z";
+export function buildOwnerRecountDegreesV8(roadmap,{evaluationTimeMs=null}={}){
+  if(!Number.isFinite(evaluationTimeMs)||evaluationTimeMs<Date.parse(OWNER_RECOUNT_V8_EFFECTIVE_AT)) return null;
   if(roadmap?.schema!=="engine22.ownerWaveRoadmap.v1" ||
       roadmap.noExecution!==true || roadmap.noPermissionCreated!==true)
     return null;
@@ -11,7 +13,7 @@ export function buildOwnerRecountDegreesV8(roadmap){
     degree,activeWave,direction,stage,parentDegree,parentWave,
     selectionStatus:"RESEARCH_ONLY",levels:[],
     ownerApprovalReference:"OWNER_20261123_CLEAR_OUT_MINOR_MINUTE_SUBMINUTE_RECOUNT_MICRO_SUBMICRO",
-    effectiveAt:roadmap.effectiveAtUtc,
+    effectiveAt:OWNER_RECOUNT_V8_EFFECTIVE_AT,
     completionConfirmed:false,reviewOnly:true,
     noExecution:true,noPermissionCreated:true,noWaveTransition:true,
     historyPreserved:true,...details
