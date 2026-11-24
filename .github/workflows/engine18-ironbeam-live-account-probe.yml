@@ -1,0 +1,18 @@
+name: Engine18 Ironbeam account probe offline
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine18/ironbeamLiveAccountProbe.js'
+      - 'services/core/tests/engine18IronbeamLiveAccountProbe.test.js'
+      - '.github/workflows/engine18-ironbeam-live-account-probe.yml'
+permissions:
+  contents: read
+jobs:
+  synthetic:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine18IronbeamLiveAccountProbe.test.js
