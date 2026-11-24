@@ -1,0 +1,38 @@
+name: Engine3 Phase C shadow reclaim regression
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/evaluateEngine3V6Phase1.js'
+      - 'services/core/tests/engine3V6*.test.js'
+      - 'scripts/research/phaseC/**'
+      - '.github/workflows/engine3-phase-c-reclaim-shadow.yml'
+  workflow_dispatch:
+jobs:
+  phase-c:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify shadow-only modules syntax
+        run: |
+          for file in logic/engine3/v6/*.js; do node --check "$file"; done
+      - name: Verify research comparator syntax
+        run: node --check ../../scripts/research/phaseC/runPhaseC.mjs
+      - name: Run Phase C regression + Phase2/3 causal contracts
+        run: |
+          node --test \
+            tests/engine3V6PhaseCReclaim.test.js \
+            tests/engine3V6PhaseCAttestation.test.js \
+            tests/engine3V6Phase2ClaudeReview.test.js \
+            tests/engine3V6Phase2CausalReducer.test.js \
+            tests/engine3V6Phase2ControlLens.test.js \
+            tests/engine3V6Phase2Evidence.test.js \
+            tests/engine3V6Phase3ResearchFixture.test.js \
+            tests/engine3V6Phase3ResearchTrace.test.js \
+            tests/engine3V6Phase3Engine26Readiness.test.js \
+            ../../scripts/research/phaseC/runPhaseC.test.mjs
