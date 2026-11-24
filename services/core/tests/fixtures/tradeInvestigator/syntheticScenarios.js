@@ -2,14 +2,14 @@
 //
 // SYNTHETIC fixtures for the Engine 12 Trade Investigator.
 //
-// The Nov 24 cases reproduce the DOCUMENTED historical outcomes (Issue #384 /
-// Engine 12 passover) using the real Replay field layout. They are NOT
-// production bytes. Real sanitized fixtures are produced by
-// jobs/exportTradeInvestigatorFixtures.js once production extraction is
-// separately approved, and must then replace these.
+// Edge-case SHAPES modelled on the documented Nov 24 outcomes, using the real
+// Replay field layout. They are NOT production bytes and are used only for
+// mutation/edge tests. Real acceptance uses the production-hash-verified
+// fixtures in ./real-2026-11-24 (tests/tradeInvestigatorRealNov24.test.js).
 //
-// Lifecycle cases (OPEN / PARTIAL / CLOSED) use the synthetic date 2026-11-20
-// so no synthetic trade is attributed to Nov 24.
+// Lifecycle cases (OPEN / PARTIAL / CLOSED) are SYNTHETIC and use 2026-11-24
+// only because the authority registry is evidence-backed for that date alone.
+// They run in isolated temp directories and describe no real Nov 24 trade.
 
 import fs from "node:fs";
 import os from "node:os";
@@ -228,12 +228,12 @@ export function nov24_1025() {
   });
 }
 
-// ---- Lifecycle cases (synthetic date 2026-11-20) ---------------------------
+// ---- Lifecycle cases (SYNTHETIC; dated 2026-11-24 for registry coverage only) ----
 
-export const LIFE_DATE = "2026-11-20";
+export const LIFE_DATE = "2026-11-24"; // only evidence-backed registry date; scenarios are isolated temp dirs
 
 /** Replay at decision: pipeline passed, Engine 8 READY (order not yet created at archive). */
-export function lifecycleReplay({ timeHHMM = "1000", snap = "2026-11-20T17:00:00.000Z", planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", e8Overrides = {} } = {}) {
+export function lifecycleReplay({ timeHHMM = "1000", snap = "2026-11-24T17:00:00.000Z", planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", e8Overrides = {} } = {}) {
   const up = passingUpstream(snap, { planId, cand, zone: "E26Z-LIFE-A" });
   const s1 = lane({
     e26a: { status: "ACTIVE", direction: "LONG", candidateId: cand, zoneId: "E26Z-LIFE-A", currentPrice: 7230, snapshotTime: snap },
@@ -242,11 +242,11 @@ export function lifecycleReplay({ timeHHMM = "1000", snap = "2026-11-20T17:00:00
       status: "READY_TO_CREATE_PAPER_ORDER", direction: "LONG", executable: true, finalContracts: 3,
       planId, candidateId: cand, zoneId: "E26Z-LIFE-A", strategyId: S1,
       orderCreated: false, orderId: null, tradeId: null, executionId: null,
-      blockers: [], reasonCodes: [], snapshotTime: snap, evaluatedAt: "2026-11-20T17:00:02.000Z",
+      blockers: [], reasonCodes: [], snapshotTime: snap, evaluatedAt: "2026-11-24T17:00:02.000Z",
       ...e8Overrides,
     },
     e28a: doctor({
-      snapshotTime: snap, generatedAt: "2026-11-20T17:00:04.000Z",
+      snapshotTime: snap, generatedAt: "2026-11-24T17:00:04.000Z",
       firstFailingEngine: null, pipelineStatus: "ORDER_READY", failureType: null, rootCause: null,
       stages: [
         ["engine26A", "PASS_CONTEXT"], ["engine3", "PASS"], ["engine4", "PASS"], ["engine6", "PASS"],
@@ -255,12 +255,12 @@ export function lifecycleReplay({ timeHHMM = "1000", snap = "2026-11-20T17:00:00
     }),
   });
   return replayRoot({
-    snapshotTime: snap, generatedAtUtc: "2026-11-20T17:00:10.000Z", dateYmd: LIFE_DATE, timeHHMM,
+    snapshotTime: snap, generatedAtUtc: "2026-11-24T17:00:10.000Z", dateYmd: LIFE_DATE, timeHHMM,
     currentPrice: 7230, strategies: { [S1]: s1 },
   });
 }
 
-export function paperOrder({ orderId, planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", executionId = orderId + "-X", action = "NEW_ENTRY", filledAt = "2026-11-20T17:00:12.000Z", strategyId = S1, paper = true, qty = 3, avgPrice = 7230.25 }) {
+export function paperOrder({ orderId, planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", executionId = orderId + "-X", action = "NEW_ENTRY", filledAt = "2026-11-24T17:00:12.000Z", strategyId = S1, paper = true, qty = 3, avgPrice = 7230.25 }) {
   return {
     orderId, idempotencyKey: "IK-" + orderId, ts: filledAt, paper, symbol: "ES", strategyId, action,
     side: action === "NEW_ENTRY" ? "BUY" : "SELL", qty, status: "filled", filledQty: qty, avgPrice, filledAt,
@@ -268,7 +268,7 @@ export function paperOrder({ orderId, planId = "E9P-LIFE-A", cand = "E26C-LIFE-A
   };
 }
 
-export function journalTrade({ tradeId, orderId, planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", executionId = orderId + "-X", status = "OPEN", accountMode = "PAPER", strategyId = S1, events = [], remainingQty = 3, realizedPnL = null, entryTime = "2026-11-20T17:00:12.500Z", closeTime = null, extra = {} }) {
+export function journalTrade({ tradeId, orderId, planId = "E9P-LIFE-A", cand = "E26C-LIFE-A", executionId = orderId + "-X", status = "OPEN", accountMode = "PAPER", strategyId = S1, events = [], remainingQty = 3, realizedPnL = null, entryTime = "2026-11-24T17:00:12.500Z", closeTime = null, extra = {} }) {
   return {
     tradeId,
     identity: { tradeId, executionId, orderId, planId, candidateId: cand, strategyId },

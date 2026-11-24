@@ -15,19 +15,23 @@
 // A future promotion (e.g. Engine 4 v2 -> canonical) must ADD a new dated row;
 // it must never edit an existing row's meaning.
 
-export const REGISTRY_VERSION = "engine12.investigator.authorityRegistry.v1";
+export const REGISTRY_VERSION = "engine12.investigator.authorityRegistry.v2";
 
-// PROVISIONAL. Earliest Replay date retained at build time (~14 Arizona days
-// before 2026-11-24). This is a retention-derived assumption, NOT proof of when
-// each canonical/shadow mapping took effect (Engine 12 Manager review, PR #392).
-// Every investigation carries AUTHORITY_REGISTRY_PROVISIONAL until per-engine
-// effective dates are proven from dated original Replay payloads and
-// deployment/commit history. Dates before this boundary resolve to UNKNOWN.
-const VERIFIED_FROM = "2026-11-10";
-export const REGISTRY_EVIDENCE_STATUS = "PROVISIONAL_RETENTION_DERIVED";
+// Evidence-backed authority coverage ONLY (Engine 12 Manager, PR #392).
+// 2026-11-24 is proven by the real Nov 24 fixture chain: production Replay
+// bytes with host BEFORE/AFTER SHA256, off-host copy, sanitized fixtures, and
+// source review of the authority in force that day. Retention coverage is NOT
+// proof, so no earlier date is claimed. Dates outside a row's range resolve to
+// authority UNKNOWN (fail closed).
+// Rows are closed ranges: no open-ended row implies future authority. Extend a
+// range, or add a new dated row (e.g. a future Engine 4 v2 promotion), only
+// with new dated evidence.
+const EVIDENCE_FROM = "2026-11-24";
+const EVIDENCE_TO = "2026-11-24";
+const ROW_EVIDENCE = "NOV24_REAL_FIXTURE_CHAIN_PR392";
+export const REGISTRY_EVIDENCE_STATUS = "EVIDENCE_BACKED_DATES_ONLY";
 export const REGISTRY_EVIDENCE_NOTE =
-  "Authority date ranges are provisional (retention-derived), not proven per-engine effective dates.";
-const OPEN_END = "9999-12-31";
+  "Authority is asserted only for evidence-proven dates; every other date returns authority UNKNOWN.";
 
 // Real canonical chain, matching Engine 28A v1:
 // 26A -> 3 -> 4 -> 6 -> 26B -> 7 -> 9 -> 8 -> 10
@@ -67,64 +71,64 @@ const ROWS = Object.freeze([
   {
     engine: "engine26A", authority: "CANONICAL", version: "engine26A",
     paths: ["engine26LocationCandidate"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine3", authority: "CANONICAL", version: "engine3.v5",
     paths: ["confluence.context.reaction.paperScalpReaction"],
     labelFields: ["engine", "version"],
     labelAccept: /^engine3\.v5(\.|$)/,
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine3", authority: "SHADOW", version: "engine3.v6",
     parentPath: "confluence.context.reaction",
     keyPattern: /^engine3V6/i,
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine4", authority: "CANONICAL", version: "engine4.v1",
     paths: ["confluence.context.volume.engine4AuthorizedReactionParticipation"],
     labelFields: ["engine"],
     labelAccept: /^engine4\.authorizedReactionParticipation\.v1$/,
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine4", authority: "SHADOW", version: "engine4.v2",
     paths: ["confluence.context.volume.engine4V2Shadow"],
     labelFields: ["version"],
     labelAccept: /^engine4\.v2\./,
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine6", authority: "CANONICAL", version: "engine6.paper",
     paths: ["permission.paper"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine26B", authority: "CANONICAL", version: "engine26B",
     paths: ["engine26ProposedGeometry"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine7", authority: "CANONICAL", version: "engine7",
     paths: ["engine7PositionSizing"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine9", authority: "CANONICAL", version: "engine9",
     paths: ["engine9OfficialManagementPlan"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine8", authority: "CANONICAL", version: "engine8.paper",
     paths: ["engine8PaperOrder"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
   {
     engine: "engine10", authority: "CANONICAL", version: "engine10",
     paths: ["engine10Journal", "engine10JournalAttachment", "engine10Lifecycle"],
-    from: VERIFIED_FROM, to: OPEN_END,
+    from: EVIDENCE_FROM, to: EVIDENCE_TO, evidence: ROW_EVIDENCE,
   },
 ]);
 
@@ -220,8 +224,8 @@ export function registrySummary() {
     evidenceStatus: REGISTRY_EVIDENCE_STATUS,
     pipelineOrder: PIPELINE_ORDER,
     engine28aLanes: ENGINE28A_LANES,
-    rows: ROWS.map(({ engine, authority, version, from, to }) => ({
-      engine, authority, version, from, to,
+    rows: ROWS.map(({ engine, authority, version, from, to, evidence }) => ({
+      engine, authority, version, from, to, evidence,
     })),
   };
 }

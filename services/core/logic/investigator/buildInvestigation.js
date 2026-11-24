@@ -21,6 +21,7 @@ import {
   REGISTRY_VERSION,
   REGISTRY_EVIDENCE_STATUS,
   REGISTRY_EVIDENCE_NOTE,
+  isDateCanonicallyVerified,
 } from "./authorityRegistry.js";
 import {
   extractEngineTimeline,
@@ -36,11 +37,6 @@ import { lookupReplayWindow } from "./lookupReplayWindow.js";
 import { LIMITS } from "./validateInvestigationQuery.js";
 
 export const INVESTIGATION_SCHEMA = "engine12.tradeInvestigator.investigation.v1";
-
-const STAGE_STATE_MAP = {
-  PASS: "PASS", PASS_CONTEXT: "PASS", WAITING: "WAITING", BLOCKED: "BLOCKED",
-  OBSERVED: "PASS",
-};
 
 const has = (v) => v !== null && v !== undefined && v !== "";
 const known = (value, source) =>
@@ -71,18 +67,25 @@ function buildPipeline({ timeline, blocker }) {
     if (engine === blockerEngine) {
       status = blocker.firstBlocker.status;
       statusSource = blocker.source === "ENGINE28A_RECORDED" ? "ENGINE28A_RECORDED_FIRST_BLOCKER" : "CANONICAL_FALLBACK";
-    } else if (recordedStages[engine] && blocker.source === "ENGINE28A_RECORDED" && blockerIdx !== -1 && idx < blockerIdx) {
-      // Engine 28A evaluates in pipeline order and stops at the first failing
-      // stage. A recorded stage strictly upstream of its recorded first
-      // blocker is therefore one 28A itself passed. This uses 28A's recorded
-      // blocker position, not the stage word: production 28A has been
-      // observed writing e.g. "REACTION_CONFIRMED" for engine3 under the same
-      // contract label (Nov 24 Replay), which no name mapping may interpret.
-      status = "PASS";
-      statusSource = "ENGINE28A_RECORDED_UPSTREAM_OF_FIRST_BLOCKER";
-    } else if (recordedStages[engine] && blockerIdx === -1) {
-      status = STAGE_STATE_MAP[recordedStages[engine]] || "UNKNOWN";
-      statusSource = "ENGINE28A_RECORDED_STAGE";
+    } else if (
+      blocker.source === "ENGINE28A_RECORDED" &&
+      GATE_ENGINES.includes(engine) &&
+      (blockerIdx === -1 ? blocker.firstBlocker.status === "PASS" : idx < blockerIdx)
+    ) {
+      // Engine 12 Manager rule (PR #392): a trusted 28A first blocker proves
+      // the pipeline progressed past earlier gates under 28A's own diagnosis,
+      // but NOT each upstream engine's exact own status. PASS only when this
+      // engine's own stored canonical fields prove it; otherwise
+      // INFERRED_PROGRESS. 28A stage words are never mapped by name
+      // (production 28A writes e.g. "REACTION_CONFIRMED" under the same
+      // contract label); they are returned verbatim as engine28aRecordedStage.
+      if (c.present && c.gate === "PASSED") {
+        status = "PASS";
+        statusSource = "ENGINE_OWN_CANONICAL_GATE";
+      } else {
+        status = "INFERRED_PROGRESS";
+        statusSource = "ENGINE28A_RECORDED_PROGRESSION";
+      }
     } else if (c.present) {
       status = engine === "engine10"
         ? (has(c.decision?.tradeId) ? "PASS" : "UNKNOWN")
@@ -244,8 +247,8 @@ export function buildInvestigation({ query, config }) {
     : { source: "ENGINE10_JOURNAL", status: "NOT_APPLICABLE", reason: "NO_CANONICAL_ENGINE8_RECORD_IN_SNAPSHOT" };
 
   const flags = [...blocker.flags, ...queryIdentityFlags(query, identity)];
-  if (REGISTRY_EVIDENCE_STATUS !== "VERIFIED") {
-    flags.push({ flag: "AUTHORITY_REGISTRY_PROVISIONAL", detail: { evidenceStatus: REGISTRY_EVIDENCE_STATUS, note: REGISTRY_EVIDENCE_NOTE } });
+  if (!isDateCanonicallyVerified(query.date)) {
+    flags.push({ flag: "AUTHORITY_NOT_PROVEN_FOR_DATE", detail: { date: query.date, evidenceStatus: REGISTRY_EVIDENCE_STATUS, note: REGISTRY_EVIDENCE_NOTE } });
   }
   if (timeline.unknownAuthority.length) {
     flags.push({
@@ -321,6 +324,9 @@ export function buildInvestigation({ query, config }) {
     undatedEvents,
     execution: {
       ...execution,
+      lifecycle: execution.status === "MATCHED" ? "MATCHED" : "UNKNOWN",
+      retentionGuarantee: "NONE_DEFINED",
+      evidenceNote: "Engine 8 PAPER stores are mutable durable files (atomic replace + fsync), not an immutable archive. No time-based retention guarantee is defined; missing execution evidence is UNKNOWN, not proof that no order existed.",
       entryFill: filledOrder
         ? { status: "FILLED_PER_ENGINE8_PAPER_STORE", orderId: filledOrder.orderId, avgPrice: filledOrder.avgPrice, filledQty: filledOrder.filledQty, eventTime: filledOrder.eventTime }
         : { status: execution.status === "MATCHED" ? "NO_FILLED_ENTRY_ORDER_MATCHED" : "UNKNOWN" },
@@ -328,9 +334,12 @@ export function buildInvestigation({ query, config }) {
     outcome: {
       source: "ENGINE10_JOURNAL",
       status: journal.status,
+      // Absent/unmatched lifecycle evidence is UNKNOWN, never "no trade".
+      lifecycle: journal.status === "MATCHED" ? "MATCHED" : "UNKNOWN",
       journalReadAt: journal.journalReadAt ?? null,
       trade: journal.trade ?? null,
-      note: "Journal is mutable current state as of journalReadAt, not a point-in-time record.",
+      retentionGuarantee: "NONE_DEFINED",
+      note: "Journal is a mutable durable store read at journalReadAt, not a point-in-time record or immutable archive. No time-based retention guarantee is defined; missing lifecycle evidence is UNKNOWN.",
     },
     journal: {
       status: journal.status,

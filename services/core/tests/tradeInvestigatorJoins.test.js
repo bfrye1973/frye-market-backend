@@ -2,7 +2,7 @@
 //
 // Engine 12 Trade Investigator: Engine 8 / Engine 10 identity joins,
 // PAPER/REAL isolation, ambiguity, conflicts, zero lookahead.
-// SYNTHETIC lifecycle fixtures on 2026-11-20.
+// SYNTHETIC lifecycle fixtures (isolated temp dirs; registry only proves 2026-11-24).
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -38,6 +38,10 @@ test("OPEN trade: plan-tier Engine 8 match, order-tier Journal chain, fill is su
   assert.equal(body.outcome.trade.qty.remainingQty, 3);
   assert.ok(body.outcome.journalReadAt);
   assert.equal(body.journal.store.mutable, true);
+  assert.equal(body.journal.store.retentionGuarantee, "NONE_DEFINED");
+  assert.equal(body.execution.stores[0].retentionGuarantee, "NONE_DEFINED");
+  assert.equal(body.outcome.lifecycle, "MATCHED");
+  assert.equal(body.execution.lifecycle, "MATCHED");
   assert.equal(body.priorEvents.length, 0);
   assert.ok(body.subsequentEvents.length >= 2);
   for (const e of body.subsequentEvents) {
@@ -50,13 +54,13 @@ test("PARTIAL trade: reduction events and remaining quantity preserved with thei
     orders: [ORDER_A],
     journal: [journalTrade({
       tradeId: "T-B", orderId: "E8O-A", status: "PARTIAL", remainingQty: 1,
-      events: [{ eventType: "PARTIAL_CLOSE", ts: "2026-11-20T17:12:00.000Z", price: 7236, qtyClosed: 2, remainingQty: 1, targetId: "T1" }],
+      events: [{ eventType: "PARTIAL_CLOSE", ts: "2026-11-24T17:12:00.000Z", price: 7236, qtyClosed: 2, remainingQty: 1, targetId: "T1" }],
     })],
   });
   assert.equal(body.outcome.trade.status, "PARTIAL");
   assert.equal(body.outcome.trade.qty.remainingQty, 1);
   const reduce = body.subsequentEvents.find((e) => e.eventType === "ENGINE10_PARTIAL_CLOSE");
-  assert.equal(reduce.eventTime, "2026-11-20T17:12:00.000Z");
+  assert.equal(reduce.eventTime, "2026-11-24T17:12:00.000Z");
   assert.equal(reduce.qtyClosed, 2);
 });
 
@@ -65,10 +69,10 @@ test("CLOSED trade: exit and recorded gross P&L", () => {
     orders: [ORDER_A],
     journal: [journalTrade({
       tradeId: "T-C", orderId: "E8O-A", status: "CLOSED", remainingQty: 0, realizedPnL: 78.75,
-      closeTime: "2026-11-20T17:40:00.000Z",
+      closeTime: "2026-11-24T17:40:00.000Z",
       events: [
-        { eventType: "PARTIAL_CLOSE", ts: "2026-11-20T17:12:00.000Z", price: 7236, qtyClosed: 2, remainingQty: 1 },
-        { eventType: "FULL_CLOSE", ts: "2026-11-20T17:40:00.000Z", price: 7238, qtyClosed: 1, remainingQty: 0, exitReason: "TARGET2" },
+        { eventType: "PARTIAL_CLOSE", ts: "2026-11-24T17:12:00.000Z", price: 7236, qtyClosed: 2, remainingQty: 1 },
+        { eventType: "FULL_CLOSE", ts: "2026-11-24T17:40:00.000Z", price: 7238, qtyClosed: 1, remainingQty: 0, exitReason: "TARGET2" },
       ],
     })],
   });
@@ -79,17 +83,17 @@ test("CLOSED trade: exit and recorded gross P&L", () => {
 });
 
 test("no lookahead: knownAtDecision carries no fill/outcome data; events split exactly at decisionTime", () => {
-  const atDecision = paperOrder({ orderId: "E8O-AT", filledAt: "2026-11-20T17:00:02.000Z" });
+  const atDecision = paperOrder({ orderId: "E8O-AT", filledAt: "2026-11-24T17:00:02.000Z" });
   const body = life({ orders: [atDecision], journal: [] });
   const k = JSON.stringify(body.knownAtDecision);
   assert.ok(!k.includes("E8O-AT"), "fill identity must not appear in knownAtDecision");
   assert.ok(!k.includes("avgPrice"));
-  assert.equal(body.subsequentEvents[0].eventTime, "2026-11-20T17:00:02.000Z", "event at decisionTime is subsequent, never prior");
+  assert.equal(body.subsequentEvents[0].eventTime, "2026-11-24T17:00:02.000Z", "event at decisionTime is subsequent, never prior");
   assert.equal(body.knownAtDecision.executionAtDecision.orderCreated.value, false);
 });
 
 test("prior same-identity order is reported as priorEvents, not as known at decision", () => {
-  const earlier = paperOrder({ orderId: "E8O-EARLY", filledAt: "2026-11-20T16:52:00.000Z" });
+  const earlier = paperOrder({ orderId: "E8O-EARLY", filledAt: "2026-11-24T16:52:00.000Z" });
   const body = life({ orders: [earlier], journal: [] });
   assert.equal(body.priorEvents.length, 1);
   assert.equal(body.priorEvents[0].orderId, "E8O-EARLY");
@@ -113,7 +117,7 @@ test("corrupt Journal => ERROR, never treated as an empty journal", () => {
 
 test("ambiguous: two opening orders for the same plan => AMBIGUOUS, nothing selected", () => {
   const body = life({
-    orders: [paperOrder({ orderId: "E8O-1" }), paperOrder({ orderId: "E8O-2", filledAt: "2026-11-20T17:01:00.000Z" })],
+    orders: [paperOrder({ orderId: "E8O-1" }), paperOrder({ orderId: "E8O-2", filledAt: "2026-11-24T17:01:00.000Z" })],
     journal: [],
   });
   assert.equal(body.execution.status, "AMBIGUOUS");
@@ -189,12 +193,12 @@ test("never joins by price or time alone", () => {
 
 test("candidate tier only inside the window; outside window => NO_MATCH", () => {
   const replay = lifecycleReplay({ planId: "E9P-NOT-IN-STORE" });
-  const inside = paperOrder({ orderId: "E8O-IN", planId: null, filledAt: "2026-11-20T17:10:00.000Z" });
+  const inside = paperOrder({ orderId: "E8O-IN", planId: null, filledAt: "2026-11-24T17:10:00.000Z" });
   inside.sourceSignal.planId = undefined;
   const a = life({ replay, orders: [inside], journal: [] });
   assert.equal(a.execution.status, "MATCHED");
   assert.equal(a.execution.matchTier, "candidate");
-  const outside = paperOrder({ orderId: "E8O-OUT", planId: null, filledAt: "2026-11-20T18:30:00.000Z" });
+  const outside = paperOrder({ orderId: "E8O-OUT", planId: null, filledAt: "2026-11-24T18:30:00.000Z" });
   outside.sourceSignal.planId = undefined;
   const b = life({ replay, orders: [outside], journal: [] });
   assert.equal(b.execution.status, "NO_MATCH");

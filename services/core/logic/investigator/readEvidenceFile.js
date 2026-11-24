@@ -62,8 +62,13 @@ export function storeMeta(read, { label, mutable }) {
     mtime: read.mtimeMs ? new Date(read.mtimeMs).toISOString() : null,
     readAt: read.readAt,
     mutable,
+    // Engine 12 Manager (PR #392): no time-based retention/cleanup exists in
+    // code for Engine 8 PAPER stores or the Engine 10 Journal. Records persist
+    // until explicitly changed/deleted or storage is lost; completeness for an
+    // arbitrary old date is NOT guaranteed.
+    retentionGuarantee: mutable ? "NONE_DEFINED" : null,
     note: mutable
-      ? "Current store state at readAt. Not an immutable point-in-time record."
+      ? "Mutable durable store, read at readAt; not an immutable archive. No time-based retention guarantee is defined, so absent evidence for older dates is UNKNOWN, not proof that nothing happened."
       : null,
   };
 }

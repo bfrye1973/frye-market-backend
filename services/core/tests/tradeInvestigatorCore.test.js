@@ -42,8 +42,8 @@ test("SYNTHETIC 07:46-shape — Engine 3 first blocker from recorded Engine 28A"
   assert.equal(row(body, "engine4").downstreamOfFirstBlocker, true);
   assert.equal(row(body, "engine8").status, "NOT_REACHED");
   assert.equal(body.selection.selection, "EXACT");
-  assert.ok(body.flags.some((f) => f.flag === "AUTHORITY_REGISTRY_PROVISIONAL"));
-  assert.equal(body.provenance.registryEvidenceStatus, "PROVISIONAL_RETENTION_DERIVED");
+  assert.ok(!body.flags.some((f) => f.flag === "AUTHORITY_NOT_PROVEN_FOR_DATE"));
+  assert.equal(body.provenance.registryEvidenceStatus, "EVIDENCE_BACKED_DATES_ONLY");
 });
 
 test("SYNTHETIC 07:52-shape — Engine 4 first blocker; Engine 4 v2 shadow visible but not authority", () => {
@@ -150,11 +150,26 @@ test("payload label contradicting registry => UNKNOWN authority, excluded, flagg
   assert.ok(body.flags.some((f) => f.flag === "RECORDS_WITH_UNKNOWN_AUTHORITY_EXCLUDED"));
 });
 
-test("date before verified registry range => UNKNOWN authority (registry is date-aware)", () => {
-  const r = nov24_0752();
-  const body = run(makeScenario({ replays: { "2026-11-01/0752": r }, orders: [], journal: [] }), { date: "2026-11-01", time: "0752" }).body;
-  assert.ok(body.flags.some((f) => f.flag === "RECORDS_WITH_UNKNOWN_AUTHORITY_EXCLUDED"));
-  assert.equal(body.knownAtDecision.firstBlocker.engine, "UNKNOWN");
+test("registry fails closed outside evidence-backed dates (before, adjacent, and after 2026-11-24)", () => {
+  for (const date of ["2026-11-01", "2026-11-10", "2026-11-23", "2026-11-25", "2027-01-05"]) {
+    const r = nov24_0752();
+    const body = run(makeScenario({ replays: { [date + "/0752"]: r }, orders: [], journal: [] }), { date, time: "0752" }).body;
+    assert.ok(body.flags.some((f) => f.flag === "RECORDS_WITH_UNKNOWN_AUTHORITY_EXCLUDED"), date);
+    assert.ok(body.flags.some((f) => f.flag === "AUTHORITY_NOT_PROVEN_FOR_DATE"), date);
+    assert.equal(body.knownAtDecision.engine28a.trusted, false, date);
+    assert.equal(body.knownAtDecision.firstBlocker.engine, "UNKNOWN", date);
+  }
+});
+
+test("registry rows are closed, evidence-labelled ranges (no open-ended future authority)", async () => {
+  const { registrySummary } = await import("../logic/investigator/authorityRegistry.js");
+  const sum = registrySummary();
+  assert.equal(sum.evidenceStatus, "EVIDENCE_BACKED_DATES_ONLY");
+  for (const r of sum.rows) {
+    assert.equal(r.from, "2026-11-24", r.engine + " " + r.version);
+    assert.equal(r.to, "2026-11-24", r.engine + " " + r.version);
+    assert.ok(r.evidence, r.engine);
+  }
 });
 
 test("28A untrusted when snapshotTime is from another cycle; fallback uses canonical gates only", () => {

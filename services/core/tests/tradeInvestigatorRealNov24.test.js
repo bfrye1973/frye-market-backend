@@ -104,8 +104,9 @@ test("REAL 07:52 — Engine 3 LONG passed, Engine 4 first blocker; v2 shadow sup
   assert.equal(k.firstBlocker.rootCause, "ENGINE4_PARTICIPATION_NOT_CONFIRMED");
   assert.equal(k.engine28a.trusted, true);
   const e3 = row(b, "engine3");
+  // Own canonical fields prove PASS; 28A stage word kept verbatim, not mapped.
   assert.equal(e3.status, "PASS");
-  assert.equal(e3.statusSource, "ENGINE28A_RECORDED_UPSTREAM_OF_FIRST_BLOCKER");
+  assert.equal(e3.statusSource, "ENGINE_OWN_CANONICAL_GATE");
   assert.equal(e3.engine28aRecordedStage, "REACTION_CONFIRMED");
   assert.equal(e3.gate, "PASSED");
   const e4 = row(b, "engine4");
@@ -143,6 +144,36 @@ test("REAL 10:25 — later state: SHORT, Engine 4 first blocker", () => {
   assert.equal(k.firstBlocker.engine, "engine4");
   assert.equal(k.firstBlocker.rootCause, "ENGINE4_PARTICIPATION_NOT_CONFIRMED");
   assert.equal(k.engine28a.trusted, true);
+});
+
+test("REAL 07:52 mutated — upstream of trusted 28A blocker without own PASS proof => INFERRED_PROGRESS, never PASS", () => {
+  const fx = JSON.parse(fs.readFileSync(path.join(DIR, "2026-11-24_0752.fixture.json"), "utf8"));
+  const e3 = fx.replay.strategies[S1].confluence.context.reaction.paperScalpReaction;
+  delete e3.allowed;
+  delete e3.engine3Strategy1QualifiedForEngine6;
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "e12-real-mut-"));
+  fs.mkdirSync(path.join(base, "es", "2026-11-24"), { recursive: true });
+  fs.writeFileSync(path.join(base, "es", "2026-11-24", "0752.json"), JSON.stringify(fx.replay));
+  const b = buildInvestigation({
+    query: { date: "2026-11-24", time: "0752", strategyId: S1, candidateId: null, planId: null, tradeId: null, windowMinutes: 15, detail: "summary" },
+    config: { replayRoot: path.join(base, "es"), engine8PaperDir: path.join(base, "n"), journalDir: path.join(base, "n") },
+  }).body;
+  const r = row(b, "engine3");
+  assert.equal(b.knownAtDecision.engine28a.trusted, true);
+  assert.equal(b.knownAtDecision.firstBlocker.engine, "engine4");
+  assert.equal(r.gate, "UNKNOWN");
+  assert.equal(r.status, "INFERRED_PROGRESS");
+  assert.equal(r.statusSource, "ENGINE28A_RECORDED_PROGRESSION");
+  assert.equal(r.engine28aRecordedStage, "REACTION_CONFIRMED");
+});
+
+test("REAL — Engine 8 / Journal absent: lifecycle UNKNOWN with no retention guarantee, never 'no trade'", () => {
+  const b = investigate("1016");
+  assert.equal(b.execution.lifecycle, "UNKNOWN");
+  assert.equal(b.execution.retentionGuarantee, "NONE_DEFINED");
+  assert.equal(b.outcome.lifecycle, "UNKNOWN");
+  assert.equal(b.outcome.retentionGuarantee, "NONE_DEFINED");
+  assert.match(b.outcome.note, /No time-based retention guarantee/);
 });
 
 test("REAL — unmapped raw statuses stay UNKNOWN (no name-based mapping)", () => {
