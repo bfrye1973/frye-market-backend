@@ -105,6 +105,18 @@ function buildReaction(node, nowMs) {
   const path = "strategies.intraday_scalp@10m.confluence.context.reaction.engine3V5.canonical.canonical";
   const c = e3?.canonical?.canonical;
   if (!c) return unavailable("reaction", "Engine 3", path, nowMs);
+  const psr = node?.confluence?.context?.reaction?.paperScalpReaction || {};
+  const tf = (o, src) => o ? {
+    state: o.state ?? null, direction: o.direction ?? null, quality: o.quality ?? null,
+    completedState: o.completedPriceActionState ?? null, completedDirection: o.completedPriceActionDirection ?? null,
+    diagnosticOnly: o.diagnosticOnly !== false, sourcePath: `strategies.intraday_scalp@10m.confluence.context.reaction.paperScalpReaction.${src}`,
+  } : null;
+  const timeframes = {
+    oneMinute: tf(psr.reactionObservation1m, "reactionObservation1m"),
+    fiveMinute: tf(psr.reactionValidation5m, "reactionValidation5m"),
+    tenMinute: tf(psr.tenMinuteConfirmation, "tenMinuteConfirmation") ?? tf(psr.broaderReaction10m, "broaderReaction10m"),
+    authority: "EVIDENCE_ONLY_CANONICAL_DIRECTION_DECIDES",
+  };
   const dir = up(c.direction) || "NEUTRAL";
   const has = dir === "LONG" || dir === "SHORT";
   return section({
@@ -120,6 +132,7 @@ function buildReaction(node, nowMs) {
       rd?.readinessState && { label: "Readiness", value: rd.readinessState },
     ],
     sourceTimestamp: e3?.evaluatedAt ?? e3?.asOf ?? null,
+    details: { timeframes },
   });
 }
 
@@ -151,7 +164,8 @@ function buildParticipation(node, nowMs) {
     ],
     sourceTimestamp: v2?.evaluationTimeMs ?? null,
     details: v2 ? {
-      shadow: { version: v2.version ?? null, participationState: v2.participationState ?? null, confirmationState: v2.confirmationState ?? null, authority: "SHADOW_ONLY" },
+      shadow: { version: v2.version ?? null, participationState: v2.participationState ?? null, confirmationState: v2.confirmationState ?? null, relVol, relVolDefinition: "completed 5m volume / median of prior 20 completed bars", authority: "SHADOW_ONLY" },
+      canonicalLegacyRatio: { currentVsPriorVolumeRatio: n(v1?.currentVsPriorVolumeRatio), definition: "current vs prior 5m bar (current bar may still be forming)", authority: "CANONICAL_V1_EVIDENCE" },
       warnings,
     } : null,
   });
@@ -248,6 +262,10 @@ function buildMarket(snapshot, node, meter, nowMs) {
         engine25: e25 ? { score: n(e25.score), regime: e25.regime ?? null, permissionContext: e25.permission ?? null, plainEnglish: e25.zoneAwareRead?.plainEnglish ?? null } : null,
         engine29: e29 ? { trend: e29.trend ?? null, parentDirection: e29.parentDirection ?? null, live: e29.live ?? null, squeeze: e29.squeeze ?? null, receipt: e29.receipt ?? null } : null,
         ema10m: { ema10: r2(e10), ema20: r2(e20), flat: emaFlat, flatRule: `|EMA10-EMA20| < ${EMA_FLAT_PCT * 100}% of price (display heuristic)` },
+        esTrendByTimeframe: meter?.lights ? Object.fromEntries(["10m", "30m", "1h", "4h", "1d"].filter((k) => meter.lights[k]).map((k) => [k, { score: r2(n(meter.lights[k].score)), state: meter.lights[k].state ?? null }])) : null,
+        esTrendSource: "ES Master meter lights (price/EMA technicals per timeframe) — same inputs as the gear",
+        marketBreadthByTimeframe: snapshot?.marketMind ? { "10m": { score: n(snapshot.marketMind.score10m), state: snapshot.marketMind.state10m ?? null }, "30m": { score: n(snapshot.marketMind.score30m), state: snapshot.marketMind.state30m ?? null }, "1h": { score: n(snapshot.marketMind.score1h), state: snapshot.marketMind.state1h ?? null }, "4h": { score: n(snapshot.marketMind.score4h), state: snapshot.marketMind.state4h ?? null }, eod: { score: n(snapshot.marketMind.scoreEOD), state: snapshot.marketMind.stateEOD ?? null } } : null,
+        marketBreadthSource: "marketMind (whole-market internals: breadth/volume) — what the old Engine 25 panel shows",
       },
     }),
   };

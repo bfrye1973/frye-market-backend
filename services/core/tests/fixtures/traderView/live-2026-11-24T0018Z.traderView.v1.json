@@ -1,0 +1,430 @@
+{
+  "schema": "traderView.v1",
+  "symbol": "ES",
+  "strategyId": "intraday_scalp@10m",
+  "generatedAt": "2026-11-24T00:19:00.000Z",
+  "price": 7260.75,
+  "freshness": {
+    "status": "LIVE",
+    "snapshotAsOf": "2026-11-24T00:18:44.126Z",
+    "snapshotAgeMs": 15874,
+    "meterAvailable": true,
+    "notes": []
+  },
+  "authority": {
+    "displayOnly": true,
+    "noPermissionCreated": true,
+    "noExecution": true,
+    "finalPermission": "Engine 6"
+  },
+  "verdict": {
+    "state": "NO_TRADE",
+    "label": "NO TRADE — WAITING",
+    "plainEnglish": "Engine 6: stand down.",
+    "source": "Engine 6"
+  },
+  "marketDirection": {
+    "state": "NEUTRAL",
+    "gear": "N",
+    "gearLabel": "Neutral",
+    "masterScore": 58.52,
+    "masterState": "neutral",
+    "weights": {
+      "10m": 0.1,
+      "30m": 0.15,
+      "1h": 0.25,
+      "4h": 0.3,
+      "1d": 0.2
+    },
+    "source": "ES Master meter (/api/v1/futures/market-meter)",
+    "authority": "DISPLAY_ONLY"
+  },
+  "rightNow": {
+    "plainEnglish": "Price is 35.00 points below the 7,295.75–7,334.50 zone. Market direction: Neutral (ES Master 58.52, blended 10m/30m/1H/4H/daily). 10-minute 10/20 EMA are flat on top of each other: no short-term trend. Engine 29 30-minute: DOWN; 10-minute: upside momentum weakening. Nothing to do until price reaches the zone."
+  },
+  "checklist": [
+    {
+      "step": 1,
+      "label": "Zone found (7,295.75–7,334.50)",
+      "done": true,
+      "source": "Engine 26"
+    },
+    {
+      "step": 2,
+      "label": "Price reaches the zone",
+      "done": false,
+      "source": "Engine 26"
+    },
+    {
+      "step": 3,
+      "label": "Reaction confirms: Engine 3",
+      "done": false,
+      "source": "Engine 3"
+    },
+    {
+      "step": 4,
+      "label": "Volume backs it on a completed bar: Engine 4",
+      "done": false,
+      "source": "Engine 4"
+    }
+  ],
+  "pipeline": [
+    {
+      "key": "location",
+      "sourceEngine": "Engine 26",
+      "status": "READY"
+    },
+    {
+      "key": "reaction",
+      "sourceEngine": "Engine 3",
+      "status": "WAITING"
+    },
+    {
+      "key": "participation",
+      "sourceEngine": "Engine 4",
+      "status": "WAITING"
+    },
+    {
+      "key": "permission",
+      "sourceEngine": "Engine 6",
+      "status": "BLOCKED"
+    }
+  ],
+  "sections": {
+    "location": {
+      "key": "location",
+      "sourceEngine": "Engine 26",
+      "sourcePath": "strategies.intraday_scalp@10m.engine26LocationCandidate",
+      "status": "READY",
+      "state": "LOCATION_DETECTED",
+      "label": "Zone found",
+      "plainEnglish": "Zone 7,295.75–7,334.50. Price is 35.00 points below it.",
+      "waitingFor": "Price to reach the bottom edge (7,295.75).",
+      "facts": [
+        {
+          "label": "Zone",
+          "value": "7,295.75–7,334.50"
+        },
+        {
+          "label": "Midline (A++)",
+          "value": "7,315.25"
+        },
+        {
+          "label": "Distance",
+          "value": "35.00 pts below"
+        },
+        {
+          "label": "Grade",
+          "value": "A+++"
+        },
+        {
+          "label": "Engine 26 watching",
+          "value": "SHORT (watch only)"
+        }
+      ],
+      "sourceTimestamp": "2026-11-24T00:18:50.615Z",
+      "sourceAgeMs": 9385,
+      "details": {
+        "candidateId": "E26C-10a6bd2afbe54dd8736e",
+        "zoneId": "E26Z-73cef29600d453a515b8",
+        "directionState": "SHORT_DIRECTIONAL_CHILD_ACTIVE"
+      },
+      "authority": "DISPLAY_ONLY"
+    },
+    "reaction": {
+      "key": "reaction",
+      "sourceEngine": "Engine 3",
+      "sourcePath": "strategies.intraday_scalp@10m.confluence.context.reaction.engine3V5.canonical.canonical",
+      "status": "WAITING",
+      "state": "NEUTRAL",
+      "label": "No reaction yet",
+      "plainEnglish": "Engine 3 is watching the authorized negotiated zone and waiting for mature completed 5-minute price reaction evidence.",
+      "waitingFor": "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar.",
+      "facts": [
+        {
+          "label": "Direction",
+          "value": "NEUTRAL"
+        },
+        {
+          "label": "Quality",
+          "value": "MIXED"
+        },
+        {
+          "label": "Readiness",
+          "value": "WAITING_FOR_5M_REACTION"
+        }
+      ],
+      "sourceTimestamp": null,
+      "sourceAgeMs": null,
+      "details": {
+        "timeframes": {
+          "oneMinute": {
+            "state": "PUSHING_HIGHER",
+            "direction": "LONG",
+            "quality": "STRONG",
+            "completedState": "PUSHING_HIGHER",
+            "completedDirection": "LONG",
+            "diagnosticOnly": true,
+            "sourcePath": "strategies.intraday_scalp@10m.confluence.context.reaction.paperScalpReaction.reactionObservation1m"
+          },
+          "fiveMinute": {
+            "state": "PUSHING_HIGHER",
+            "direction": "LONG",
+            "quality": "STRONG",
+            "completedState": "PUSHING_HIGHER",
+            "completedDirection": "LONG",
+            "diagnosticOnly": true,
+            "sourcePath": "strategies.intraday_scalp@10m.confluence.context.reaction.paperScalpReaction.reactionValidation5m"
+          },
+          "tenMinute": {
+            "state": "PUSHING_HIGHER",
+            "direction": "LONG",
+            "quality": "GOOD",
+            "completedState": "NO_CLEAR_DIRECTION",
+            "completedDirection": "NEUTRAL",
+            "diagnosticOnly": true,
+            "sourcePath": "strategies.intraday_scalp@10m.confluence.context.reaction.paperScalpReaction.tenMinuteConfirmation"
+          },
+          "authority": "EVIDENCE_ONLY_CANONICAL_DIRECTION_DECIDES"
+        }
+      },
+      "authority": "DISPLAY_ONLY"
+    },
+    "participation": {
+      "key": "participation",
+      "sourceEngine": "Engine 4",
+      "sourcePath": "strategies.intraday_scalp@10m.confluence.context.volume.engine4AuthorizedReactionParticipation.participation5m",
+      "status": "WAITING",
+      "state": "UNRESOLVED",
+      "label": "Waiting for volume",
+      "plainEnglish": "Volume is light (0.81× normal on the last completed 5-minute bar). No warning signs.",
+      "waitingFor": "Engine 3 to pick a direction, then volume to back it on a completed bar.",
+      "facts": [
+        {
+          "label": "Engine 4 state",
+          "value": "UNRESOLVED"
+        },
+        {
+          "label": "Quality",
+          "value": "WEAK"
+        },
+        {
+          "label": "5-min vs normal (shadow)",
+          "value": "0.81×"
+        },
+        {
+          "label": "Warnings",
+          "value": "None"
+        }
+      ],
+      "sourceTimestamp": 1795479517653,
+      "sourceAgeMs": 22347,
+      "details": {
+        "shadow": {
+          "version": "engine4.v2.participationShadow.v1",
+          "participationState": "NO_DIRECTION",
+          "confirmationState": "NO_DIRECTION",
+          "relVol": 0.81,
+          "relVolDefinition": "completed 5m volume / median of prior 20 completed bars",
+          "authority": "SHADOW_ONLY"
+        },
+        "canonicalLegacyRatio": {
+          "currentVsPriorVolumeRatio": 0.81,
+          "definition": "current vs prior 5m bar (current bar may still be forming)",
+          "authority": "CANONICAL_V1_EVIDENCE"
+        },
+        "warnings": []
+      },
+      "authority": "DISPLAY_ONLY"
+    },
+    "permission": {
+      "key": "permission",
+      "sourceEngine": "Engine 6",
+      "sourcePath": "strategies.intraday_scalp@10m.permission",
+      "status": "BLOCKED",
+      "state": "STAND_DOWN",
+      "label": "Stand down",
+      "plainEnglish": "Engine 6 says stand down: the setup is not complete.",
+      "waitingFor": "Engines 3 and 4 to confirm at the zone.",
+      "facts": [
+        {
+          "label": "Decision",
+          "value": "STAND_DOWN"
+        },
+        {
+          "label": "Size",
+          "value": "×0"
+        }
+      ],
+      "sourceTimestamp": "2026-11-24T00:18:45.761Z",
+      "sourceAgeMs": 14239,
+      "details": {
+        "reasonCodes": [
+          "ENGINE6_FINAL_PAPER_PERMISSION",
+          "ENGINE3_STRATEGY1_NOT_QUALIFIED",
+          "ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL",
+          "ENGINE4_WEAK_PARTICIPATION",
+          "RELATIVE_VOLUME_TOO_LOW",
+          "ENGINE26_SHORT_WATCH_ONLY",
+          "WATCH_ONLY_NO_PAPER_ALLOW",
+          "NO_TICKET"
+        ]
+      },
+      "authority": "DISPLAY_ONLY"
+    },
+    "structure": {
+      "key": "structure",
+      "sourceEngine": "Engine 22",
+      "sourcePath": "strategies.intraday_scalp@10m.engine22WaveStrategy",
+      "status": "INFO",
+      "state": "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH",
+      "label": "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+      "plainEnglish": "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.",
+      "waitingFor": "Context only. The wave count never creates a trade by itself.",
+      "facts": [
+        {
+          "label": "Degree",
+          "value": "minor"
+        },
+        {
+          "label": "Readiness",
+          "value": "WATCH"
+        },
+        {
+          "label": "Direction",
+          "value": "NONE"
+        },
+        {
+          "label": "Chase risk",
+          "value": "HIGH"
+        }
+      ],
+      "sourceTimestamp": "2026-11-24T00:18:37.653Z",
+      "sourceAgeMs": 22347,
+      "details": {
+        "keyLevels": {
+          "topCandidate": 7648,
+          "hardInvalidation": 7484.5
+        },
+        "displayWarnings": [
+          {
+            "code": "LEVELS_FAR_FROM_PRICE",
+            "levels": [
+              7648
+            ],
+            "meaning": "Some Engine 22 levels are more than 5% from price; the count may need an owner update."
+          }
+        ]
+      },
+      "authority": "DISPLAY_ONLY"
+    },
+    "marketContext": {
+      "key": "marketContext",
+      "sourceEngine": "Engines 25 / 29 + ES Master",
+      "sourcePath": "engine25Context · engine4V2Shadow.engine29Context · futures/market-meter.master",
+      "status": "INFO",
+      "state": "NEUTRAL",
+      "label": "Neutral — no short-term trend",
+      "plainEnglish": "Market direction: Neutral (ES Master 58.52, blended 10m/30m/1H/4H/daily). 10-minute 10/20 EMA are flat on top of each other: no short-term trend. Engine 29 30-minute: DOWN; 10-minute: upside momentum weakening.",
+      "waitingFor": "Context only.",
+      "facts": [
+        {
+          "label": "ES Master",
+          "value": "58.52 · neutral"
+        },
+        {
+          "label": "Market health",
+          "value": "57 · MIXED_BULLISH"
+        },
+        {
+          "label": "10m 10/20 EMA",
+          "value": "Flat (no trend)"
+        },
+        {
+          "label": "Engine 29 30m",
+          "value": "DOWN"
+        }
+      ],
+      "sourceTimestamp": "2026-11-24T00:20:36.344Z",
+      "sourceAgeMs": 0,
+      "details": {
+        "engine25": {
+          "score": 57,
+          "regime": "MIXED_BULLISH",
+          "permissionContext": "A_PLUS_ONLY_INTRADAY_DAMAGE_REQUIRES_RECLAIM",
+          "plainEnglish": "ES is trading below institutional support and the zone is at risk. No normal longs until ES reclaims value and Engine 6 confirms permission. First reclaim level: 7334.5."
+        },
+        "engine29": {
+          "trend": "DOWN",
+          "parentDirection": "FLAT",
+          "live": {
+            "direction": "UP",
+            "state": "UPSIDE_MOMENTUM_WEAKENING",
+            "momentum": "WEAKENING",
+            "contextVsParent": "NO_ACTIVE_PARENT",
+            "persistence20m": true
+          },
+          "squeeze": null,
+          "receipt": {
+            "schema": "engine29.downstreamContext.v1",
+            "timestamp": "2026-11-24T00:18:12.341Z",
+            "receiptAgeMs": 25312
+          }
+        },
+        "ema10m": {
+          "ema10": 7255.51,
+          "ema20": 7257.67,
+          "flat": true,
+          "flatRule": "|EMA10-EMA20| < 0.05% of price (display heuristic)"
+        },
+        "esTrendByTimeframe": {
+          "10m": {
+            "score": 40.59,
+            "state": "bear"
+          },
+          "30m": {
+            "score": 58,
+            "state": "neutral"
+          },
+          "1h": {
+            "score": 56.95,
+            "state": "neutral"
+          },
+          "4h": {
+            "score": 85.06,
+            "state": "bull"
+          },
+          "1d": {
+            "score": 30.01,
+            "state": "bear"
+          }
+        },
+        "esTrendSource": "ES Master meter lights (price/EMA technicals per timeframe) — same inputs as the gear",
+        "marketBreadthByTimeframe": {
+          "10m": {
+            "score": 20,
+            "state": "bear"
+          },
+          "30m": {
+            "score": 51,
+            "state": "neutral"
+          },
+          "1h": {
+            "score": 63.33,
+            "state": "bull"
+          },
+          "4h": {
+            "score": 58,
+            "state": "neutral"
+          },
+          "eod": {
+            "score": 23.1,
+            "state": "bear"
+          }
+        },
+        "marketBreadthSource": "marketMind (whole-market internals: breadth/volume) — what the old Engine 25 panel shows"
+      },
+      "authority": "DISPLAY_ONLY"
+    }
+  }
+}

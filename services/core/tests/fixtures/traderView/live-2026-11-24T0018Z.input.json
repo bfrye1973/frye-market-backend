@@ -1,0 +1,72 @@
+{
+  "_note": "Captured live from backend-1 dashboard-snapshot + futures/market-meter at 2026-11-24T00:18Z (17:18 AZ). Trimmed to the fields buildTraderView reads; Engine 6 reasonCodes shortened.",
+  "snapshot": {
+    "now": "2026-11-24T00:18:44.126Z",
+    "emaPosture": { "tenMinute": { "ema10": 7255.51, "ema20": 7257.67, "close": 7252.25 } },
+    "marketMind": { "score10m": 20, "state10m": "bear", "score30m": 51, "state30m": "neutral", "score1h": 63.33, "state1h": "bull", "score4h": 58, "state4h": "neutral", "scoreEOD": 23.1, "stateEOD": "bear" },
+    "engine25Context": {
+      "score": 57, "regime": "MIXED_BULLISH", "permission": "A_PLUS_ONLY_INTRADAY_DAMAGE_REQUIRES_RECLAIM",
+      "generatedAtUtc": "2026-11-24T00:15:33.933Z",
+      "marketHealth": { "score": 57, "regime": "MIXED_BULLISH" },
+      "zoneAwareRead": { "plainEnglish": "ES is trading below institutional support and the zone is at risk. No normal longs until ES reclaims value and Engine 6 confirms permission. First reclaim level: 7334.5." }
+    },
+    "strategies": {
+      "intraday_scalp@10m": {
+        "engine26LocationCandidate": {
+          "active": true, "status": "LOCATION_DETECTED", "candidateId": "E26C-10a6bd2afbe54dd8736e", "zoneId": "E26Z-73cef29600d453a515b8",
+          "currentPrice": 7260.75, "snapshotTime": "2026-11-24T00:18:50.615Z", "directionBias": "SHORT", "preferredDirection": "SHORT",
+          "directionState": "SHORT_DIRECTIONAL_CHILD_ACTIVE", "setupGrade": "A+++", "entryZoneLow": 7295.75, "entryZoneHigh": 7334.5, "entryZoneMidline": 7315.25
+        },
+        "permission": {
+          "permission": "STAND_DOWN", "sizeMultiplier": 0, "asOf": "2026-11-24T00:18:45.761Z",
+          "reasonCodes": ["ENGINE6_FINAL_PAPER_PERMISSION", "ENGINE3_STRATEGY1_NOT_QUALIFIED", "ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL", "ENGINE4_WEAK_PARTICIPATION", "RELATIVE_VOLUME_TOO_LOW", "ENGINE26_SHORT_WATCH_ONLY", "WATCH_ONLY_NO_PAPER_ALLOW", "NO_TICKET"]
+        },
+        "engine22WaveStrategy": {
+          "currentPrice": 7252.25,
+          "tradeContextSummary": { "headline": "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES", "subheadline": "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.", "bias": "POSSIBLE_W5_UP_COMPLETE_PULLBACK_WATCH", "topCandidate": 7648, "hardInvalidation": 7484.5 },
+          "waveOpportunity": { "setupType": "POST_MINOR_5_CORRECTIVE_BOUNCE_WATCH", "degree": "minor", "readiness": "WATCH", "direction": "NONE", "chaseRisk": "HIGH" },
+          "sevenDegreeInvalidations": { "evaluationTime": "2026-11-24T00:18:37.653Z" }
+        },
+        "confluence": {
+          "context": {
+            "reaction": {
+              "engine3V5": {
+                "normalizedZoneInput": { "eligible": true, "zone": { "zoneId": "E26Z-73cef29600d453a515b8", "type": "NEGOTIATED", "low": 7295.75, "high": 7334.5, "midline": 7315.25 } },
+                "canonical": { "canonical": { "direction": "NEUTRAL", "quality": "MIXED" } }
+              },
+              "engine3Strategy1Readiness": { "readinessState": "WAITING_FOR_5M_REACTION", "plainEnglishMeaning": "Engine 3 is watching the authorized negotiated zone and waiting for mature completed 5-minute price reaction evidence." },
+              "paperScalpReaction": {
+                "reactionObservation1m": { "active": true, "diagnosticOnly": true, "sourceTimeframe": "1m", "state": "PUSHING_HIGHER", "direction": "LONG", "quality": "STRONG", "completedPriceActionState": "PUSHING_HIGHER", "completedPriceActionDirection": "LONG" },
+                "reactionValidation5m": { "active": true, "diagnosticOnly": true, "sourceTimeframe": "5m", "state": "PUSHING_HIGHER", "direction": "LONG", "quality": "STRONG", "completedPriceActionState": "PUSHING_HIGHER", "completedPriceActionDirection": "LONG" },
+                "tenMinuteConfirmation": { "active": true, "diagnosticOnly": true, "sourceTimeframe": "10m", "state": "PUSHING_HIGHER", "direction": "LONG", "quality": "GOOD", "completedPriceActionState": "NO_CLEAR_DIRECTION", "completedPriceActionDirection": "NEUTRAL" },
+                "broaderReaction10m": null
+              }
+            },
+            "volume": {
+              "engine4AuthorizedReactionParticipation": { "participation5m": { "state": "UNRESOLVED", "quality": "WEAK", "canonicalDirection": "NEUTRAL", "fresh": true, "stale": false, "completed": false, "currentVsPriorVolumeRatio": 0.81, "volumeWeak": true } },
+              "engine4V2Shadow": {
+                "version": "engine4.v2.participationShadow.v1", "evaluationTimeMs": 1795479517653,
+                "participationState": "NO_DIRECTION", "confirmationState": "NO_DIRECTION", "evidence": { "relVol": 0.81 }, "warnings": [],
+                "engine29Context": {
+                  "available": true, "authority": "CONTEXT_ONLY", "trend": "DOWN", "parentDirection": "FLAT",
+                  "live": { "direction": "UP", "state": "UPSIDE_MOMENTUM_WEAKENING", "momentum": "WEAKENING", "contextVsParent": "NO_ACTIVE_PARENT", "persistence20m": true },
+                  "squeeze": null, "squeezeVsSetup": "UNAVAILABLE",
+                  "receipt": { "schema": "engine29.downstreamContext.v1", "timestamp": "2026-11-24T00:18:12.341Z", "receiptAgeMs": 25312 }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "meter": {
+    "updated_at_utc": "2026-11-24T00:20:36.344Z",
+    "master": { "score": 58.52, "state": "neutral", "tone": "warn", "weights": { "10m": 0.1, "30m": 0.15, "1h": 0.25, "4h": 0.3, "1d": 0.2 } },
+    "lights": {
+      "10m": { "score": 40.59, "state": "bear" }, "30m": { "score": 58, "state": "neutral" }, "1h": { "score": 56.95, "state": "neutral" },
+      "4h": { "score": 85.06, "state": "bull" }, "1d": { "score": 30.01, "state": "bear" }
+    }
+  },
+  "nowMs": 1795479540000
+}
