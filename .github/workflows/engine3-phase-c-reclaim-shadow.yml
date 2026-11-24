@@ -1,0 +1,23 @@
+name: Engine3 Phase C shadow reclaim regression
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine3/v6/evaluateEngine3V6Phase1.js'
+      - 'services/core/tests/engine3V6PhaseCReclaim.test.js'
+      - '.github/workflows/engine3-phase-c-reclaim-shadow.yml'
+  workflow_dispatch:
+jobs:
+  phase-c:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify shadow-only reducer syntax
+        run: node --check logic/engine3/v6/evaluateEngine3V6Phase1.js
+      - name: Run deterministic Phase C regressions
+        run: node --test tests/engine3V6PhaseCReclaim.test.js
