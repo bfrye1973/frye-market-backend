@@ -296,3 +296,86 @@ test("route: missing or invalid snapshot -> 503, never a fake verdict", async ()
     }
   }
 });
+
+/* ---------------- Engine 22: authorized count vs owner research ---------------- */
+
+const E22 = JSON.parse(fs.readFileSync(path.join(here, "fixtures/traderView/live-2026-11-24T0631Z.engine22.json"), "utf8")).engine22WaveStrategy;
+function withE22(mut) {
+  const p = live();
+  node(p).engine22WaveStrategy = clone(E22);
+  if (mut) mut(node(p).engine22WaveStrategy);
+  return p;
+}
+const fact = (sec, label) => (sec.facts.find((f) => f.label === label) || {}).value;
+
+test("E22 live: authorized and research shown separately, reconciliation pending", () => {
+  const v = buildTraderView(withE22());
+  const s = v.sections.structure;
+  assert.equal(s.status, "INFO");
+  assert.equal(s.state, "RECONCILIATION_PENDING");
+  assert.equal(fact(s, "Authorized Micro"), "C DOWN");
+  assert.equal(fact(s, "Authorized Submicro"), "W2 DOWN");
+  assert.equal(fact(s, "Micro (research)"), "W1 UP candidate (unconfirmed)");
+  assert.equal(fact(s, "Submicro (research)"), "Unresolved");
+  assert.match(s.plainEnglish, /Authorized count \(what Engine 6 and Engine 27 read, rev 7\): Minute W2 DOWN → Subminute C DOWN → Micro C DOWN → Submicro W2 DOWN/);
+  assert.match(s.plainEnglish, /Owner research, not confirmed:/);
+  assert.match(s.plainEnglish, /frye-market-backend#378/);
+  // the obsolete trade-summary headline is retired, not shown as the count
+  assert.doesNotMatch(s.label + s.plainEnglish, /POSSIBLE MINOR W5/);
+  assert.equal(s.details.retiredHeadline.text, E22.tradeContextSummary.headline);
+  // provenance
+  assert.equal(s.details.authorizedWaveContext.publicationRevision, 7);
+  assert.equal(s.details.authorizedWaveContext.publishedAt, "2026-11-24T06:31:00.075Z");
+  assert.equal(s.details.researchWaveContext.publicationType, "OWNER_WORKING_RESEARCH_ONLY");
+  assert.equal(s.details.researchWaveContext.pointInTimeSourceVerified, false);
+  assert.equal(s.details.researchWaveContext.effectiveAtUtc, "2026-11-24T06:10:31Z");
+  assert.deepEqual(s.details.reconciliation.conflicts.map((c) => c.degree), ["micro", "submicro"]);
+  assert.equal(s.details.chartMinutePanel, "Minute W2 ABC pullback active — C-down watch from 7810.75");
+  assert.equal(s.sourceTimestamp, "2026-11-24T06:31:00.075Z");
+});
+
+test("E22 research never changes the verdict, pipeline or other sections", () => {
+  const base = buildTraderView(live());
+  const up = buildTraderView(withE22((w) => {
+    // even a fully "confirmed" bullish research count must not create permission
+    w.currentWavelength.ownerWaveRoadmap.micro = { activeWave: "W3", direction: "UP", stage: "W3_UP_CONFIRMED", completionConfirmed: true };
+  }));
+  assert.equal(up.verdict.state, "NO_TRADE");
+  assert.deepEqual(up.verdict, base.verdict);
+  assert.deepEqual(up.pipeline, base.pipeline);
+  assert.deepEqual(up.checklist, base.checklist);
+  for (const k of ["location", "reaction", "participation", "permission"]) assert.deepEqual(up.sections[k], base.sections[k], k);
+});
+
+test("E22 in sync -> authorized count is the headline", () => {
+  const v = buildTraderView(withE22((w) => {
+    w.currentWavelength.ownerWaveRoadmap.micro = { activeWave: "C", direction: "DOWN", stage: "C_DOWN" };
+    w.currentWavelength.ownerWaveRoadmap.submicro = { activeWave: "W2", direction: "DOWN", stage: "W2_DOWN" };
+  }));
+  const s = v.sections.structure;
+  assert.equal(s.state, "IN_SYNC");
+  assert.match(s.label, /^Authorized count: Minute W2 DOWN/);
+  assert.equal(s.details.reconciliation.trackedIn, null);
+});
+
+test("E22 authorized missing -> RECOUNT_PENDING, research is never promoted", () => {
+  const v = buildTraderView(withE22((w) => { delete w.authorizedWorkingStructure; }));
+  const s = v.sections.structure;
+  assert.equal(s.state, "RECOUNT_PENDING");
+  assert.equal(fact(s, "Authorized Micro"), "Unknown");
+  assert.equal(fact(s, "Micro (research)"), "W1 UP candidate (unconfirmed)");
+  assert.match(s.label, /recount pending/i);
+});
+
+test("E22 both missing -> UNKNOWN; research missing -> no research facts", () => {
+  const unk = buildTraderView(withE22((w) => { delete w.authorizedWorkingStructure; delete w.currentWavelength; }));
+  assert.equal(unk.sections.structure.state, "UNKNOWN");
+  assert.equal(unk.sections.structure.label, "Wave count unknown");
+  const noRes = buildTraderView(withE22((w) => { delete w.currentWavelength; }));
+  assert.equal(noRes.sections.structure.state, "IN_SYNC");
+  assert.equal(fact(noRes.sections.structure, "Micro (research)"), undefined);
+});
+
+test("E22 dual context keeps the payload under 20 KB", () => {
+  assert.ok(Buffer.byteLength(JSON.stringify(buildTraderView(withE22()))) < 20 * 1024);
+});

@@ -1,0 +1,59 @@
+{
+  "capturedFrom": "GET /api/v1/dashboard-snapshot?symbol=ES (backend-1), trimmed to the fields Trader View reads",
+  "snapshotNow": "2026-11-24T06:31:07.076Z",
+  "engine22WaveStrategy": {
+    "currentPrice": 7269,
+    "tradeContextSummary": {
+      "headline": "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+      "subheadline": "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.",
+      "topCandidate": 7648,
+      "hardInvalidation": 7484.5
+    },
+    "waveOpportunity": { "degree": "minor", "readiness": "WATCH", "direction": "NONE" },
+    "sevenDegreeInvalidations": { "evaluationTime": "2026-11-24T06:31:00.075Z" },
+    "degreeStates": {
+      "minute": { "headline": "Minute W2 ABC pullback active — C-down watch from 7810.75", "activeWave": "W2", "direction": "DOWN" }
+    },
+    "authorizedWorkingStructure": {
+      "schema": "engine22.authorizedWorkingStructure.v1",
+      "mode": "READ_ONLY",
+      "status": "COMPLETE_WORKING_SELECTION",
+      "publicationRevision": 7,
+      "selectionApprovalReference": "OWNER_20261116_LATEST_MICRO_SUBMINUTE_ABC_SUBMICRO_W2_MINUTE_W2",
+      "publishedAt": "2026-11-24T06:31:00.075Z",
+      "degreeOrder": ["submicro", "micro", "subminute", "minute", "minor", "intermediate", "primary"],
+      "degrees": {
+        "submicro": { "degree": "submicro", "available": true, "selectionStatus": "OWNER_SELECTED_WORKING", "sourcePath": "currentWavelength.degrees.submicro.ownerSubmicroW3Nov9InternalResearch", "modelVersion": "engine22.ownerSubmicroW3Nov9InternalResearch.v1", "activeWave": "W2", "direction": "DOWN", "stage": "W2_DOWN_DEVELOPING_OWNER_RESEARCH", "parentDegree": "micro", "parentWave": "C", "completionConfirmed": false },
+        "micro": { "degree": "micro", "available": true, "selectionStatus": "OWNER_SELECTED_WORKING", "sourcePath": "currentWavelength.degrees.micro.ownerMicroAbcDownNov16Research", "modelVersion": "engine22.ownerMicroAbcDownNov16Research.v1", "activeWave": "C", "direction": "DOWN", "stage": "C_DOWN_DEVELOPING_OWNER_RESEARCH", "parentDegree": "subminute", "parentWave": "C", "completionConfirmed": false },
+        "subminute": { "degree": "subminute", "available": true, "selectionStatus": "OWNER_SELECTED_WORKING", "sourcePath": "currentWavelength.degrees.subminute.ownerSubminuteAbcDownNov16Research", "modelVersion": "engine22.ownerSubminuteAbcDownNov16Research.v1", "activeWave": "C", "direction": "DOWN", "stage": "C_DOWN_DEVELOPING_OWNER_RESEARCH", "parentDegree": "minute", "parentWave": "W2", "completionConfirmed": false },
+        "minute": { "degree": "minute", "available": true, "selectionStatus": "OWNER_SELECTED_WORKING", "sourcePath": "currentWavelength.degrees.minute.ownerMinuteW1FormingNov9Research", "modelVersion": "engine22.minuteW1FormingNov9Research.v1", "activeWave": "W2", "direction": "DOWN", "stage": "W2_DOWN_DEVELOPING_OWNER_RESEARCH", "parentDegree": "minor", "parentWave": "W3_OWNER_WORKING_RESEARCH", "completionConfirmed": false },
+        "minor": { "degree": "minor", "available": true, "selectionStatus": "CANONICAL_DEGREE_STATE", "sourcePath": "degreeStates.minor", "activeWave": "W5", "direction": "UP", "stage": "MINOR_W5_ACTIVE_CANDIDATE_MINUTE_W2_PULLBACK_ACTIVE", "completionConfirmed": false },
+        "intermediate": { "degree": "intermediate", "available": true, "selectionStatus": "CANONICAL_DEGREE_STATE", "sourcePath": "degreeStates.intermediate", "activeWave": "W3", "direction": "UP", "stage": "ACTIVE", "completionConfirmed": false },
+        "primary": { "degree": "primary", "available": true, "selectionStatus": "CANONICAL_DEGREE_STATE", "sourcePath": "degreeStates.primary", "activeWave": "W5", "direction": "UP", "stage": "ACTIVE", "completionConfirmed": false }
+      },
+      "pointInTimeAsOfAvailable": false,
+      "noExecution": true,
+      "noPermissionCreated": true,
+      "noWaveTransition": true
+    },
+    "currentWavelength": {
+      "ownerWaveRoadmap": {
+        "schema": "engine22.ownerWaveRoadmap.v1",
+        "publicationType": "OWNER_WORKING_RESEARCH_ONLY",
+        "effectiveAtUtc": "2026-11-24T06:10:31Z",
+        "observedAtUtc": null,
+        "pointInTimeSourceVerified": false,
+        "priceBasisVerified": false,
+        "source": "OWNER_SELECTED_PIVOTS_2026_11_23_AND_ISSUE_378",
+        "primary": { "activeWave": "W5", "direction": "UP", "stage": "OWNER_WORKING_UNCONFIRMED" },
+        "intermediate": { "activeWave": "W1", "direction": "UP", "stage": "W1_UP_DEVELOPING_CANDIDATE", "completionConfirmed": false },
+        "micro": { "activeWave": "W1", "direction": "UP", "stage": "W1_UP_HIGH_CANDIDATE_UNCONFIRMED", "observedReferenceHigh": { "price": 7313.25, "dateAz": "2026-11-23", "timeAz": null, "verified": false }, "startingLow": null, "endingHigh": null, "completionConfirmed": false, "alternatives": ["W1_STILL_DEVELOPING", "W2_DOWN_CORRECTIVE_STRUCTURE_STARTED"] },
+        "submicro": { "direction": "NEUTRAL", "stage": "CONSOLIDATION_UNRESOLVED", "alternatives": ["INTERNAL_W4", "MICRO_W2_START"] },
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "noWaveTransition": true,
+        "engine6ApprovalUnchanged": true
+      }
+    }
+  }
+}
