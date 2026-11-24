@@ -1,3 +1,4 @@
+import {ownerApprovedWorkingSelectionV8} from "./ownerApprovedWorkingSelectionV8.js";
 import {ownerApprovedWorkingSelection,OWNER_APPROVED_SELECTION_SCHEMA} from "./ownerApprovedWorkingSelectionV1.js";
 // Read-only seven-degree selection; no wave transitions or trading mutations.
 import {createHash} from "node:crypto";
@@ -5,7 +6,15 @@ const order=["submicro","micro","subminute","minute","minor","intermediate","pri
 const string=x=>typeof x==="string"&&x.trim()?x:null;
 const sha=x=>createHash("sha256").update(JSON.stringify(x)).digest("hex");
 const ts=x=>typeof x==="string"&&Number.isFinite(Date.parse(x))?x:null;
-export function buildAuthorizedWorkingStructureV1({currentWavelength,degreeStates,sevenDegreeInvalidations,publicationTime,selection=ownerApprovedWorkingSelection}={}){
+export function buildAuthorizedWorkingStructureV1({currentWavelength,degreeStates,sevenDegreeInvalidations,publicationTime,selection=null}={}){
+// The new owner selection takes effect prospectively; historical Replay keeps
+// revision 7. A missing or incomplete recount never silently promotes old data.
+if(!selection){
+ const eligible=publicationTime&&Number.isFinite(Date.parse(publicationTime))&&
+   Date.parse(publicationTime)>=Date.parse(ownerApprovedWorkingSelectionV8.effectiveAtUtc)&&
+   currentWavelength?.ownerRecountV8?.micro?.version===ownerApprovedWorkingSelectionV8.degrees.micro.modelVersion;
+ selection=eligible?ownerApprovedWorkingSelectionV8:ownerApprovedWorkingSelection;
+}
 const validSelection=selection?.schema===OWNER_APPROVED_SELECTION_SCHEMA&&Number.isInteger(selection.selectionRevision)&&selection.selectionRevision>0;
 const configured=validSelection?selection.degrees:{};
 const degrees={};
