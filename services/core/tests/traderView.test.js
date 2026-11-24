@@ -441,7 +441,8 @@ test("E3 explain (live 13:39Z): real waiting reason, observed sellers vs officia
   assert.equal(x.observedControl.diagnosticOnly, true);
   assert.equal(x.whyWaiting, "Sellers are in control (sellers 68 vs buyers 0), but the reaction quality is MIXED (40). Engine 3 only sets a new direction when quality is GOOD or STRONG.");
   assert.equal(x.stillNeeds, "Quality GOOD or STRONG while sellers keep control on completed 5-minute price action.");
-  assert.equal(s.waitingFor, x.stillNeeds);
+  // the card itself is back to its original wording; the explain data stays in the payload
+  assert.equal(s.waitingFor, "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar.");
   assert.ok(x.ruleCodes.includes("FRESH_DIRECTION_REQUIRES_GOOD_OR_STRONG_QUALITY"));
   assert.deepEqual(x.checks.map((c) => c.done), [true, true, false, false]);
   assert.deepEqual(x.lastCompleted5m && [x.lastCompleted5m.time, x.lastCompleted5m.open, x.lastCompleted5m.high, x.lastCompleted5m.low, x.lastCompleted5m.close, x.lastCompleted5m.zoneRelation],
@@ -449,8 +450,8 @@ test("E3 explain (live 13:39Z): real waiting reason, observed sellers vs officia
   assert.equal(x.lastCompleted5m.stateMachineHandoffEligible, false);
   assert.equal(x.forming5m.time, "2026-11-24T13:35:00.000Z");
   assert.equal(x.v6Shadow, null);
-  assert.equal(fact(s, "Observed control (diagnostic)"), "Sellers · GOOD");
-  assert.equal(fact(s, "Quality"), "MIXED · 40");
+  assert.deepEqual(s.facts.map((f) => f.label), ["Direction", "Quality", "Readiness"]);
+  assert.equal(fact(s, "Quality"), "MIXED");
 });
 
 test("E3 explain never changes status, verdict or pipeline (even strong observed sellers)", () => {
@@ -535,4 +536,16 @@ test("payload with E22 V8 + E3 explain stays under 20 KB", () => {
 test("E3 source time comes from engine3V5.canonical.snapshotTime (was blank on the card)", () => {
   const s = buildTraderView(withE3((r) => { r.engine3V5.canonical.snapshotTime = "2026-11-24T13:39:20.000Z"; })).sections.reaction;
   assert.equal(s.sourceTimestamp, "2026-11-24T13:39:20.000Z");
+});
+
+test("E3 explain: contested control wins over the quality rule (live 13:57Z bug)", () => {
+  const x = buildTraderView(withE3((r) => {
+    r.engine3V5.evidence.priceAction.controlState = "CONTESTED";
+    r.engine3V5.evidence.priceAction.sellerScore = 15;
+    r.engine3V5.evidence.priceAction.mixedScore = 78;
+    r.engine3V5.evidence.priceAction.qualityScore = 11;
+    r.engine3V5.trace.stateMachine.reasonCodes = ["ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_NOT_RESOLVED", "ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED", "ENGINE3_V5_CONTROL_CONTESTED"];
+  })).sections.reaction.explain;
+  assert.equal(x.whyWaiting, "Buyers and sellers are contested; neither side has control yet.");
+  assert.doesNotMatch(x.whyWaiting, /Mixed are in control/);
 });

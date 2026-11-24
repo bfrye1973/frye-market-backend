@@ -138,12 +138,12 @@ export function buildEngine3Explain(reaction, { history = null } = {}) {
   } else if (zoneOk === false) {
     whyWaiting = "Engine 3 has no authorized Engine 26 zone to evaluate right now.";
     stillNeeds = "An active, authorized Engine 26 negotiated zone.";
-  } else if (has("ENGINE3_V5_DIRECTIONAL_CONTROL_PRESENT_BUT_QUALITY_NOT_QUALIFIED") || has("ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED")) {
-    whyWaiting = `${side || "One side"} ${side === "Mixed" ? "are" : "are"} in control${scoreText}, but the reaction quality is ${qualityText}. Engine 3 only sets a new direction when quality is GOOD or STRONG.`;
-    stillNeeds = `Quality GOOD or STRONG while ${side ? side.toLowerCase() : "the same side"} keep control on completed 5-minute price action.`;
-  } else if (side === "Mixed" || !control) {
+  } else if (side === "Mixed" || !control || has("ENGINE3_V5_CONTROL_CONTESTED") || has("ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_NOT_RESOLVED")) {
     whyWaiting = "Buyers and sellers are contested; neither side has control yet.";
     stillNeeds = "One side taking clear control inside the zone on completed 5-minute price action.";
+  } else if (has("ENGINE3_V5_DIRECTIONAL_CONTROL_PRESENT_BUT_QUALITY_NOT_QUALIFIED") || has("ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED")) {
+    whyWaiting = `${side} are in control${scoreText}, but the reaction quality is ${qualityText}. Engine 3 only sets a new direction when quality is GOOD or STRONG.`;
+    stillNeeds = `Quality GOOD or STRONG while ${side.toLowerCase()} keep control on completed 5-minute price action.`;
   } else {
     whyWaiting = `Engine 3 is holding ${official}: ${String(sm.canonicalSource || sm.stateTransition || "waiting").replace(/_/g, " ").toLowerCase()}.`;
   }
@@ -260,18 +260,16 @@ function buildReaction(node, nowMs, opts = {}) {
   const dir = up(c.direction) || "NEUTRAL";
   const has = dir === "LONG" || dir === "SHORT";
   const explain = buildEngine3Explain(reaction, { history: opts.reactionHistory ?? null });
-  const obs = explain?.observedControl;
   return section({
     key: "reaction", sourceEngine: "Engine 3", sourcePath: path, nowMs,
     status: has ? "READY" : "WAITING", state: dir,
     label: has ? `${dir} reaction` : "No reaction yet",
     // Engine 3's own words when it publishes them.
     plainEnglish: rd?.plainEnglishMeaning || (has ? `Engine 3 reads a ${dir.toLowerCase()} reaction at the zone.` : "No reaction to read yet."),
-    waitingFor: has ? null : (explain?.stillNeeds || "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar."),
+    waitingFor: has ? null : "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar.",
     facts: [
-      { label: "Official direction", value: dir },
-      obs?.side && { label: "Observed control (diagnostic)", value: `${obs.side}${obs.confidence ? ` · ${obs.confidence}` : ""}` },
-      c.quality && { label: "Quality", value: `${up(c.quality)}${explain?.quality?.score != null ? ` · ${explain.quality.score}` : ""}` },
+      { label: "Direction", value: dir },
+      c.quality && { label: "Quality", value: up(c.quality) },
       rd?.readinessState && { label: "Readiness", value: rd.readinessState },
     ],
     sourceTimestamp: e3?.canonical?.snapshotTime ?? e3?.normalizedZoneInput?.identity?.snapshotTime ?? e3?.evaluatedAt ?? null,
