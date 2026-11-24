@@ -23,7 +23,13 @@ export function makeEngine2cResearchRoute({settings=process.env,privateRoot=sett
    for(const [k,v] of Object.entries(response.headers??{}))res.setHeader(k,v);
    // Do not rely on project-wide reflective CORS policy for this licensed page.
    const origin=req.get('origin');
-   if(origin==='https://frye-dashboard.onrender.com'){
+   const allowedOrigins=new Set([
+     'https://frye-dashboard.onrender.com',
+     'https://redline-trading.vercel.app',
+     'http://localhost:4173',
+     'http://127.0.0.1:4173'
+   ]);
+   if(allowedOrigins.has(origin)){
      res.setHeader('Access-Control-Allow-Origin',origin);
      res.setHeader('Vary','Origin, Cookie, Authorization');
      res.setHeader('Access-Control-Allow-Headers','Accept, X-Engine2C-Access');
