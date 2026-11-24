@@ -1,0 +1,22 @@
+name: Engine4 parallel shadow Phase B
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine4/parallelShadow/**"
+      - "services/core/tests/engine4ParallelParticipationShadow.test.js"
+      - ".github/workflows/engine4-parallel-shadow.yml"
+  workflow_dispatch:
+jobs:
+  phase-b:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node --check logic/engine4/parallelShadow/buildParallelParticipationShadow.js
+      - run: node --check tests/engine4ParallelParticipationShadow.test.js
+      - run: node --test tests/engine4ParallelParticipationShadow.test.js
