@@ -1,0 +1,41 @@
+name: engine12-trade-investigator
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/investigator/**"
+      - "services/core/routes/tradeInvestigator.js"
+      - "services/core/jobs/exportTradeInvestigatorFixtures.js"
+      - "services/core/tests/tradeInvestigator*.js"
+      - "services/core/tests/fixtures/tradeInvestigator/**"
+      - "services/core/server.js"
+      - ".github/workflows/engine12-trade-investigator.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Root package-lock.json is out of sync with package.json on main (luxon),
+      # so `npm ci` fails; install without touching the lockfile.
+      - run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Syntax
+        working-directory: services/core
+        run: |
+          node --check server.js
+          node --check routes/tradeInvestigator.js
+          node --check jobs/exportTradeInvestigatorFixtures.js
+          for f in logic/investigator/*.js; do node --check "$f"; done
+      - name: Trade Investigator tests
+        working-directory: services/core
+        run: node --test tests/tradeInvestigatorCore.test.js tests/tradeInvestigatorJoins.test.js tests/tradeInvestigatorRoute.test.js tests/tradeInvestigatorFixtureExport.test.js
+      - name: Related existing tests
+        working-directory: services/core
+        run: node --test tests/engine28APipelineDoctor.test.js tests/engine12Engine27ReplayPreservation.test.js
+      - name: Latency benchmark (report only)
+        working-directory: services/core
+        run: node tests/tradeInvestigatorLatency.bench.js

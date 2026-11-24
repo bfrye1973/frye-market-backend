@@ -2,13 +2,20 @@
 //
 // Engine 12 Trade Investigator: controlled, READ-ONLY fixture export.
 //
-// Reads selected canonical Replay snapshots, hashes the ORIGINAL bytes,
-// projects only the paths the investigator reads for one lane, redacts, and
-// writes sanitized fixtures to an output directory OUTSIDE /var/data/replay.
+// For each selected Replay snapshot:
+//   1. resolve the source; refuse symlinks and anything outside the Replay root
+//   2. BEFORE: read original bytes, sha256, size, mtime, inode
+//   3. optional: compare BEFORE sha256 with an independently recorded host hash
+//   4. project only the investigator-read paths for one lane, redact
+//   5. write the sanitized fixture (exclusive create, never overwrite)
+//   6. AFTER: re-read the source, sha256, size, mtime, inode
+//   7. BEFORE must equal AFTER exactly; otherwise the fixture just written is
+//      removed and the result is FAILED_SOURCE_CHANGED_DURING_EXPORT
+// A manifest (exclusive create) records every before/after proof.
 //
-// Running this against production requires separate owner approval.
-// It never writes under the Replay root, never overwrites an output file,
-// and never modifies a source file.
+// Output must resolve (realpath, symlinks followed) OUTSIDE /var/data/replay
+// and outside the Replay root. Sources are never written, renamed or touched.
+// Running against production requires separate owner approval.
 //
 // Env:
 //   TRADE_INVESTIGATOR_FIXTURE_EXPORT_CONFIRM=READ_ONLY_EXPORT_APPROVED   (required)
@@ -17,6 +24,8 @@
 //   TRADE_INVESTIGATOR_FIXTURE_OUT=/tmp/e12-fixtures-20261124
 //   TRADE_INVESTIGATOR_FIXTURE_STRATEGY=intraday_scalp@10m                (optional)
 //   TRADE_INVESTIGATOR_REPLAY_ROOT=/var/data/replay/es                    (optional)
+//   TRADE_INVESTIGATOR_FIXTURE_EXPECTED_SHA256=0746=<hex>,0752=<hex>,...  (optional;
+//       hashes recorded independently on the production host)
 
 import fs from "node:fs";
 import path from "node:path";
@@ -26,8 +35,8 @@ import { readEvidenceBytes } from "../logic/investigator/readEvidenceFile.js";
 import { redactInvestigationPayload } from "../logic/investigator/redactInvestigationPayload.js";
 import { ENGINE28A_PATH, getPath } from "../logic/investigator/authorityRegistry.js";
 
-export const EXPORT_VERSION = "engine12.tradeInvestigator.fixtureExport.v1";
-const PROTECTED_ROOT = "/var/data/replay";
+export const EXPORT_VERSION = "engine12.tradeInvestigator.fixtureExport.v2";
+export const PROTECTED_ROOT = "/var/data/replay";
 
 // Every lane path the investigator reads (canonical + shadow parents + 28A).
 const LANE_PATHS = [
@@ -79,27 +88,122 @@ export function isInside(child, parent) {
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 
-export function exportFixtures({ replayRoot, date, times, strategyId, outDir, now = () => new Date().toISOString() }) {
-  if (isInside(outDir, PROTECTED_ROOT) || isInside(outDir, replayRoot)) {
-    throw new Error("OUTPUT_DIR_INSIDE_PROTECTED_STORAGE_REFUSED");
+/** realpath of the deepest existing ancestor + the not-yet-existing remainder. */
+export function resolveIntendedPath(p) {
+  let current = path.resolve(p);
+  const rest = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(current), ...rest);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return path.join(current, ...rest);
+      rest.unshift(path.basename(current));
+      current = parent;
+    }
   }
+}
+
+function realOrSelf(p) {
+  try { return fs.realpathSync(p); } catch { return path.resolve(p); }
+}
+
+function assertOutputAllowed(outDir, replayRoot) {
+  const protectedRoots = [path.resolve(PROTECTED_ROOT), realOrSelf(PROTECTED_ROOT), path.resolve(replayRoot), realOrSelf(replayRoot)];
+  const candidates = [path.resolve(outDir), resolveIntendedPath(outDir)];
+  for (const c of candidates) {
+    for (const root of protectedRoots) {
+      if (isInside(c, root)) throw new Error("OUTPUT_DIR_INSIDE_PROTECTED_STORAGE_REFUSED");
+    }
+  }
+}
+
+function sourceProof(file) {
+  let st;
+  try { st = fs.lstatSync(file); } catch { st = null; }
+  const raw = readEvidenceBytes(file);
+  if (raw.status !== "OK") return { ok: false, reason: raw.reason, raw };
+  return {
+    ok: true,
+    raw,
+    proof: {
+      sha256: raw.sha256,
+      byteLength: raw.byteLength,
+      mtimeMs: st ? st.mtimeMs : null,
+      ino: st ? String(st.ino) : null,
+      readAt: raw.readAt,
+    },
+  };
+}
+
+function sameProof(a, b) {
+  return a.sha256 === b.sha256 && a.byteLength === b.byteLength && a.mtimeMs === b.mtimeMs && a.ino === b.ino;
+}
+
+export function parseExpectedHashes(text) {
+  const out = {};
+  for (const part of String(text || "").split(",").map((s) => s.trim()).filter(Boolean)) {
+    const m = /^(\d{4})=([0-9a-f]{64})$/i.exec(part);
+    if (!m) throw new Error("BAD_EXPECTED_SHA256_ENTRY");
+    out[m[1]] = m[2].toLowerCase();
+  }
+  return out;
+}
+
+/**
+ * @param {object} p
+ * @param {object} [p.expectedSha256] { HHMM: hex } recorded independently on the host
+ * @param {object} [p.testHooks] { afterFixtureWrite(time, sourcePath) } tests only
+ */
+export function exportFixtures({
+  replayRoot, date, times, strategyId, outDir, expectedSha256 = {},
+  now = () => new Date().toISOString(), testHooks = {},
+}) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("BAD_DATE");
+  assertOutputAllowed(outDir, replayRoot);
   fs.mkdirSync(outDir, { recursive: true });
+  // Re-check after creation: the created path must still resolve outside.
+  assertOutputAllowed(fs.realpathSync(outDir), replayRoot);
+  const realRoot = fs.realpathSync(replayRoot);
+
   const results = [];
   for (const time of times) {
+    if (!/^\d{4}$/.test(time)) { results.push({ time, ok: false, status: "BAD_TIME" }); continue; }
     const source = path.join(replayRoot, date, time + ".json");
-    const raw = readEvidenceBytes(source);
-    if (raw.status !== "OK") {
-      results.push({ time, ok: false, reason: raw.reason });
+    const sourceRelativePath = date + "/" + time + ".json";
+
+    let lst;
+    try { lst = fs.lstatSync(source); } catch { results.push({ time, ok: false, status: "SOURCE_NOT_FOUND", sourceRelativePath }); continue; }
+    if (lst.isSymbolicLink() || !lst.isFile()) { results.push({ time, ok: false, status: "SOURCE_PATH_POLICY_REFUSED", sourceRelativePath }); continue; }
+    if (!isInside(fs.realpathSync(source), realRoot)) { results.push({ time, ok: false, status: "SOURCE_OUTSIDE_REPLAY_ROOT", sourceRelativePath }); continue; }
+
+    const before = sourceProof(source);
+    if (!before.ok) { results.push({ time, ok: false, status: "SOURCE_UNREADABLE", reason: before.reason, sourceRelativePath }); continue; }
+
+    const expected = expectedSha256[time] ?? null;
+    if (expected && expected !== before.proof.sha256) {
+      results.push({
+        time, ok: false, status: "SOURCE_HASH_DIFFERS_FROM_HOST_RECORD", sourceRelativePath,
+        before: before.proof, expectedHostSha256: expected,
+      });
       continue;
     }
-    const replay = JSON.parse(raw.bytes.toString("utf8"));
+
+    let replay;
+    try { replay = JSON.parse(before.raw.bytes.toString("utf8")); } catch {
+      results.push({ time, ok: false, status: "SOURCE_JSON_INVALID", sourceRelativePath, before: before.proof });
+      continue;
+    }
+
     const fixture = {
       fixtureSchema: "engine12.tradeInvestigator.sanitizedFixture.v1",
       exportVersion: EXPORT_VERSION,
-      sourceRelativePath: date + "/" + time + ".json",
-      sourceSha256: raw.sha256,
-      sourceBytes: raw.byteLength,
+      sourceRelativePath,
+      sourceSha256: before.proof.sha256,
+      sourceBytes: before.proof.byteLength,
       sourceSha256Scope: "ORIGINAL_REPLAY_FILE_BYTES_BEFORE_PROJECTION",
+      expectedHostSha256: expected,
       projection: "INVESTIGATOR_READ_PATHS_ONLY_ONE_LANE",
       strategyId,
       extractedAt: now(),
@@ -107,8 +211,35 @@ export function exportFixtures({ replayRoot, date, times, strategyId, outDir, no
     };
     const target = path.join(outDir, date + "_" + time + ".fixture.json");
     fs.writeFileSync(target, JSON.stringify(fixture, null, 2), { flag: "wx", mode: 0o600 });
-    results.push({ time, ok: true, sourceSha256: raw.sha256, sourceBytes: raw.byteLength, fixture: path.basename(target) });
+
+    if (typeof testHooks.afterFixtureWrite === "function") testHooks.afterFixtureWrite(time, source);
+
+    const after = sourceProof(source);
+    const unchanged = after.ok && sameProof(before.proof, after.proof);
+    if (!unchanged) {
+      fs.unlinkSync(target); // remove only our own just-written output
+      results.push({
+        time, ok: false, status: "FAILED_SOURCE_CHANGED_DURING_EXPORT", sourceRelativePath,
+        before: before.proof, after: after.ok ? after.proof : { error: after.reason },
+      });
+      continue;
+    }
+    results.push({
+      time, ok: true, status: "EXPORTED", sourceRelativePath,
+      before: before.proof, after: after.proof, sourceUnchanged: true,
+      expectedHostSha256: expected, hostHashMatch: expected ? true : null,
+      fixture: path.basename(target),
+    });
   }
+
+  const manifest = {
+    manifestSchema: "engine12.tradeInvestigator.fixtureExportManifest.v1",
+    exportVersion: EXPORT_VERSION,
+    date, strategyId, createdAt: now(),
+    allSucceeded: results.every((r) => r.ok),
+    results,
+  };
+  fs.writeFileSync(path.join(outDir, date + "_export-manifest.json"), JSON.stringify(manifest, null, 2), { flag: "wx", mode: 0o600 });
   return results;
 }
 
@@ -130,6 +261,8 @@ if (isMain) {
     replayRoot: env.TRADE_INVESTIGATOR_REPLAY_ROOT || "/var/data/replay/es",
     date, times, outDir,
     strategyId: env.TRADE_INVESTIGATOR_FIXTURE_STRATEGY || "intraday_scalp@10m",
+    expectedSha256: parseExpectedHashes(env.TRADE_INVESTIGATOR_FIXTURE_EXPECTED_SHA256),
   });
-  console.log(JSON.stringify({ ok: true, exportVersion: EXPORT_VERSION, date, results }, null, 2));
+  console.log(JSON.stringify({ ok: results.every((r) => r.ok), exportVersion: EXPORT_VERSION, date, results }, null, 2));
+  process.exit(results.every((r) => r.ok) ? 0 : 2);
 }

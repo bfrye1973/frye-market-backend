@@ -41,6 +41,8 @@ test("Fixture 07:46 — Engine 3 first blocker from recorded Engine 28A", () => 
   assert.equal(row(body, "engine4").downstreamOfFirstBlocker, true);
   assert.equal(row(body, "engine8").status, "NOT_REACHED");
   assert.equal(body.selection.selection, "EXACT");
+  assert.ok(body.flags.some((f) => f.flag === "AUTHORITY_REGISTRY_PROVISIONAL"));
+  assert.equal(body.provenance.registryEvidenceStatus, "PROVISIONAL_RETENTION_DERIVED");
 });
 
 test("Fixture 07:52 — Engine 4 first blocker; Engine 4 v2 shadow visible but not authority", () => {

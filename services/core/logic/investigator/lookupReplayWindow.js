@@ -27,7 +27,7 @@ export function listArchivedTimes(root, date) {
   } catch {
     return null;
   }
-  if (st.isSymbolicLink() || !st.isDirectory()) return null;
+  if (st.isSymbolicLink() || !st.isDirectory()) return { policyRefused: true };
   return fs.readdirSync(dayDir)
     .filter((n) => /^\d{4}\.json$/.test(n))
     .map((n) => n.slice(0, 4))
@@ -44,6 +44,7 @@ export function lookupReplayWindow({ root, date, time, windowMinutes }) {
 
   const times = listArchivedTimes(root, date);
   if (times === null) return fail(404, "REPLAY_DATE_NOT_FOUND");
+  if (times.policyRefused) return fail(403, "PATH_POLICY_REFUSED");
 
   const requested = toMinutes(time);
   const atOrBefore = times.filter((t) => toMinutes(t) <= requested);
@@ -62,13 +63,20 @@ export function lookupReplayWindow({ root, date, time, windowMinutes }) {
   }
 
   const file = path.join(root, date, selectedTime + ".json");
+  let lst;
+  try {
+    lst = fs.lstatSync(file);
+  } catch {
+    return fail(404, "REPLAY_FILE_NOT_FOUND");
+  }
+  if (lst.isSymbolicLink() || !lst.isFile()) return fail(403, "PATH_POLICY_REFUSED");
   let realFile;
   try {
     realFile = fs.realpathSync(file);
   } catch {
     return fail(404, "REPLAY_FILE_NOT_FOUND");
   }
-  if (!realFile.startsWith(realRoot + path.sep)) return fail(403, "PATH_OUTSIDE_REPLAY_ROOT");
+  if (!realFile.startsWith(realRoot + path.sep)) return fail(403, "PATH_POLICY_REFUSED");
 
   const raw = readEvidenceBytes(file);
   if (raw.status === "UNAVAILABLE") return fail(404, "REPLAY_FILE_NOT_FOUND");

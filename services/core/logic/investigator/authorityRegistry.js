@@ -17,8 +17,16 @@
 
 export const REGISTRY_VERSION = "engine12.investigator.authorityRegistry.v1";
 
-// Earliest Replay date currently retained (~14 Arizona days before 2026-11-24).
+// PROVISIONAL. Earliest Replay date retained at build time (~14 Arizona days
+// before 2026-11-24). This is a retention-derived assumption, NOT proof of when
+// each canonical/shadow mapping took effect (Engine 12 Manager review, PR #392).
+// Every investigation carries AUTHORITY_REGISTRY_PROVISIONAL until per-engine
+// effective dates are proven from dated original Replay payloads and
+// deployment/commit history. Dates before this boundary resolve to UNKNOWN.
 const VERIFIED_FROM = "2026-11-10";
+export const REGISTRY_EVIDENCE_STATUS = "PROVISIONAL_RETENTION_DERIVED";
+export const REGISTRY_EVIDENCE_NOTE =
+  "Authority date ranges are provisional (retention-derived), not proven per-engine effective dates.";
 const OPEN_END = "9999-12-31";
 
 // Real canonical chain, matching Engine 28A v1:
@@ -209,6 +217,7 @@ export function isDateCanonicallyVerified(dateYmd) {
 export function registrySummary() {
   return {
     registryVersion: REGISTRY_VERSION,
+    evidenceStatus: REGISTRY_EVIDENCE_STATUS,
     pipelineOrder: PIPELINE_ORDER,
     engine28aLanes: ENGINE28A_LANES,
     rows: ROWS.map(({ engine, authority, version, from, to }) => ({

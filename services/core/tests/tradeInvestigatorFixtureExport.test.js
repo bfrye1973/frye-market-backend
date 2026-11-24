@@ -11,7 +11,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { exportFixtures, projectReplayForFixture, isInside } from "../jobs/exportTradeInvestigatorFixtures.js";
+import { exportFixtures, projectReplayForFixture, isInside, parseExpectedHashes } from "../jobs/exportTradeInvestigatorFixtures.js";
 import { buildInvestigation } from "../logic/investigator/buildInvestigation.js";
 import { S1, nov24Scenario, makeScenario, query } from "./fixtures/tradeInvestigator/syntheticScenarios.js";
 
@@ -49,6 +49,66 @@ test("export refuses output inside /var/data/replay or the Replay root", () => {
   assert.throws(() => exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0746"], strategyId: S1, outDir: "/var/data/replay/fixtures" }), /PROTECTED/);
   assert.throws(() => exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0746"], strategyId: S1, outDir: path.join(sc.config.replayRoot, "x") }), /PROTECTED/);
   assert.equal(isInside("/var/data/replay-other", "/var/data/replay"), false);
+});
+
+test("before/after proof recorded and manifest written exclusively", () => {
+  const sc = nov24Scenario();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "e12-fixture-out-"));
+  const [r] = exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["1016"], strategyId: S1, outDir: out });
+  assert.equal(r.status, "EXPORTED");
+  assert.equal(r.sourceUnchanged, true);
+  assert.equal(r.before.sha256, r.after.sha256);
+  assert.equal(r.before.byteLength, r.after.byteLength);
+  assert.equal(r.before.mtimeMs, r.after.mtimeMs);
+  const manifest = JSON.parse(fs.readFileSync(path.join(out, "2026-11-24_export-manifest.json"), "utf8"));
+  assert.equal(manifest.allSucceeded, true);
+  assert.equal(manifest.results[0].before.sha256, r.before.sha256);
+});
+
+test("source mutated between before and after reads => FAILED, fixture removed", () => {
+  const sc = nov24Scenario();
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "e12-fixture-out-"));
+  const [r] = exportFixtures({
+    replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["1016"], strategyId: S1, outDir: out,
+    testHooks: { afterFixtureWrite: (_t, src) => fs.appendFileSync(src, " ") },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.status, "FAILED_SOURCE_CHANGED_DURING_EXPORT");
+  assert.notEqual(r.before.sha256, r.after.sha256);
+  assert.equal(fs.existsSync(path.join(out, "2026-11-24_1016.fixture.json")), false);
+  const manifest = JSON.parse(fs.readFileSync(path.join(out, "2026-11-24_export-manifest.json"), "utf8"));
+  assert.equal(manifest.allSucceeded, false);
+});
+
+test("independent host hash: match recorded, mismatch refused before any write", () => {
+  const sc = nov24Scenario();
+  const src = path.join(sc.config.replayRoot, "2026-11-24", "0746.json");
+  const good = crypto.createHash("sha256").update(fs.readFileSync(src)).digest("hex");
+  const out1 = fs.mkdtempSync(path.join(os.tmpdir(), "e12-fixture-out-"));
+  const [a] = exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0746"], strategyId: S1, outDir: out1, expectedSha256: { "0746": good } });
+  assert.equal(a.hostHashMatch, true);
+  const out2 = fs.mkdtempSync(path.join(os.tmpdir(), "e12-fixture-out-"));
+  const [b] = exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0746"], strategyId: S1, outDir: out2, expectedSha256: { "0746": "0".repeat(64) } });
+  assert.equal(b.status, "SOURCE_HASH_DIFFERS_FROM_HOST_RECORD");
+  assert.equal(fs.existsSync(path.join(out2, "2026-11-24_0746.fixture.json")), false);
+  assert.throws(() => parseExpectedHashes("0746=nothex"), /BAD_EXPECTED_SHA256_ENTRY/);
+});
+
+test("output path that resolves through a symlink into the Replay root is refused", () => {
+  const sc = nov24Scenario();
+  const link = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "e12-link-")), "out");
+  fs.symlinkSync(sc.config.replayRoot, link);
+  assert.throws(() => exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0746"], strategyId: S1, outDir: path.join(link, "fixtures") }), /PROTECTED/);
+  assert.equal(fs.existsSync(path.join(sc.config.replayRoot, "fixtures")), false);
+});
+
+test("symlinked source file is refused, never followed", () => {
+  const sc = nov24Scenario();
+  const day = path.join(sc.config.replayRoot, "2026-11-24");
+  fs.symlinkSync(path.join(day, "0746.json"), path.join(day, "0800.json"));
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "e12-fixture-out-"));
+  const [r] = exportFixtures({ replayRoot: sc.config.replayRoot, date: "2026-11-24", times: ["0800"], strategyId: S1, outDir: out });
+  assert.equal(r.status, "SOURCE_PATH_POLICY_REFUSED");
 });
 
 test("projection keeps only one lane and investigator paths; redacts", () => {

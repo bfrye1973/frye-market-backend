@@ -19,6 +19,8 @@ import {
   PIPELINE_ORDER,
   GATE_ENGINES,
   REGISTRY_VERSION,
+  REGISTRY_EVIDENCE_STATUS,
+  REGISTRY_EVIDENCE_NOTE,
 } from "./authorityRegistry.js";
 import {
   extractEngineTimeline,
@@ -232,6 +234,9 @@ export function buildInvestigation({ query, config }) {
     : { source: "ENGINE10_JOURNAL", status: "NOT_APPLICABLE", reason: "NO_CANONICAL_ENGINE8_RECORD_IN_SNAPSHOT" };
 
   const flags = [...blocker.flags, ...queryIdentityFlags(query, identity)];
+  if (REGISTRY_EVIDENCE_STATUS !== "VERIFIED") {
+    flags.push({ flag: "AUTHORITY_REGISTRY_PROVISIONAL", detail: { evidenceStatus: REGISTRY_EVIDENCE_STATUS, note: REGISTRY_EVIDENCE_NOTE } });
+  }
   if (timeline.unknownAuthority.length) {
     flags.push({
       flag: "RECORDS_WITH_UNKNOWN_AUTHORITY_EXCLUDED",
@@ -330,6 +335,7 @@ export function buildInvestigation({ query, config }) {
     flags,
     provenance: {
       registryVersion: REGISTRY_VERSION,
+      registryEvidenceStatus: REGISTRY_EVIDENCE_STATUS,
       gateVersion: GATE_VERSION,
       statusMappingVersion: STATUS_MAPPING_VERSION,
       blockerFallbackVersion: FALLBACK_VERSION,

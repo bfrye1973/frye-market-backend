@@ -107,10 +107,12 @@ test("symlinked day directory and symlinked file escaping the root are refused",
   fs.symlinkSync(path.join(outside, "1016.json"), path.join(sc.config.replayRoot, "2026-11-26", "1016.json"));
   const srv = await serve(settingsFor(sc));
   const a = await fetch(srv.base + "?date=2026-11-25&time=1016&strategyId=" + S1, { headers: auth });
-  assert.equal(a.status, 404);
+  assert.equal(a.status, 403);
+  assert.equal((await a.json()).error, "PATH_POLICY_REFUSED");
   const b = await fetch(srv.base + "?date=2026-11-26&time=1016&strategyId=" + S1, { headers: auth });
-  assert.ok([403, 500].includes(b.status), "escaping symlink refused, got " + b.status);
+  assert.equal(b.status, 403);
   const body = await b.json();
+  assert.equal(body.error, "PATH_POLICY_REFUSED");
   assert.ok(!JSON.stringify(body).includes(outside));
   await srv.close();
 });
