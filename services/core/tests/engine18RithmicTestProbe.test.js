@@ -15,6 +15,7 @@ test('protobuf handshake uses market data template only, no order plant',()=>{
  assert.equal(b[PROTOCOL_FIELDS.templateVersion][0].toString(),'5.55');
  assert.equal(b[PROTOCOL_FIELDS.infraType][0],1);
  assert.equal(b[PROTOCOL_FIELDS.systemName][0].toString(),'Rithmic Test');
+ assert.equal(b[PROTOCOL_FIELDS.appName][0].toString(),'brfr:Frye Engine18 ReadOnly Test');
 });
 test('decode actual field identifiers and reject malformed input',()=>{
  const sys=Buffer.concat([int(PROTOCOL_FIELDS.templateId,17),field(PROTOCOL_FIELDS.rpCode,'0'),
