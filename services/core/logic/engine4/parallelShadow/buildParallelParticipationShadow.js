@@ -26,7 +26,7 @@ export function buildParallelParticipationShadow({
   bars5m = [], evaluationTimeMs, authorizationStartedAtMs = null,
   candidateId, zoneId, authorizeEngine3Evaluation = false,
   zone = null, invalidated = false, nextZoneReached = false,
-  contractId = null, provenance = null, engine29 = null, policy = {},
+  contractId = null, provenance = null, engine29 = null,
 } = {}) {
   const evalMs = millis(evaluationTimeMs), authMs = millis(authorizationStartedAtMs);
   const cid = identity(candidateId), zid = identity(zoneId);
@@ -36,7 +36,8 @@ export function buildParallelParticipationShadow({
     authorizationStartedAtMs: Number.isFinite(authMs) ? authMs : null,
     evaluationTimeMs: Number.isFinite(evalMs) ? evalMs : null,
     sourceProvenance: provenance ?? null };
-  const P = { ...RESEARCH_POLICY, ...policy };
+  // Frozen pre-registered Phase B research thresholds: never accept caller overrides.
+  const P = RESEARCH_POLICY;
   if (!cid || !zid || lo == null || hi == null || hi <= lo || mid == null ||
       mid < lo || mid > hi || !Number.isFinite(evalMs))
     return unknown("IDENTITY_ZONE_OR_EVALUATION_INVALID", setup);
