@@ -1,0 +1,22 @@
+name: Engine22 Owner Recount V8 Authorized
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/wave/buildOwnerRecountDegreesV8.js'
+      - 'services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV8.js'
+      - 'services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js'
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/tests/engine22OwnerRecountV8Authorized.test.js'
+      - '.github/workflows/engine22-owner-recount-v8.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/wave/buildOwnerRecountDegreesV8.js
+      - run: node --check services/core/logic/engine22/wave/ownerApprovedWorkingSelectionV8.js
+      - run: node --check services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js
+      - run: node --test services/core/tests/engine22OwnerRecountV8Authorized.test.js services/core/tests/engine6EAdvisoryContext.test.js

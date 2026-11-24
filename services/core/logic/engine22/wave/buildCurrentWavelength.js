@@ -1,3 +1,4 @@
+import {buildOwnerRecountDegreesV8} from "./buildOwnerRecountDegreesV8.js";
 import {buildOwnerWaveRoadmapV1} from "./buildOwnerWaveRoadmapV1.js";
 import {buildOwnerNov23ResearchContextV1} from "./buildOwnerNov23ResearchContextV1.js";
 import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
@@ -1367,6 +1368,10 @@ export function buildCurrentWavelength({
       nextLevel: nextLevel(minorLevels, price), lastTouchedLevel: lastTouchedLevel(minorLevels), alertEligibleEvents: ALERT_EVENTS,
     },
   };
+  const researchRoadmap=buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs});
+  const ownerRecount=buildOwnerRecountDegreesV8(researchRoadmap,{evaluationTimeMs});
+  if(ownerRecount) for(const degree of ["minor","minute","subminute","micro","submicro"])
+    degrees[degree].ownerRecountNov23V8=ownerRecount[degree];
   return {
     version: "engine22.currentWavelength.v1",
     symbol: String(symbol || "ES").toUpperCase(),
@@ -1384,6 +1389,8 @@ export function buildCurrentWavelength({
     degrees,
     ownerResearchContext:String(symbol||"").toUpperCase()==="ES" ? buildOwnerNov23ResearchContextV1({evaluationTimeMs}) : null,
     ownerWaveRoadmap:buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs}),
+    // New lower-degree working research. Legacy degrees remain untouched for history.
+    ownerRecountV8:ownerRecount,
     alertsPreview: [], // Future Engine 13 integration only; no sends.
   };
 }
