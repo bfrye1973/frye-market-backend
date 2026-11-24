@@ -26,7 +26,7 @@ const pts = (v) => (v == null ? "—" : v.toLocaleString("en-US", { minimumFract
 const up = (v) => (typeof v === "string" ? v.toUpperCase() : null);
 const ms = (v) => { if (typeof v === "number") return v < 1e12 ? v * 1000 : v; const t = Date.parse(v ?? ""); return Number.isFinite(t) ? t : null; };
 
-function section({ key, sourceEngine, sourcePath, status, state, label, plainEnglish, waitingFor = null, facts = [], sourceTimestamp = null, details = null, nowMs }) {
+function section({ key, sourceEngine, sourcePath, status, state, label, plainEnglish, waitingFor = null, facts = [], sourceTimestamp = null, details = null, extra = null, nowMs }) {
   const t = ms(sourceTimestamp);
   return {
     key, sourceEngine, sourcePath,
@@ -35,6 +35,7 @@ function section({ key, sourceEngine, sourcePath, status, state, label, plainEng
     sourceTimestamp: sourceTimestamp ?? null,
     sourceAgeMs: t != null && nowMs != null ? Math.max(0, nowMs - t) : null,
     details: details ?? null,
+    ...(extra || {}),
     authority: "DISPLAY_ONLY",
   };
 }
@@ -99,19 +100,158 @@ function buildLocation(node, price, nowMs) {
   };
 }
 
-function buildReaction(node, nowMs) {
-  const e3 = node?.confluence?.context?.reaction?.engine3V5;
-  const rd = node?.confluence?.context?.reaction?.engine3Strategy1Readiness;
+// ---- Engine 3 explain block (display only) ----
+// Every line comes from Engine 3 v5's published fields and rule codes. Nothing here
+// evaluates a rule: it reads Engine 3's own state machine, control and quality outputs.
+const sideOf = (controlState) => {
+  const c = up(controlState);
+  if (c === "SELLERS_CONTROL") return "Sellers";
+  if (c === "BUYERS_CONTROL") return "Buyers";
+  if (c) return "Mixed";
+  return null;
+};
+const isoFromSec = (t) => (Number.isFinite(Number(t)) ? new Date(Number(t) * 1000).toISOString() : null);
+const bar = (b) => b ? { time: isoFromSec(b.time), open: n(b.open), high: n(b.high), low: n(b.low), close: n(b.close) } : null;
+
+export function buildEngine3Explain(reaction, { history = null } = {}) {
+  const v5 = reaction?.engine3V5;
+  if (!v5) return null;
+  const sm = v5.stateMachine || {};
+  const codes = Array.isArray(v5.trace?.stateMachine?.reasonCodes) ? v5.trace.stateMachine.reasonCodes : (Array.isArray(sm.reasonCodes) ? sm.reasonCodes : []);
+  const has = (c) => codes.includes(c);
+  const pa = v5.evidence?.priceAction || {};
+  const f5 = v5.evidence?.fiveMinute || {};
+  const zoneOk = v5.normalizedZoneInput ? v5.normalizedZoneInput.eligible === true : null;
+  const official = up(v5.canonical?.canonical?.direction ?? sm.direction) || "NEUTRAL";
+  const control = up(pa.controlState ?? sm.controlState) || null;
+  const side = sideOf(control);
+  const quality = up(pa.quality ?? sm.quality) || null;
+  const qScore = n(pa.qualityScore);
+  const sc = { buyers: n(pa.buyerScore), sellers: n(pa.sellerScore), mixed: n(pa.mixedScore) };
+  const scoreText = sc.sellers != null && sc.buyers != null ? ` (sellers ${sc.sellers} vs buyers ${sc.buyers})` : "";
+  const qualityText = quality ? `${quality}${qScore != null ? ` (${qScore})` : ""}` : "unknown";
+
+  let whyWaiting = null;
+  let stillNeeds = null;
+  if (official === "LONG" || official === "SHORT") {
+    whyWaiting = null;
+  } else if (zoneOk === false) {
+    whyWaiting = "Engine 3 has no authorized Engine 26 zone to evaluate right now.";
+    stillNeeds = "An active, authorized Engine 26 negotiated zone.";
+  } else if (has("ENGINE3_V5_DIRECTIONAL_CONTROL_PRESENT_BUT_QUALITY_NOT_QUALIFIED") || has("ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED")) {
+    whyWaiting = `${side || "One side"} ${side === "Mixed" ? "are" : "are"} in control${scoreText}, but the reaction quality is ${qualityText}. Engine 3 only sets a new direction when quality is GOOD or STRONG.`;
+    stillNeeds = `Quality GOOD or STRONG while ${side ? side.toLowerCase() : "the same side"} keep control on completed 5-minute price action.`;
+  } else if (side === "Mixed" || !control) {
+    whyWaiting = "Buyers and sellers are contested; neither side has control yet.";
+    stillNeeds = "One side taking clear control inside the zone on completed 5-minute price action.";
+  } else {
+    whyWaiting = `Engine 3 is holding ${official}: ${String(sm.canonicalSource || sm.stateTransition || "waiting").replace(/_/g, " ").toLowerCase()}.`;
+  }
+
+  const checks = [
+    { label: "Price inside the authorized zone", done: up(pa.latestZoneCloseRelation) === "INSIDE_ZONE" && zoneOk !== false, source: "priceAction.latestZoneCloseRelation" },
+    { label: "One side has control", done: side === "Sellers" || side === "Buyers", source: "priceAction.controlState" },
+    { label: "Quality GOOD or STRONG", done: quality === "GOOD" || quality === "STRONG", source: "priceAction.quality; rule FRESH_DIRECTION_REQUIRES_GOOD_OR_STRONG_QUALITY" },
+    { label: "Engine 3 direction set", done: official === "LONG" || official === "SHORT", source: "canonical.canonical.direction" },
+  ];
+
+  const bars = f5.completed?.normalized?.bars;
+  const lastBar = Array.isArray(bars) && bars.length ? bars[bars.length - 1] : null;
+  const c5 = f5.completed || {};
+  const lastCompleted5m = lastBar ? {
+    ...bar(lastBar),
+    zoneRelation: c5.followThrough?.latestRelation ?? null,
+    contact: c5.contact?.contactState ?? null,
+    reaction: c5.reaction?.reactionState ?? null,
+    followThrough: c5.followThrough?.followThroughState ?? null,
+    control: c5.control?.controlState ?? null,
+    quality: c5.quality?.quality ?? null,
+    qualityScore: n(c5.quality?.qualityScore),
+    stateMachineHandoffEligible: f5.stateMachineHandoff ? f5.stateMachineHandoff.eligible === true : null,
+  } : null;
+  const forming5m = f5.completion?.formingBarPresent && f5.completion?.formingBar ? { ...bar(f5.completion.formingBar), note: "Still forming; Engine 3 does not use it to set direction." } : null;
+
+  // Engine 3 v6 shadow, only if Engine 3 publishes it. No authority.
+  const v6Key = reaction ? Object.keys(reaction).find((k) => /^engine3V6/i.test(k)) : null;
+  const v6 = v6Key ? reaction[v6Key] : null;
+  const v6Shadow = v6 ? {
+    sourcePath: `strategies.intraday_scalp@10m.confluence.context.reaction.${v6Key}`,
+    direction: up(v6.canonical?.canonical?.direction ?? v6.direction) || null,
+    reason: v6.canonical?.canonical?.canonicalSource ?? v6.stateMachine?.canonicalSource ?? v6.reason ?? null,
+    quality: up(v6.canonical?.canonical?.quality ?? v6.quality) || null,
+    authority: "SHADOW_NO_AUTHORITY",
+  } : null;
+
+  return {
+    officialDirection: official,
+    observedControl: { state: control, side, confidence: up(pa.controlConfidence) || null, scores: sc, diagnosticOnly: true,
+      evidence: { buyers: pa.control?.evidence?.buyers?.reasons || [], sellers: pa.control?.evidence?.sellers?.reasons || [], mixed: pa.control?.evidence?.mixed?.reasons || [] } },
+    quality: { value: quality, score: qScore, reasons: pa.qualityEvidence?.scoring?.reasons || [] },
+    whyWaiting,
+    stillNeeds,
+    stateTransition: sm.stateTransition ?? null,
+    canonicalSource: sm.canonicalSource ?? null,
+    sourcePrefix: "strategies.intraday_scalp@10m.confluence.context.reaction.engine3V5",
+    ruleCodes: codes.filter((c) => !/NO_PERMISSION_CREATED|NO_EXECUTION|STATE_MACHINE_RAN|SOLE_CANONICAL|TIMEFRAME_LABELS|OWNS_INITIAL/.test(c)).map((c) => c.replace(/^ENGINE3_V5_/, "")),
+    checks,
+    lastCompleted5m,
+    forming5m,
+    directionHistory: history,
+    v6Shadow,
+  };
+}
+
+/**
+ * Direction history recorded by Trader View (Engine 3 does not publish one).
+ * Pure: returns a new state. Records a row when Engine 3's canonical direction changes
+ * between snapshots Trader View has read. Lost on backend restart; labeled as such.
+ */
+export function updateEngine3DirectionHistory(state, snapshot, { max = 20, startedAt = null } = {}) {
+  const prev = state && Array.isArray(state.entries) ? state : { startedAt: startedAt ?? new Date().toISOString(), entries: [], lastSnapshotAt: null };
+  const node = snapshot?.strategies?.[TRADER_VIEW_STRATEGY];
+  const v5 = node?.confluence?.context?.reaction?.engine3V5;
+  const dir = up(v5?.canonical?.canonical?.direction ?? v5?.stateMachine?.direction);
+  const at = snapshot?.now ?? null;
+  if (!dir || !at || at === prev.lastSnapshotAt) return prev;
+  const last = prev.entries[0] || null;
+  if (last && last.to === dir) return { ...prev, lastSnapshotAt: at };
+  const sm = v5?.stateMachine || {};
+  const row = {
+    at, from: last ? last.to : null, to: dir,
+    stateTransition: sm.stateTransition ?? v5?.canonical?.canonical?.stateTransition ?? null,
+    canonicalSource: sm.canonicalSource ?? v5?.canonical?.canonical?.canonicalSource ?? null,
+    controlState: v5?.evidence?.priceAction?.controlState ?? sm.controlState ?? null,
+    quality: v5?.evidence?.priceAction?.quality ?? sm.quality ?? null,
+    firstObservation: !last,
+  };
+  return { ...prev, entries: [row, ...prev.entries].slice(0, max), lastSnapshotAt: at };
+}
+
+export function directionHistoryView(state) {
+  if (!state) return null;
+  return {
+    recordedBy: "Trader View endpoint (Engine 3 does not publish a history)",
+    since: state.startedAt,
+    note: "Changes Trader View observed in the snapshots it read since the backend started. Lost on restart.",
+    entries: state.entries,
+  };
+}
+
+function buildReaction(node, nowMs, opts = {}) {
+  const reaction = node?.confluence?.context?.reaction;
+  const e3 = reaction?.engine3V5;
+  const rd = reaction?.engine3Strategy1Readiness;
   const path = "strategies.intraday_scalp@10m.confluence.context.reaction.engine3V5.canonical.canonical";
   const c = e3?.canonical?.canonical;
   if (!c) return unavailable("reaction", "Engine 3", path, nowMs);
-  const psr = node?.confluence?.context?.reaction?.paperScalpReaction || {};
+  const psr = reaction?.paperScalpReaction || {};
   const tf = (o, src) => o ? {
     state: o.state ?? null, direction: o.direction ?? null, quality: o.quality ?? null,
     completedState: o.completedPriceActionState ?? null, completedDirection: o.completedPriceActionDirection ?? null,
-    diagnosticOnly: o.diagnosticOnly !== false, sourcePath: `strategies.intraday_scalp@10m.confluence.context.reaction.paperScalpReaction.${src}`,
+    diagnosticOnly: o.diagnosticOnly !== false, sourcePath: `paperScalpReaction.${src}`,
   } : null;
   const timeframes = {
+    pathPrefix: "strategies.intraday_scalp@10m.confluence.context.reaction",
     oneMinute: tf(psr.reactionObservation1m, "reactionObservation1m"),
     fiveMinute: tf(psr.reactionValidation5m, "reactionValidation5m"),
     tenMinute: tf(psr.tenMinuteConfirmation, "tenMinuteConfirmation") ?? tf(psr.broaderReaction10m, "broaderReaction10m"),
@@ -119,20 +259,24 @@ function buildReaction(node, nowMs) {
   };
   const dir = up(c.direction) || "NEUTRAL";
   const has = dir === "LONG" || dir === "SHORT";
+  const explain = buildEngine3Explain(reaction, { history: opts.reactionHistory ?? null });
+  const obs = explain?.observedControl;
   return section({
     key: "reaction", sourceEngine: "Engine 3", sourcePath: path, nowMs,
     status: has ? "READY" : "WAITING", state: dir,
     label: has ? `${dir} reaction` : "No reaction yet",
     // Engine 3's own words when it publishes them.
     plainEnglish: rd?.plainEnglishMeaning || (has ? `Engine 3 reads a ${dir.toLowerCase()} reaction at the zone.` : "No reaction to read yet."),
-    waitingFor: has ? null : "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar.",
+    waitingFor: has ? null : (explain?.stillNeeds || "A rejection or a failed break at the zone edge, confirmed on a completed 5-minute bar."),
     facts: [
-      { label: "Direction", value: dir },
-      c.quality && { label: "Quality", value: up(c.quality) },
+      { label: "Official direction", value: dir },
+      obs?.side && { label: "Observed control (diagnostic)", value: `${obs.side}${obs.confidence ? ` · ${obs.confidence}` : ""}` },
+      c.quality && { label: "Quality", value: `${up(c.quality)}${explain?.quality?.score != null ? ` · ${explain.quality.score}` : ""}` },
       rd?.readinessState && { label: "Readiness", value: rd.readinessState },
     ],
-    sourceTimestamp: e3?.evaluatedAt ?? e3?.asOf ?? null,
+    sourceTimestamp: e3?.canonical?.snapshotTime ?? e3?.normalizedZoneInput?.identity?.snapshotTime ?? e3?.evaluatedAt ?? null,
     details: { timeframes },
+    extra: { explain },
   });
 }
 
@@ -294,7 +438,7 @@ export function buildE22Contexts(w, nowMs) {
         degrees: Object.fromEntries(
           E22_ALL_DEGREES.filter((k) => aws.degrees[k] && aws.degrees[k].available !== false).map((k) => {
             const d = aws.degrees[k];
-            return [k, { ...pickDegree(d), selectionStatus: d.selectionStatus ?? null, sourcePath: d.sourcePath ?? null, modelVersion: d.modelVersion ?? null }];
+            return [k, { ...pickDegree(d), selectionStatus: d.selectionStatus ?? null, sourcePath: d.sourcePath ?? null }];
           })
         ),
       }
@@ -481,7 +625,7 @@ function buildMarket(snapshot, node, meter, nowMs) {
  * @param {object|null} p.meter  /api/v1/futures/market-meter?symbol=ES response
  * @param {number} p.nowMs
  */
-export function buildTraderView({ snapshot = null, meter = null, nowMs = Date.now() } = {}) {
+export function buildTraderView({ snapshot = null, meter = null, nowMs = Date.now(), reactionHistory = null } = {}) {
   const node = snapshot?.strategies?.[TRADER_VIEW_STRATEGY] || null;
   const asOfMs = ms(snapshot?.now);
   const ageMs = asOfMs != null ? Math.max(0, nowMs - asOfMs) : null;
@@ -490,7 +634,7 @@ export function buildTraderView({ snapshot = null, meter = null, nowMs = Date.no
   const price = px(node?.engine26LocationCandidate?.currentPrice) ?? px(node?.engine22WaveStrategy?.currentPrice) ?? px(snapshot?.emaPosture?.tenMinute?.close);
 
   const location = buildLocation(node, price, nowMs);
-  const reaction = buildReaction(node, nowMs);
+  const reaction = buildReaction(node, nowMs, { reactionHistory });
   const participation = buildParticipation(node, nowMs);
   const permission = buildPermission(node, nowMs);
   const structure = buildStructure(node, price, nowMs);
