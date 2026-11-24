@@ -296,3 +296,14 @@ test("route: missing or invalid snapshot -> 503, never a fake verdict", async ()
     }
   }
 });
+
+test("a 0 price upstream (not set) becomes null, never 0", () => {
+  const p = live();
+  delete node(p).engine26LocationCandidate.currentPrice;
+  node(p).engine22WaveStrategy.currentPrice = 0;
+  p.snapshot.emaPosture.tenMinute.close = null;
+  const v = buildTraderView(p);
+  assert.equal(v.price, null);
+  assert.equal(v.checklist[1].done, false);
+  assert.deepEqual(v.sections.structure.details.displayWarnings, []);
+});
