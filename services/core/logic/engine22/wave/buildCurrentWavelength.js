@@ -1,3 +1,4 @@
+import {buildOwnerWaveRoadmapV1} from "./buildOwnerWaveRoadmapV1.js";
 import {buildOwnerNov23ResearchContextV1} from "./buildOwnerNov23ResearchContextV1.js";
 import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
 import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
@@ -1382,6 +1383,7 @@ export function buildCurrentWavelength({
     persistenceNote: "Phase 1 records Manager-locked touch facts and current-price observations; it does not maintain historical touch state.",
     degrees,
     ownerResearchContext:String(symbol||"").toUpperCase()==="ES" ? buildOwnerNov23ResearchContextV1({evaluationTimeMs}) : null,
+    ownerWaveRoadmap:buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs}),
     alertsPreview: [], // Future Engine 13 integration only; no sends.
   };
 }
