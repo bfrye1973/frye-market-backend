@@ -315,13 +315,16 @@ const fact = (sec, label) => (sec.facts.find((f) => f.label === label) || {}).va
 test("E22 V8 live: cleared degrees, Micro W1 UP candidate, Submicro unresolved, plain English", () => {
   const s = buildTraderView(withE22(E22_V8)).sections.structure;
   assert.equal(s.status, "INFO");
-  assert.equal(s.label, "Minor, Minute and Subminute cleared (recount pending); Micro W1 UP candidate (unconfirmed); Submicro unresolved");
+  // the card reads the Micro chart first
+  assert.equal(s.label, "Micro W1 UP candidate (unconfirmed); Submicro unresolved");
+  assert.equal(s.details.focusDegree, "micro");
+  assert.match(s.plainEnglish, /^Micro chart \(authorized, rev 8, what Engine 6 and Engine 27 read\): Micro W1 UP candidate \(unconfirmed\); Submicro unresolved\. Higher degrees: Minor, Minute and Subminute cleared \(recount pending\)\./);
   assert.equal(fact(s, "Micro"), "W1 UP candidate (unconfirmed)");
   assert.equal(fact(s, "Submicro"), "Unresolved");
   assert.equal(fact(s, "Minor / Minute / Subminute"), "Cleared (recount)");
   assert.equal(fact(s, "Primary (research)"), "W5 UP (unconfirmed)");
   assert.equal(fact(s, "Intermediate (research)"), "W1 UP candidate (unconfirmed)");
-  assert.match(s.plainEnglish, /Authorized count \(what Engine 6 and Engine 27 read, rev 8\)/);
+
   assert.match(s.plainEnglish, /an UP candidate is not a LONG signal\. Engine 6 decides\./);
   assert.doesNotMatch(s.label + s.plainEnglish, /POSSIBLE MINOR W5/);
   // 7,313.25 stays a historical reference in details, never a fact or trigger
@@ -358,7 +361,7 @@ test("E22 V7 (historical): old DOWN count vs research -> reconciliation pending 
 
 test("E22 revision is read, not hardcoded", () => {
   const s = buildTraderView(withE22(E22_V8, (w) => { w.authorizedWorkingStructure.publicationRevision = 12; })).sections.structure;
-  assert.match(s.plainEnglish, /rev 12\)/);
+  assert.match(s.plainEnglish, /rev 12,/);
 });
 
 test("E22 stale authorized count is flagged", () => {
