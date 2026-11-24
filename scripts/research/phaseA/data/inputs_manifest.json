@@ -1,0 +1,39 @@
+{
+  "schema": "phaseA.inputs.v1",
+  "generatedBy": "Claude (PM), 2026-11-24; reproduced exactly on rerun",
+  "replay": {
+    "provenance": "VERIFIED_AS_OF (Engine 12 Replay engine states)",
+    "strategyId": "intraday_scalp@10m",
+    "selection": "all times returned by GET /api/v1/replay/es/times?date=D for D in the days below; 2026-11-24 truncated at 1037",
+    "perDay": {
+      "2026-11-17": [457, "0001", "2357"],
+      "2026-11-18": [460, "0001", "2357"],
+      "2026-11-19": [459, "0000", "2357"],
+      "2026-11-20": [300, "0000", "1457"],
+      "2026-11-22": [160, "1601", "2357"],
+      "2026-11-23": [451, "0001", "2357"],
+      "2026-11-24": [210, "0003", "1037"]
+    },
+    "totalSnapshots": 2497,
+    "snapshotIdListSha256": "c8388973e0a8763e0e432bb1c870551662c749993c0c8dd7eccf235b27eec8dd",
+    "snapshotIdListFormat": "one line per day 'YYYY-MM-DD:HHMM,HHMM,...' joined by \\n, days ascending",
+    "note": "2026-11-21 has no Replay snapshots."
+  },
+  "bars5m": {
+    "provenance": "RETROSPECTIVE_REST (arrival, finality, contract UNKNOWN; original bytes not protected)",
+    "source": "GET /api/v1/futures/ohlc?symbol=ES&timeframe=5m&limit=5000 (rolling 7-day window)",
+    "count": 1607,
+    "firstBarStartEpoch": 1794873600,
+    "lastBarStartEpoch": 1795546200,
+    "cutoff": "bar start <= 2026-11-24T18:50:00Z",
+    "sha256": "d10bc2d5d1cde76c70bd1847e4d698e49ef8e1e93f924fd5dd2dd375cde0b53a",
+    "sha256Format": "lines 'time,open,high,low,close,volume' (numbers as JS Number toString), ascending, joined by \\n",
+    "valuesCommitted": false,
+    "whyNotCommitted": "Massive market-data licensing hold (owner decision pending); repository visibility"
+  },
+  "result": {
+    "e3": { "signals": 128, "wins": 51, "stops": 72, "netR": -7.76 },
+    "e4": { "signals": 13, "wins": 9, "stops": 4, "netR": 8.17 },
+    "agreements": 8, "withFollowingE3": 12, "agreeLeadMinutes": [3, 3, 6, 11, 12, 26, 26, 51]
+  }
+}
