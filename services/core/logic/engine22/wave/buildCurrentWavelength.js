@@ -1,3 +1,4 @@
+import {buildOwnerRecountDegreesV8} from "./buildOwnerRecountDegreesV8.js";
 import {buildOwnerWaveRoadmapV1} from "./buildOwnerWaveRoadmapV1.js";
 import {buildOwnerNov23ResearchContextV1} from "./buildOwnerNov23ResearchContextV1.js";
 import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
@@ -1384,6 +1385,8 @@ export function buildCurrentWavelength({
     degrees,
     ownerResearchContext:String(symbol||"").toUpperCase()==="ES" ? buildOwnerNov23ResearchContextV1({evaluationTimeMs}) : null,
     ownerWaveRoadmap:buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs}),
+    // New lower-degree working research. Legacy degrees remain untouched for history.
+    ownerRecountV8:buildOwnerRecountDegreesV8(buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs})),
     alertsPreview: [], // Future Engine 13 integration only; no sends.
   };
 }
