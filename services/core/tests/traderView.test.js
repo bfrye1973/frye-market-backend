@@ -8,7 +8,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import express from "express";
 import { fileURLToPath } from "node:url";
-import { buildTraderView, gearFromMasterScore } from "../logic/traderView/buildTraderView.js";
+import { buildTraderView, gearFromMasterScore, updateEngine3DirectionHistory, directionHistoryView } from "../logic/traderView/buildTraderView.js";
 import { createTraderViewRouter } from "../routes/traderView.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -417,4 +417,122 @@ test("a 0 price upstream (not set) becomes null, never 0", () => {
   assert.equal(v.price, null);
   assert.equal(v.checklist[1].done, false);
   assert.deepEqual(v.sections.structure.details.displayWarnings, []);
+});
+
+/* ---------------- Engine 3 explain block (display only) ---------------- */
+
+const E3 = loadE22("live-2026-11-24T1339Z.engine3v5.json");
+function withE3(mut) {
+  const p = live();
+  const r = node(p).confluence.context.reaction;
+  r.engine3V5 = { ...r.engine3V5, ...clone(E3.engine3V5) };
+  if (mut) mut(r);
+  return p;
+}
+
+test("E3 explain (live 13:39Z): real waiting reason, observed sellers vs official NEUTRAL, checks, 5m bars", () => {
+  const s = buildTraderView(withE3()).sections.reaction;
+  const x = s.explain;
+  assert.equal(s.status, "WAITING");
+  assert.equal(x.officialDirection, "NEUTRAL");
+  assert.equal(x.observedControl.side, "Sellers");
+  assert.equal(x.observedControl.confidence, "GOOD");
+  assert.deepEqual(x.observedControl.scores, { buyers: 0, sellers: 68, mixed: 22 });
+  assert.equal(x.observedControl.diagnosticOnly, true);
+  assert.equal(x.whyWaiting, "Sellers are in control (sellers 68 vs buyers 0), but the reaction quality is MIXED (40). Engine 3 only sets a new direction when quality is GOOD or STRONG.");
+  assert.equal(x.stillNeeds, "Quality GOOD or STRONG while sellers keep control on completed 5-minute price action.");
+  assert.equal(s.waitingFor, x.stillNeeds);
+  assert.ok(x.ruleCodes.includes("FRESH_DIRECTION_REQUIRES_GOOD_OR_STRONG_QUALITY"));
+  assert.deepEqual(x.checks.map((c) => c.done), [true, true, false, false]);
+  assert.deepEqual(x.lastCompleted5m && [x.lastCompleted5m.time, x.lastCompleted5m.open, x.lastCompleted5m.high, x.lastCompleted5m.low, x.lastCompleted5m.close, x.lastCompleted5m.zoneRelation],
+    ["2026-11-24T13:30:00.000Z", 7163.5, 7164.75, 7153, 7157.75, "INSIDE_ZONE"]);
+  assert.equal(x.lastCompleted5m.stateMachineHandoffEligible, false);
+  assert.equal(x.forming5m.time, "2026-11-24T13:35:00.000Z");
+  assert.equal(x.v6Shadow, null);
+  assert.equal(fact(s, "Observed control (diagnostic)"), "Sellers · GOOD");
+  assert.equal(fact(s, "Quality"), "MIXED · 40");
+});
+
+test("E3 explain never changes status, verdict or pipeline (even strong observed sellers)", () => {
+  const base = buildTraderView(live());
+  const strong = buildTraderView(withE3((r) => {
+    r.engine3V5.evidence.priceAction.quality = "STRONG";
+    r.engine3V5.evidence.priceAction.qualityScore = 95;
+  }));
+  assert.equal(strong.sections.reaction.status, "WAITING");
+  assert.equal(strong.sections.reaction.state, "NEUTRAL");
+  assert.deepEqual(strong.verdict, base.verdict);
+  assert.deepEqual(strong.pipeline, base.pipeline);
+  assert.equal(strong.sections.reaction.explain.checks[2].done, true);
+  assert.equal(strong.sections.reaction.explain.checks[3].done, false);
+});
+
+test("E3 explain: SHORT set -> no waiting reason; zone not eligible; contested control", () => {
+  const set = buildTraderView(withE3((r) => { r.engine3V5.canonical.canonical.direction = "SHORT"; })).sections.reaction;
+  assert.equal(set.explain.whyWaiting, null);
+  assert.equal(set.status, "READY");
+  const noZone = buildTraderView(withE3((r) => { r.engine3V5.normalizedZoneInput.eligible = false; })).sections.reaction.explain;
+  assert.match(noZone.whyWaiting, /no authorized Engine 26 zone/);
+  const mixed = buildTraderView(withE3((r) => {
+    r.engine3V5.evidence.priceAction.controlState = "MIXED_CONTROL";
+    r.engine3V5.trace.stateMachine.reasonCodes = ["ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL"];
+  })).sections.reaction.explain;
+  assert.equal(mixed.whyWaiting, "Buyers and sellers are contested; neither side has control yet.");
+});
+
+test("E3 v6 shadow appears only when published, with no authority", () => {
+  const v = buildTraderView(withE3((r) => {
+    r.engine3V6Shadow = { canonical: { canonical: { direction: "SHORT", quality: "GOOD", canonicalSource: "V6_CONVICTION_SELLERS" } } };
+  }));
+  const x = v.sections.reaction.explain;
+  assert.deepEqual(x.v6Shadow, { sourcePath: "strategies.intraday_scalp@10m.confluence.context.reaction.engine3V6Shadow", direction: "SHORT", reason: "V6_CONVICTION_SELLERS", quality: "GOOD", authority: "SHADOW_NO_AUTHORITY" });
+  assert.equal(v.sections.reaction.state, "NEUTRAL"); // v5 still decides
+  assert.equal(v.verdict.state, "NO_TRADE");
+});
+
+test("E3 direction history records changes only, newest first", () => {
+  const snap = (dir, at) => { const p = withE3(); node(p).confluence.context.reaction.engine3V5.canonical.canonical.direction = dir; p.snapshot.now = at; return p.snapshot; };
+  let h = null;
+  h = updateEngine3DirectionHistory(h, snap("NEUTRAL", "2026-11-24T13:00:00Z"), { startedAt: "2026-11-24T12:59:00Z" });
+  h = updateEngine3DirectionHistory(h, snap("NEUTRAL", "2026-11-24T13:03:00Z"));
+  h = updateEngine3DirectionHistory(h, snap("SHORT", "2026-11-24T13:06:00Z"));
+  h = updateEngine3DirectionHistory(h, snap("SHORT", "2026-11-24T13:06:00Z"));
+  h = updateEngine3DirectionHistory(h, snap("NEUTRAL", "2026-11-24T13:09:00Z"));
+  assert.deepEqual(h.entries.map((e) => `${e.from}->${e.to}@${e.at}`), [
+    "SHORT->NEUTRAL@2026-11-24T13:09:00Z", "NEUTRAL->SHORT@2026-11-24T13:06:00Z", "null->NEUTRAL@2026-11-24T13:00:00Z"]);
+  assert.equal(h.entries[2].firstObservation, true);
+  const view = directionHistoryView(h);
+  assert.equal(view.since, "2026-11-24T12:59:00Z");
+  assert.match(view.note, /Lost on restart/);
+});
+
+test("route: direction history flows into reaction.explain across requests", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "trader-view-"));
+  const file = path.join(dir, "strategy-snapshot-es.json");
+  const write = (d, at) => { const p = withE3(); node(p).confluence.context.reaction.engine3V5.canonical.canonical.direction = d; p.snapshot.now = at; fs.writeFileSync(file, JSON.stringify(p.snapshot)); };
+  let t = Date.parse("2026-11-24T13:10:00Z");
+  const { srv, base } = await startApp({ snapshotFile: file, getMeter: async () => input.meter, now: () => t });
+  try {
+    write("NEUTRAL", "2026-11-24T13:09:30Z");
+    await fetch(`${base}/api/v1/trader-view?symbol=ES`);
+    write("SHORT", "2026-11-24T13:12:30Z"); t += 3 * 60 * 1000;
+    const v = await (await fetch(`${base}/api/v1/trader-view?symbol=ES`)).json();
+    const h = v.sections.reaction.explain.directionHistory;
+    assert.deepEqual(h.entries.map((e) => `${e.from}->${e.to}`), ["NEUTRAL->SHORT", "null->NEUTRAL"]);
+    assert.match(h.recordedBy, /Engine 3 does not publish a history/);
+  } finally {
+    srv.close();
+  }
+});
+
+test("payload with E22 V8 + E3 explain stays under 20 KB", () => {
+  const p = withE3();
+  node(p).engine22WaveStrategy = clone(E22_V8.engine22WaveStrategy);
+  const bytes = Buffer.byteLength(JSON.stringify(buildTraderView(p)));
+  assert.ok(bytes < 20 * 1024, `payload ${bytes} bytes`);
+});
+
+test("E3 source time comes from engine3V5.canonical.snapshotTime (was blank on the card)", () => {
+  const s = buildTraderView(withE3((r) => { r.engine3V5.canonical.snapshotTime = "2026-11-24T13:39:20.000Z"; })).sections.reaction;
+  assert.equal(s.sourceTimestamp, "2026-11-24T13:39:20.000Z");
 });

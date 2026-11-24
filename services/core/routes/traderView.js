@@ -16,7 +16,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { buildTraderView } from "../logic/traderView/buildTraderView.js";
+import { buildTraderView, updateEngine3DirectionHistory, directionHistoryView } from "../logic/traderView/buildTraderView.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -66,6 +66,8 @@ export function createTraderViewRouter({
 } = {}) {
   const router = express.Router();
   let meterCache = { at: 0, value: null, inFlight: null };
+  // Engine 3 direction changes seen by this process (display only, in memory).
+  let e3History = null;
 
   async function cachedMeter() {
     const t = now();
@@ -97,7 +99,8 @@ export function createTraderViewRouter({
       if (!read.ok) return res.status(503).json({ ok: false, symbol, ...read });
 
       const meter = await cachedMeter();
-      const view = buildTraderView({ snapshot: read.snapshot, meter, nowMs: now() });
+      e3History = updateEngine3DirectionHistory(e3History, read.snapshot, { startedAt: new Date(now()).toISOString() });
+      const view = buildTraderView({ snapshot: read.snapshot, meter, nowMs: now(), reactionHistory: directionHistoryView(e3History) });
       return res.json(view);
     } catch (err) {
       console.error("[/api/v1/trader-view] error:", err?.stack || err);

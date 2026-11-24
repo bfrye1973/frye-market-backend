@@ -1,0 +1,151 @@
+{
+  "capturedFrom": "GET /api/v1/dashboard-snapshot?symbol=ES (backend-1) 2026-11-24T13:39Z, engine3V5 fields Trader View reads, real nesting",
+  "snapshotNow": "2026-11-24T13:39:28.710Z",
+  "engine3V5": {
+    "stateMachine": {
+      "previousDirection": "NEUTRAL",
+      "direction": "NEUTRAL",
+      "controlState": "SELLERS_CONTROL",
+      "quality": "MIXED",
+      "mode": "PRICE_ACTION_CONTROL",
+      "stateTransition": "NEUTRAL_HELD",
+      "establishedNow": false,
+      "reversedNow": false,
+      "resetNow": false,
+      "heldNow": true,
+      "canonicalSource": "WAITING_FOR_QUALITY_QUALIFIED_PRICE_ACTION_CONTROL"
+    },
+    "trace": {
+      "stateMachine": {
+        "reasonCodes": [
+          "ENGINE3_V5_DIRECTION_STATE_MACHINE_RAN",
+          "ENGINE3_V5_ZONE_INPUT_ELIGIBLE",
+          "ENGINE3_V5_PRICE_ACTION_HANDOFF_ELIGIBLE",
+          "ENGINE3_V5_DIRECTIONAL_PRICE_ACTION_CONTROL_RESOLVED",
+          "ENGINE3_V5_FRESH_DIRECTION_QUALITY_NOT_QUALIFIED",
+          "ENGINE3_V5_PRICE_ACTION_CONTROL_OWNS_INITIAL_DIRECTION_EVIDENCE",
+          "ENGINE3_V5_TIMEFRAME_LABELS_HAVE_NO_INITIAL_DIRECTION_AUTHORITY",
+          "ENGINE3_V5_SOLE_CANONICAL_DIRECTION_PUBLISHER",
+          "ENGINE3_V5_NO_PERMISSION_CREATED",
+          "ENGINE3_V5_NO_EXECUTION",
+          "ENGINE3_V5_DIRECTIONAL_CONTROL_PRESENT_BUT_QUALITY_NOT_QUALIFIED",
+          "ENGINE3_V5_CONTROL_SELLERS_CONTROL",
+          "ENGINE3_V5_QUALITY_MIXED",
+          "ENGINE3_V5_FRESH_DIRECTION_REQUIRES_GOOD_OR_STRONG_QUALITY",
+          "ENGINE3_V5_CANONICAL_DIRECTION_NEUTRAL"
+        ]
+      }
+    },
+    "evidence": {
+      "priceAction": {
+        "controlState": "SELLERS_CONTROL",
+        "controlConfidence": "GOOD",
+        "quality": "MIXED",
+        "qualityScore": 40,
+        "buyerScore": 0,
+        "sellerScore": 68,
+        "mixedScore": 22,
+        "approachState": "ALREADY_WORKING_INSIDE_ZONE",
+        "contactState": "ZONE_CONTACT_NO_CLEAR_REACTION",
+        "reactionState": "IN_ZONE_PRESSURE_DOWN",
+        "followThroughState": "CONTINUING_DOWN",
+        "sequencePhase": "MIXED",
+        "latestClose": 7157.75,
+        "latestZoneCloseRelation": "INSIDE_ZONE",
+        "control": {
+          "evidence": {
+            "buyers": {
+              "reasons": []
+            },
+            "sellers": {
+              "reasons": [
+                "REACTION_IN_ZONE_PRESSURE_DOWN_SUPPORTS_SELLERS",
+                "REACTION_BIAS_DOWN",
+                "FOLLOW_THROUGH_CONTINUING_DOWN"
+              ]
+            },
+            "mixed": {
+              "reasons": [
+                "CONTACT_MIXED_OR_MIDLINE_INTERACTION",
+                "SEQUENCE_MIXED"
+              ]
+            }
+          }
+        },
+        "qualityEvidence": {
+          "scoring": {
+            "reasons": [
+              "CONTROL_SELLERS_CONTROL_GOOD",
+              "FOLLOW_THROUGH_CONTINUING_DOWN_GOOD",
+              "SEQUENCE_MIXED",
+              "CONTACT_MIXED_CONTACT"
+            ]
+          }
+        }
+      },
+      "fiveMinute": {
+        "completion": {
+          "latestBarCompletionState": "FORMING",
+          "evaluationTimeMs": 1795527560808,
+          "completedBarCount": 119,
+          "formingBarPresent": true,
+          "formingBar": {
+            "time": 1795527300,
+            "open": 7157.75,
+            "high": 7169.25,
+            "low": 7153.25,
+            "close": 7167.5,
+            "volume": 3712
+          }
+        },
+        "completed": {
+          "normalized": {
+            "bars": [
+              {
+                "time": 1795526700,
+                "open": 7165.5,
+                "high": 7175.5,
+                "low": 7163.5,
+                "close": 7163.75,
+                "volume": 5136
+              },
+              {
+                "time": 1795527000,
+                "open": 7163.5,
+                "high": 7164.75,
+                "low": 7153,
+                "close": 7157.75,
+                "volume": 4379
+              }
+            ]
+          },
+          "contact": {
+            "contactState": "ZONE_CONTACT_NO_CLEAR_REACTION"
+          },
+          "reaction": {
+            "reactionState": "IN_ZONE_PRESSURE_DOWN",
+            "reactionBias": "DOWN"
+          },
+          "followThrough": {
+            "followThroughState": "CONTINUING_DOWN",
+            "latestRelation": "INSIDE_ZONE"
+          },
+          "control": {
+            "controlState": "SELLERS_CONTROL",
+            "controlConfidence": "GOOD"
+          },
+          "quality": {
+            "quality": "MIXED",
+            "qualityScore": 40
+          }
+        },
+        "stateMachineHandoff": {
+          "eligible": false,
+          "matureControlResolved": true,
+          "supportingEvidenceOnly": true,
+          "mixedControlResolved": false
+        }
+      }
+    }
+  }
+}
