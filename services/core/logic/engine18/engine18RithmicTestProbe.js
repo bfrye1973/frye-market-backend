@@ -16,7 +16,7 @@ export function encodeTickerPlantLogin({user,password,systemName='Rithmic Test'}
  return Buffer.concat([num(PROTOCOL_FIELDS.templateId,10),
  str(PROTOCOL_FIELDS.templateVersion,'5.55'),
  str(PROTOCOL_FIELDS.user,user),str(PROTOCOL_FIELDS.password,password),
- str(PROTOCOL_FIELDS.appName,'Frye Engine18 ReadOnly Test'),
+ str(PROTOCOL_FIELDS.appName,'brfr:Frye Engine18 ReadOnly Test'),
  str(PROTOCOL_FIELDS.appVersion,'0.1.0'),
  str(PROTOCOL_FIELDS.systemName,systemName),num(PROTOCOL_FIELDS.infraType,1)]);
 }
