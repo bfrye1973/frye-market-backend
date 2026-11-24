@@ -52,6 +52,22 @@ export function buildEngine6AdvisoryContext({snapshot=null,engine25Participation
           noVeto:true,noExecution:true
         };
       })(),
+      ownerWaveRoadmap:(()=>{
+        const m=strategy?.engine22WaveStrategy?.currentWavelength?.ownerWaveRoadmap;
+        if(m?.schema!=="engine22.ownerWaveRoadmap.v1" ||
+           m.noPermissionCreated!==true || m.noExecution!==true)
+          return {available:false,reasonCode:"OWNER_WAVE_ROADMAP_UNAVAILABLE"};
+        return {available:true,source:"ENGINE22_OWNER_RESEARCH_ONLY",
+          effectiveAtUtc:m.effectiveAtUtc,pointInTimeSourceVerified:false,
+          primary:{activeWave:m.primary?.activeWave??null,direction:m.primary?.direction??null,
+            stage:m.primary?.stage??null},
+          intermediate:{activeWave:m.intermediate?.activeWave??null,
+            direction:m.intermediate?.direction??null,stage:m.intermediate?.stage??null},
+          micro:{activeWave:m.micro?.activeWave??null,direction:m.micro?.direction??null,
+            stage:m.micro?.stage??null,completionConfirmed:m.micro?.completionConfirmed===true},
+          submicro:{direction:m.submicro?.direction??null,stage:m.submicro?.stage??null},
+          noEntryPermission:true,noVeto:true,noExecution:true,notLive:true};
+      })(),
       submicro:published(wave.publication?.degrees?.submicro),
       micro:published(wave.publication?.degrees?.micro)
     },
