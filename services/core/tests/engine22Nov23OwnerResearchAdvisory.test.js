@@ -4,7 +4,7 @@ import {buildCurrentWavelength} from "../logic/engine22/wave/buildCurrentWavelen
 import {buildEngine6AdvisoryContext} from "../logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js";
 
 test("Engine6 sees owner Primary W5 UP as research, not a live entry instruction", () => {
-  const currentWavelength=buildCurrentWavelength({symbol:"ES",currentPrice:7272.25});
+  const currentWavelength=buildCurrentWavelength({symbol:"ES",currentPrice:7272.25,evaluationTimeMs:Date.parse("2026-11-23T23:00:00Z")});
   const snapshot={symbol:"ES",strategies:{"intraday_scalp@10m":{
     engine22WaveStrategy:{currentWavelength}
   }}};
@@ -29,4 +29,11 @@ test("Engine6 does not infer owner direction from missing or forged research obj
  assert.equal(result.wave.ownerResearch.available,false);
  assert.equal(result.wave.ownerResearch.higherDegreeDirection,undefined);
  assert.equal(result.noPermissionCreated,true);
+});
+
+test("Nov 23 research packet disappears when time is absent, historical or stale",()=>{
+ for(const time of [null,Date.parse("2026-11-22T23:00:00Z"),Date.parse("2026-11-24T07:00:00Z")]){
+   const w=buildCurrentWavelength({symbol:"ES",currentPrice:7272.25,evaluationTimeMs:time});
+   assert.equal(w.ownerResearchContext,null);
+ }
 });
