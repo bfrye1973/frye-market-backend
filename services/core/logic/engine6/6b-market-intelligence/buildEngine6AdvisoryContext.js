@@ -28,6 +28,30 @@ export function buildEngine6AdvisoryContext({snapshot=null,engine25Participation
       ownerApprovalReference:wave.publication?.selectionApprovalReference??null,
       publishedAt:wave.publication?.publishedAt??null,
       selectionStatus:wave.publication?.status??"UNAVAILABLE",
+      // Clearly separated from the authorized selection: an owner wave hypothesis
+      // is never a live trend measurement or Engine6 LONG permission.
+      ownerResearch:(()=>{
+        const research=strategy?.engine22WaveStrategy?.currentWavelength?.ownerResearchContext;
+        if (research?.schema!=="engine22.ownerNov23ResearchContext.v1" ||
+            research?.noExecution!==true || research?.noPermissionCreated!==true)
+          return {available:false,reasonCode:"OWNER_RESEARCH_NOT_AVAILABLE"};
+        return {
+          available:true,source:"ENGINE22_OWNER_RESEARCH_ONLY",
+          observedOn:research.observedOn??null,
+          asOfUtc:research.asOfUtc??null,
+          pointInTimeAsOfAvailable:research.pointInTimeAsOfAvailable===true,
+          higherDegreeDirection:research.primary?.direction??null,
+          higherDegreeWave:research.primary?.activeWave??null,
+          higherDegreeStage:research.primary?.stage??null,
+          intermediateWorkingDirection:research.intermediate?.direction??null,
+          minorWorkingDirection:research.minor?.direction??null,
+          microWorkingDirection:research.micro?.direction??null,
+          microStage:research.micro?.stage??null,
+          intradayState:research.submicro?.stage??"UNRESOLVED",
+          screenshotOnly:true,notLive:true,noEntryPermission:true,
+          noVeto:true,noExecution:true
+        };
+      })(),
       submicro:published(wave.publication?.degrees?.submicro),
       micro:published(wave.publication?.degrees?.micro)
     },
