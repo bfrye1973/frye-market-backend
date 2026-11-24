@@ -75,10 +75,10 @@ export function buildParallelParticipationShadow({
     shadowOnly: true, gate: false, createsDirection: false, createsPermission: false,
     policy: P };
   if (valid.length < P.baselineBars + 1)
-    return unknown("INSUFFICIENT_VERIFIED_COMPLETED_BARS", outputBase);
+    return unknown("INSUFFICIENT_VERIFIED_COMPLETED_BARS", { ...outputBase, evidenceCompleteness: "INCOMPLETE" });
   const afterAuth = valid.filter(b => b.t + 300000 > authMs && b.t >= authMs);
   // A completed bar must have STARTED after authorization: no mixed-authorization bar.
-  if (!afterAuth.length) return unknown("NO_POST_AUTHORIZATION_COMPLETED_BARS", outputBase);
+  if (!afterAuth.length) return unknown("NO_POST_AUTHORIZATION_COMPLETED_BARS", { ...outputBase, evidenceCompleteness: "INCOMPLETE" });
 
   let episode = null, signals = [], trace = [];
   let buyerEvidence = false, sellerEvidence = false;
@@ -122,11 +122,13 @@ export function buildParallelParticipationShadow({
       b.c >= mid && closeUpper && b.c >= lo && (lowerWick >= P.wickFraction || effort);
     const sellers = phase === "TOUCH_DEFENSE" && highVol && b.h >= mid &&
       b.c <= mid && closeLower && b.c <= hi && (upperWick >= P.wickFraction || effort);
+    const newBuyer = buyers && !buyerEvidence;
+    const newSeller = sellers && !sellerEvidence;
     if (buyers) buyerEvidence = true;
     if (sellers) sellerEvidence = true;
-    if (buyers || sellers) signals.push({
+    if (newBuyer || newSeller) signals.push({
       episodeKey:episode.key, barTimeMs:b.t, availableAtMs:b.arrival,
-      signalClass:phase, buyerDefense:buyers, sellerDefense:sellers, relVol,
+      signalClass:phase, buyerDefense:newBuyer, sellerDefense:newSeller, relVol,
       source:"VERIFIED_AS_OF_COMPLETED_5M" });
     trace.push({barTimeMs:b.t, signalClass:phase, relVol,
       highVolumeNoSide:highVol && !buyers && !sellers,
