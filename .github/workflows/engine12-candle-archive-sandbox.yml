@@ -1,0 +1,24 @@
+name: Engine12 Candle Archive Sandbox
+
+on:
+  push:
+    branches:
+      - engine12/candle-archive-sandbox-20261118
+  pull_request:
+    paths:
+      - "services/core/logic/engine12/candleArchive/**"
+      - "services/core/tests/engine12CandleArchiveSandbox.test.js"
+      - ".github/workflows/engine12-candle-archive-sandbox.yml"
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax check
+        run: node --check services/core/logic/engine12/candleArchive/createCandleArchiveWriter.js
+      - name: Engine12 candle archive sandbox tests
+        run: node --test services/core/tests/engine12CandleArchiveSandbox.test.js
