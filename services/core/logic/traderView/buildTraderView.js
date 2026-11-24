@@ -203,30 +203,82 @@ function buildPermission(node, nowMs) {
 // Authorized = engine22WaveStrategy.authorizedWorkingStructure (what Engine 6 advisory and
 // Engine 27 read). Research = currentWavelength.ownerWaveRoadmap (OWNER_WORKING_RESEARCH_ONLY).
 // Research is never promoted to the authorized count, and neither feeds the verdict.
-const E22_AUTH_DEGREES = ["minute", "subminute", "micro", "submicro"];
-const E22_RESEARCH_DEGREES = ["primary", "intermediate", "micro", "submicro"];
+// Nothing here is tied to a specific revision: whatever is published is read and described.
+const E22_AUTH_DEGREES = ["minor", "minute", "subminute", "micro", "submicro"];
+const E22_ALL_DEGREES = ["primary", "intermediate", "minor", "minute", "subminute", "micro", "submicro"];
 const E22_RECONCILE_ISSUE = "frye-market-backend#378";
+const E22_AUTH_STALE_MS = 15 * 60 * 1000;
 
 const cap = (x) => (x ? String(x).charAt(0).toUpperCase() + String(x).slice(1) : x);
-const waveText = (d) => {
-  if (!d) return null;
-  const wave = d.activeWave ? String(d.activeWave) : null;
-  const dir = d.direction && d.direction !== "NEUTRAL" ? String(d.direction) : null;
-  return [wave, dir].filter(Boolean).join(" ") || null;
-};
-const researchText = (d) => {
-  if (!d) return null;
-  const st = String(d.stage || "");
-  if (/UNRESOLVED/.test(st)) return "Unresolved";
-  const base = waveText(d) || "Unknown";
-  if (d.completionConfirmed === true) return base;
-  if (/CANDIDATE/.test(st)) return `${base} candidate (unconfirmed)`;
-  return `${base} (unconfirmed)`;
-};
 
-export function buildE22Contexts(w) {
+/** Normalize one degree read into a comparable meaning. */
+export function e22Meaning(d) {
+  if (!d) return null;
+  const wave = d.activeWave ? String(d.activeWave).toUpperCase() : null;
+  const dir = d.direction ? String(d.direction).toUpperCase() : null;
+  const st = String(d.stage || "").toUpperCase();
+  let kind = "ACTIVE";
+  if (wave === "RECOUNT" || /CLEARED|RECOUNT/.test(st)) kind = "RECOUNT";
+  else if (wave === "UNRESOLVED" || /UNRESOLVED/.test(st)) kind = "UNRESOLVED";
+  else if (d.completionConfirmed !== true && /CANDIDATE|UNCONFIRMED/.test(st)) kind = "CANDIDATE";
+  const realWave = wave && wave !== "RECOUNT" && wave !== "UNRESOLVED" ? wave : null;
+  const realDir = dir && dir !== "NEUTRAL" && dir !== "NONE" ? dir : null;
+  return { kind, wave: realWave, direction: realDir, candidate: /CANDIDATE/.test(st) };
+}
+
+/** Plain-English text for one degree. */
+export function e22Text(d) {
+  const m = e22Meaning(d);
+  if (!m) return null;
+  if (m.kind === "RECOUNT") return "Cleared (recount pending)";
+  if (m.kind === "UNRESOLVED") return "Unresolved";
+  const base = [m.wave, m.direction].filter(Boolean).join(" ") || "Unknown";
+  if (m.kind === "CANDIDATE") return m.candidate ? `${base} candidate (unconfirmed)` : `${base} (unconfirmed)`;
+  return base;
+}
+
+/** Same meaning? Recount/unresolved must match kind; otherwise wave + direction must match. */
+function sameMeaning(a, b) {
+  const x = e22Meaning(a), y = e22Meaning(b);
+  if (!x || !y) return true;
+  if (x.kind === "RECOUNT" || y.kind === "RECOUNT" || x.kind === "UNRESOLVED" || y.kind === "UNRESOLVED") return x.kind === y.kind;
+  return x.wave === y.wave && x.direction === y.direction;
+}
+
+/** "Minor, Minute and Subminute cleared (recount pending); Micro W1 UP candidate (unconfirmed); Submicro unresolved" */
+function describeDegrees(degrees, order) {
+  const parts = [];
+  let cleared = [];
+  const flush = () => {
+    if (!cleared.length) return;
+    const names = cleared.map(cap);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    parts.push(`${list} cleared (recount pending)`);
+    cleared = [];
+  };
+  for (const k of order) {
+    const d = degrees[k];
+    if (!d) continue;
+    if (e22Meaning(d).kind === "RECOUNT") { cleared.push(k); continue; }
+    flush();
+    const t = e22Text(d);
+    parts.push(`${cap(k)} ${t === "Unresolved" ? "unresolved" : t}`);
+  }
+  flush();
+  return parts.join("; ");
+}
+
+const pickDegree = (d) => ({
+  activeWave: d.activeWave ?? null, direction: d.direction ?? null, stage: d.stage ?? null,
+  completionConfirmed: d.completionConfirmed === true,
+  meaning: e22Text(d),
+});
+
+export function buildE22Contexts(w, nowMs) {
   const aws = w?.authorizedWorkingStructure || null;
   const awsOk = !!(aws && aws.degrees && typeof aws.degrees === "object");
+  const publishedMs = awsOk && aws.publishedAt ? Date.parse(aws.publishedAt) : NaN;
+  const ageMs = Number.isFinite(publishedMs) && Number.isFinite(nowMs) ? Math.max(0, nowMs - publishedMs) : null;
   const authorized = awsOk
     ? {
         available: true,
@@ -235,20 +287,15 @@ export function buildE22Contexts(w) {
         publicationRevision: aws.publicationRevision ?? null,
         selectionApprovalReference: aws.selectionApprovalReference ?? null,
         publishedAt: aws.publishedAt ?? null,
+        ageMs,
+        stale: ageMs == null ? true : ageMs > E22_AUTH_STALE_MS,
         pointInTimeAsOfAvailable: aws.pointInTimeAsOfAvailable ?? null,
         sourcePath: "strategies.intraday_scalp@10m.engine22WaveStrategy.authorizedWorkingStructure",
         degrees: Object.fromEntries(
-          [...E22_AUTH_DEGREES, "minor", "intermediate", "primary"]
-            .filter((k) => aws.degrees[k])
-            .map((k) => {
-              const d = aws.degrees[k];
-              return [k, {
-                activeWave: d.activeWave ?? null, direction: d.direction ?? null, stage: d.stage ?? null,
-                available: d.available !== false, selectionStatus: d.selectionStatus ?? null,
-                completionConfirmed: d.completionConfirmed === true, sourcePath: d.sourcePath ?? null,
-                modelVersion: d.modelVersion ?? null,
-              }];
-            })
+          E22_ALL_DEGREES.filter((k) => aws.degrees[k] && aws.degrees[k].available !== false).map((k) => {
+            const d = aws.degrees[k];
+            return [k, { ...pickDegree(d), selectionStatus: d.selectionStatus ?? null, sourcePath: d.sourcePath ?? null, modelVersion: d.modelVersion ?? null }];
+          })
         ),
       }
     : { available: false, sourcePath: "strategies.intraday_scalp@10m.engine22WaveStrategy.authorizedWorkingStructure" };
@@ -266,32 +313,29 @@ export function buildE22Contexts(w) {
         source: rm.source ?? null,
         sourcePath: "strategies.intraday_scalp@10m.engine22WaveStrategy.currentWavelength.ownerWaveRoadmap",
         degrees: Object.fromEntries(
-          E22_RESEARCH_DEGREES.filter((k) => rm[k]).map((k) => {
+          E22_ALL_DEGREES.filter((k) => rm[k]).map((k) => {
             const d = rm[k];
-            return [k, {
-              activeWave: d.activeWave ?? null, direction: d.direction ?? null, stage: d.stage ?? null,
-              completionConfirmed: d.completionConfirmed === true,
-              alternatives: Array.isArray(d.alternatives) ? d.alternatives : [],
-              observedReferenceHigh: d.observedReferenceHigh ? { price: n(d.observedReferenceHigh.price), dateAz: d.observedReferenceHigh.dateAz ?? null, verified: d.observedReferenceHigh.verified === true } : undefined,
-            }];
+            const out = { ...pickDegree(d), alternatives: Array.isArray(d.alternatives) ? d.alternatives : [] };
+            if (d.observedReferenceHigh) {
+              out.observedReferenceHigh = {
+                price: n(d.observedReferenceHigh.price), dateAz: d.observedReferenceHigh.dateAz ?? null,
+                verified: d.observedReferenceHigh.verified === true,
+                note: "Historical chart reference only — not an ending pivot, not a trade trigger.",
+              };
+            }
+            return [k, out];
           })
         ),
       }
     : { available: false, sourcePath: "strategies.intraday_scalp@10m.engine22WaveStrategy.currentWavelength.ownerWaveRoadmap" };
 
-  // Reconciliation: any degree where research and authorized differ in direction,
-  // or research is unconfirmed/unresolved while authorized says something else.
   const conflicts = [];
   if (authorized.available && research.available) {
-    for (const k of ["micro", "submicro"]) {
-      const a = authorized.degrees[k];
-      const r = research.degrees[k];
-      if (!a || !r) continue;
-      const aDir = a.direction || null;
-      const rDir = r.direction || null;
-      if (aDir !== rDir || (r.activeWave && a.activeWave !== r.activeWave)) {
-        conflicts.push({ degree: k, authorized: waveText(a), research: researchText(r) });
-      }
+    for (const k of E22_ALL_DEGREES) {
+      const a = aws.degrees[k];
+      const r = rm[k];
+      if (!a || !r || a.available === false) continue;
+      if (!sameMeaning(a, r)) conflicts.push({ degree: k, authorized: e22Text(a), research: e22Text(r) });
     }
   }
   let status;
@@ -317,40 +361,42 @@ function buildStructure(node, price, nowMs) {
   const path = "strategies.intraday_scalp@10m.engine22WaveStrategy";
   if (!w) return unavailable("structure", "Engine 22", path, nowMs);
 
-  const ctx = buildE22Contexts(w);
+  const ctx = buildE22Contexts(w, nowMs);
   const A = ctx.authorizedWaveContext;
   const R = ctx.researchWaveContext;
   const rec = ctx.reconciliation;
   const chartMinute = w?.degreeStates?.minute?.headline ?? null;
+  const awsDeg = w?.authorizedWorkingStructure?.degrees || {};
+  const rmRaw = w?.currentWavelength?.ownerWaveRoadmap || {};
 
-  const authLine = A.available
-    ? E22_AUTH_DEGREES.filter((k) => A.degrees[k]).map((k) => `${cap(k)} ${waveText(A.degrees[k]) || "?"}`).join(" → ")
-    : null;
-  const resLine = R.available
-    ? E22_RESEARCH_DEGREES.filter((k) => R.degrees[k]).map((k) => `${cap(k)} ${researchText(R.degrees[k])}`).join("; ")
-    : null;
+  const authLine = A.available ? describeDegrees(awsDeg, E22_AUTH_DEGREES) : null;
+  // Research adds what the authorized trading degrees don't: the higher degrees.
+  const resHigher = R.available ? describeDegrees(rmRaw, ["primary", "intermediate"]) : null;
 
   let label;
   if (rec.status === "UNKNOWN") label = "Wave count unknown";
   else if (rec.status === "RECOUNT_PENDING") label = "Authorized count missing — recount pending";
-  else if (rec.status === "RECONCILIATION_PENDING") label = "Authorized count and owner research disagree — reconciliation pending";
-  else label = `Authorized count: ${authLine}`;
+  else label = authLine ? `${authLine.charAt(0).toUpperCase()}${authLine.slice(1)}` : "Wave structure";
 
   const parts = [];
   if (authLine) parts.push(`Authorized count (what Engine 6 and Engine 27 read${A.publicationRevision != null ? `, rev ${A.publicationRevision}` : ""}): ${authLine}.`);
-  if (resLine) parts.push(`Owner research, not confirmed: ${resLine}.`);
-  if (rec.status !== "IN_SYNC" && rec.status !== "UNKNOWN") parts.push(`Reconciliation tracked in ${rec.trackedIn}.`);
-  parts.push("Research never counts as a trade signal.");
+  if (A.available && A.stale) parts.push(`This count is stale (published ${A.ageMs == null ? "at an unknown time" : `${Math.round(A.ageMs / 60000)} min ago`}).`);
+  if (resHigher) parts.push(`Owner research, not confirmed: ${resHigher}.`);
+  if (rec.status === "RECONCILIATION_PENDING") {
+    parts.push(`Still differs from research: ${rec.conflicts.map((c) => `${cap(c.degree)} (authorized ${c.authorized} vs research ${c.research})`).join("; ")} — tracked in ${rec.trackedIn}.`);
+  } else if (rec.status === "RECOUNT_PENDING") {
+    parts.push(`Tracked in ${rec.trackedIn}.`);
+  }
+  parts.push("The wave count is context only: an UP candidate is not a LONG signal. Engine 6 decides.");
 
   // Display check only: older trade-summary levels very far from price.
   const s = w.tradeContextSummary || {};
   const levels = [n(s.topCandidate), n(s.hardInvalidation)].filter((v) => v != null && v > 0);
   const far = price != null ? levels.filter((v) => Math.abs(v - price) / price > 0.05) : [];
 
-  const am = A.available ? A.degrees.micro : null;
-  const as = A.available ? A.degrees.submicro : null;
-  const rmi = R.available ? R.degrees.micro : null;
-  const rsu = R.available ? R.degrees.submicro : null;
+  const ad = A.available ? A.degrees : {};
+  const rd = R.available ? R.degrees : {};
+  const cleared = ["minor", "minute", "subminute"].filter((k) => ad[k] && e22Meaning(awsDeg[k]).kind === "RECOUNT");
 
   return section({
     key: "structure", sourceEngine: "Engine 22", sourcePath: path, nowMs,
@@ -360,10 +406,13 @@ function buildStructure(node, price, nowMs) {
     plainEnglish: parts.join(" "),
     waitingFor: "Context only. The wave count never creates a trade by itself.",
     facts: [
-      { label: "Authorized Micro", value: am ? waveText(am) : "Unknown" },
-      { label: "Authorized Submicro", value: as ? waveText(as) : "Unknown" },
-      R.available && { label: "Micro (research)", value: rmi ? researchText(rmi) : "Unknown" },
-      R.available && { label: "Submicro (research)", value: rsu ? researchText(rsu) : "Unknown" },
+      { label: "Micro", value: ad.micro ? ad.micro.meaning : "Unknown" },
+      { label: "Submicro", value: ad.submicro ? ad.submicro.meaning : "Unknown" },
+      cleared.length === 3
+        ? { label: "Minor / Minute / Subminute", value: "Cleared (recount)" }
+        : ad.minute && { label: "Minute", value: ad.minute.meaning },
+      rd.primary && { label: "Primary (research)", value: rd.primary.meaning },
+      rd.intermediate && { label: "Intermediate (research)", value: rd.intermediate.meaning },
       { label: "Count status", value: rec.status },
     ],
     sourceTimestamp: A.publishedAt ?? R.effectiveAtUtc ?? w.sevenDegreeInvalidations?.evaluationTime ?? null,
