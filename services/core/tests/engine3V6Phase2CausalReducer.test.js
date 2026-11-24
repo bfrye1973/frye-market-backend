@@ -48,7 +48,7 @@ test("deferred postactivation seed can establish after v5 one-shot already passe
 });
 test("preactivation opposing closes cannot invalidate an already held SHORT",()=>{
  const prior={schema:"engine3.v6.phase1.shadow.v1",canonicalDirection:"SHORT",
-  candidateId:"NEW-ZONE",reactionAnchor:105,establishedAtMs:now-10*minute,
+  candidateId:"NEW-ZONE",zoneId:"Z2",reactionAnchor:105,establishedAtMs:now-10*minute,
   lastEvaluatedAtMs:now-minute};
  const safeOne=[candle(now-3*minute,minute,104,100,101),
     candle(now-2*minute,minute,103,99,100)];
