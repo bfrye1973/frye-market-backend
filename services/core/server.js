@@ -27,6 +27,7 @@ import { volumeBehaviorRouter } from "./routes/volumeBehavior.js";
 import { spyVolumeBehaviorRouter } from "./routes/spyVolumeBehavior.js";
 import { confluenceScoreRouter } from "./routes/confluenceScore.js";
 import dashboardSnapshotRouter from "./routes/dashboardSnapshot.js";
+import traderViewRouter from "./routes/traderView.js"; // Trader View v1 (display-only)
 import replayRouter from "./routes/replay.js";
 import { scalpStatusRouter } from "./routes/scalpStatus.js";
 import { alertsRouter } from "./routes/alerts.js";
@@ -194,6 +195,7 @@ app.use("/api/v1", esVolumeBehaviorRouter);
 app.use("/api/v1", confluenceScoreRouter);
 app.use("/api/v1", momentumContextRouter);
 app.use("/api/v1", dashboardSnapshotRouter);
+app.use("/api/v1", traderViewRouter); // GET /api/v1/trader-view?symbol=ES — display-only
 app.use("/api/v1", replayRouter);
 app.use("/api/v1", scalpStatusRouter);
 app.use("/api/v1/alerts", alertsRouter);
