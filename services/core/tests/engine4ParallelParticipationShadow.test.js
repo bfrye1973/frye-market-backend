@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildParallelParticipationShadow as build, buildEngine3Engine4Agreement as agreement } from "../logic/engine4/parallelShadow/buildParallelParticipationShadow.js";
+import { buildParallelParticipationShadow as build, buildEngine3Engine4Agreement as agreement, RESEARCH_POLICY } from "../logic/engine4/parallelShadow/buildParallelParticipationShadow.js";
 
 const T0 = 1795500000000 - (1795500000000 % 300000);
 const contractId = "ESZ6";
@@ -137,4 +137,24 @@ test("Nov24 retrospective fixture is exploratory and cannot confirm",()=>{
   const r=build({...good(bars),provenance:{sourceVerified:false,contractVerified:true,finalityVerified:false}});
   assert.equal(r.evidenceCompleteness,"INCOMPLETE");
   assert.equal(r.confirmationState,"UNKNOWN");
+});
+
+test("Phase B research thresholds are frozen and caller policy overrides cannot alter decisions",()=>{
+  assert.deepEqual(RESEARCH_POLICY, {
+    baselineBars:20, minRelVol:1.5, wickFraction:0.5, maxBarsWithoutRetest:24,
+  });
+  assert.equal(Object.isFrozen(RESEARCH_POLICY),true);
+  const malicious = { baselineBars:1, minRelVol:0, wickFraction:0, maxBarsWithoutRetest:999999 };
+  const fixtures = [
+    good(bullish()),
+    good(bearish()),
+    good(bar(base(),{open:7160,high:7215,low:7150,close:7210,volume:500000})),
+    good(bar(base(),{open:7160,high:7195,low:7120,close:7190,volume:10000})),
+  ];
+  for (const input of fixtures) {
+    const canonical = build(input);
+    assert.deepEqual(build({...input,policy:malicious}),canonical);
+    assert.deepEqual(build({...input,policy:{baselineBars:100,minRelVol:999,wickFraction:0.99,maxBarsWithoutRetest:1}}),canonical);
+    assert.deepEqual(canonical.policy,RESEARCH_POLICY);
+  }
 });
