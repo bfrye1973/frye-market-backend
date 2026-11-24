@@ -1,0 +1,188 @@
+{
+  "capturedFrom": "GET /api/v1/dashboard-snapshot?symbol=ES (backend-1) after Engine 22 V8 (PR #380), trimmed to the fields Trader View reads",
+  "snapshotNow": "2026-11-24T06:48:47.177Z",
+  "engine22WaveStrategy": {
+    "currentPrice": 7272.5,
+    "tradeContextSummary": {
+      "headline": "POSSIBLE MINOR W5 UP COMPLETE — WATCH PULLBACK ENTRY ZONES",
+      "subheadline": "Possible Minor W5 up is marked complete. Watch pullback fib levels off the W5 high for reaction / entry zones.",
+      "topCandidate": 7648,
+      "hardInvalidation": 7484.5
+    },
+    "waveOpportunity": {
+      "degree": "minor",
+      "readiness": "WATCH",
+      "direction": "NONE"
+    },
+    "sevenDegreeInvalidations": {
+      "evaluationTime": "2026-11-24T06:48:40.162Z"
+    },
+    "degreeStates": {
+      "minute": {
+        "headline": "Minute W2 ABC pullback active — C-down watch from 7810.75",
+        "activeWave": "W2",
+        "direction": "DOWN"
+      }
+    },
+    "authorizedWorkingStructure": {
+      "schema": "engine22.authorizedWorkingStructure.v1",
+      "mode": "READ_ONLY",
+      "status": "COMPLETE_WORKING_SELECTION",
+      "publicationRevision": 8,
+      "selectionApprovalReference": "OWNER_20261123_CLEAR_MINOR_MINUTE_SUBMINUTE_MICRO_UP_CANDIDATE_SUBMICRO_UNRESOLVED",
+      "publishedAt": "2026-11-24T06:48:40.162Z",
+      "degreeOrder": [
+        "submicro",
+        "micro",
+        "subminute",
+        "minute",
+        "minor",
+        "intermediate",
+        "primary"
+      ],
+      "degrees": {
+        "submicro": {
+          "degree": "submicro",
+          "available": true,
+          "selectionStatus": "OWNER_SELECTED_WORKING",
+          "sourcePath": "currentWavelength.degrees.submicro.ownerRecountNov23V8",
+          "modelVersion": "engine22.ownerRecountNov23.v8.submicro",
+          "activeWave": "UNRESOLVED",
+          "direction": "NEUTRAL",
+          "stage": "CONSOLIDATION_UNRESOLVED",
+          "parentDegree": "micro",
+          "parentWave": "W1",
+          "completionConfirmed": false
+        },
+        "micro": {
+          "degree": "micro",
+          "available": true,
+          "selectionStatus": "OWNER_SELECTED_WORKING",
+          "sourcePath": "currentWavelength.degrees.micro.ownerRecountNov23V8",
+          "modelVersion": "engine22.ownerRecountNov23.v8.micro",
+          "activeWave": "W1",
+          "direction": "UP",
+          "stage": "W1_UP_CANDIDATE_UNCONFIRMED",
+          "parentDegree": "subminute",
+          "parentWave": "RECOUNT",
+          "completionConfirmed": false
+        },
+        "subminute": {
+          "degree": "subminute",
+          "available": true,
+          "selectionStatus": "OWNER_SELECTED_WORKING",
+          "sourcePath": "currentWavelength.degrees.subminute.ownerRecountNov23V8",
+          "modelVersion": "engine22.ownerRecountNov23.v8.subminute",
+          "activeWave": "RECOUNT",
+          "direction": "NEUTRAL",
+          "stage": "CURRENT_COUNT_CLEARED_RECOUNT_PENDING",
+          "parentDegree": "minute",
+          "parentWave": "RECOUNT",
+          "completionConfirmed": false
+        },
+        "minute": {
+          "degree": "minute",
+          "available": true,
+          "selectionStatus": "OWNER_SELECTED_WORKING",
+          "sourcePath": "currentWavelength.degrees.minute.ownerRecountNov23V8",
+          "modelVersion": "engine22.ownerRecountNov23.v8.minute",
+          "activeWave": "RECOUNT",
+          "direction": "NEUTRAL",
+          "stage": "CURRENT_COUNT_CLEARED_RECOUNT_PENDING",
+          "parentDegree": "minor",
+          "parentWave": "RECOUNT",
+          "completionConfirmed": false
+        },
+        "minor": {
+          "degree": "minor",
+          "available": true,
+          "selectionStatus": "OWNER_SELECTED_WORKING",
+          "sourcePath": "currentWavelength.degrees.minor.ownerRecountNov23V8",
+          "modelVersion": "engine22.ownerRecountNov23.v8.minor",
+          "activeWave": "RECOUNT",
+          "direction": "NEUTRAL",
+          "stage": "CURRENT_COUNT_CLEARED_RECOUNT_PENDING",
+          "parentDegree": "intermediate",
+          "parentWave": "W1",
+          "completionConfirmed": false
+        },
+        "intermediate": {
+          "degree": "intermediate",
+          "available": true,
+          "selectionStatus": "CANONICAL_DEGREE_STATE",
+          "sourcePath": "degreeStates.intermediate",
+          "activeWave": "W3",
+          "direction": "UP",
+          "stage": "ACTIVE",
+          "completionConfirmed": false
+        },
+        "primary": {
+          "degree": "primary",
+          "available": true,
+          "selectionStatus": "CANONICAL_DEGREE_STATE",
+          "sourcePath": "degreeStates.primary",
+          "activeWave": "W5",
+          "direction": "UP",
+          "stage": "ACTIVE",
+          "completionConfirmed": false
+        }
+      },
+      "pointInTimeAsOfAvailable": false,
+      "noExecution": true,
+      "noPermissionCreated": true,
+      "noWaveTransition": true
+    },
+    "currentWavelength": {
+      "ownerWaveRoadmap": {
+        "schema": "engine22.ownerWaveRoadmap.v1",
+        "publicationType": "OWNER_WORKING_RESEARCH_ONLY",
+        "effectiveAtUtc": "2026-11-24T06:10:31Z",
+        "observedAtUtc": null,
+        "pointInTimeSourceVerified": false,
+        "priceBasisVerified": false,
+        "source": "OWNER_SELECTED_PIVOTS_2026_11_23_AND_ISSUE_378",
+        "primary": {
+          "activeWave": "W5",
+          "direction": "UP",
+          "stage": "OWNER_WORKING_UNCONFIRMED"
+        },
+        "intermediate": {
+          "activeWave": "W1",
+          "direction": "UP",
+          "stage": "W1_UP_DEVELOPING_CANDIDATE",
+          "completionConfirmed": false
+        },
+        "micro": {
+          "activeWave": "W1",
+          "direction": "UP",
+          "stage": "W1_UP_HIGH_CANDIDATE_UNCONFIRMED",
+          "observedReferenceHigh": {
+            "price": 7313.25,
+            "dateAz": "2026-11-23",
+            "timeAz": null,
+            "verified": false
+          },
+          "startingLow": null,
+          "endingHigh": null,
+          "completionConfirmed": false,
+          "alternatives": [
+            "W1_STILL_DEVELOPING",
+            "W2_DOWN_CORRECTIVE_STRUCTURE_STARTED"
+          ]
+        },
+        "submicro": {
+          "direction": "NEUTRAL",
+          "stage": "CONSOLIDATION_UNRESOLVED",
+          "alternatives": [
+            "INTERNAL_W4",
+            "MICRO_W2_START"
+          ]
+        },
+        "noExecution": true,
+        "noPermissionCreated": true,
+        "noWaveTransition": true,
+        "engine6ApprovalUnchanged": true
+      }
+    }
+  }
+}

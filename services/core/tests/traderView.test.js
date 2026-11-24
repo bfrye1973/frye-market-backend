@@ -297,6 +297,114 @@ test("route: missing or invalid snapshot -> 503, never a fake verdict", async ()
   }
 });
 
+/* ---------------- Engine 22: authorized count vs owner research ---------------- */
+
+const loadE22 = (f) => JSON.parse(fs.readFileSync(path.join(here, "fixtures/traderView", f), "utf8"));
+const E22_V7 = loadE22("live-2026-11-24T0631Z.engine22.json");
+const E22_V8 = loadE22("live-2026-11-24T0648Z.engine22-v8.json");
+function withE22(fx, mut, nowIso) {
+  const p = live();
+  node(p).engine22WaveStrategy = clone(fx.engine22WaveStrategy);
+  if (mut) mut(node(p).engine22WaveStrategy);
+  p.nowMs = Date.parse(nowIso || fx.snapshotNow);
+  p.snapshot.now = nowIso || fx.snapshotNow; // keep the rest of the payload LIVE
+  return p;
+}
+const fact = (sec, label) => (sec.facts.find((f) => f.label === label) || {}).value;
+
+test("E22 V8 live: cleared degrees, Micro W1 UP candidate, Submicro unresolved, plain English", () => {
+  const s = buildTraderView(withE22(E22_V8)).sections.structure;
+  assert.equal(s.status, "INFO");
+  assert.equal(s.label, "Minor, Minute and Subminute cleared (recount pending); Micro W1 UP candidate (unconfirmed); Submicro unresolved");
+  assert.equal(fact(s, "Micro"), "W1 UP candidate (unconfirmed)");
+  assert.equal(fact(s, "Submicro"), "Unresolved");
+  assert.equal(fact(s, "Minor / Minute / Subminute"), "Cleared (recount)");
+  assert.equal(fact(s, "Primary (research)"), "W5 UP (unconfirmed)");
+  assert.equal(fact(s, "Intermediate (research)"), "W1 UP candidate (unconfirmed)");
+  assert.match(s.plainEnglish, /Authorized count \(what Engine 6 and Engine 27 read, rev 8\)/);
+  assert.match(s.plainEnglish, /an UP candidate is not a LONG signal\. Engine 6 decides\./);
+  assert.doesNotMatch(s.label + s.plainEnglish, /POSSIBLE MINOR W5/);
+  // 7,313.25 stays a historical reference in details, never a fact or trigger
+  assert.equal(s.details.researchWaveContext.degrees.micro.observedReferenceHigh.price, 7313.25);
+  assert.equal(s.details.researchWaveContext.degrees.micro.observedReferenceHigh.verified, false);
+  assert.ok(!s.facts.some((f) => String(f.value).includes("7313") || String(f.value).includes("7,313")));
+  assert.equal(s.details.authorizedWaveContext.publicationRevision, 8);
+  assert.equal(s.details.authorizedWaveContext.stale, false);
+});
+
+test("E22 V8: micro/submicro agree with research; the Intermediate difference is reported, not hidden", () => {
+  const s = buildTraderView(withE22(E22_V8)).sections.structure;
+  // authorized Intermediate (canonical degreeStates) is W3 UP; research says W1 UP candidate
+  assert.equal(s.state, "RECONCILIATION_PENDING");
+  assert.deepEqual(s.details.reconciliation.conflicts.map((c) => c.degree), ["intermediate"]);
+  assert.match(s.plainEnglish, /Intermediate \(authorized W3 UP vs research W1 UP candidate \(unconfirmed\)\)/);
+  // when they agree on every shared degree -> IN_SYNC, no false pending
+  const synced = buildTraderView(withE22(E22_V8, (w) => {
+    w.authorizedWorkingStructure.degrees.intermediate = { ...w.authorizedWorkingStructure.degrees.intermediate, activeWave: "W1", stage: "W1_UP_DEVELOPING_CANDIDATE" };
+  })).sections.structure;
+  assert.equal(synced.state, "IN_SYNC");
+  assert.equal(synced.details.reconciliation.trackedIn, null);
+});
+
+test("E22 V7 (historical): old DOWN count vs research -> reconciliation pending at micro and submicro", () => {
+  const s = buildTraderView(withE22(E22_V7)).sections.structure;
+  assert.equal(s.state, "RECONCILIATION_PENDING");
+  assert.equal(fact(s, "Micro"), "C DOWN");
+  assert.equal(fact(s, "Submicro"), "W2 DOWN");
+  assert.deepEqual(s.details.reconciliation.conflicts.map((c) => c.degree).sort(), ["intermediate", "micro", "submicro"]);
+  assert.equal(s.details.authorizedWaveContext.publicationRevision, 7);
+  assert.equal(s.details.retiredHeadline.text, E22_V7.engine22WaveStrategy.tradeContextSummary.headline);
+});
+
+test("E22 revision is read, not hardcoded", () => {
+  const s = buildTraderView(withE22(E22_V8, (w) => { w.authorizedWorkingStructure.publicationRevision = 12; })).sections.structure;
+  assert.match(s.plainEnglish, /rev 12\)/);
+});
+
+test("E22 stale authorized count is flagged", () => {
+  const later = new Date(Date.parse(E22_V8.snapshotNow) + 40 * 60 * 1000).toISOString();
+  const p = withE22(E22_V8, null, later);
+  const s = buildTraderView(p).sections.structure;
+  assert.equal(s.details.authorizedWaveContext.stale, true);
+  assert.match(s.plainEnglish, /This count is stale \(published 40 min ago\)/);
+});
+
+test("E22 research never changes the verdict, pipeline or other sections; no execution/sizing fields", () => {
+  const base = buildTraderView(withE22(E22_V8));
+  const up = buildTraderView(withE22(E22_V8, (w) => {
+    w.currentWavelength.ownerWaveRoadmap.micro = { activeWave: "W3", direction: "UP", stage: "W3_UP_CONFIRMED", completionConfirmed: true };
+    w.authorizedWorkingStructure.degrees.micro = { ...w.authorizedWorkingStructure.degrees.micro, activeWave: "W3", stage: "W3_UP_ACTIVE", completionConfirmed: true };
+  }));
+  assert.equal(up.verdict.state, "NO_TRADE");
+  assert.deepEqual(up.verdict, base.verdict);
+  assert.deepEqual(up.pipeline, base.pipeline);
+  assert.deepEqual(up.checklist, base.checklist);
+  for (const k of ["location", "reaction", "participation", "permission"]) assert.deepEqual(up.sections[k], base.sections[k], k);
+  const txt = JSON.stringify(up.sections.structure);
+  assert.doesNotMatch(txt, /"(sizeMultiplier|paperAllowed|allowTrade|execute|placeOrder|ticket)"/);
+});
+
+test("E22 authorized missing -> RECOUNT_PENDING, research never promoted", () => {
+  const s = buildTraderView(withE22(E22_V8, (w) => { delete w.authorizedWorkingStructure; })).sections.structure;
+  assert.equal(s.state, "RECOUNT_PENDING");
+  assert.equal(fact(s, "Micro"), "Unknown");
+  assert.equal(fact(s, "Submicro"), "Unknown");
+  assert.match(s.label, /recount pending/i);
+});
+
+test("E22 both missing -> UNKNOWN; research missing -> no research facts", () => {
+  const unk = buildTraderView(withE22(E22_V8, (w) => { delete w.authorizedWorkingStructure; delete w.currentWavelength; })).sections.structure;
+  assert.equal(unk.state, "UNKNOWN");
+  assert.equal(unk.label, "Wave count unknown");
+  const noRes = buildTraderView(withE22(E22_V8, (w) => { delete w.currentWavelength; })).sections.structure;
+  assert.equal(noRes.state, "IN_SYNC");
+  assert.equal(fact(noRes, "Primary (research)"), undefined);
+});
+
+test("E22 dual context keeps the payload under 20 KB", () => {
+  assert.ok(Buffer.byteLength(JSON.stringify(buildTraderView(withE22(E22_V8)))) < 20 * 1024);
+});
+
 test("a 0 price upstream (not set) becomes null, never 0", () => {
   const p = live();
   delete node(p).engine26LocationCandidate.currentPrice;
