@@ -4,6 +4,7 @@ on:
     paths:
       - 'services/core/logic/engine3/v6/evaluateEngine3V6Phase1.js'
       - 'services/core/tests/engine3V6*.test.js'
+      - 'scripts/research/phaseC/**'
       - '.github/workflows/engine3-phase-c-reclaim-shadow.yml'
   workflow_dispatch:
 jobs:
@@ -20,6 +21,8 @@ jobs:
       - name: Verify shadow-only modules syntax
         run: |
           for file in logic/engine3/v6/*.js; do node --check "$file"; done
+      - name: Verify research comparator syntax
+        run: node --check ../../scripts/research/phaseC/runPhaseC.mjs
       - name: Run Phase C regression + Phase2/3 causal contracts
         run: |
           node --test \
@@ -31,4 +34,5 @@ jobs:
             tests/engine3V6Phase2Evidence.test.js \
             tests/engine3V6Phase3ResearchFixture.test.js \
             tests/engine3V6Phase3ResearchTrace.test.js \
-            tests/engine3V6Phase3Engine26Readiness.test.js
+            tests/engine3V6Phase3Engine26Readiness.test.js \
+            ../../scripts/research/phaseC/runPhaseC.test.mjs
