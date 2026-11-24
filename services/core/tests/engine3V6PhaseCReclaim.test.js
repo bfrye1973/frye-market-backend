@@ -104,3 +104,21 @@ test("retest outside episode or future bar does not create signal",()=>{
  const x=run(prior("LONG",7210.75),[bar(7215,7213.25,5*m,7217,7209)]);
  assert.equal(x.breakoutEdgeRetestHeldNow,false);
 });
+
+test("same candidate but different Engine26 zone resets old direction and breakout",()=>{
+ const old=prior("LONG",7210.75);
+ const x=run(old,[bar(7220,7223)],at,{zoneId:"NEW-ZONE"});
+ assert.equal(x.canonicalDirection,"NEUTRAL");
+ assert.equal(x.breakoutContext,null);
+ assert.equal(x.invalidatedNow,true);
+ assert.ok(x.reasonCodes.includes("CANDIDATE_OR_ZONE_IDENTITY_CHANGED"));
+});
+test("new Engine26 candidate with old neutral episode defers establishment one evaluation",()=>{
+ const old={...prior("LONG",7210.75),canonicalDirection:"NEUTRAL"};
+ const x=run(old,[],at,{candidateId:"NEW-CAND",
+ seedFromPhase2:{postActivationVerified:true,establishedNow:true,direction:"LONG",
+ reactionAnchor:7210,establishedAtMs:at-m}});
+ assert.equal(x.canonicalDirection,"NEUTRAL");
+ assert.equal(x.establishedNow,false);
+ assert.ok(x.reasonCodes.includes("CANDIDATE_OR_ZONE_IDENTITY_CHANGED"));
+});
