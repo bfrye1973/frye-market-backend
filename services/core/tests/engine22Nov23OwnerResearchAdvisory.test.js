@@ -37,3 +37,8 @@ test("Nov 23 research packet disappears when time is absent, historical or stale
    assert.equal(w.ownerResearchContext,null);
  }
 });
+
+test("ES-only owner research cannot leak into other market symbols",()=>{
+ const other=buildCurrentWavelength({symbol:"SPY",currentPrice:100,evaluationTimeMs:Date.parse("2026-11-23T23:00:00Z")});
+ assert.equal(other.ownerResearchContext,null);
+});
