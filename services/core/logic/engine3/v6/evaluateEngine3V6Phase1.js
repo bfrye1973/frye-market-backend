@@ -46,6 +46,14 @@ export function evaluateEngine3V6Phase1({
     (prev==="LONG"
       ?b.open<activeBreakout.edge&&b.close<activeBreakout.edge
       :b.open>activeBreakout.edge&&b.close>activeBreakout.edge)));
+  // A retest is an *observation*, never an Engine6 trade permission.
+  // It requires a prior independently attested completed-5m breakout and
+  // a later completed bar that probes the broken edge and closes outside.
+  const edgeRetestHeld=Boolean(activeBreakout&&!bodyReclaimed&&bars5.some(b=>
+    number(b.low)!==null&&number(b.high)!==null&&
+    (prev==="LONG"
+      ?b.low<=activeBreakout.edge&&b.close>activeBreakout.edge
+      :b.high>=activeBreakout.edge&&b.close<activeBreakout.edge)));
   const previousProgress=number(priorState?.progressExtreme);
   const priorProgressAt=number(priorState?.lastProgressAtMs);
   const directionExtremes=prev==="SHORT"
@@ -85,6 +93,7 @@ export function evaluateEngine3V6Phase1({
     establishedAtMs,lastEvaluatedAtMs:validTime,
     canonicalDirection:prev,convictionState:prev==="NEUTRAL"?"NEUTRAL":"HOLDING",
     breakoutContext:activeBreakout,breakoutBodyReclaimedNow:bodyReclaimed,
+    breakoutEdgeRetestHeldNow:edgeRetestHeld,
     invalidatedNow:false,establishedNow:false,reversedNow:false,
     deteriorationEvidenceVotes:votes,deterioratingSinceMs:deteriorationSince,
     evaluationTimeMs:validTime,observedControl,observedQuality,
@@ -131,7 +140,8 @@ export function evaluateEngine3V6Phase1({
   if(prev!=="NEUTRAL"){
     return {...base,canonicalDirection:prev,
       convictionState:deteriorating?"DETERIORATING":"HOLDING",
-      reasonCodes:reasons(deteriorating?"DIRECTION_HELD_WITH_DETERIORATION":"DIRECTION_HELD",
+      reasonCodes:reasons(edgeRetestHeld&&"BREAKOUT_EDGE_RETEST_HELD_COMPLETED_5M",
+        deteriorating?"DIRECTION_HELD_WITH_DETERIORATION":"DIRECTION_HELD",
         timedOut&&"DETERIORATION_TIMEOUT_DIAGNOSTIC_ONLY",
         observedDirection===opposite(prev)&&"OPPOSITE_CONTROL_NOT_AUTOMATIC_REVERSAL")};
   }
