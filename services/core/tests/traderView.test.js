@@ -404,3 +404,14 @@ test("E22 both missing -> UNKNOWN; research missing -> no research facts", () =>
 test("E22 dual context keeps the payload under 20 KB", () => {
   assert.ok(Buffer.byteLength(JSON.stringify(buildTraderView(withE22(E22_V8)))) < 20 * 1024);
 });
+
+test("a 0 price upstream (not set) becomes null, never 0", () => {
+  const p = live();
+  delete node(p).engine26LocationCandidate.currentPrice;
+  node(p).engine22WaveStrategy.currentPrice = 0;
+  p.snapshot.emaPosture.tenMinute.close = null;
+  const v = buildTraderView(p);
+  assert.equal(v.price, null);
+  assert.equal(v.checklist[1].done, false);
+  assert.deepEqual(v.sections.structure.details.displayWarnings, []);
+});

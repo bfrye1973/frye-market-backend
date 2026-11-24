@@ -480,7 +480,9 @@ export function buildTraderView({ snapshot = null, meter = null, nowMs = Date.no
   const node = snapshot?.strategies?.[TRADER_VIEW_STRATEGY] || null;
   const asOfMs = ms(snapshot?.now);
   const ageMs = asOfMs != null ? Math.max(0, nowMs - asOfMs) : null;
-  const price = n(node?.engine26LocationCandidate?.currentPrice) ?? n(node?.engine22WaveStrategy?.currentPrice) ?? n(snapshot?.emaPosture?.tenMinute?.close);
+  // A price of 0 (or below) means "not set" upstream (e.g. Engine 22 overnight); show unknown, never 0.
+  const px = (v) => { const x = n(v); return x != null && x > 0 ? x : null; };
+  const price = px(node?.engine26LocationCandidate?.currentPrice) ?? px(node?.engine22WaveStrategy?.currentPrice) ?? px(snapshot?.emaPosture?.tenMinute?.close);
 
   const location = buildLocation(node, price, nowMs);
   const reaction = buildReaction(node, nowMs);
