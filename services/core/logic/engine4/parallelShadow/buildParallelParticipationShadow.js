@@ -87,7 +87,11 @@ export function buildParallelParticipationShadow({
     const b = valid[i];
     if (b.t < authMs) continue;
     const intersects = b.l <= hi && b.h >= lo;
-    const fullFailure = (b.o < lo && b.c < lo) || (b.o > hi && b.c > hi);
+    const fullFailure = buyerEvidence && !sellerEvidence
+      ? b.o < lo && b.c < lo
+      : sellerEvidence && !buyerEvidence
+      ? b.o > hi && b.c > hi
+      : (b.o < lo && b.c < lo) || (b.o > hi && b.c > hi);
     if (episode && (fullFailure || (i - episode.lastTouchIndex >= P.maxBarsWithoutRetest))) {
       trace.push({ event:"EPISODE_END", barTimeMs:b.t, reason:fullFailure?"FULL_ZONE_FAILURE":"NO_RETEST_24_BARS" });
       episode = null; buyerEvidence = false; sellerEvidence = false; signals = [];
