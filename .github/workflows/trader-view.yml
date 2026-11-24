@@ -1,0 +1,42 @@
+name: Trader View v1 backend
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/traderView/**"
+      - "services/core/routes/traderView.js"
+      - "services/core/tests/traderView.test.js"
+      - "services/core/tests/fixtures/traderView/**"
+      - "services/core/server.js"
+      - ".github/workflows/trader-view.yml"
+  push:
+    branches:
+      - trader-view-v1-backend
+  workflow_dispatch:
+jobs:
+  trader-view:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install runtime dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Verify syntax
+        run: |
+          node --check services/core/logic/traderView/buildTraderView.js
+          node --check services/core/routes/traderView.js
+          node --check services/core/server.js
+      - name: Trader View tests
+        run: node --test services/core/tests/traderView.test.js
+      - name: Display-only guard (no engine files changed vs main)
+        run: |
+          git fetch origin main
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          echo "$CHANGED"
+          BAD=$(echo "$CHANGED" | grep -v -E '^(services/core/logic/traderView/|services/core/routes/traderView\.js|services/core/tests/traderView\.test\.js|services/core/tests/fixtures/traderView/|services/core/server\.js|\.github/workflows/trader-view\.yml)' || true)
+          if [ -n "$BAD" ]; then echo "Files outside Trader View scope changed:"; echo "$BAD"; exit 1; fi
