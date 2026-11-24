@@ -2,7 +2,12 @@
 // This object is intentionally versioned and dated. Price ranges are screenshot-derived and
 // must never be mistaken for current, broker-qualified market data or an Engine 6 trade signal.
 export const OWNER_NOV23_RESEARCH_SCHEMA="engine22.ownerNov23ResearchContext.v1";
-export function buildOwnerNov23ResearchContextV1() {
+export function buildOwnerNov23ResearchContextV1({evaluationTimeMs=null}={}) {
+  // A fixed screenshot must not silently become a permanent "current" wave call.
+  // Unknown clocks, earlier Replay, and dates after Nov 23 AZ fail closed.
+  const t=Number(evaluationTimeMs);
+  if (!Number.isFinite(t) || t < Date.parse("2026-11-23T22:00:00Z") ||
+      t >= Date.parse("2026-11-24T07:00:00Z")) return null;
   return {
     schema:OWNER_NOV23_RESEARCH_SCHEMA,
     status:"RESEARCH_ONLY",
