@@ -17,7 +17,7 @@ function completed(bars,timeframe,evaluationTimeMs){
 export function buildEngine3V6Phase1Shadow({
  priorState=null,v5=null,candidateId=null,zoneId=null,
  bars1m=[],bars5m=[],evaluationTimeMs=null,openTradeActive=false,
- lockedTradeDirection="NEUTRAL",policy=null,
+ lockedTradeDirection="NEUTRAL",policy=null,breakoutContext=null,
  causalControl=null,phase2Evidence=null,
 }={}){
  // Phase2 must use the same eligible post-activation windows for EVERYTHING:
@@ -96,6 +96,7 @@ export function buildEngine3V6Phase1Shadow({
      :v5?.evidence?.priceAction?.quality??"WEAK",
    completed1m:scopedOne,completed5m:scopedFive,evaluationTimeMs,
    seedFromV5:seed,openTradeActive,lockedTradeDirection,policy,
+   breakoutContext,
    evidence:{noProgress,highOverlap:overlap!==null&&overlap>=0.60,
      opposingReaction:observedOpposing,completed5mAbsorption:completedAbsorption},
  });
