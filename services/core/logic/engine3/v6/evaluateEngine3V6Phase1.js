@@ -16,7 +16,7 @@ export function evaluateEngine3V6Phase1({
 }={}){
   const prev=dir(priorState?.canonicalDirection);
   const lock=dir(lockedTradeDirection);
-  const sameCandidate=Boolean(candidateId&&priorState?.candidateId===candidateId);
+  const sameCandidate=Boolean(candidateId&&zoneId&&priorState?.candidateId===candidateId&&priorState?.zoneId===zoneId);
   const validTime=number(evaluationTimeMs);
   const anchor=number(priorState?.reactionAnchor)??number(reactionAnchor);
   const establishedAtMs=number(priorState?.establishedAtMs);
@@ -122,11 +122,11 @@ export function evaluateEngine3V6Phase1({
       deterioratingSinceMs:priorState?.deterioratingSinceMs??null,
       reasonCodes:["DUPLICATE_OR_REWOUND_EVALUATION_IGNORED"]};
   }
-  if(prev!=="NEUTRAL"&&!sameCandidate){
+  if(priorState?.candidateId&&!sameCandidate){
     return {...base,canonicalDirection:"NEUTRAL",convictionState:"INVALIDATED",
       invalidatedNow:true,invalidatedAtMs:validTime,deterioratingSinceMs:null,
       breakoutContext:null,
-      reasonCodes:["CANDIDATE_IDENTITY_CHANGED","OPPOSITE_ESTABLISHMENT_DEFERRED"]};
+      reasonCodes:["CANDIDATE_OR_ZONE_IDENTITY_CHANGED","CANDIDATE_IDENTITY_CHANGED","OPPOSITE_ESTABLISHMENT_DEFERRED"]};
   }
   // Phase1: deterioration expiry is an observation, NEVER an invalidation cause.
   if(prev!=="NEUTRAL"&&(closed1||closed5||bodyReclaimed)){
