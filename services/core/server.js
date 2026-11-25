@@ -63,6 +63,7 @@ import engine29CrossMarketStressRouter from "./routes/engine29CrossMarketStress.
 import engine29ReceiptVerifyRouter from "./routes/engine29ReceiptVerify.js";
 import { runEngine29OneShotReceiptAudit } from "./logic/engine29/runOneShotReceiptAudit.js";
 import engine28APipelineDoctorRouter from "./routes/engine28APipelineDoctor.js";
+import { makeTradeInvestigatorRouter } from "./routes/tradeInvestigator.js";
 import engine6ENoTradeFunnelRouter from "./routes/engine6ENoTradeFunnel.js";
 import executionStateRouter from "./routes/executionState.js";
 import engine26ManualHardSignalRouter from "./routes/engine26ManualHardSignal.js";
@@ -225,6 +226,8 @@ app.use("/api/v1", engine29CrossMarketStressRouter);
 app.use("/api/v1", engine29ReceiptVerifyRouter);
 app.use("/api/v1", engine27MicroAlignmentHistoryRouter);
 app.use("/api/v1", engine28APipelineDoctorRouter);
+// Engine 12 Trade Investigator: GET-only, read-only, off unless TRADE_INVESTIGATOR_ENABLED=true.
+app.use("/api/v1", makeTradeInvestigatorRouter());
 app.use("/api/v1", engine6ENoTradeFunnelRouter);
 app.use("/api/v1/execution-state", executionStateRouter);
 app.use("/api/v1", engine26ManualHardSignalRouter);
