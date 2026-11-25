@@ -10,6 +10,8 @@ on:
       - 'services/core/logic/engine18/engine18RithmicRenderTestServer.js'
       - 'services/core/tests/engine18RithmicDboBook.test.js'
       - 'services/core/tests/engine18RithmicPaperDboProbe.test.js'
+      - 'services/core/logic/engine18/engine18RithmicPaperHistoryReplay.js'
+      - 'services/core/tests/engine18RithmicPaperHistoryReplay.test.js'
       - '.github/workflows/engine18-rithmic-paper-step-a.yml'
 jobs:
   offline:
@@ -23,7 +25,7 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - run: node --check services/core/logic/engine18/engine18RithmicPaperProbe.js
       - run: node --check services/core/logic/engine18/engine18RithmicPaperRenderServer.js
-      - run: node --test services/core/tests/engine18RithmicPaperProbe.test.js services/core/tests/engine18RithmicDboBook.test.js services/core/tests/engine18RithmicPaperDboProbe.test.js
+      - run: node --test services/core/tests/engine18RithmicPaperProbe.test.js services/core/tests/engine18RithmicDboBook.test.js services/core/tests/engine18RithmicPaperDboProbe.test.js services/core/tests/engine18RithmicPaperHistoryReplay.test.js
       - run: node --check services/core/logic/engine18/engine18RithmicRenderTestServer.js
       # Existing Test-system suites must stay green (shared helpers are imported, not changed).
       - run: node --test services/core/tests/engine18RithmicTestProbe.test.js services/core/tests/engine18RithmicConformanceTest.test.js services/core/tests/engine18RithmicDboEntitlementProbe.test.js

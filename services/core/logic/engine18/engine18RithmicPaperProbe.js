@@ -126,14 +126,15 @@ export function selectGateway({gateways,preferredName=null,pinnedUri=null}){
 }
 
 // --- session messages ---
-export function encodePaperLogin({user,password}){
+export function encodePaperLogin({user,password},infraType=1){
+ if(infraType!==1&&infraType!==3)throw Error('TICKER_PLANT(1) or HISTORY_PLANT(3) only');
  if(typeof user!=='string'||!user||typeof password!=='string'||!password)
   throw Error('Rithmic Paper credentials required');
  // aggregated_quotes (153644) intentionally NOT sent: un-aggregated feed required.
  return Buffer.concat([num(F.templateId,TEMPLATES.login),str(F.templateVersion,'5.55'),
   str(F.user,user),str(F.password,password),str(F.appName,PAPER_APP_NAME),
   str(F.appVersion,'0.1.0'),str(F.systemName,PAPER_SYSTEM_NAME),
-  num(F.infraType,1)]); // TICKER_PLANT
+  num(F.infraType,infraType)]); // 1=TICKER_PLANT, 3=HISTORY_PLANT
 }
 export function parsePaperLogin(frame){
  const f=decodeFields(frame);
