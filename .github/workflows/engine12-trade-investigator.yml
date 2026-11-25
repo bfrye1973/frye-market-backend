@@ -32,7 +32,7 @@ jobs:
           for f in logic/investigator/*.js; do node --check "$f"; done
       - name: Trade Investigator tests
         working-directory: services/core
-        run: node --test tests/tradeInvestigatorCore.test.js tests/tradeInvestigatorJoins.test.js tests/tradeInvestigatorRoute.test.js tests/tradeInvestigatorFixtureExport.test.js tests/tradeInvestigatorRealNov24.test.js
+        run: node --test tests/tradeInvestigatorCore.test.js tests/tradeInvestigatorJoins.test.js tests/tradeInvestigatorRoute.test.js tests/tradeInvestigatorFixtureExport.test.js tests/tradeInvestigatorRealNov24.test.js tests/tradeInvestigatorSession.test.js
       - name: Related existing tests
         working-directory: services/core
         run: node --test tests/engine28APipelineDoctor.test.js tests/engine12Engine27ReplayPreservation.test.js
