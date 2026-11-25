@@ -126,14 +126,15 @@ export function selectGateway({gateways,preferredName=null,pinnedUri=null}){
 }
 
 // --- session messages ---
-export function encodePaperLogin({user,password}){
+export function encodePaperLogin({user,password},infraType=1){
+ if(infraType!==1&&infraType!==3)throw Error('TICKER_PLANT(1) or HISTORY_PLANT(3) only');
  if(typeof user!=='string'||!user||typeof password!=='string'||!password)
   throw Error('Rithmic Paper credentials required');
  // aggregated_quotes (153644) intentionally NOT sent: un-aggregated feed required.
  return Buffer.concat([num(F.templateId,TEMPLATES.login),str(F.templateVersion,'5.55'),
   str(F.user,user),str(F.password,password),str(F.appName,PAPER_APP_NAME),
   str(F.appVersion,'0.1.0'),str(F.systemName,PAPER_SYSTEM_NAME),
-  num(F.infraType,1)]); // TICKER_PLANT
+  num(F.infraType,infraType)]); // 1=TICKER_PLANT, 3=HISTORY_PLANT
 }
 export function parsePaperLogin(frame){
  const f=decodeFields(frame);
@@ -272,6 +273,53 @@ async function discoverGatewaysWithLogin({WebSocketImpl,url,user,password,timeou
  })}finally{clearTimeout(timer);closeQuietly(ws)}
 }
 
+// Steps 1-3: discover and validate the Paper gateway. Mutates r.discovery / r.gateway*.
+// Returns {ok:true,gateway} or {ok:false,reason}. Paper credentials are never used here.
+export async function discoverPaperGateway({cfg,WebSocketImpl=WebSocket,discoveryGateway=DISCOVERY_GATEWAY,
+ discoveryTimeoutMs=8000,sent,r,status=()=>{}}){
+ if(cfg.discoveryUri)discoveryGateway=cfg.discoveryUri;
+ const fail=reason=>({ok:false,reason});
+ // 1) Unauthenticated system list on the known vendor gateway.
+ let sys;
+ try{sys=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeSystemInfoRequest(),
+  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
+ catch(e){return fail('SYSTEM_INFO_'+e.message)}
+ r.discovery.paperListedOnDiscoveryGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
+ r.discovery.mode=cfg.unauthDiscovery?'UNAUTHENTICATED_MULTI_SYSTEM_HOST':'TEST_LOGIN_ON_KIT_GATEWAY';
+ r.discovery.host=new URL(discoveryGateway).hostname;
+ let gi;
+ if(cfg.unauthDiscovery){
+  // 2a) Multi-system host must itself list Paper; ask 20 with no credentials.
+  if(!r.discovery.paperListedOnDiscoveryGateway)return fail('PAPER_SYSTEM_NOT_LISTED');
+  try{gi=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeGatewayInfoRequest(),
+   expect:TEMPLATES.gatewayInfoResp,decode:parseGatewayInfo,timeoutMs:discoveryTimeoutMs,sent})}
+  catch(e){return fail('GATEWAY_INFO_'+e.message)}
+ }else{
+  // 2b) Kit gateway: a Test gateway may list just its own system; 21 is the authority.
+  if(!sys.systems.includes('Rithmic Test'))return fail('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
+  status('DISCOVERY_LOGIN');
+  try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
+   password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
+  catch(e){return fail(e.message)}
+ }
+ r.discovery.gatewayInfoRpCode=gi.rpCode;
+ if(!gi.accepted)return fail('GATEWAY_INFO_REJECTED');
+ if(gi.systemName!==null&&gi.systemName!==PAPER_SYSTEM_NAME)return fail('GATEWAY_INFO_SYSTEM_MISMATCH');
+ const sel=selectGateway({gateways:gi.gateways,preferredName:cfg.gatewayName,pinnedUri:cfg.pinnedUri});
+ r.discovery.gatewayNames=sel.names;r.discovery.rejectedGatewayNames=sel.rejected;
+ if(!sel.ok)return fail(sel.reason);
+ r.gatewaySource=sel.source;r.gatewayName=sel.gateway.name;r.gatewayHost=new URL(sel.gateway.uri).hostname;
+
+ // 3) Confirm the selected gateway itself lists the Paper system.
+ try{sys=await requestOnce({WebSocketImpl,url:sel.gateway.uri,request:encodeSystemInfoRequest(),
+  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
+ catch(e){r.gatewaySource=null;return fail('SELECTED_SYSTEM_INFO_'+e.message)}
+ r.discovery.paperListedOnSelectedGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
+ if(!r.discovery.paperListedOnSelectedGateway){r.gatewaySource=null;return fail('PAPER_NOT_LISTED_ON_SELECTED_GATEWAY')}
+
+ return {ok:true,gateway:sel.gateway};
+}
+
 // --- Step A orchestration ---
 export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  durationMs=MAX_STEP_A_MS,discoveryGateway=DISCOVERY_GATEWAY,now=Date.now,
@@ -280,7 +328,6 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
- if(cfg.discoveryUri)discoveryGateway=cfg.discoveryUri;
  const r={schema:'engine18.rithmicPaperStepA.v1',readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
@@ -293,43 +340,9 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
   return {...r,...evaluateStepA(r)}};
  const status=p=>{r.phase=p;onStatus({phase:p})};
 
- // 1) Unauthenticated system list on the known vendor gateway.
- let sys;
- try{sys=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeSystemInfoRequest(),
-  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
- catch(e){return stop('SYSTEM_INFO_'+e.message)}
- r.discovery.paperListedOnDiscoveryGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
- r.discovery.mode=cfg.unauthDiscovery?'UNAUTHENTICATED_MULTI_SYSTEM_HOST':'TEST_LOGIN_ON_KIT_GATEWAY';
- r.discovery.host=new URL(discoveryGateway).hostname;
- let gi;
- if(cfg.unauthDiscovery){
-  // 2a) Multi-system host must itself list Paper; ask 20 with no credentials.
-  if(!r.discovery.paperListedOnDiscoveryGateway)return stop('PAPER_SYSTEM_NOT_LISTED');
-  try{gi=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeGatewayInfoRequest(),
-   expect:TEMPLATES.gatewayInfoResp,decode:parseGatewayInfo,timeoutMs:discoveryTimeoutMs,sent})}
-  catch(e){return stop('GATEWAY_INFO_'+e.message)}
- }else{
-  // 2b) Kit gateway: a Test gateway may list just its own system; 21 is the authority.
-  if(!sys.systems.includes('Rithmic Test'))return stop('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
-  status('DISCOVERY_LOGIN');
-  try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
-   password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
-  catch(e){return stop(e.message)}
- }
- r.discovery.gatewayInfoRpCode=gi.rpCode;
- if(!gi.accepted)return stop('GATEWAY_INFO_REJECTED');
- if(gi.systemName!==null&&gi.systemName!==PAPER_SYSTEM_NAME)return stop('GATEWAY_INFO_SYSTEM_MISMATCH');
- const sel=selectGateway({gateways:gi.gateways,preferredName:cfg.gatewayName,pinnedUri:cfg.pinnedUri});
- r.discovery.gatewayNames=sel.names;r.discovery.rejectedGatewayNames=sel.rejected;
- if(!sel.ok)return stop(sel.reason);
- r.gatewaySource=sel.source;r.gatewayName=sel.gateway.name;r.gatewayHost=new URL(sel.gateway.uri).hostname;
-
- // 3) Confirm the selected gateway itself lists the Paper system.
- try{sys=await requestOnce({WebSocketImpl,url:sel.gateway.uri,request:encodeSystemInfoRequest(),
-  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
- catch(e){r.gatewaySource=null;return stop('SELECTED_SYSTEM_INFO_'+e.message)}
- r.discovery.paperListedOnSelectedGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
- if(!r.discovery.paperListedOnSelectedGateway){r.gatewaySource=null;return stop('PAPER_NOT_LISTED_ON_SELECTED_GATEWAY')}
+ const disc=await discoverPaperGateway({cfg,WebSocketImpl,discoveryGateway,discoveryTimeoutMs,sent,r,status});
+ if(!disc.ok)return stop(disc.reason);
+ const sel={gateway:disc.gateway};
 
  // 4) One session socket: login, heartbeat, subscribe, bounded window, unsubscribe, logout.
  status('AUTHENTICATING');

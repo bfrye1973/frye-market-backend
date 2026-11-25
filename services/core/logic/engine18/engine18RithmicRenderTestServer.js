@@ -6,6 +6,7 @@ import {probeRithmicTest} from './engine18RithmicTestProbe.js';
 import {probeRithmicDbo} from './engine18RithmicDboEntitlementProbe.js';
 import {runConformance} from './engine18RithmicConformanceTest.js';
 import {runPaperStepA} from './engine18RithmicPaperProbe.js';
+import {runPaperHistoryReplay} from './engine18RithmicPaperHistoryReplay.js';
 const port=Number(process.env.PORT||10000);
 const host='0.0.0.0';
 const status={phase:'STARTING',readOnly:true,attempts:0,completed:false,connected:false};
@@ -20,6 +21,20 @@ const app=http.createServer((req,res)=>{
 app.listen(port,host,()=>{
  console.log('RITHMIC_TEST_SERVICE_READY readOnly=true noRecorder=true noTrading=true');
  // Paper Step A (read-only BBO/LastTrade, <=120s). Takes precedence and runs alone.
+ if(process.env.RITHMIC_PAPER_CONNECT_ENABLED==='YES'&&process.env.RITHMIC_PAPER_HISTORY_ENABLED==='YES'){
+  if(status.attempts++)return;
+  status.phase='PAPER_HISTORY_RUNNING';
+  console.log('RITHMIC_PAPER_HISTORY_START readOnly=true plant=HISTORY trading=false recording=false');
+  runPaperHistoryReplay({onStatus:s=>{status.phase='PAPER_HISTORY_'+s.phase}}).then(r=>{
+   const {minutes,...rest}=r;status.phase='PAPER_HISTORY_'+r.stopReason;
+   console.log('RITHMIC_PAPER_HISTORY_RESULT '+JSON.stringify(rest));
+   for(let i=0;i<(minutes||[]).length;i+=30)
+    console.log('RITHMIC_PAPER_HISTORY_MINUTES '+i+' '+JSON.stringify(minutes.slice(i,i+30)));
+  }).catch(e=>{status.phase='PAPER_HISTORY_FAILED';
+   const m=e?.message||'';console.log('RITHMIC_PAPER_HISTORY_FAILED '+(/disabled|missing|window|level/.test(m)?m.replace(/[^\w ,<=>()\/.-]/g,''):'sanitized'))})
+   .finally(()=>{status.completed=true;status.connected=false});
+  return;
+ }
  if(process.env.RITHMIC_PAPER_CONNECT_ENABLED==='YES'){
   if(status.attempts++)return;
   status.phase='PAPER_STEP_A_RUNNING';
