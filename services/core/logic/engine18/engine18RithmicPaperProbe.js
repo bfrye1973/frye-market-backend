@@ -69,11 +69,17 @@ export function verifyPaperEnvironment(env){
  if(gatewayName!==null&&!/^[A-Za-z0-9 ._()-]{1,64}$/.test(gatewayName))
   throw Error('invalid gateway name');
  const pinnedUri=env.RITHMIC_PAPER_GATEWAY_URI?normalizeGatewayUri(env.RITHMIC_PAPER_GATEWAY_URI):null;
+ // Discovery host. Default = Test kit gateway (serves only Rithmic Test, so it needs a Test
+ // login and may still refuse 20). A multi-system rprotocol host (validated *.rithmic.com:443)
+ // can be named instead; it is queried WITHOUT credentials.
+ const discoveryUri=env.RITHMIC_PAPER_DISCOVERY_URI?normalizeGatewayUri(env.RITHMIC_PAPER_DISCOVERY_URI):null;
+ const unauthDiscovery=discoveryUri!==null&&discoveryUri!==RITHMIC_TEST_ENDPOINT;
  // Discovery-only login on the Test system. Never used for the Paper session.
  const discoveryUser=env.RITHMIC_TEST_USER,discoveryPassword=env.RITHMIC_TEST_PASSWORD;
- if(!discoveryUser||!discoveryPassword)
+ if(!unauthDiscovery&&(!discoveryUser||!discoveryPassword))
   throw Error('missing discovery login (RITHMIC_TEST_USER/RITHMIC_TEST_PASSWORD on Rithmic Test)');
- return {user,password,symbol,exchange:'CME',gatewayName,pinnedUri,discoveryUser,discoveryPassword};
+ return {user,password,symbol,exchange:'CME',gatewayName,pinnedUri,discoveryUri,unauthDiscovery,
+  discoveryUser,discoveryPassword};
 }
 
 // Accepts 'host.rithmic.com:443' or 'wss://host.rithmic.com:443'. Rejects anything
@@ -274,6 +280,7 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
+ if(cfg.discoveryUri)discoveryGateway=cfg.discoveryUri;
  const r={schema:'engine18.rithmicPaperStepA.v1',readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
@@ -291,16 +298,24 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  try{sys=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeSystemInfoRequest(),
   expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
  catch(e){return stop('SYSTEM_INFO_'+e.message)}
- // Recorded only: a Test gateway may list just its own system; 21 is the authority.
  r.discovery.paperListedOnDiscoveryGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
- if(!sys.systems.includes('Rithmic Test'))return stop('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
-
- // 2) Log in to Rithmic Test (discovery only), ask gateways for 'Rithmic Paper Trading', log out.
- status('DISCOVERY_LOGIN');
+ r.discovery.mode=cfg.unauthDiscovery?'UNAUTHENTICATED_MULTI_SYSTEM_HOST':'TEST_LOGIN_ON_KIT_GATEWAY';
+ r.discovery.host=new URL(discoveryGateway).hostname;
  let gi;
- try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
-  password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
- catch(e){return stop(e.message)}
+ if(cfg.unauthDiscovery){
+  // 2a) Multi-system host must itself list Paper; ask 20 with no credentials.
+  if(!r.discovery.paperListedOnDiscoveryGateway)return stop('PAPER_SYSTEM_NOT_LISTED');
+  try{gi=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeGatewayInfoRequest(),
+   expect:TEMPLATES.gatewayInfoResp,decode:parseGatewayInfo,timeoutMs:discoveryTimeoutMs,sent})}
+  catch(e){return stop('GATEWAY_INFO_'+e.message)}
+ }else{
+  // 2b) Kit gateway: a Test gateway may list just its own system; 21 is the authority.
+  if(!sys.systems.includes('Rithmic Test'))return stop('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
+  status('DISCOVERY_LOGIN');
+  try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
+   password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
+  catch(e){return stop(e.message)}
+ }
  r.discovery.gatewayInfoRpCode=gi.rpCode;
  if(!gi.accepted)return stop('GATEWAY_INFO_REJECTED');
  if(gi.systemName!==null&&gi.systemName!==PAPER_SYSTEM_NAME)return stop('GATEWAY_INFO_SYSTEM_MISMATCH');

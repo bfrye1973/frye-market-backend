@@ -222,3 +222,20 @@ test('rejects unbounded window before network',async()=>{
  await assert.rejects(runPaperStepA({env:{},WebSocketImpl:FakeWS}),/disabled/);
  assert.equal(log.sockets.length,0);
 });
+
+test('unauthenticated discovery on a multi-system rprotocol host: no credentials to discovery',async()=>{
+ const DE='wss://rprotocol-de.rithmic.com:443';
+ const {FakeWS,log}=fakeFactory((ws,id)=>{
+  if(ws.url===DE){if(id===16)ws.reply(sysInfo(['Rithmic 01',PAPER_SYSTEM_NAME]));
+   if(id===20)ws.reply(gwInfo([{name:'Chicago Area',uri:'paper-chi.rithmic.com:443'},
+    {name:'Europe',uri:'rprotocol-ie.rithmic.com:443'}]));return}
+  happy({streamFrames:[bbo(6800,6800.25),trade(6800.25)]})(ws,id)});
+ const env={...ENV,RITHMIC_PAPER_DISCOVERY_URI:'rprotocol-de.rithmic.com:443',RITHMIC_PAPER_GATEWAY_NAME:'Chicago Area'};
+ delete env.RITHMIC_TEST_USER;delete env.RITHMIC_TEST_PASSWORD;
+ const r=await runPaperStepA({env,WebSocketImpl:FakeWS,durationMs:1000});
+ assert.deepEqual(log.sockets,[DE,DE,GW,GW]);
+ assert.deepEqual(r.sentTemplates,[16,20,16,10,18,100,100,12]);
+ assert.equal(r.discovery.mode,'UNAUTHENTICATED_MULTI_SYSTEM_HOST');
+ assert.ok(!log.sends.filter(s=>s.url===DE).some(s=>s.id===10||s.bytes.includes(Buffer.from('paper-secret-y'))));
+ assert.equal(r.gatewayName,'Chicago Area');assert.equal(r.authenticated,true);
+});
