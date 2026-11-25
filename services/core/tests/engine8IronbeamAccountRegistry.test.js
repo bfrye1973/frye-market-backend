@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {STRATEGIES,reconcileIronbeamAccounts,normalizeIronbeamBalance} from '../logic/trading/ironbeam/engine8IronbeamAccountRegistry.js';
+const mapping=STRATEGIES.map((strategy,i)=>({strategy,accountId:'TEST'+i}));
+const info={status:'OK',isLive:true,accounts:mapping.map(x=>x.accountId)};
+test('seven unique accounts, no execution',()=>{const r=reconcileIronbeamAccounts(info,mapping);assert.equal(r.ok,true);assert.equal(r.accounts.length,7);assert.ok(r.accounts.every(x=>x.broker==='IRONBEAM'&&!x.executionEnabled));});
+test('wrong environment',()=>assert.equal(reconcileIronbeamAccounts({...info,isLive:false},mapping).ok,false));
+test('duplicate discovery',()=>assert.equal(reconcileIronbeamAccounts({...info,accounts:[...info.accounts,info.accounts[0]]},mapping).ok,false));
+test('missing account',()=>assert.equal(reconcileIronbeamAccounts({...info,accounts:info.accounts.slice(1)},mapping).ok,false));
+test('duplicate mapping',()=>assert.equal(reconcileIronbeamAccounts(info,[...mapping.slice(0,6),mapping[0]]).ok,false));
+test('zero not unknown',()=>{const r=normalizeIronbeamBalance({accountId:'TEST0',cashBalance:0},'TEST0');assert.equal(r.cashBalance,0);assert.equal(r.availableMargin,null);});
+test('missing or invalid cash rejected',()=>{for(const cashBalance of [null,undefined,'0',NaN])assert.equal(normalizeIronbeamBalance({accountId:'TEST0',cashBalance},'TEST0').ok,false);});
+test('wrong account and error rejected',()=>{assert.equal(normalizeIronbeamBalance({accountId:'TEST1',cashBalance:0},'TEST0').ok,false);assert.equal(normalizeIronbeamBalance({status:'ERROR',accountId:'TEST0',cashBalance:0},'TEST0').ok,false);});
