@@ -10,9 +10,11 @@ import {discoverPaperGateway,verifyPaperEnvironment,encodePaperLogin,parsePaperL
 import {encodeConformanceHeartbeat} from './engine18RithmicConformanceTest.js';
 import {decodeFields} from './engine18RithmicTestProbe.js';
 import {createFlowReader} from './engine18FlowReader.js';
+import {createLiquidityMap,referenceCandidates,profileCandidates,provenCandidates} from './engine18LiquidityMap.js';
 
 export const HISTORY_SEND_ALLOWLIST=Object.freeze([10,12,16,18,20,202]);
 export const MAX_SECOND_BARS_SPAN=9900; // stays under the server's 10,000-record cap
+export const MAX_MINUTE_BARS_SPAN=9900*60;
 const F={templateId:154467,rq:132764,rp:132766,symbol:110100,exchange:110101,barType:119200,
  period:119112,start:153002,finish:153003,direction:149253,timeOrder:149307,marker:119100,
  trades:119109,volume:119110,bidVol:119117,askVol:119118,open:100019,close:100021,high:100012,low:100013};
@@ -28,16 +30,19 @@ export function verifyHistoryEnvironment(env){
  if(env.RITHMIC_PAPER_HISTORY_ENABLED!=='YES')throw Error('Rithmic Paper history replay disabled');
  const start=Number(env.RITHMIC_PAPER_HISTORY_START),end=Number(env.RITHMIC_PAPER_HISTORY_END);
  const level=env.RITHMIC_PAPER_HISTORY_LEVEL===undefined?null:Number(env.RITHMIC_PAPER_HISTORY_LEVEL);
- if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||end<=start||end-start>MAX_SECOND_BARS_SPAN)
-  throw Error('history window must be Unix seconds, end>start, span<=9900s');
+ const barUnit=(env.RITHMIC_PAPER_HISTORY_BAR||'SECOND').toUpperCase();
+ if(barUnit!=='SECOND'&&barUnit!=='MINUTE')throw Error('history bar must be SECOND or MINUTE');
+ const maxSpan=barUnit==='MINUTE'?MAX_MINUTE_BARS_SPAN:MAX_SECOND_BARS_SPAN;
+ if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||end<=start||end-start>maxSpan)
+  throw Error('history window must be Unix seconds, end>start, span<=9900 bars');
  if(level!==null&&(!Number.isFinite(level)||Math.abs(level/0.25-Math.round(level/0.25))>1e-9))
   throw Error('level must be an ES tick price');
- return {...cfg,start,end,level};
+ return {...cfg,start,end,level,barUnit};
 }
-export function encodeSecondBarReplay({symbol,exchange,start,end}){
+export function encodeSecondBarReplay({symbol,exchange,start,end,barUnit='SECOND'}){
  if(!/^ES[HMUZ]\d$/.test(symbol)||exchange!=='CME')throw Error('ES/CME only');
  return Buffer.concat([num(F.templateId,202),str(F.symbol,symbol),str(F.exchange,exchange),
-  num(F.barType,1),num(F.period,1),num(F.start,start),num(F.finish,end),
+  num(F.barType,barUnit==='MINUTE'?2:1),num(F.period,1),num(F.start,start),num(F.finish,end),
   num(F.direction,1),num(F.timeOrder,1)]); // SECOND_BAR x1, FIRST, FORWARDS
 }
 export function parseTimeBar(frame){
@@ -151,6 +156,32 @@ export async function runPaperHistoryReplay({env=process.env,WebSocketImpl=WebSo
   // The final, possibly incomplete minute is excluded.
   const reader=createFlowReader();const complete=r.minutes.filter(m=>m.t+60<=cfg.end);
   r.flowReads=complete.map(m=>reader.onMinute(m)).filter(x=>x.reads.length)
-   .map(x=>({time:x.time,price:x.price,reads:x.reads.map(q=>q.type+(q.level!=null?'@'+q.level:'')+': '+q.read)}));}
+   .map(x=>({time:x.time,price:x.price,reads:x.reads.map(q=>q.type+(q.level!=null?'@'+q.level:'')+': '+q.read)}));
+  r.liquidityMap=replayLiquidityMap(complete);}
  return r;
+}
+
+// Point-in-time Liquidity Map checkpoints over a replay: every checkpoint uses only minutes up to it.
+const RTH_OPEN_UTC_MIN=14*60+30;
+export function replayLiquidityMap(minutes,{everyMin=30}={}){
+ const reader=createFlowReader();
+ const map=createLiquidityMap({staleSec:{PROFILE:everyMin*60+60}});
+ const rth=[];let sessionOpen=null;const out=[];
+ minutes.forEach((m,i)=>{
+  const snap=reader.onMinute(m);
+  if(Math.floor((m.t%86400)/60)>=RTH_OPEN_UTC_MIN){rth.push(m);if(sessionOpen===null)sessionOpen=m.o}
+  const t=m.t+60;
+  for(const c of provenCandidates(snap))map.add('PROVEN',{...c,t});
+  const isCheckpoint=(t%(everyMin*60)===0)||i===minutes.length-1;
+  if(!isCheckpoint||rth.length<30)return;
+  const pc=profileCandidates(rth,{t});
+  for(const c of pc.candidates)map.add('PROFILE',{...c,t});
+  for(const c of referenceCandidates({t,price:m.c,sessionOpen}))map.add('REFERENCE',{...c,t});
+  const ev=map.evaluate({t,price:m.c,airPockets:pc.airPockets});
+  out.push({time:new Date((t-7*3600)*1000).toISOString().slice(11,16)+' MST',price:m.c,
+   lines:ev.drawn.map(d=>({side:d.side,price:d.price,strength:d.strength,sources:d.sourceTypes,
+    labels:Object.values(d.evidence).flatMap(e=>e.labels),state:d.state,airPocketsBetween:d.airPocketsBetween})),
+   noLineReason:ev.noLineReason});
+ });
+ return out;
 }
