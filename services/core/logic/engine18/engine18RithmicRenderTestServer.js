@@ -26,7 +26,8 @@ app.listen(port,host,()=>{
   status.phase='PAPER_HISTORY_RUNNING';
   console.log('RITHMIC_PAPER_HISTORY_START readOnly=true plant=HISTORY trading=false recording=false');
   runPaperHistoryReplay({onStatus:s=>{status.phase='PAPER_HISTORY_'+s.phase}}).then(r=>{
-   const {minutes,flowReads,...rest}=r;status.phase='PAPER_HISTORY_'+r.stopReason;
+   const {minutes,flowReads,liquidityMap,...rest}=r;status.phase='PAPER_HISTORY_'+r.stopReason;
+   for(const cp of liquidityMap||[])console.log('RITHMIC_PAPER_HISTORY_MAP '+JSON.stringify(cp));
    for(let i=0;i<(flowReads||[]).length;i+=25)
     console.log('RITHMIC_PAPER_HISTORY_FLOWREADS '+i+' '+JSON.stringify(flowReads.slice(i,i+25)));
    console.log('RITHMIC_PAPER_HISTORY_RESULT '+JSON.stringify(rest));
