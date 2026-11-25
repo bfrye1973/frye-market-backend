@@ -6,6 +6,7 @@ import {probeRithmicTest} from './engine18RithmicTestProbe.js';
 import {probeRithmicDbo} from './engine18RithmicDboEntitlementProbe.js';
 import {runConformance} from './engine18RithmicConformanceTest.js';
 import {runPaperStepA} from './engine18RithmicPaperProbe.js';
+import {runPaperDboStepB} from './engine18RithmicPaperDboProbe.js';
 const port=Number(process.env.PORT||10000);
 const host='0.0.0.0';
 const status={phase:'STARTING',readOnly:true,attempts:0,completed:false,connected:false};
@@ -23,12 +24,15 @@ app.listen(port,host,()=>{
  if(process.env.RITHMIC_PAPER_CONNECT_ENABLED==='YES'){
   if(status.attempts++)return;
   status.phase='PAPER_STEP_A_RUNNING';
-  console.log('RITHMIC_PAPER_STEP_A_START readOnly=true trading=false recording=false');
-  runPaperStepA({onStatus:s=>{status.phase='PAPER_'+s.phase;status.connected=s.phase==='STREAMING'}})
-   .then(r=>{status.phase='PAPER_'+r.verdict;console.log('RITHMIC_PAPER_STEP_A_RESULT '+JSON.stringify(r))})
+  const dbo=process.env.RITHMIC_PAPER_DBO_ENABLED==='YES';
+  const label=dbo?'RITHMIC_PAPER_DBO':'RITHMIC_PAPER_STEP_A';
+  console.log(label+'_START readOnly=true trading=false recording=false');
+  const onStatus=s=>{status.phase='PAPER_'+s.phase;status.connected=s.phase==='STREAMING'};
+  (dbo?runPaperDboStepB({onStatus}):runPaperStepA({onStatus}))
+   .then(r=>{status.phase='PAPER_'+r.verdict;console.log(label+'_RESULT '+JSON.stringify(r))})
    .catch(e=>{status.phase='PAPER_FAILED';
     const disabled=/disabled|missing/.test(e?.message||'');
-    console.log('RITHMIC_PAPER_STEP_A_FAILED '+(disabled?(e.message.match(/\(([A-Z_/]+)\)/)?.[1]||'CONFIG'):'sanitized'))})
+    console.log(label+'_FAILED '+(disabled?(e.message.match(/\(([A-Z_/]+)\)/)?.[1]||'CONFIG'):'sanitized'))})
    .finally(()=>{status.completed=true;status.connected=false});
   return;
  }

@@ -38,7 +38,7 @@ const F=Object.freeze({...PROTOCOL_FIELDS,rqHandlerRpCode:132764,gatewayName:153
  gatewayUri:153641,symbol:110100,exchange:110101,request:100000,updateBits:154211,
  presenceBits:149138,clearBits:154571,isSnapshot:110121,bidPrice:100022,bidSize:100030,
  bidSize64:159000,askPrice:100025,askSize:100031,askSize64:159002,tradePrice:100006,
- tradeSize:100178,tradeSize64:159008,aggressor:112003,ssboe:150100});
+ tradeSize:100178,tradeSize64:159008,aggressor:112003,ssboe:150100,usecs:150101});
 const UPDATE_BITS={LAST_TRADE:1,BBO:2};
 
 // --- protobuf wire helpers (same encoding as the conformance module) ---
@@ -152,13 +152,15 @@ export const encodeLogout=()=>num(F.templateId,TEMPLATES.logout);
 
 // --- inbound market data ---
 const size=(f,k64,k32)=>int(f,k64)??int(f,k32);
+// Gateway timestamp in microseconds (ssboe*1e6+usecs; < 2^53 until year 2255) or null.
+const gwTs=f=>{const a=int(f,F.ssboe),b=int(f,F.usecs);return a===null?null:a*1e6+(b??0)};
 export function parseInbound(frame){
  const f=decodeFields(frame),id=first(f,F.templateId);
  if(id===TEMPLATES.bbo)return {kind:'BBO',presence:int(f,F.presenceBits),clear:int(f,F.clearBits),
   snapshot:int(f,F.isSnapshot)===1,bid:dbl(f,F.bidPrice),bidSize:size(f,F.bidSize64,F.bidSize),
-  ask:dbl(f,F.askPrice),askSize:size(f,F.askSize64,F.askSize)};
- if(id===TEMPLATES.lastTrade)return {kind:'TRADE',snapshot:int(f,F.isSnapshot)===1,
-  price:dbl(f,F.tradePrice),size:size(f,F.tradeSize64,F.tradeSize),aggressor:int(f,F.aggressor)};
+  ask:dbl(f,F.askPrice),askSize:size(f,F.askSize64,F.askSize),ts:gwTs(f)};
+ if(id===TEMPLATES.lastTrade)return {kind:'TRADE',presence:int(f,F.presenceBits),snapshot:int(f,F.isSnapshot)===1,
+  price:dbl(f,F.tradePrice),size:size(f,F.tradeSize64,F.tradeSize),aggressor:int(f,F.aggressor),ts:gwTs(f)};
  if(id===TEMPLATES.heartbeatResp)return {kind:'HEARTBEAT',accepted:okCodes(strings(f,F.rpCode))||!strings(f,F.rpCode).length};
  if(id===TEMPLATES.marketDataResp){const c=strings(f,F.rpCode);
   return {kind:'SUBSCRIPTION',accepted:okCodes(c),rpCode:safeCode(c[0])}}
@@ -172,8 +174,11 @@ export function parseInbound(frame){
 const onTick=p=>Math.abs(p/ES_TICK-Math.round(p/ES_TICK))<1e-6;
 export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
  const s={startMs:null,endMs:null,bbo:0,bboSnapshots:0,trades:0,tradeSnapshots:0,
-  tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
-  spreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},nonTickPrices:0,
+  lastTradeNonTradeUpdates:0,tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
+  spreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},
+  // Synchronized = both sides' latest values carry the SAME gateway timestamp (same event).
+  syncedSpreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},syncedObservations:0,
+  oneSidedBboUpdates:0,bidTs:null,askTs:null,nonTickPrices:0,
   outOfRangePrices:0,minTrade:null,maxTrade:null,bid:null,ask:null,last:null,samples:[],nextSampleMs:null};
  const price=p=>{if(p===null)return;if(!onTick(p))s.nonTickPrices++;if(p<1000||p>20000)s.outOfRangePrices++};
  return {
@@ -182,12 +187,21 @@ export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
    const t=now();
    if(m.kind==='BBO'){
     s.bbo++;if(m.snapshot)s.bboSnapshots++;
-    if(m.clear&1)s.bid=null;if(m.clear&2)s.ask=null;
-    if(m.bid!==null){price(m.bid);s.bid=m.bid}if(m.ask!==null){price(m.ask);s.ask=m.ask}
+    if(m.clear&1){s.bid=null;s.bidTs=null}if(m.clear&2){s.ask=null;s.askTs=null}
+    const hasBid=m.bid!=null&&(m.presence==null||(m.presence&1)!==0);
+    const hasAsk=m.ask!=null&&(m.presence==null||(m.presence&2)!==0);
+    if(hasBid){price(m.bid);s.bid=m.bid;s.bidTs=m.ts??null}
+    if(hasAsk){price(m.ask);s.ask=m.ask;s.askTs=m.ts??null}
+    if(hasBid!==hasAsk)s.oneSidedBboUpdates++;
+    const bucket=(h,k)=>{if(k<=0)h.lockedOrCrossed++;else if(k===1)h.one++;else if(k===2)h.two++;else h.threePlus++};
     if(s.bid!==null&&s.ask!==null){s.twoSided++;const k=Math.round((s.ask-s.bid)/ES_TICK);
-     if(k<=0)s.spreadTicks.lockedOrCrossed++;else if(k===1)s.spreadTicks.one++;
-     else if(k===2)s.spreadTicks.two++;else s.spreadTicks.threePlus++;}
+     bucket(s.spreadTicks,k);
+     const synced=(hasBid&&hasAsk)||(s.bidTs!==null&&s.bidTs===s.askTs);
+     if(synced){s.syncedObservations++;bucket(s.syncedSpreadTicks,k)}}
    }else if(m.kind==='TRADE'){
+    // presence bit LAST_TRADE(1) marks an actual trade; other LastTrade messages carry
+    // only volume / net change / VWAP updates and are not trades.
+    if(m.presence!==null&&m.presence!==undefined&&(m.presence&1)===0){s.lastTradeNonTradeUpdates++;return}
     s.trades++;if(m.snapshot)s.tradeSnapshots++;
     if(m.price!==null){price(m.price);s.last=m.price;
      s.minTrade=s.minTrade===null?m.price:Math.min(s.minTrade,m.price);
@@ -201,10 +215,11 @@ export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
     s.nextSampleMs+=sampleEveryMs;}
   },
   finish(){s.endMs=now();const secs=Math.max(1,(s.endMs-s.startMs)/1000);
-   const {nextSampleMs,...out}=s;
+   const {nextSampleMs,bidTs,askTs,...out}=s;
    return {...out,observedMs:s.endMs-s.startMs,
     bboPerSec:Math.round(s.bbo/secs*100)/100,tradesPerSec:Math.round(s.trades/secs*100)/100,
-    oneTickShare:s.twoSided?Math.round(s.spreadTicks.one/s.twoSided*1000)/1000:null};}
+    oneTickShare:s.twoSided?Math.round(s.spreadTicks.one/s.twoSided*1000)/1000:null,
+    syncedOneTickShare:s.syncedObservations?Math.round(s.syncedSpreadTicks.one/s.syncedObservations*1000)/1000:null};}
  };
 }
 export function evaluateStepA(r){
@@ -217,8 +232,9 @@ export function evaluateStepA(r){
   fullWindow:r.stopReason==='WINDOW_COMPLETE',
   bboRateOver1PerSec:(m.bboPerSec??0)>1,
   tradesPresent:(m.trades??0)>0,
-  mostlyOneTickSpread:(m.oneTickShare??0)>=0.8,
-  noLockedOrCrossed:(m.spreadTicks?.lockedOrCrossed??1)===0,
+  // Judged only on synchronized two-sided observations (>=30 needed); threshold unchanged.
+  mostlyOneTickSpread:(m.syncedObservations??0)>=30&&(m.syncedOneTickShare??0)>=0.8,
+  noLockedOrCrossed:(m.syncedSpreadTicks?.lockedOrCrossed??1)===0,
   pricesTickAligned:(m.nonTickPrices??1)===0&&(m.outOfRangePrices??1)===0,
  };
  const pass=Object.values(checks).every(Boolean);
@@ -272,6 +288,53 @@ async function discoverGatewaysWithLogin({WebSocketImpl,url,user,password,timeou
  })}finally{clearTimeout(timer);closeQuietly(ws)}
 }
 
+// Steps 1-3: discover and validate the Paper gateway. Mutates r.discovery / r.gateway*.
+// Returns {ok:true,gateway} or {ok:false,reason}. Paper credentials are never used here.
+export async function discoverPaperGateway({cfg,WebSocketImpl=WebSocket,discoveryGateway=DISCOVERY_GATEWAY,
+ discoveryTimeoutMs=8000,sent,r,status=()=>{}}){
+ if(cfg.discoveryUri)discoveryGateway=cfg.discoveryUri;
+ const fail=reason=>({ok:false,reason});
+ // 1) Unauthenticated system list on the known vendor gateway.
+ let sys;
+ try{sys=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeSystemInfoRequest(),
+  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
+ catch(e){return fail('SYSTEM_INFO_'+e.message)}
+ r.discovery.paperListedOnDiscoveryGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
+ r.discovery.mode=cfg.unauthDiscovery?'UNAUTHENTICATED_MULTI_SYSTEM_HOST':'TEST_LOGIN_ON_KIT_GATEWAY';
+ r.discovery.host=new URL(discoveryGateway).hostname;
+ let gi;
+ if(cfg.unauthDiscovery){
+  // 2a) Multi-system host must itself list Paper; ask 20 with no credentials.
+  if(!r.discovery.paperListedOnDiscoveryGateway)return fail('PAPER_SYSTEM_NOT_LISTED');
+  try{gi=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeGatewayInfoRequest(),
+   expect:TEMPLATES.gatewayInfoResp,decode:parseGatewayInfo,timeoutMs:discoveryTimeoutMs,sent})}
+  catch(e){return fail('GATEWAY_INFO_'+e.message)}
+ }else{
+  // 2b) Kit gateway: a Test gateway may list just its own system; 21 is the authority.
+  if(!sys.systems.includes('Rithmic Test'))return fail('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
+  status('DISCOVERY_LOGIN');
+  try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
+   password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
+  catch(e){return fail(e.message)}
+ }
+ r.discovery.gatewayInfoRpCode=gi.rpCode;
+ if(!gi.accepted)return fail('GATEWAY_INFO_REJECTED');
+ if(gi.systemName!==null&&gi.systemName!==PAPER_SYSTEM_NAME)return fail('GATEWAY_INFO_SYSTEM_MISMATCH');
+ const sel=selectGateway({gateways:gi.gateways,preferredName:cfg.gatewayName,pinnedUri:cfg.pinnedUri});
+ r.discovery.gatewayNames=sel.names;r.discovery.rejectedGatewayNames=sel.rejected;
+ if(!sel.ok)return fail(sel.reason);
+ r.gatewaySource=sel.source;r.gatewayName=sel.gateway.name;r.gatewayHost=new URL(sel.gateway.uri).hostname;
+
+ // 3) Confirm the selected gateway itself lists the Paper system.
+ try{sys=await requestOnce({WebSocketImpl,url:sel.gateway.uri,request:encodeSystemInfoRequest(),
+  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
+ catch(e){r.gatewaySource=null;return fail('SELECTED_SYSTEM_INFO_'+e.message)}
+ r.discovery.paperListedOnSelectedGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
+ if(!r.discovery.paperListedOnSelectedGateway){r.gatewaySource=null;return fail('PAPER_NOT_LISTED_ON_SELECTED_GATEWAY')}
+
+ return {ok:true,gateway:sel.gateway};
+}
+
 // --- Step A orchestration ---
 export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  durationMs=MAX_STEP_A_MS,discoveryGateway=DISCOVERY_GATEWAY,now=Date.now,
@@ -280,7 +343,6 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
- if(cfg.discoveryUri)discoveryGateway=cfg.discoveryUri;
  const r={schema:'engine18.rithmicPaperStepA.v1',readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
@@ -293,43 +355,9 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
   return {...r,...evaluateStepA(r)}};
  const status=p=>{r.phase=p;onStatus({phase:p})};
 
- // 1) Unauthenticated system list on the known vendor gateway.
- let sys;
- try{sys=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeSystemInfoRequest(),
-  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
- catch(e){return stop('SYSTEM_INFO_'+e.message)}
- r.discovery.paperListedOnDiscoveryGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
- r.discovery.mode=cfg.unauthDiscovery?'UNAUTHENTICATED_MULTI_SYSTEM_HOST':'TEST_LOGIN_ON_KIT_GATEWAY';
- r.discovery.host=new URL(discoveryGateway).hostname;
- let gi;
- if(cfg.unauthDiscovery){
-  // 2a) Multi-system host must itself list Paper; ask 20 with no credentials.
-  if(!r.discovery.paperListedOnDiscoveryGateway)return stop('PAPER_SYSTEM_NOT_LISTED');
-  try{gi=await requestOnce({WebSocketImpl,url:discoveryGateway,request:encodeGatewayInfoRequest(),
-   expect:TEMPLATES.gatewayInfoResp,decode:parseGatewayInfo,timeoutMs:discoveryTimeoutMs,sent})}
-  catch(e){return stop('GATEWAY_INFO_'+e.message)}
- }else{
-  // 2b) Kit gateway: a Test gateway may list just its own system; 21 is the authority.
-  if(!sys.systems.includes('Rithmic Test'))return stop('DISCOVERY_TEST_SYSTEM_NOT_LISTED');
-  status('DISCOVERY_LOGIN');
-  try{gi=await discoverGatewaysWithLogin({WebSocketImpl,url:discoveryGateway,user:cfg.discoveryUser,
-   password:cfg.discoveryPassword,timeoutMs:Math.max(discoveryTimeoutMs,10000),sent,out:r.discovery})}
-  catch(e){return stop(e.message)}
- }
- r.discovery.gatewayInfoRpCode=gi.rpCode;
- if(!gi.accepted)return stop('GATEWAY_INFO_REJECTED');
- if(gi.systemName!==null&&gi.systemName!==PAPER_SYSTEM_NAME)return stop('GATEWAY_INFO_SYSTEM_MISMATCH');
- const sel=selectGateway({gateways:gi.gateways,preferredName:cfg.gatewayName,pinnedUri:cfg.pinnedUri});
- r.discovery.gatewayNames=sel.names;r.discovery.rejectedGatewayNames=sel.rejected;
- if(!sel.ok)return stop(sel.reason);
- r.gatewaySource=sel.source;r.gatewayName=sel.gateway.name;r.gatewayHost=new URL(sel.gateway.uri).hostname;
-
- // 3) Confirm the selected gateway itself lists the Paper system.
- try{sys=await requestOnce({WebSocketImpl,url:sel.gateway.uri,request:encodeSystemInfoRequest(),
-  expect:TEMPLATES.systemInfoResp,decode:parseSystemInfo,timeoutMs:discoveryTimeoutMs,sent})}
- catch(e){r.gatewaySource=null;return stop('SELECTED_SYSTEM_INFO_'+e.message)}
- r.discovery.paperListedOnSelectedGateway=sys.systems.includes(PAPER_SYSTEM_NAME);
- if(!r.discovery.paperListedOnSelectedGateway){r.gatewaySource=null;return stop('PAPER_NOT_LISTED_ON_SELECTED_GATEWAY')}
+ const disc=await discoverPaperGateway({cfg,WebSocketImpl,discoveryGateway,discoveryTimeoutMs,sent,r,status});
+ if(!disc.ok)return stop(disc.reason);
+ const sel={gateway:disc.gateway};
 
  // 4) One session socket: login, heartbeat, subscribe, bounded window, unsubscribe, logout.
  status('AUTHENTICATING');

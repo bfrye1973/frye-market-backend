@@ -108,22 +108,27 @@ test('market data request is BBO|LAST_TRADE only; inbound decode supports 64- an
  assert.equal(decodeFields(encodeMarketDataRequest({symbol:'ESZ6',exchange:'CME',subscribe:false}))[100000][0],2);
  assert.throws(()=>encodeMarketDataRequest({symbol:'NQZ6',exchange:'CME',subscribe:true}));
  assert.deepEqual(parseInbound(bbo(6800,6800.25)),{kind:'BBO',presence:3,clear:null,snapshot:false,
-  bid:6800,bidSize:12,ask:6800.25,askSize:9});
+  bid:6800,bidSize:12,ask:6800.25,askSize:9,ts:null});
  const t32=parseInbound(frame(150,[dbl(100006,6800.5),num(100178,4),num(112003,2)]));
  assert.equal(t32.size,4);assert.equal(t32.aggressor,2);
  assert.equal(parseInbound(frame(77)).kind,'FORCED_LOGOUT');
 });
 
-test('summary: spread histogram, locked/crossed, tick alignment, merged one-sided BBO',()=>{
+test('summary: merged vs synchronized spreads, one-sided updates, tick alignment',()=>{
  let t=0;const s=createStepASummary({now:()=>t,sampleEveryMs:10000});s.start();
- s.observe({kind:'BBO',bid:6800,ask:6800.25,clear:null});t=500;
- s.observe({kind:'BBO',bid:null,ask:6800.5,clear:null});t=1000;  // ask-only update -> 2 ticks
- s.observe({kind:'BBO',bid:6800.5,ask:null,clear:null});t=1500; // locked
- s.observe({kind:'TRADE',price:6800.3,size:1,aggressor:1});t=2000;
+ s.observe({kind:'BBO',presence:3,bid:6800,ask:6800.25,clear:null,ts:100});t=500;   // synced 1 tick
+ s.observe({kind:'BBO',presence:2,bid:null,ask:6800.5,clear:null,ts:200});t=1000;   // ask-only: merged 2 ticks, NOT synced
+ s.observe({kind:'BBO',presence:1,bid:6800.25,ask:null,clear:null,ts:200});t=1200;  // bid same ts -> synced 1 tick
+ s.observe({kind:'BBO',presence:1,bid:6800.5,ask:null,clear:null,ts:300});t=1500;   // merged locked, not synced
+ s.observe({kind:'TRADE',presence:1,price:6800.3,size:1,aggressor:1});t=1800;
+ s.observe({kind:'TRADE',presence:8,price:null,size:null,aggressor:null});t=2000; // volume-only, not a trade
  const out=s.finish();
- assert.deepEqual(out.spreadTicks,{one:1,two:1,threePlus:0,lockedOrCrossed:1});
- assert.equal(out.nonTickPrices,1);assert.equal(out.trades,1);assert.equal(out.bboPerSec,1.5);
- assert.equal(out.samples.length,1);
+ assert.deepEqual(out.spreadTicks,{one:2,two:1,threePlus:0,lockedOrCrossed:1});
+ assert.deepEqual(out.syncedSpreadTicks,{one:2,two:0,threePlus:0,lockedOrCrossed:0});
+ assert.equal(out.syncedObservations,2);assert.equal(out.syncedOneTickShare,1);
+ assert.equal(out.oneSidedBboUpdates,3);
+ assert.equal(out.nonTickPrices,1);assert.equal(out.trades,1);assert.equal(out.lastTradeNonTradeUpdates,1);
+ assert.equal(out.bboPerSec,2);assert.equal(out.samples.length,1);
 });
 
 test('happy path: Test login discovery -> Paper login -> heartbeat -> subscribe -> window -> unsubscribe -> logout',async()=>{
