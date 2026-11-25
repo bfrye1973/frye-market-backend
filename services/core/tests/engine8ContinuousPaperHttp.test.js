@@ -160,9 +160,9 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     fs.mkdirSync(coreData,{recursive:true});
     fs.mkdirSync(flags.ENGINE8_PAPER_DATA_DIR,{recursive:true});
     fs.mkdirSync(flags.TRADE_JOURNAL_DIR,{recursive:true});
-    fs.writeFileSync(path.join(flags.ENGINE8_PAPER_DATA_DIR,"engine8-paper-acceptance-state.json"),
-      JSON.stringify({version:"engine8.paperAcceptanceState.v1",
-        acceptanceTradeCompleted:false,newPaperOrdersAllowed:true}));
+    // Nov25 regression: reproduce a genuinely missing legacy acceptance receipt.
+    const receiptPath=path.join(flags.ENGINE8_PAPER_DATA_DIR,"engine8-paper-acceptance-state.json");
+    assert.equal(fs.existsSync(receiptPath),false);
     const writeSnapshot=(candidateId)=>fs.writeFileSync(snapshotFile,JSON.stringify({
       ok:true,strategies:{"intraday_scalp@10m":{engine8PaperOrder:fixture(candidateId)}}
     }));
@@ -185,6 +185,21 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
       method:"POST",headers:{"content-type":"application/json"},body:"{}",
     });
     assert.equal(response.status,401,"untrusted HTTP caller cannot execute");
+
+    // Verify the actual durable-state reader (not merely the synthetic READY fixture).
+    const {getEngine8DuplicateState}=await import("../logic/trading/engine8DuplicateState.js");
+    const identity={strategyId:"intraday_scalp@10m",candidateId:"CAND-A",planId:"PLAN-CAND-A"};
+    process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED="0";
+    assert.equal(getEngine8DuplicateState(identity).acceptanceEligibility.allowed,false);
+    const noAuth=await runBridge({...flags,CORE_BASE_URL:base,ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"0"});
+    assert.notEqual(noAuth.code,0);
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,0);
+    assert.equal(fs.existsSync(receiptPath),false);
+    process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED="1";
+    const eligibility=getEngine8DuplicateState(identity).acceptanceEligibility;
+    assert.equal(eligibility.allowed,true);
+    assert.equal(eligibility.reason,"CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL");
+    console.log("NOV25_MISSING_RECEIPT_REGRESSION",JSON.stringify({receiptPresent:false,unauthorizedOrderCount:0,authorizedEligibility:eligibility.reason}));
 
     const a=await runBridge({...flags,CORE_BASE_URL:base});
     assert.equal(a.code,0,JSON.stringify(a.payload));
