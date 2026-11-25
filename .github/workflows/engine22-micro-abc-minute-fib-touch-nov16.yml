@@ -1,0 +1,28 @@
+name: Engine22 Micro ABC and Minute W2 Fib Touch Nov16
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js'
+      - 'services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js'
+      - 'services/core/tests/engine22MicroAbcMinuteW2TouchNov16.test.js'
+      - 'services/core/tests/engine22WorkingWaveNodesV1.test.js'
+      - '.github/workflows/engine22-micro-abc-minute-fib-touch-nov16.yml'
+permissions:
+  contents: read
+jobs:
+  micro-minute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Micro ABC and Minute W2 green-on-touch verification
+        run: |
+          node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+          node --check services/core/logic/engine22/wave/buildEngine22WorkingWaveNodesV1.js
+          node --check services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js
+          node --test services/core/tests/engine22MicroAbcMinuteW2TouchNov16.test.js services/core/tests/engine22WorkingWaveNodesV1.test.js

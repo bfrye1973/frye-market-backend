@@ -1,0 +1,19 @@
+name: Engine22 Subminute C Down Reconciliation
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/tests/engine22SubminuteCDownReconciliation.test.js"
+      - ".github/workflows/engine22-subminute-cdown.yml"
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --test services/core/tests/engine22SubminuteCDownReconciliation.test.js

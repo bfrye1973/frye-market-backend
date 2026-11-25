@@ -1,0 +1,20 @@
+name: Engine27 Live Cross Market Reactions
+on:
+  pull_request:
+    paths:
+      - "services/core/jobs/buildEngine27LiveCrossMarketReactionsV1.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine27LiveCrossMarketReactionsV1.test.js"
+      - ".github/workflows/engine27-live-crossmarket-reactions.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/core/tests/engine27LiveCrossMarketReactionsV1.test.js services/core/tests/engine27QualifiedReactionsV1.test.js
+      - run: |
+          node --check services/core/jobs/buildEngine27LiveCrossMarketReactionsV1.js
+          node --check services/core/jobs/buildStrategySnapshot.js

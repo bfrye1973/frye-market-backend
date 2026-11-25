@@ -1,0 +1,18 @@
+name: Engine25 Finlight REST Pause Guard
+on:
+  push:
+    branches: [engine25-finlight-rest-pause-20261117]
+  pull_request:
+    paths:
+      - services/core/jobs/updateEngine25NewsEvents.js
+      - services/core/tests/engine25FinlightRestPause.test.js
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine25FinlightRestPause.test.js
+      - run: node --check services/core/jobs/updateEngine25NewsEvents.js

@@ -1,0 +1,17 @@
+name: Engine27 Zone Reaction Evidence V1
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/crossMarket/detectZoneReactionsV1.js"
+      - "services/core/tests/engine27ZoneReactionsV1.test.js"
+      - ".github/workflows/engine27-zone-reactions-v1.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/core/tests/engine27ZoneReactionsV1.test.js
+      - run: node --check services/core/logic/engine27/crossMarket/detectZoneReactionsV1.js

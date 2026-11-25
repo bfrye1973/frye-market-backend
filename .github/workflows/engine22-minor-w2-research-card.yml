@@ -1,0 +1,20 @@
+name: Engine22 Minor W2 Research Card
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/tests/engine22MinorW2ResearchCardNov5.test.js"
+      - ".github/workflows/engine22-minor-w2-research-card.yml"
+  push:
+    branches:
+      - "engine22-minor-w2-card-research-20261105"
+jobs:
+  minor-card:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --test services/core/tests/engine22MinorW2ResearchCardNov5.test.js services/core/tests/engine22AuthorizedWorkingStructureV1.test.js

@@ -1,0 +1,20 @@
+name: Engine22 Submicro Oct27 owner W5
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js"
+      - "services/core/logic/engine22/wave/buildSevenDegreeInvalidationsV1.js"
+      - "services/core/tests/engine22SubmicroFiveUpOwnerOct27.test.js"
+      - ".github/workflows/engine22-submicro-five-up-owner.yml"
+permissions:
+  contents: read
+jobs:
+  submicro:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22SubmicroFiveUpOwnerOct27.test.js services/core/tests/engine22MicroOct27OwnerW1W2.test.js services/core/tests/engine22SubminuteDUpOwnerWorking.test.js

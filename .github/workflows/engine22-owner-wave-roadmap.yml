@@ -1,0 +1,23 @@
+name: Engine22 Owner Wave Roadmap and Engine6 Advisory
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/wave/buildOwnerWaveRoadmapV1.js'
+      - 'services/core/logic/engine22/wave/buildOwnerNov23ResearchContextV1.js'
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js'
+      - 'services/core/tests/engine22OwnerWaveRoadmapNov23.test.js'
+      - 'services/core/tests/engine22Nov23OwnerResearchAdvisory.test.js'
+      - '.github/workflows/engine22-owner-wave-roadmap.yml'
+jobs:
+  test-owner-wave-roadmap:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/wave/buildOwnerWaveRoadmapV1.js
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --check services/core/logic/engine6/6b-market-intelligence/buildEngine6AdvisoryContext.js
+      - run: node --test services/core/tests/engine22OwnerWaveRoadmapNov23.test.js services/core/tests/engine22Nov23OwnerResearchAdvisory.test.js services/core/tests/engine6EAdvisoryContext.test.js

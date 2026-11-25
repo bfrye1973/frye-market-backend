@@ -1,0 +1,31 @@
+name: Engine27 Authorized Sync Release Acceptance
+on:
+  push:
+    branches:
+      - engine27-authorized-sync-release-candidate-20261027
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/v2/**"
+      - "services/core/tests/engine27AuthorizedPublisherConsumerIntegration.test.js"
+      - ".github/workflows/engine27-authorized-sync-release-acceptance.yml"
+jobs:
+  producer-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fetch pinned Engine22H producer source for combined test only
+        run: |
+          git fetch origin fb9fc0f397aa2866e7bb307b8658ee9e3196d556 --depth=1
+          git show fb9fc0f397aa2866e7bb307b8658ee9e3196d556:services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js > services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js
+      - name: Cross-engine integration and legacy cards
+        run: node --test services/core/tests/engine27AuthorizedPublisherConsumerIntegration.test.js services/core/tests/engine27TraderIntelligenceV2.test.js
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine27/v2/buildWorkingSevenDegrees.js
+          node --check services/core/logic/engine27/v2/buildTraderIntelligenceV2.js
+          node --check services/core/logic/engine27/v2/readAuthorizedWorkingStructure.js

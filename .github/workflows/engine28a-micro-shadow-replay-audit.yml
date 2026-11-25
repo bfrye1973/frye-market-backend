@@ -1,0 +1,41 @@
+name: Engine28A Micro Shadow Replay Audit
+
+on:
+  push:
+    branches:
+      - engine22-micro-v2-shadow-audit
+  pull_request:
+    paths:
+      - "services/core/logic/engine28a/summarizeMicroTimingShadowSnapshots.js"
+      - "services/core/jobs/auditMicroTimingShadowReplay.js"
+      - "services/core/tests/engine28AMicroTimingShadowReplayAudit.test.js"
+      - ".github/workflows/engine28a-micro-shadow-replay-audit.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine28a/summarizeMicroTimingShadowSnapshots.js
+          node --check services/core/jobs/auditMicroTimingShadowReplay.js
+
+      - name: Replay-audit tests
+        run: |
+          node --test services/core/tests/engine28AMicroTimingShadowReplayAudit.test.js
+
+      - name: Acceptance shadow regression
+        run: |
+          node --test \
+            services/core/tests/engine28AMicroTimingAutomationShadow.test.js \
+            services/core/tests/engine26MicroTimingShadow.test.js

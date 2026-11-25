@@ -1,0 +1,19 @@
+name: Engine22 Subminute Owner D Up
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js"
+      - "services/core/tests/engine22SubminuteDUpOwnerWorking.test.js"
+      - ".github/workflows/engine22-subminute-d-up-owner.yml"
+permissions:
+  contents: read
+jobs:
+  subminute:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22SubminuteDUpOwnerWorking.test.js services/core/tests/engine22SubminuteCDownReconciliation.test.js services/core/tests/engine22MinuteW2OwnerTriangleHypothesisV1.test.js

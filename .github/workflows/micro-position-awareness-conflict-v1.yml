@@ -1,0 +1,44 @@
+name: Micro Position Awareness Conflict V1
+
+on:
+  push:
+    branches:
+      - micro-position-awareness-conflict-v1
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/microV2/buildMicroPositionContext.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine22MicroPositionContext.test.js"
+      - "services/core/tests/engine22MicroPositionContextWiring.test.js"
+      - ".github/workflows/micro-position-awareness-conflict-v1.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/buildMicroPositionContext.js
+          node --check services/core/jobs/buildStrategySnapshot.js
+
+      - name: Position-awareness tests
+        run: |
+          node --test             services/core/tests/engine22MicroPositionContext.test.js             services/core/tests/engine22MicroPositionContextWiring.test.js
+
+      - name: Existing Micro regressions
+        run: |
+          node --test             services/core/tests/engine22MicroNegotiatedMidlineConfluence.test.js             services/core/tests/engine22MicroConsistencyReplayV2.test.js             services/core/tests/engine22MicroProductionMigrationV2.test.js             services/core/tests/engine26MicroTimingShadow.test.js             services/core/tests/engine28AMicroTimingAutomationShadow.test.js
+
+      - name: Strategy1 ownership regressions
+        run: |
+          node --test             services/core/tests/engine26Strategy1DirectionRegression.test.js             services/core/tests/engine26BPipeline.test.js             services/core/tests/engine9Strategy1Phase8.test.js

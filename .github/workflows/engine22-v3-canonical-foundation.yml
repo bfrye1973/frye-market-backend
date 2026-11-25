@@ -1,0 +1,79 @@
+name: Engine22 V3 Canonical Foundation
+on:
+  push:
+    branches: [engine22-v3-canonical-foundation-20261011]
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/v3/**"
+      - "services/core/tests/engine22V3*.test.js"
+permissions:
+  contents: read
+jobs:
+  canonical-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check syntax
+        run: |
+          node --check services/core/logic/engine22/v3/canonicalStructure.js
+          node --check services/core/logic/engine22/v3/proposeSubmicroMigration.js
+          node --check services/core/logic/engine22/v3/evaluateWaveTransition.js
+      - name: Run V3 isolated unit tests
+        run: node --test services/core/tests/engine22V3*.test.js
+      - name: Produce isolated V3 snapshot proof
+        run: node services/core/tests/engine22V3SnapshotProof.js
+      - name: Preserve isolated snapshot proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-snapshot-proof
+          path: ${{ runner.temp }}/engine22-v3-snapshot-proof.json
+          if-no-files-found: error
+      - name: Read production ES snapshot endpoint without mutation
+        id: capture-es
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --max-time 35 \
+            --output "$RUNNER_TEMP/engine22-prod-es-snapshot.json" \
+            'https://frye-market-backend-1.onrender.com/api/v1/dashboard-snapshot?symbol=ES'
+          node --input-type=module -e '
+            import fs from "node:fs";import crypto from "node:crypto";
+            const p=process.env.RUNNER_TEMP+"/engine22-prod-es-snapshot.json";
+            const b=fs.readFileSync(p);
+            const obj=JSON.parse(b.toString("utf8"));
+            if(obj.symbol!=="ES" || !obj.strategies?.["intraday_scalp@10m"])throw Error("ES_STRATEGY_SNAPSHOT_INVALID");
+            const proof={source:"GET /api/v1/dashboard-snapshot?symbol=ES",capturedAt:new Date().toISOString(),
+              sha256:crypto.createHash("sha256").update(b).digest("hex"),bytes:b.length,
+              symbol:obj.symbol,hasEngine22:Boolean(obj.strategies["intraday_scalp@10m"].engine22WaveStrategy)};
+            fs.writeFileSync(process.env.RUNNER_TEMP+"/engine22-prod-capture-proof.json",JSON.stringify(proof,null,2));
+            console.log(JSON.stringify(proof));
+          '
+      - name: Preserve read-only production ES capture
+        if: steps.capture-es.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-production-es-readonly-capture
+          path: |
+            ${{ runner.temp }}/engine22-prod-es-snapshot.json
+            ${{ runner.temp }}/engine22-prod-capture-proof.json
+          if-no-files-found: error
+      - name: Checkout exact production baseline for comparison
+        uses: actions/checkout@v4
+        with:
+          ref: 9cee0f86682ea65e8182467c2049ec98b31643d0
+          path: _engine22_production_baseline
+      - name: Compare Engine22 outputs against exact production commit
+        env:
+          ENGINE22_BASE_CHECKOUT: ${{ github.workspace }}/_engine22_production_baseline
+        run: node services/core/tests/engine22V3ExactCommitCompare.js
+      - name: Preserve exact-commit comparison report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine22-v3-exact-commit-compare
+          path: ${{ runner.temp }}/engine22-v3-exact-commit-compare.json
+          if-no-files-found: warn

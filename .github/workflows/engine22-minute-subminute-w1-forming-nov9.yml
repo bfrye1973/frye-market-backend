@@ -1,0 +1,17 @@
+name: Engine22 Minute Subminute W1 Forming Nov9
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/tests/engine22MinuteSubminuteW1FormingNov9.test.js'
+      - '.github/workflows/engine22-minute-subminute-w1-forming-nov9.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --test services/core/tests/engine22MinuteSubminuteW1FormingNov9.test.js services/core/tests/engine22MinorW2CompleteW3Nov9.test.js services/core/tests/engine22MicroSubmicroRedegreeNov9.test.js

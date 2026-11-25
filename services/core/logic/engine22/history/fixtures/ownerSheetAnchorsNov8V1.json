@@ -1,0 +1,49 @@
+{
+  "schema":"engine22.ownerSheetAnchorSource.v1",
+  "workbookId":"1oLsBV4Hbzg-6jApd2k960XU_CTxmCQwAxFcot4yQKJc",
+  "capturedAsOf":"2026-11-08",
+  "description":"Bounded source-table snapshot from connected native Google Sheets. Not owner approval, no retroactive publication time, no chart plot eligibility.",
+  "columns":["degree","label","dateArizona","timeArizona","esPrice","sourceEvidence"],
+  "tabs":[
+    {"title":"Primary","sheetId":102,"rows":[
+      [2,"PRIMARY","W1 starting low","2020-04-02","08:00","3200","HISTORICAL UNCHANGED"],
+      [3,"PRIMARY","W1 ending high","2022-01-05","10:00","5620","HISTORICAL UNCHANGED"],
+      [4,"PRIMARY","W2 ending low","2022-10-12","09:00","4306","HISTORICAL UNCHANGED"],
+      [5,"PRIMARY","W3 ending high","2025-02-20","09:00","6487","HISTORICAL UNCHANGED"],
+      [6,"PRIMARY","W4 ending low","2025-04-09","07:00","5182","HISTORICAL UNCHANGED"]]},
+    {"title":"Intermediate","sheetId":103,"rows":[
+      [2,"INTERMEDIATE","W1 starting low","2025-04-08","07:00","5188.5","HISTORICAL UNCHANGED"],
+      [3,"INTERMEDIATE","W1 ending high","2026-01-28","10:00","7151","HISTORICAL UNCHANGED"],
+      [4,"INTERMEDIATE","W2 ending low","2026-03-30","03:00","6407","HISTORICAL UNCHANGED"]]},
+    {"title":"Minor Original Archive","sheetId":104,"rows":[
+      [2,"MINOR","W1 starting low","2026-03-30","17:00","6417","PREVIOUS MODEL"],
+      [3,"MINOR","W1 ending high","2026-04-10","08:00","6948.75","PREVIOUS MODEL"],
+      [4,"MINOR","W2 ending low","2026-04-12","15:00","6829","PREVIOUS MODEL"],
+      [5,"MINOR","W3 ending high","2026-06-02","19:00","7694.25","PREVIOUS MODEL"],
+      [6,"MINOR","W4 ending low","2026-07-29","13:30","7398","PREVIOUS MODEL"]]},
+    {"title":"Minor W1-W2 Proposed","sheetId":101,"rows":[
+      [2,"MINOR","W1 starting low","2026-04-30","17:00","6485","OWNER RESEARCH"],
+      [3,"MINOR","W1 ending high","2026-08-14","03:00","7901.75","OWNER RESEARCH"],
+      [4,"MINOR","W2 starting high","2026-08-14","03:00","7901.75","OWNER RESEARCH"],
+      [5,"MINOR","W2 observed low candidate","2026-11-05","UNKNOWN","7325","APPROXIMATE / NOT CONFIRMED"]]},
+    {"title":"Minute ABC Proposed","sheetId":107,"rows":[
+      [2,"MINUTE","A starting high","2026-08-14","07:00","7901.75","OWNER-SUPPLIED; differs from Minor W1 high time 03:00 — reconcile"],
+      [3,"MINUTE","A ending low","2026-09-16","11:00","7575.25","OWNER-SUPPLIED"],
+      [4,"MINUTE","B ending high","2026-10-11","22:00","7890.25","OWNER-CORRECTED B DATE: OCTOBER 11"],
+      [5,"MINUTE","C observed low candidate","2026-11-05","16:00","7322.25","PROVISIONAL — WAVE COMPLETION NOT CONFIRMED"]]},
+    {"title":"Subminute ABC Proposed","sheetId":108,"rows":[
+      [2,"SUBMINUTE","A starting high","2026-11-05","05:00","7735","OWNER HANDWRITTEN — RESEARCH; parent Minute C candidate"],
+      [3,"SUBMINUTE","A ending low","2026-11-05","08:00","7420","OWNER HANDWRITTEN — time slightly overwritten; review if needed"],
+      [4,"SUBMINUTE","B ending high","2026-11-05","08:20","7542","OWNER HANDWRITTEN — RESEARCH"],
+      [5,"SUBMINUTE","C ending low","UNKNOWN","UNKNOWN",null,"NOT SUPPLIED — developing/unconfirmed"]]},
+    {"title":"Micro W1-W2 Proposed","sheetId":109,"rows":[
+      [2,"MICRO","W1 starting low","2026-11-05","16:00","7321.75","OWNER-SUPPLIED — proposed Micro W1 UP"],
+      [3,"MICRO","W1 ending high","UNKNOWN","07:50","7469.75","OWNER-SUPPLIED — exact date not yet confirmed"],
+      [4,"MICRO","W2 developing low","UNKNOWN","UNKNOWN",null,"NOT CONFIRMED — blue scenario research"]]},
+    {"title":"Submicro ABC Proposed","sheetId":110,"rows":[
+      [2,"SUBMICRO","A starting high","2026-11-06","07:50","7469.75","OWNER-SUPPLIED — proposed ABC within Micro W2"],
+      [3,"SUBMICRO","A ending low","2026-11-06","10:50","7396.75","OWNER-SUPPLIED"],
+      [4,"SUBMICRO","B ending high","2026-11-06","12:30","7436.75","OWNER-SUPPLIED"],
+      [5,"SUBMICRO","C ending low","UNKNOWN","UNKNOWN",null,"NOT SUPPLIED — developing / unconfirmed"]]}
+  ]
+}

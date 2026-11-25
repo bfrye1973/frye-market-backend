@@ -1,0 +1,19 @@
+name: Engine22C Micro ABC Minute D
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/tests/engine22MicroAbcMinuteDWorkingV1.test.js"
+      - ".github/workflows/engine22c-micro-abc-minute-d.yml"
+permissions:
+  contents: read
+jobs:
+  micro-abc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --test services/core/tests/engine22MicroAbcMinuteDWorkingV1.test.js

@@ -1,0 +1,53 @@
+name: engine25-reconstructed-eod-shadow-once
+# trigger: breadth-state-refresh-2026-10-31
+# trigger: cap-universe-refresh-2026-10-31
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/engine25-reconstructed-eod-shadow-once.yml"
+jobs:
+  build_shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    env:
+      LIVE_BRANCH: data-live-eod
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Build daily source with reconstructed EOD shadow
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p data
+          python -u scripts/build_outlook_source_daily.py             --sectors-dir data/sectors             --days 90             --lookback-days 10             --out data/outlook_source_daily.json
+      - name: Build reconstructed EOD shadow artifact
+        env:
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          BACKEND_BASE: https://frye-market-backend-1.onrender.com
+        run: |
+          set -euo pipefail
+          python -u scripts/build_engine25_reconstructed_eod_detail.py             --source data/outlook_source_daily.json             --out /tmp/outlook_reconstructed_eod_shadow.json
+      - name: Publish shadow file without touching production EOD
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          git config user.name "actions-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git fetch origin "${LIVE_BRANCH}"
+          git checkout -B "${LIVE_BRANCH}" "origin/${LIVE_BRANCH}"
+          mkdir -p data
+          cp -f /tmp/outlook_reconstructed_eod_shadow.json data/outlook_reconstructed_eod_shadow.json
+          git add data/outlook_reconstructed_eod_shadow.json
+          git commit -m "Reconstructed EOD shadow $(date -u +'%Y-%m-%dT%H:%M:%SZ')" || echo "nothing to commit"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${REPO}.git"
+          git push origin "${LIVE_BRANCH}"

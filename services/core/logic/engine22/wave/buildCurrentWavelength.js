@@ -1,0 +1,1396 @@
+import {buildOwnerRecountDegreesV8} from "./buildOwnerRecountDegreesV8.js";
+import {buildOwnerWaveRoadmapV1} from "./buildOwnerWaveRoadmapV1.js";
+import {buildOwnerNov23ResearchContextV1} from "./buildOwnerNov23ResearchContextV1.js";
+import { buildMicroWaveSequence } from "./buildMicroWaveSequence.js";
+import { buildMicroFiveMinuteEvidence } from "./buildMicroFiveMinuteEvidence.js";
+// Engine 22C Phase 1 — Manager-locked wavelength intelligence.
+// READ_ONLY overlay: never feeds permissions, execution, or canonical wave-state mutations.
+// Micro W1 progression uses Manager-locked 7782.75 start; prior W3 high remains historical.
+const MICRO_TARGETS = [
+  ["e0382", "0.382", 7833.75],
+  ["e0500", "0.500", 7849.00],
+  ["e0618", "0.618", 7864.25],
+  ["e1000", "1.000", 7914.00],
+  ["e1272", "1.272", 7949.25],
+  ["e1618", "1.618", 7994.25],
+  ["e2000", "2.000", 8044.00],
+];
+// Explicit legacy-mark anchors are only used for manager-reviewed display projections.
+// These are not confirmation rules and never influence trade permissions.
+const WAVE_PROJECTION_RATIOS = [
+  ["e0382", "0.382", 0.382],
+  ["e0500", "0.500", 0.5],
+  ["e0618", "0.618", 0.618],
+  ["e1000", "1.000", 1],
+  ["e1272", "1.272", 1.272],
+  ["e1618", "1.618", 1.618],
+  ["e2000", "2.000", 2],
+];
+function waveProjectionLevels({ w1Low, w1High, start, currentPrice, anchorSource }) {
+  const length = w1High - w1Low;
+  if (![w1Low, w1High, start].every(Number.isFinite) || length <= 0) return [];
+  return WAVE_PROJECTION_RATIOS.map(([key, label, ratio]) => {
+    const target = Math.round((start + length * ratio) * 4) / 4;
+    return level(key, label, target, currentPrice != null && currentPrice >= target ? "TOUCHED" : "WATCH", {
+      anchorSource, projectionMode: "MANAGER_REVIEW_PROVISIONAL", wave1Length: length,
+    });
+  });
+}
+const ALERT_EVENTS = [
+  "FIB_LEVEL_TOUCHED",
+  "FIB_LEVEL_CONFIRMED",
+  "WAVE_INVALIDATION_TOUCHED",
+  "WAVE_CONFIRMATION_TOUCHED",
+];
+// Market prices must be positive. Missing values sometimes arrive as 0 from snapshot adapters.
+const n = (x) => { const value = Number(x); return x == null || x === "" || !Number.isFinite(value) || value <= 0 ? null : value; };
+const round = (x) => x == null ? null : Math.round(x * 100) / 100;
+const level = (key, label, price, status = "WATCH", extra = {}) => ({
+  key, label, price, status, touchedAt: null, confirmedAt: null, ...extra,
+});
+function nextLevel(levels, currentPrice) {
+  return levels.find((v) => v.price != null && (currentPrice == null || v.price > currentPrice)) || null;
+}
+function lastTouchedLevel(levels) {
+  return [...levels].reverse().find((v) => v.status === "TOUCHED" || v.status === "CONFIRMED") || null;
+}
+export function buildCurrentWavelength({
+  symbol = "ES",
+  currentPrice = null,
+  degreeStates = null,
+  engine22Display = null,
+  waveFibState = null,
+  currentLifecycleState = null,
+  intrabarLow = null,
+  lastClosed10mClose = null,
+  microCandidateW1High = null,
+  microConfirmedW1High = null,
+  microW1CompletionConfirmed = false,
+  microW1ConfirmationSource = null,
+  microConfirmedW2Low = null,
+  microW2CompletionConfirmed = false,
+  microBars5m = [],
+  evaluationTimeMs = null,
+  previousMicroSequence = null,
+} = {}) {
+  const price = n(currentPrice);
+  const low = n(intrabarLow);
+  const close10m = n(lastClosed10mClose);
+  const previous = previousMicroSequence && typeof previousMicroSequence === "object"
+    ? previousMicroSequence : {};
+  const w1Read = buildMicroFiveMinuteEvidence({
+    bars: microBars5m, evaluationTimeMs, side: "HIGH", origin: 7782.75,
+    prior: { candidateAnchor: previous.candidateW1High,
+      lastObservedBarTime: previous.w1LastObservedBarTime },
+  });
+  const priorHigh = previous.confirmedW1High;
+  const w2Read = (previous.w1Completion?.state === "LOCKED" || previous.w1Completion?.state === "CONFIRMED")
+    ? buildMicroFiveMinuteEvidence({
+      bars: microBars5m, evaluationTimeMs, side: "LOW", origin: 7782.75,
+      prior: { candidateAnchor: previous.w2CandidateLow,
+        lastObservedBarTime: previous.w2LastObservedBarTime,
+        confirmedW1High: priorHigh,
+        startAfterTimestamp: previous.w1Completion?.evidence?.sourceTimestamp ||
+          previous.w1ConfirmedAtBarTime || null },
+    }) : { evidence: null, candidateAnchor: null, lastObservedBarTime: null };
+  const w1NewExtreme = previous.w1Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.candidateW1High != null && w1Read.candidateAnchor != null &&
+    w1Read.candidateAnchor > previous.candidateW1High;
+  const w2NewExtreme = previous.w2Completion?.state === "COMPLETION_CANDIDATE" &&
+    previous.w2CandidateLow != null && w2Read.candidateAnchor != null &&
+    w2Read.candidateAnchor < previous.w2CandidateLow;
+
+  /*
+   * W2 must not auto-lock merely because the previous snapshot reached
+   * CONFIRMED. A separate NEW completed 5m structural confirmation is
+   * required before the confirmed W2 low becomes LOCKED.
+   *
+   * This prevents repeated snapshot builds from advancing W2 -> W3_WATCH
+   * without new confirmation evidence.
+   */
+  const w2Evidence = w2Read?.evidence || null;
+  const w2EvidenceClose = Number(w2Evidence?.close);
+  const w2EvidencePivot = Number(w2Evidence?.localPivot);
+  const w2DirectionBreak =
+    w2Evidence?.timeframe === "5m" &&
+    w2Evidence?.closed === true &&
+    Number.isFinite(w2EvidenceClose) &&
+    Number.isFinite(w2EvidencePivot) &&
+    w2EvidenceClose > w2EvidencePivot;
+
+  const w2StrongDisplacement =
+    w2DirectionBreak &&
+    w2Evidence?.displacement === true &&
+    w2Evidence?.displacementQuality === "HIGH" &&
+    Number(w2Evidence?.bodyToRange) >= 0.65;
+
+  const w2SwingBreak =
+    w2DirectionBreak &&
+    w2Evidence?.swingBreak === true;
+
+  const w2TwoCloseConfirmation =
+    w2DirectionBreak &&
+    Number(w2Evidence?.consecutiveClosesBeyondPivot) >= 2;
+
+  const w2LockEvidence =
+    w2Evidence?.anchorRejection === true &&
+    w2Evidence?.validRetracementReaction === true &&
+    (
+      w2TwoCloseConfirmation ||
+      (w2StrongDisplacement && w2SwingBreak)
+    );
+
+  const lockedW2Low =
+    previous.w2Completion?.state === "LOCKED"
+      ? previous.confirmedW2Low
+      : previous.w2Completion?.state === "CONFIRMED" &&
+        w2LockEvidence === true
+      ? previous.confirmedW2Low
+      : null;
+
+  const microSequence = buildMicroWaveSequence({
+    currentPrice: price,
+    candidateW1High: w1Read.candidateAnchor ?? previous.candidateW1High ?? microCandidateW1High,
+    w1Evidence5m: w1Read.evidence,
+    w1PriorState: w1NewExtreme ? "DEVELOPING" : previous.w1Completion?.state ?? "DEVELOPING",
+    lockedW1High: previous.w1Completion?.state === "CONFIRMED" ||
+      previous.w1Completion?.state === "LOCKED" ? previous.confirmedW1High : null,
+    w2Evidence5m: w2Read.evidence,
+    w2PriorState: w2NewExtreme ? "DEVELOPING" : previous.w2Completion?.state ?? "DEVELOPING",
+    lockedW2Low,
+    confirmedW1High: microConfirmedW1High,
+    w1CompletionConfirmed: microW1CompletionConfirmed,
+    w1ConfirmationSource: microW1ConfirmationSource,
+    confirmedW2Low: w2Read.candidateAnchor ?? previous.w2CandidateLow ?? microConfirmedW2Low,
+    w2ObservedLow:
+      w2Read.candidateAnchor ??
+      previous.w2CandidateLow ??
+      microConfirmedW2Low ??
+      null,
+    w2CompletionConfirmed: microW2CompletionConfirmed,
+  });
+  microSequence.resetReasonCodes = [
+    ...(w1NewExtreme ? ["W1_CANDIDATE_RESET_NEW_HIGH"] : []),
+    ...(w2NewExtreme ? ["W2_CANDIDATE_RESET_NEW_LOW"] : []),
+  ];
+  microSequence.w1LastObservedBarTime = w1Read.lastObservedBarTime;
+  microSequence.w1ConfirmedAtBarTime = previous.w1ConfirmedAtBarTime ||
+    (microSequence.w1Completion?.state === "CONFIRMED" ?
+      microSequence.w1Completion?.evidence?.sourceTimestamp : null);
+  microSequence.w2LastObservedBarTime = w2Read.lastObservedBarTime;
+  microSequence.w2CandidateLow = w2Read.candidateAnchor;
+  const microLevels = microSequence.activeWave === "W1"
+    ? microSequence.projectedW1
+    : microSequence.activeWave === "W2" ? microSequence.projectedW2 : [];
+  const microBreach = low != null && low < 7782.75 || price != null && price < 7782.75;
+  const microFailed = close10m != null && close10m < 7782.75;
+  const microStatus = microFailed ? "FAILED" : microBreach
+    ? "INVALIDATION_TOUCHED" : microSequence.state;
+  const microConfirmationStatus = microFailed ? "FAILED_CONFIRMED" : microBreach
+    ? "FAILED_REVIEW_REQUIRED" : microSequence.confirmationStatus;
+
+  // Owner-locked Wave 3 projection geometry; display context only.
+  // Verified candle touch status remains independent and unavailable here.
+  const microW3Anchors = {
+    w1Low:7706.25,w1High:7897.25,w2Low:7718.00,
+    w2LowLocalTime:"2026-10-15 06:30",
+    source:"OWNER_LOCKED_MICRO_W3_20261015",
+  };
+  const ownerMicroW3Levels = waveProjectionLevels({
+    w1Low:microW3Anchors.w1Low,w1High:microW3Anchors.w1High,
+    start:microW3Anchors.w2Low,currentPrice:null,
+    anchorSource:microW3Anchors.source,
+  }).map(level=>({...level,status:"WATCH",provisional:true,touchEvidenceAvailable:false}));
+  // Oct 21 owner working count: Micro ABC UP builds Minute internal D.
+  // A starts at Minute C's confirmed owner price (Oct 16 11:00 Phoenix).
+  // This is a read-only candidate and does not replace microSequence.
+  const ownerMicroAbc = {
+    version:"engine22.microAbcMinuteD.v1",
+    parentDegree:"minute",parentLeg:"D",
+    activeWave:"C",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+    waveA:{
+      startPrice:7676.50,
+      startLocalTime:"2026-10-16 11:00",
+      high:7773.25,highLocalTime:"2026-10-19 08:00",
+      status:"OWNER_COMPLETED",
+    },
+    waveB:{
+      low:7708.00,lowLocalTime:"2026-10-20 05:00",
+      status:"OWNER_COMPLETED",
+    },
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+      label:ratio.toFixed(3),
+      price:Math.round((7708+(7773.25-7676.50)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+    })),
+    confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
+  // October 28 owner working transition: Micro W4 DOWN and Submicro A DOWN.
+  // Prior W3/W5 records remain unchanged, and no completion is inferred.
+  // October 31 owner black ABC working count; prior W4 model preserved.
+  const ownerMicroCDownOct31 = {
+    version:"engine22.microCDownOct31OwnerWorking.v1",
+    degree:"micro",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"C",
+    ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+    waveA:{startHigh:7810.00,startLocalTime:"2026-10-21 11:00",
+      low:7663.25,endLocalTime:"2026-10-26 03:00",timezone:"America/Phoenix",
+      status:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED"},
+    priorBEnding:{price:7814.75,localTime:"2026-10-28 13:00",
+      timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED"},
+    sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",
+      C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+    observedLowReference:{price:7558.25,date:"2026-10-30",
+      status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+    fibStatus:"OWNER_ANCHORED_MICRO_C_DOWN_RESEARCH",
+    projectionMethod:"B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+    levels:[0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7814.75-(7810.00-7663.25)*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    previousModelVersion:"engine22.microW4DownOct28OwnerWorking.v1",
+    oldW4HistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+  };
+  const ownerMicroW4Down = {
+    version:"engine22.microW4DownOct28OwnerWorking.v1",
+    degree:"micro",activeWave:"W4",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"D",
+    priorW3Ending:{price:7820.00,localTime:"2026-10-28 13:00",timezone:"America/Phoenix",
+      status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"},
+    precedingW3:{low:7699.50,high:7820.00,length:120.50},
+    projectionMethod:"W3_HIGH_MINUS_W3_LENGTH_TIMES_RETRACEMENT",
+    levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+      key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7820.00-120.50*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    wave4:{low:null,completionConfirmed:false},
+    nextWave:"W5_UP_POSSIBLE_NOT_STARTED",
+    previousModelVersion:"engine22.microW3UpOct27Owner.v1",
+    ownerWorkingOnly:true,noExecution:true,noPermissionCreated:true,
+  };
+  // Owner-approved comparative Submicro scenarios, advisory only.
+  // Nov 2 owner-approved Submicro ABC C-down update; prior alternatives remain preserved.
+  const ownerSubmicroCDownNov2 = {
+    version:"engine22.submicroCDownNov2OwnerWorking.v1",degree:"submicro",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"C",
+    ownerApprovalReference:"OWNER_20261102_SUBMICRO_C_DOWN",
+    waveA:{startHigh:7819.50,low:7664.50,status:"OWNER_MARKED_COMPLETE"},
+    waveB:{high:7692.00,localTime:"2026-11-02 08:00",timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE"},
+    waveC:{completionConfirmed:false,status:"DEVELOPING_CANDIDATE"},
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7692-(7819.5-7664.5)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true
+    })),
+    reviewBoundary:{price:7692.00,reviewOnly:true,officialInvalidation:false},
+    previousModelVersion:"engine22.submicroCompareNov1.v1",
+    historicalAlternativesPreserved:true,noExecution:true,noPermissionCreated:true
+  };
+  const submicroCompare = {
+    version:"engine22.submicroCompareNov1.v1",degree:"submicro",
+    activeWave:"ALTERNATIVES",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"C",
+    approvalReference:"OWNER_SUBMICRO_TWO_OPTIONS_20261031",
+    referenceLow:{price:7558.25,date:"2026-10-30",status:"OWNER_CHART_OBSERVED_NOT_CONFIRMED_WAVE_END"},
+    option1:{
+      label:"ABC DOWN — C DEVELOPING",startHigh:7819.50,
+      waveALow:7664.50,waveBHigh:7696.00,
+      waveAStatus:"OWNER_MARKED_COMPLETE",waveBStatus:"OWNER_MARKED_COMPLETE",
+      waveCStatus:"DEVELOPING_COMPLETION_UNCONFIRMED",
+      levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+        key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+        price:Math.round((7696-(7819.5-7664.5)*ratio)*4)/4,
+        status:ratio<=0.786?"OWNER_OBSERVED_TOUCH":"WATCH",
+        touchEvidenceAvailable:ratio<=0.786,
+        touchEvidenceType:ratio<=0.786?"OWNER_CHART_OBSERVATION":null,
+        touchEvidence:ratio<=0.786?{verified:false,evidenceClass:"OWNER_CHART_OBSERVATION"}:null,
+        touchedAt:null,provisional:true
+      })),
+      reviewPrice:7696.00,
+    },
+    option2:{
+      label:"A DOWN ENDING CANDIDATE — B UP NOT CONFIRMED",
+      startHigh:7819.50,candidateALow:7558.25,
+      waveAStatus:"ENDING_CANDIDATE_NOT_CONFIRMED",
+      waveBStatus:"POSSIBLE_NOT_STARTED",
+      waveCStatus:"NOT_STARTED",
+      levels:[0.236,0.382,0.5,0.618,0.786].map(ratio=>({
+        key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+        price:Math.round((7558.25+(7819.5-7558.25)*ratio)*4)/4,
+        status:"WATCH",touchEvidenceAvailable:false,touchedAt:null,provisional:true
+      })),
+      reviewPrice:7558.25,
+    },
+    noExecution:true,noPermissionCreated:true,
+  };
+  const ownerSubmicroADownInsideMicroW4 = {
+    version:"engine22.submicroADownMicroW4Oct28OwnerWorking.v1",
+    degree:"submicro",activeWave:"A",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"W4",
+    priorW5Ending:{price:7820.00,localTime:"2026-10-28 13:00",timezone:"America/Phoenix",
+      status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"},
+    sequence:{A:"DOWN_DEVELOPING",B:"UP_PENDING",C:"DOWN_PENDING"},
+    projectionBasis:{priorLow:7703.75,priorHigh:7820.00,length:116.25},
+    projectionMethod:"PRIOR_HIGH_MINUS_PRIOR_ADVANCE_TIMES_RATIO",
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7820.00-116.25*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    waveA:{low:null,completionConfirmed:false},
+    previousModelVersion:"engine22.submicroFiveUpOct27OwnerWatch.v1",
+    ownerWorkingOnly:true,noExecution:true,noPermissionCreated:true,
+  };
+  // October 27 owner working Micro impulse-up recount, independent from
+  // existing C DOWN and historical Micro models; do not infer missing W1 high.
+  const ownerMicroW3Up = {
+    version:"engine22.microW3UpOct27Owner.v1",
+    degree:"micro",direction:"UP",activeWave:"W3",
+    stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",
+    parentWave:"D",parentModelVersion:"engine22.subminuteDUpOwnerWorking.v1",
+    wave1:{
+      low:7651.75,lowLocalTime:"2026-10-25 15:00",
+      high:7739.50,highLocalTime:"2026-10-26 08:00",
+      highStatus:"OWNER_CONFIRMED_PRICE_NOT_INDEPENDENTLY_OHLC_VERIFIED",
+    },
+    wave2:{
+      low:7699.50,lowLocalTime:"2026-10-27 01:00",
+      status:"OWNER_WORKING_ENDING_PROVISIONAL",
+    },
+    wave3:{direction:"UP",stage:"DEVELOPING_CANDIDATE",
+      startPrice:7699.50,completionConfirmed:false,
+      ownerEnding:{price:7820.00,localTime:"2026-10-28 13:00",timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"}},
+    projectionMethod:"W2_LOW_PLUS_W1_LENGTH_TIMES_EXTENSION",
+    fibStatus:"OWNER_PROVISIONAL_MICRO_W3_UP_EXTENSIONS",
+    fibAnchorStatus:"OWNER_PRICE_LEVELS_NOT_INDEPENDENTLY_CANDLE_VERIFIED",
+    wave1Length:7739.50-7651.75,
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7699.50+(7739.50-7651.75)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,
+      touchEvidenceType:null,touchedAt:null,provisional:true,
+    })),
+    previousModelVersion:"engine22.microCDownOwnerWatch.v1",
+    oldCDownHistoryPreserved:true,ownerWorkingOnly:true,
+    noExecution:true,noPermissionCreated:true,
+  };
+  // Owner working recount October 22: Micro A completed, B DOWN developing.
+  // Keep prior C-UP owner model as historical, without promoting wave confirmation.
+  // Current owner working count: A DOWN complete, B UP complete, C DOWN developing.
+  const ownerMicroCDown = {
+    version:"engine22.microCDownOwnerWatch.v1",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"subminute",parentWave:"C",
+    waveA:{high:7898,low:7678,lowLocalTime:"2026-10-16 09:00",status:"OWNER_COMPLETED"},
+    waveB:{high:7813.25,highLocalTime:"2026-10-21 09:00",status:"OWNER_COMPLETED"},
+    levels:[0.236,0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7813.25-(7898-7678)*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"C_DOWN_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
+  const ownerMicroBDown = {
+    version:"engine22.microBDownOwnerWatch.v1",activeWave:"B",direction:"DOWN",
+    stage:"DEVELOPING_CANDIDATE",parentDegree:"subminute",parentLeg:"ABC_UP_INSIDE_MINUTE_D",
+    waveA:{low:7708.00,high:7812.25,highLocalTime:"2026-10-21 11:00",status:"OWNER_COMPLETED"},
+    levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+      key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7812.25-(7812.25-7708)*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"B_DOWN_WORKING_COUNT_NOT_CONFIRMED",noExecution:true,noPermissionCreated:true,
+  };
+  // Submicro A down is only a developing leg. These are reference
+  // retracements from the last owner Submicro low to the Micro A high,
+  // not an independently confirmed Submicro A projection.
+  // Current owner working Submicro ABC DOWN inside Micro C DOWN.
+  // B time corrected to Oct 22 18:50 Arizona, after A low at 14:30.
+  // Owner chart, 2026-10-27 (15m ES): proposed bullish subdivisions
+  // developing inside Micro W3 UP, which sits within Subminute D UP.
+  // W1/W2/W4 exact extrema have NOT been furnished; do not fabricate them.
+  // W3 high is chart-labeled 7772.75; 4 and 5 are tentative annotations.
+  // This is NOT an official Elliott completion or autonomous recount.
+  // Owner-specified October 27 Arizona 15m Submicro anchors.
+  // W1 to W4 are owner working marks; W5 is not yet confirmed.
+  const ownerSubmicroFiveUp = {
+    version:"engine22.submicroFiveUpOct27OwnerWatch.v1",
+    degree:"submicro",parentDegree:"micro",parentWave:"W3",
+    parentModelVersion:"engine22.microW3UpOct27Owner.v1",
+    activeWave:"W5",direction:"UP",stage:"PROJECTED_W5_WATCH",
+    interpretation:"PROVISIONAL_UPWARD_FIVE_WAVE_SCENARIO",
+    source:"OWNER_SPECIFIED_2026_10_27_ARIZONA_ANCHORS",
+    wave1:{
+      low:7703.75,lowLocalTime:"2026-10-27 01:45",
+      high:7749.25,highLocalTime:"2026-10-27 05:15",
+      status:"OWNER_WORKING_ANCHORS_NOT_CANDLE_VERIFIED",
+    },
+    wave2:{
+      low:7712.75,lowLocalTime:"2026-10-27 07:15",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave3:{
+      high:7772.25,highLocalTime:"2026-10-27 09:00",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave4:{
+      low:7750.50,lowLocalTime:"2026-10-27 11:30",
+      status:"OWNER_WORKING_ANCHOR_NOT_CANDLE_VERIFIED",
+    },
+    wave5:{high:null,status:"PROJECTED_NOT_CONFIRMED_COMPLETE",completionConfirmed:false,ownerEnding:{price:7820.00,localTime:"2026-10-28 13:00",timezone:"America/Phoenix",status:"OWNER_MARKED_COMPLETE_NOT_INDEPENDENTLY_VERIFIED"}},
+    priorCEnding:{price:7648.50,localTime:"2026-10-23 07:00",
+      status:"OWNER_NOMINATED_PRIOR_C_ENDING_UNVERIFIED"},
+    wave1Length:45.50,
+    projectionMethod:"W4_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+    fibStatus:"OWNER_PROVISIONAL_W5_UP_PROJECTIONS",
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7750.50+(7749.25-7703.75)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,
+      touchEvidenceType:null,touchedAt:null,provisional:true,
+    })),
+    confirmationStatus:"NO_SUBMICRO_WAVE_COMPLETION_CONFIRMED",
+    previousModelVersion:"engine22.submicroCDownOwnerWatch.v1",
+    historicFibTouchesPreserved:true,
+    noExecution:true,noPermissionCreated:true,ownerWorkingOnly:true,
+  };
+  const ownerSubmicroCDown = {
+    version:"engine22.submicroCDownOwnerWatch.v1",
+    activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+    parentDegree:"micro",parentWave:"C",
+    waveA:{high:7812,highLocalTime:"2026-10-21 11:30",
+      low:7712,lowLocalTime:"2026-10-22 14:30",status:"OWNER_COMPLETED"},
+    waveB:{high:7743,highLocalTime:"2026-10-22 18:50",status:"OWNER_COMPLETED"},
+    levels:[0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7743-100*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"C_DOWN_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
+  const ownerSubmicroADown = {
+    version:"engine22.submicroADownOwnerWatch.v1",activeWave:"A",direction:"DOWN",
+    stage:"DEVELOPING_CANDIDATE",parentDegree:"micro",parentWave:"B",
+    referenceLow:7750.75,originHigh:7812.25,
+    referenceOnly:true,
+    levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+      key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+      price:Math.round((7812.25-(7812.25-7750.75)*ratio)*4)/4,
+      status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+    })),
+    confirmationStatus:"A_DOWN_DEVELOPING_UNCONFIRMED",noExecution:true,noPermissionCreated:true,
+  };
+  const subminuteLevels = waveProjectionLevels({
+    w1Low:7616.25,w1High:7847.00,start:7673.25,currentPrice:null,
+    anchorSource:"OWNER_CONFIRMED_ALL_NODES_SUBMINUTE_20261015",
+  }).map(level=>({...level,status:"WATCH",provisional:true,touchEvidenceAvailable:false}));
+  const minuteLevels = waveProjectionLevels({
+    w1Low: 7591.00, w1High: 7848.50, start: 7576.00, currentPrice: price,
+    anchorSource: "ACTIVE_WAVE_STATE_ES_MINUTE_W1_PLUS_MANAGER_W2_ORIGIN",
+  });
+  // Minor W5 only: a live ES snapshot at/above a Fib level proves that
+  // price has REACHED that level. It does not prove a historic candle touch,
+  // a completed candle, a W5 confirmation, or trade permission.
+  const minorLevels = waveProjectionLevels({
+    w1Low: 6417.00, w1High: 6948.75, start: 7398.00, currentPrice: price,
+    anchorSource: "ACTIVE_WAVE_STATE_ES_MINOR_W1_W4",
+  }).map(item => ({
+    ...item,
+    touchEvidenceAvailable:item.status==="TOUCHED",
+    touchEvidenceType:item.status==="TOUCHED"?"ES_CURRENT_SNAPSHOT_AT_OR_ABOVE_LEVEL":null,
+    touchEvidence:item.status==="TOUCHED" ? {
+      verified:false, observation:"ES_CURRENT_SNAPSHOT_THRESHOLD",
+      observedPrice:price, direction:"UP", historicTouchUnverified:true,
+    }:null,
+  }));
+  // Owner-locked Submicro W1 after the ABC C low at 7718.00.
+  // This is a distinct owner-directed read-only wave state, not a
+  // candle-confirmed V3 recount or trading authorization.
+  const submicroW1Low = 7718.00;
+  const submicroW1High = 7800.00;
+  const submicroW2Ratios = [
+    ["r236","0.236",0.236],["r382","0.382",0.382],
+    ["r500","0.500",0.5],["r618","0.618",0.618],
+    ["r786","0.786",0.786],
+  ];
+  // Owner's annotated 10m chart showed W2 low at about 7772.50.
+  // This proves a chart-observed 0.236 crossing, NOT a feed-verified touch.
+  const ownerObservedW2Low = 7772.50;
+  const submicroW2Levels = submicroW2Ratios.map(([key,label,ratio]) => {
+    const target = Math.round((submicroW1High -
+      (submicroW1High-submicroW1Low)*ratio)*4)/4;
+    const chartObserved = ownerObservedW2Low <= target;
+    return {
+      key,label,price:target,
+      status:chartObserved?"OWNER_OBSERVED_TOUCH":"WATCH",
+      touchEvidenceType:chartObserved?"OWNER_CHART_OBSERVATION":null,
+      ownerObservedW2Low:chartObserved?ownerObservedW2Low:null,
+      provisional:true,touchEvidenceAvailable:false,
+      anchorSource:"OWNER_CORRECTED_SUBMICRO_W1_20261016",
+    };
+  });
+  const ownerSubmicroW2 = {
+    version:"engine22.submicroW2OwnerProjection.v1",
+    previousWave:"C",previousWaveEnd:7718.00,
+    completedWave:"W1",activeWave:"W2",direction:"DOWN",
+    lifecycle:"W1_COMPLETED_OWNER_READ_W2_WATCH",
+    anchors:{w1Low:submicroW1Low,w1High:submicroW1High},
+    ownerObservedW2Low,
+    levels:submicroW2Levels,
+    confirmationStatus:"OWNER_COUNT_CANDLE_CONFIRMATION_PENDING",
+    noExecution:true,provisional:true,
+  };
+  // Owner-confirmed Oct 21 Submicro A/B points; C remains an active
+  // developing working hypothesis, not a structurally confirmed completion.
+  const ownerSubmicroAbc = {
+    version:"engine22.submicroAbcMicroC.v1",
+    parentDegree:"micro",parentWave:"C",
+    activeWave:"C",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+    waveA:{
+      startPrice:7708.00,startLocalTime:"2026-10-20 05:00",
+      high:7793.25,highLocalTime:"2026-10-20 16:00",
+      status:"OWNER_COMPLETED",
+    },
+    waveB:{
+      low:7750.75,lowLocalTime:"2026-10-21 07:00",
+      status:"OWNER_COMPLETED",
+    },
+    levels:[0.382,0.5,0.618,1,1.272,1.618,2].map(ratio=>({
+      key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+      label:ratio.toFixed(3),
+      price:Math.round((7750.75+(7793.25-7708.00)*ratio)*4)/4,
+      status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+    })),
+    confirmationStatus:"C_UP_WORKING_COUNT_NOT_CONFIRMED",
+    noExecution:true,noPermissionCreated:true,
+  };
+  const degrees = {
+    submicro:{
+      // Nov 9 owner-supplied Submicro W1/W2 anchors in existing Google Sheet.
+      // Research presentation only: do not replace owner-selected Submicro C,
+      // assert W3 has begun, or rewrite the older ABC Fib/touch history.
+      // New black internal Submicro waves, separate from older blue-degree model.
+      ownerSubmicroW3Nov9InternalResearch:{
+        version:"engine22.ownerSubmicroW3Nov9InternalResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W2",direction:"DOWN",stage:"W2_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"micro",parentWave:"C",
+        anchors:{
+          w1Low:7390.25,w1LowLocalTime:"2026-11-09 01:00 AZ",w1High:7476,
+          w1HighLocalTime:"2026-11-09 06:00 AZ",w1Length:85.75,
+          w2Low:7449.25,w2LowLocalTime:"2026-11-09 06:20 AZ",
+          w2LowAtUtc:"2026-11-09T13:20:00Z",w2CompletionConfirmed:false,w3StartConfirmed:false,
+          aHigh:7600.00,aHighLocalTime:"2026-11-09 13:00 AZ",
+          aHighAtUtc:"2026-11-09T20:00:00Z",
+          aLow:7507.25,aLowLocalTime:"2026-11-10 06:40 AZ",
+          aLowAtUtc:"2026-11-10T13:40:00Z",
+          bHigh:7566.00,bHighLocalTime:"2026-11-10 08:00 AZ",
+          bHighAtUtc:"2026-11-10T15:00:00Z",
+          abcStatus:"OWNER_MARKED_ABC_C_COMPLETE",
+          cLow:7492.25,cLowLocalTime:"2026-11-10 10:40 AZ",
+          cLowAtUtc:"2026-11-10T17:40:00Z",
+          cCompletionStatus:"OWNER_MARKED_C_COMPLETE",
+          w1StartLow:7492.25,w1StartLocalTime:"2026-11-10 10:40 AZ",
+          w1StartAtUtc:"2026-11-10T17:40:00Z",
+          newW1High:7625,newW1HighLocalTime:"2026-11-11 07:30 AZ",
+          newW1HighAtUtc:"2026-11-11T14:30:00Z",
+          priorNewW1HighRevision:{
+            price:7560,localTime:"2026-11-10 14:50 AZ",
+            atUtc:"2026-11-10T21:50:00Z",
+            status:"SUPERSEDED_BY_OWNER_20261111_W1_FINAL_HIGH"
+          },
+          newW1CompletionConfirmed:true,
+          newW1Length:132.75,
+          newW2Low:null,newW2LowLocalTime:null,
+          newW2CompletionConfirmed:false,
+          provenance:"OWNER_SUBMICRO_CURRENT_NOV9_BLACK_INTERNAL_WAVES"
+        },
+        // ABC C-down extensions from owner-supplied A high / A low / B high.
+        // C ending low is UNKNOWN; projected levels are research WATCH only.
+        cDownExtensionLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7566-(7600-7507.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_C_DOWN_EXTENSION_RESEARCH",
+        })),
+        // LOCKED ENGINE22 WAVE FIB METHOD (owner review 2026-11-10):
+        // A forming Submicro W1 has only an origin, NOT a verified W1 high.
+        // Its CURRENT watch levels are retracements UP from the preceding
+        // completed correction's high 7600 to low 7492.25. Never project a
+        // new W1 from an older unrelated W1 length. ES rounds to 0.25.
+        // When W1 high is owner-confirmed, switch to W2 retracements of W1;
+        // only after W2 low exists project W3 from W2 using W1 length.
+        w1FibMethod:"PRIOR_CORRECTION_RETRACEMENT_FROM_C_LOW",
+        w1PriorCorrectionRetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+(7600-7492.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W1_PRIOR_CORRECTION_RETRACEMENT_REFERENCE",
+        })),
+        // Retain prior 85.75-point proxy for history/audit only.
+        // Never display it as the current Submicro W1 projection.
+        w1LegacyProxyLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+85.75*ratio)*4)/4,
+          status:"SUPERSEDED_RESEARCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W1_UP_PREVIOUS_W1_LENGTH_PROXY_ARCHIVED",
+        })),
+        // OWNER CORRECTION 2026-11-11: Submicro W1 ended at ES 7625.00
+        // at 07:30 AZ, superseding the Nov 10 14:50 AZ / 7560 mark.
+        // LOCKED FIB METHOD: W2 retraces THIS final W1 advance
+        // (7492.25 -> 7625.00), never the older 85.75-point proxy.
+        // Only W2 WATCH retracements are current. W3 requires an owner W2 low.
+        w2FibMethod:"W2_DOWN_RETRACEMENT_OF_NEW_W1",
+        w2DownRetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7625-(7625-7492.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"SUBMICRO_W2_DOWN_RETRACEMENT_RESEARCH",
+        })),
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7449.25+(7476-7390.25)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7449.25,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
+        nextWave:"W2",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      ownerSubmicroW3Nov9Research:{
+        version:"engine22.submicroW3Nov9Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W3",direction:"UP",stage:"W3_UP_PROJECTION_CANDIDATE",
+        parentDegree:"micro",parentWave:"W2_RESEARCH",
+        anchors:{
+          w1Low:7324.00,w1LowLocalTime:"2026-11-05 15:20 AZ",
+          w1LowAtUtc:"2026-11-05T22:20:00Z",
+          w1High:7469.00,w1HighLocalTime:"2026-11-06 07:40 AZ",
+          w1HighAtUtc:"2026-11-06T14:40:00Z",
+          w1Length:145.00,
+          w2Low:7362.00,w2LowLocalTime:"2026-11-08 15:00 AZ",
+          w2LowAtUtc:"2026-11-08T22:00:00Z",
+          w2CompletionConfirmed:false,w3StartConfirmed:false,
+          provenance:"OWNER_SUBMICRO_SHEET_W1_W2_20261109",
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7362+(7469-7324)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7324.00,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        historicalAbcModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      // Owner Nov 6 ABC within the proposed Micro W2 — research card only.
+      ownerSubmicroNov6AbcResearch:{
+        version:"engine22.submicroNov6AbcResearch.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"submicro",
+        activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"micro",parentWave:"W2",
+        anchors:{
+          aHigh:7469.75,aHighLocalTime:"2026-11-06 07:50 AZ",
+          aLow:7396.75,aLowLocalTime:"2026-11-06 10:50 AZ",
+          bHigh:7436.75,bHighLocalTime:"2026-11-06 12:30 AZ",
+          bHighAtUtc:"2026-11-06T19:30:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_SUBMICRO_NOV6_HANDWRITTEN_20261108",
+        },
+        fibMethod:"C_DOWN_B_MINUS_A_LENGTH_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7436.75-(7469.75-7396.75)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMICRO_C_DOWN_EXTENSION",
+        })),
+        reviewReference:7436.75,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        olderWorkingModelsPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
+      degree:"submicro",activeWave:"W2",direction:"DOWN",
+      state:"SUBMICRO_W2_DOWN_WATCH_OWNER_READ",
+      ownerSubmicroW2, // archived owner model; touch memory must remain separate
+      ownerSubmicroAbc,
+      ownerSubmicroADown,
+      ownerSubmicroCDown,
+      ownerSubmicroFiveUp,
+      ownerSubmicroCDownNov2,
+      submicroCompare,
+      ownerSubmicroADownInsideMicroW4,
+      levels:submicroW2Levels,
+      nextLevel:null,lastTouchedLevel:null,
+      noExecution:true,
+    },
+    micro: {
+      // Owner Nov 5→6 Micro W1/W2 blue research scenario. Does not promote
+      // away from current Oct31 Micro C DOWN owner-selected count.
+      // Owner reclassified earlier blue W1/W2 from Submicro to Micro.
+      // Owner-marked NEW Micro ABC (Nov 15-16). Separate from historical
+      // Micro W5-UP and older October ABC interpretations; C still forming.
+      ownerMicroAbcDownNov16Research:{
+        version:"engine22.ownerMicroAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"subminute",parentWave:"C",
+        anchors:{
+          aHigh:7614.75,aHighLocalTime:"2026-11-15 16:40 AZ",
+          aHighAtUtc:"2026-11-15T23:40:00Z",
+          aLow:7537.25,aLowLocalTime:"2026-11-15 23:20 AZ",
+          aLowAtUtc:"2026-11-16T06:20:00Z",
+          bHigh:7570.75,bHighLocalTime:"2026-11-16 01:40 AZ",
+          bHighAtUtc:"2026-11-16T08:40:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_MICRO_ABC_DOWN",
+        },
+        aLength:77.50,
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7570.75-(7614.75-7537.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"MICRO_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalMicroModelsPreserved:true,priceBasisReconciliation:"PENDING",
+      },
+      ownerMicroW3Nov9ReclassifiedResearch:{
+        version:"engine22.ownerMicroW3Nov9ReclassifiedResearch.v1",selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        completedWave:"W1",completedWaveStatus:"OWNER_ANCHORED_RESEARCH",
+        activeWave:"W5",direction:"UP",stage:"W5_UP_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"subminute",parentWave:"W1_FORMING_RESEARCH",
+        anchors:{
+          w1Low:7324,w1LowLocalTime:"2026-11-05 15:20 AZ",w1High:7469,
+          w1HighLocalTime:"2026-11-06 07:40 AZ",w1Length:145,
+          w2Low:7362,w2LowLocalTime:"2026-11-08 16:00 AZ",
+          w2LowAtUtc:"2026-11-08T23:00:00Z",
+          priorAnchorRevision:{w2Low:7362,w2LowLocalTime:"2026-11-08 15:00 AZ",w2LowAtUtc:"2026-11-08T22:00:00Z",status:"SUPERSEDED_BY_OWNER_20261109_CORRECTION"},
+          w2CompletionConfirmed:false,w3StartConfirmed:false,
+          w3High:7600.00,w3HighLocalTime:"2026-11-09 13:00 AZ",
+          w3HighAtUtc:"2026-11-09T20:00:00Z",
+          w3CompletionStatus:"OWNER_MARKED_W3_END_RESEARCH",
+          w4Low:7492.25,w4LowLocalTime:"2026-11-10 10:40 AZ",
+          w4LowAtUtc:"2026-11-10T17:40:00Z",
+          w4CompletionStatus:"OWNER_MARKED_W4_COMPLETE",
+          w5CompletionConfirmed:false,
+          provenance:"OWNER_20261109_BLUE_W1_W2_RECLASSIFIED_SUBMICRO_TO_MICRO"
+        },
+        // Micro W4 downside retracement of the owner-marked W2 low -> W3 high.
+        // These are provisional WATCH prices, not trade triggers or touches.
+        w4RetracementLevels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7600-(7600-7362)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MICRO_W4_DOWN_RETRACEMENT_RESEARCH",
+        })),
+        // W5 UP uses the original Micro W1 length (7469 - 7324 = 145)
+        // projected from the owner-marked W4 low; only WATCH, no touch claim.
+        w5UpExtensionLevels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7492.25+145*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MICRO_W5_UP_EXTENSION_RESEARCH",
+        })),
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7362+(7469-7324)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MICRO_W3_UP_EXTENSION",
+        })),
+        structuralReference:7362,reviewOnly:true,officialInvalidation:null,earlyWarning:null,
+        nextWave:"W5",nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",historicalModelsAndTouchesPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      ownerMicroW2Nov6Research:{
+        version:"engine22.microW2Nov6Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"micro",
+        completedWave:"W1",completedWaveStatus:"COMPLETION_CANDIDATE",
+        activeWave:"W2",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"subminute",parentWave:"REVERSAL_CANDIDATE",
+        anchors:{
+          w1Low:7321.75,w1LowLocalTime:"2026-11-05 16:00 AZ",
+          w1High:7469.75,w1HighLocalTime:"2026-11-06 07:50 AZ",
+          w1HighAtUtc:"2026-11-06T14:50:00Z",
+          w2Low:null,w2LowLocalTime:null,w2CompletionConfirmed:false,
+          provenance:"OWNER_MICRO_W1_NOV5_LOW_NOV6_HIGH_20261108",
+        },
+        fibMethod:"W2_DOWN_RETRACEMENT_OF_W1",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7469.75-(7469.75-7321.75)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MICRO_W2_RETRACEMENT",
+        })),
+        structuralReference:7321.75,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,nextWave:"W3",
+        nextWaveStarted:false,completionConfirmed:false,
+        priceBasisReconciliation:"PENDING",
+        olderWorkingModelsPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
+      degree: "micro", role: "TIMING_ONLY", activeWave: microSequence.activeWave,
+      anchorProvenance: microSequence.anchorProvenance,
+      microSequence,
+      ownerMicroAbc,
+      ownerMicroBDown,
+      ownerMicroCDown,
+      ownerMicroW3Up,
+      ownerMicroCDownOct31,
+      ownerMicroW4Down,
+      ownerMicroW3:{
+        version:"engine22.microW3OwnerProjection.v1",
+        activeWave:"W3",direction:"UP",anchors:microW3Anchors,
+        levels:ownerMicroW3Levels,provisional:true,noExecution:true,
+      },
+      state: microStatus, origin: 7782.75, invalidation: 7782.75,
+      confirmation: null, confirmationStatus: microConfirmationStatus,
+      invalidationTouchRule: "INTRABAR_TOUCH_FLAGS_REVIEW",
+      failureRule: "10M_CLOSE_BELOW_INVALIDATION_CONFIRMS_FAILURE",
+      levels: microLevels, nextLevel: nextLevel(microLevels, price),
+      lastTouchedLevel: lastTouchedLevel(microLevels),
+      alertEligibleEvents: ALERT_EVENTS,
+    },
+    subminute: {
+      // Owner requested new W1-up forming research display; earlier C-down and D-up remain.
+      ownerSubminuteW1FormingNov9Research:{
+        version:"engine22.subminuteW1FormingNov9Research.v1",
+        degree:"subminute",selectionStatus:"RESEARCH_ONLY",
+        activeWave:"W1",direction:"UP",stage:"W1_UP_FORMING",
+        parentDegree:"minute",parentWave:"W1_FORMING_RESEARCH",
+        anchors:{
+          w1StartReference:7322.25,
+          w1StartReferenceLocalTime:"2026-11-05 16:00 AZ",
+          w1StartReferenceAtUtc:"2026-11-05T23:00:00Z",
+          w1StartIsProposedParentReference:true,
+          w1StartIndependentlyConfirmed:false,
+          w1EndingHigh:null,w1EndingLocalTime:null,
+          w2EndingLow:null,w2EndingLocalTime:null,
+          provenance:"OWNER_20261109_MINUTE_SUBMINUTE_W1_FORMING",
+        },
+        childDegree:"micro",childWaveSequence:"MICRO_W1_TO_W5_BUILDING",
+        w1CompletionConfirmed:false,nextWave:"W2",
+        nextWaveStarted:false,completionConfirmed:false,
+        microVsParentStartTimeReviewPending:true,
+        timestampConflictNote:"MICRO_BLUE_W1_LOW_2026_11_05_15_20_AZ_PRECEDES_PARENT_REFERENCE_16_00_AZ",
+        fibMethod:"PENDING_W1_AND_W2_ENDING_ANCHORS",
+        levels:[],reviewReference:7322.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      // Owner 2026-11-16: NEW November 12-15 Subminute ABC, independent of
+      // archived Nov 5 ABC and W1-forming interpretations. C down is
+      // developing research only; never manufacture a C ending low.
+      ownerSubminuteAbcDownNov16Research:{
+        version:"engine22.ownerSubminuteAbcDownNov16Research.v1",
+        selectionStatus:"RESEARCH_ONLY",degree:"subminute",
+        activeWave:"C",direction:"DOWN",stage:"C_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"minute",parentWave:"W2",
+        anchors:{
+          aHigh:7675.75,aHighLocalTime:"2026-11-12 09:00 AZ",
+          aHighAtUtc:"2026-11-12T16:00:00Z",
+          aLow:7516,aLowLocalTime:"2026-11-13 08:00 AZ",
+          aLowAtUtc:"2026-11-13T15:00:00Z",
+          bHigh:7614,bHighLocalTime:"2026-11-15 16:30 AZ",
+          bHighAtUtc:"2026-11-15T23:30:00Z",
+          cLow:null,cLowLocalTime:null,cCompletionConfirmed:false,
+          provenance:"OWNER_20261116_SUBMINUTE_ABC_DOWN",
+        },
+        fibMethod:"C_DOWN_B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        aLength:159.75,
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7614-(7675.75-7516)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"SUBMINUTE_C_DOWN_OWNER_RESEARCH",
+        })),
+        reviewOnly:true,completionConfirmed:false,noExecution:true,
+        noPermissionCreated:true,canonicalOwnerSelectionUnchanged:true,
+        historicalSubminuteModelsPreserved:true,
+        priceBasisReconciliation:"PENDING",
+      },
+      // New November 5 owner-marked ABC is a research-only card overlay.
+      // Do not promote it into current seven-degree selection or overwrite
+      // the October 31 wick/body models and their historical touches.
+      ownerSubminuteNov5AbcResearch:{
+        version:"engine22.subminuteNov5AbcResearch.v1",
+        selectionStatus:"RESEARCH_ONLY",
+        degree:"subminute",activeWave:"C",direction:"DOWN",
+        stage:"DEVELOPING_CANDIDATE",parentDegree:"minute",parentWave:"C",
+        anchors:{
+          aHigh:7735.00,aHighLocalTime:"2026-11-05 05:00 AZ",
+          aLow:7420.00,aLowLocalTime:"2026-11-05 08:00 AZ",
+          aLowTimeReviewPending:true,
+          bHigh:7542.00,bHighLocalTime:"2026-11-05 08:20 AZ",
+          bHighAtUtc:"2026-11-05T15:20:00Z",
+          observedLowReference:7322.25,
+          observedLowAtUtc:"2026-11-05T23:00:00Z",
+          observedLowLocalTime:"2026-11-05 16:00 AZ",
+          observedLowSource:"OWNER_MINUTE_C_CHART_REFERENCE",
+          cCompletionConfirmed:false,
+          cLowAnchorApproved:false,
+          provenance:"OWNER_SUBMINUTE_HANDWRITTEN_20261105",
+        },
+        fibMethod:"C_DOWN_FROM_B_HIGH_BY_A_WAVE_LENGTH",
+        fibFormula:"bHigh - (aHigh - aLow) * ratio",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7542-(7735-7420)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"SUBMINUTE_C_DOWN_PROJECTION",
+        })),
+        reviewReference:7542.00,reviewOnly:true,officialInvalidation:null,
+        earlyWarning:null,completionConfirmed:false,
+        historicalSubminuteModelsPreserved:true,
+        priceBasisReconciliation:"PENDING",
+        noExecution:true,noPermissionCreated:true,
+      },
+      // October 31 owner recount: add new C DOWN selection; preserve D UP history.
+      ownerSubminuteCDownOct31:{
+        version:"engine22.subminuteCDownOct31OwnerWorking.v1",
+        degree:"subminute",activeWave:"C",direction:"DOWN",stage:"DEVELOPING_CANDIDATE",
+        parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_20261031_SUBMINUTE_MICRO_C_DOWN",
+        waveA:{startHigh:7901.00,startLocalTime:"2026-08-14 05:00",wickLow:7558.75,bodyReferenceLow:7617.50,endLocalTime:"2026-09-16 11:00",status:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED"},
+        priorBEnding:{price:7895.00,localDate:"2026-10-06",status:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED"},
+        sequence:{A:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",B:"OWNER_MARKED_COMPLETE_NOT_MACHINE_VERIFIED",C:"DOWN_DEVELOPING_COMPLETION_UNCONFIRMED"},
+        observedLowReference:{price:7558.25,date:"2026-10-30",status:"OBSERVED_CHART_LOW_NOT_CONFIRMED_WAVE_END"},
+        fibStatus:"DUAL_REFERENCE_OWNER_RESEARCH_NOT_CONFIRMED",
+        fibMethod:"B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        fibReferences:{
+          wick:{label:"WICK PRIMARY RESEARCH",aLength:342.25,levels:[{"key":"e618","label":"0.618","price":7683.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7552.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7459.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7341.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7210.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}]},
+          body:{label:"BODY ALTERNATIVE RESEARCH",aLength:283.50,levels:[{"key":"e618","label":"0.618","price":7719.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7611.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7534.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7436.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7328,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}]}
+        },
+        levels:[{"key":"e618","label":"0.618","price":7683.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1000","label":"1.000","price":7552.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1272","label":"1.272","price":7459.75,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e1618","label":"1.618","price":7341.25,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false},{"key":"e2000","label":"2.000","price":7210.5,"status":"WATCH","provisional":true,"touchEvidenceAvailable":false}],
+        previousModelVersion:"engine22.subminuteDUpOwnerWorking.v1",
+        oldDUpHistoryPreserved:true,noExecution:true,noPermissionCreated:true,
+      },
+      // October 27 owner-selected working proposal. Not a completed-pattern
+      // confirmation, canonical count promotion, or autonomous transition.
+      // Earlier C DOWN and legacy W3 models remain below without mutation.
+      ownerCurrentDUp:{
+        version:"engine22.subminuteDUpOwnerWorking.v1",
+        activeWave:"D",direction:"UP",stage:"DEVELOPING_CANDIDATE",
+        degree:"subminute",parentDegree:"minute",parentWave:"W2",
+        ownerApprovalReference:"OWNER_APPROVED_2026_10_27_PR214",
+        proposedPriorC:{
+          direction:"DOWN",endingPrice:7648.50,
+          endingLocalTime:"2026-10-23 07:00",
+          timezone:"America/Phoenix",
+          source:"OWNER_CHART_REFERENCE_NOT_CANDLE_VERIFIED",
+          confirmationStatus:"OWNER_WORKING_ENDING_NOT_STRUCTURALLY_VERIFIED",
+        },
+        parentCorrectionStatus:"MINUTE_W2_NOT_COMPLETE",
+        minuteW3Started:false,
+        structure:"ABCDE_TRIANGLE_CANDIDATE_NOT_CONFIRMED",
+        nextLeg:"E_DOWN_POSSIBLE_NOT_STARTED",
+        // D-UP retracements of the nominated B -> C decline.
+        // B high is an older owner chart reference; C low is not candle-verified.
+        // These are provisional upside objectives, never confirmation of D.
+        anchors:{
+          bHigh:7897.50,
+          cLow:7648.50,
+          cLowLocalTime:"2026-10-23 07:00",
+          cLowTimezone:"America/Phoenix",
+          status:"OWNER_REFERENCES_NOT_INDEPENDENTLY_VERIFIED",
+        },
+        projectionMethod:"C_LOW_PLUS_B_TO_C_RANGE_TIMES_RETRACEMENT_RATIO",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+          price:Math.round((7648.50+(7897.50-7648.50)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,touchedAt:null,provisional:true,
+        })),
+        fibLevelsStatus:"OWNER_PROVISIONAL_D_UP_RETRACEMENT",
+        previousModelVersion:"engine22.subminuteCurrentCDownReference.v1",
+        oldCDownHistoryPreserved:true,
+        publicationStatus:"OWNER_WORKING_PROVISIONAL",
+        noExecution:true,noPermissionCreated:true,
+      },
+      // Owner-selected presentation of larger corrective C inside Minute W2.
+      // The source scenario stays independently stored under Minute, and the
+      // legacy Subminute W3 remains for historical audit.
+      ownerCurrentCDown:{
+        version:"engine22.subminuteCurrentCDownReference.v1",
+        activeWave:"C",direction:"DOWN",
+        parentDegree:"minute",parentWave:"W2",
+        stage:"DEVELOPING_CANDIDATE",
+        scenarioSource:"engine22WaveStrategy.currentWavelength.degrees.minute.ownerLargerCDownScenario",
+        modelStatus:"DEGREE_PLACEMENT_PROVISIONAL",
+        levels:[], // resolved from canonical scenario at presentation time
+        confirmationStatus:"NOT_STRUCTURALLY_CONFIRMED",
+        noExecution:true,noPermissionCreated:true,
+      },
+      degree: "subminute", activeWave: "W3", direction: "UP",
+      state: "SUBMINUTE_W3_ACTIVE_CANDIDATE", origin: 7673.25,
+      invalidation: 7673.25,
+      confirmationStatus: "PENDING_TOMORROW",
+      confirmationRule: "NEXT_SESSION_10M_ACCEPTANCE_ABOVE_0618_REQUIRED",
+      confirmationNote: "Owner anchors locked. Structural confirmation and candle touch evidence remain separately pending.",
+      levels: subminuteLevels, nextLevel: nextLevel(subminuteLevels, price),
+      fibAnchorStatus: "OWNER_COORDINATES_CONFIRMED_PRICE_BASIS_PENDING",
+      lastTouchedLevel: lastTouchedLevel(subminuteLevels),
+      alertEligibleEvents: ALERT_EVENTS,
+    },
+    minute: {
+      // Owner requested Minute W1-up forming inside Minor W3; older W2 / ABC retained.
+      ownerMinuteW1FormingNov9Research:{
+        version:"engine22.minuteW1FormingNov9Research.v1",
+        degree:"minute",selectionStatus:"RESEARCH_ONLY",
+        activeWave:"W2",direction:"DOWN",stage:"W2_DOWN_DEVELOPING_OWNER_RESEARCH",
+        parentDegree:"minor",parentWave:"W3_OWNER_WORKING_RESEARCH",
+        anchors:{
+          w1StartReference:7322.25,
+          w1StartReferenceLocalTime:"2026-11-05 16:00 AZ",
+          w1StartReferenceAtUtc:"2026-11-05T23:00:00Z",
+          w1StartIsProposedParentReference:true,
+          w1StartIndependentlyConfirmed:false,
+          w1EndingHigh:7671,w1EndingHighLocalTime:"2026-11-11 08:00 AZ",
+          w1EndingHighAtUtc:"2026-11-11T15:00:00Z",
+          w1EndingLocalTime:"2026-11-11 08:00 AZ",
+          w1EndingOwnerMarked:true,
+          w2EndingLow:null,w2EndingLocalTime:null,
+          provenance:"OWNER_20261109_MINUTE_SUBMINUTE_W1_FORMING",
+        },
+        childDegree:"subminute",childWaveSequence:"SUBMINUTE_W1_TO_W5_BUILDING",
+        w1CompletionConfirmed:true,nextWave:"W2",
+        nextWaveStarted:false,completionConfirmed:false,
+        microVsParentStartTimeReviewPending:true,
+        timestampConflictNote:"MICRO_BLUE_W1_LOW_2026_11_05_15_20_AZ_PRECEDES_PARENT_REFERENCE_16_00_AZ",
+        fibMethod:"W2_DOWN_RETRACEMENT_OF_OWNER_W1_HIGH_AND_PROPOSED_START_REFERENCE",
+        w1ReferenceLength:348.75,
+        levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7671-(7671-7322.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MINUTE_W2_DOWN_RETRACEMENT_PROVISIONAL_W1_START",
+        })),reviewReference:7322.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        oldAbcResearchPreserved:true,canonicalOwnerSelectionUnchanged:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      // Owner's current Oct 21 working hypothesis is Minute W2 developing,
+      // with an INTERNAL contracting triangle candidate. It is NOT a
+      // completed triangle, a formally confirmed recount, or trade authority.
+      // The historical W3 projection beneath this packet remains for audit.
+      // Larger August-October correction: owner-directed C DOWN projection.
+      // Degree placement between competing ABC and ABCDE paths is unconfirmed.
+      // Independent from historical Minute W3 and older D-UP watch.
+      ownerLargerCDownScenario:{
+        version:"engine22.largerCorrectionCDownWatch.v1",
+        status:"PROVISIONAL_WORKING_SCENARIO",activeLeg:"C",direction:"DOWN",
+        structureCandidates:["ABC","ABCDE_TRIANGLE"],
+        degreeAssignment:"PENDING_RECONCILIATION",
+        anchors:{aHigh:7905,aHighLocalTime:"2026-08-13 07:00",
+          aLow:7575,aLowLocalTime:"2026-09-16 12:00",
+          bHigh:7897.50},
+        formula:"B_HIGH_MINUS_A_LENGTH_TIMES_RATIO",
+        levels:[0.382,0.5,0.618,0.786,1,1.272,1.618,2].map(ratio=>({
+          key:"e"+Math.round(ratio*1000),label:ratio.toFixed(3),
+          price:Math.round((7897.50-330*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+        })),
+        warningReferences:[7618,7575],
+        confirmationStatus:"STRUCTURAL_C_COMPLETION_NOT_CONFIRMED",
+        countIdentityStatus:"NOT_PUBLISHED",noExecution:true,noPermissionCreated:true,
+      },
+      // Oct 25 owner-confirmed Minute W1: July 30 12:00 AZ -> Aug 13 09:00 AZ.
+      // W2 is still DOWN/DEVELOPING. This owner model supersedes the
+      // historical Minute W3 projection for the CURRENT Minute card ONLY.
+      // Minute A-B-C inside the proposed Minor W2: CARD RESEARCH ONLY.
+      // Preserve the existing Minute W2 canonical count and previous C scenario.
+      ownerMinuteAbcResearch:{
+        version:"engine22.minuteAbcDownNov5Research.v1",
+        degree:"minute",activeWave:"C",direction:"DOWN",
+        stage:"DEVELOPING_CANDIDATE",selectionStatus:"RESEARCH_ONLY",
+        parentDegree:"minor",parentWave:"W2",
+        anchors:{
+          aHigh:7901.75,aHighLocalTime:"2026-08-14 07:00 AZ",
+          aLow:7575.25,aLowLocalTime:"2026-09-16 11:00 AZ",
+          bHigh:7890.25,bHighLocalTime:"2026-10-11 22:00 AZ",
+          cObservedCandidateLow:7322.25,cCandidateLocalTime:"2026-11-05 16:00 AZ",
+          cCandidateAtUtc:"2026-11-05T23:00:00Z",
+          cCandidateConfirmed:false,
+          timestampReconciliation:"MINOR_W1_END_2026_08_14_03_00_VS_MINUTE_A_HIGH_07_00",
+          provenance:"OWNER_HANDWRITTEN_MINUTE_ABC_20261105_B_DATE_CORRECTED_OCT11",
+        },
+        fibMethod:"C_PROJECTION_FROM_B_USING_A_LENGTH",
+        fibFormula:"bHigh - (aHigh - aLow) * ratio",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7890.25-(7901.75-7575.25)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"MINUTE_C_DOWN_EXTENSION",
+        })),
+        reviewReference:7890.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        completionConfirmed:false,
+        historicalMinuteW2Preserved:true,
+        priceBasisReconciliation:"PENDING",
+        noExecution:true,noPermissionCreated:true,
+      },
+      ownerMinuteW2Retracement:{
+        version:"engine22.minuteW2RetracementOwner.v1",
+        degree:"minute",completedWave:"W1",completedWaveConfirmedByOwner:true,
+        activeWave:"W2",direction:"DOWN",stage:"DEVELOPING",
+        nextWave:"W3",nextWaveStarted:false,
+        anchors:{
+          w1Low:7419.50,w1LowLocalTime:"2026-07-30 12:00",
+          w1High:7908.75,w1HighLocalTime:"2026-08-13 09:00",
+          wave1Length:489.25,
+          provenance:"OWNER_CHART_APPROVED_20261025",
+        },
+        levels:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),
+          price:Math.round((7908.75-489.25*ratio)*4)/4,
+          status:"WATCH",provisional:false,touchEvidenceAvailable:false,
+          levelType:ratio===1?"W1_ORIGIN_STRUCTURAL_BOUNDARY":"W2_RETRACEMENT",
+        })),
+        structuralReference:7419.50,
+        invalidationRule:"MINUTE_W2_CANNOT_TRADE_BELOW_START_OF_MINUTE_W1",
+        invalidationTrigger:"INTRABAR_PRICE_BELOW_7419_50",
+        status:"OWNER_APPROVED_REFERENCE_NOT_LIVE_HARD_INVALIDATION",
+        noExecution:true,noPermissionCreated:true,
+      },
+      ownerMinuteW2Hypothesis: {
+        version:"engine22.minuteW2ComplexCorrectionWatch.v1",
+        degree:"minute",activeWave:"W2",direction:"CORRECTIVE",
+        stage:"COMPLEX_CORRECTION_CANDIDATE",
+        confirmationStatus:"OWNER_HYPOTHESIS_UNCONFIRMED",
+        // Owner confirmed these two pivots for the developing internal D leg.
+        // Fib is a retracement of B -> C, NOT a new Minute W3 projection.
+        activeInternalLeg:"D",
+        activeInternalLegDirection:"UP",
+        activeInternalLegStage:"DEVELOPING_CANDIDATE",
+        priorPivotB:{price:7897.50,source:"OWNER_CONFIRMED_20261021"},
+        priorPivotC:{price:7676.50,localTime:"2026-10-16 11:00",source:"OWNER_CONFIRMED_20261021"},
+        internalDProjection:{
+          version:"engine22.minuteW2InternalDProjection.v1",
+          origin:7676.50,referenceHigh:7897.50,
+          direction:"UP",status:"DEVELOPING_WATCH",
+          levels:[0.382,0.5,0.618,0.786,0.886].map(ratio=>({
+            key:"r"+Math.round(ratio*1000),label:ratio.toFixed(3),
+            price:Math.round((7676.50+(7897.50-7676.50)*ratio)*4)/4,
+            status:"WATCH",touchEvidenceAvailable:false,provisional:true,
+          })),
+          completionConfirmed:false,noExecution:true,
+        },
+        minuteW3Started:false,
+        minuteW3Confirmation:"NOT_CONFIRMED",
+        rangeReferences:{upperApprox:7910,lowerApprox:7557},
+        internalPattern:{
+          type:"CONTRACTING_TRIANGLE_CANDIDATE",
+          placement:"INTERNAL_B_OR_X_COMPONENT_UNRESOLVED",
+          A:"COMPLETION_CANDIDATE",
+          B:"COMPLETION_CANDIDATE",
+          C:"COMPLETION_CANDIDATE",
+          D:"DEVELOPING_CANDIDATE",
+          E:"ANTICIPATED_NOT_STARTED",
+          completionConfirmed:false,
+        },
+        // Lower degrees are preserved, not reset or relabeled. Their prior
+        // owner projections are observational swings during the Minute W2
+        // hypothesis, not evidence that Minute W3 has been confirmed.
+        childDegreeContext:{
+          subminute:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMINUTE_W3_OWNER_PROJECTION",
+            currentWorkingStructure:"ABC_UP_INSIDE_MINUTE_D",
+            direction:"UP",
+            A:"DEVELOPING_CANDIDATE",
+            B:"PENDING",
+            C:"PENDING",
+            parentLeg:"MINUTE_W2_INTERNAL_D",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          micro:{
+            historicalCountPreserved:true,
+            priorProjection:"MICRO_W3_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+          submicro:{
+            historicalCountPreserved:true,
+            priorProjection:"SUBMICRO_W2_OWNER_PROJECTION",
+            relationship:"INSIDE_MINUTE_W2_CANDIDATE",
+            waveRecount:"PENDING",
+            noReset:true,
+          },
+        },
+        preserveHistoricalAnchors:true,
+        shadowOnly:true,noExecution:true,noPermissionCreated:true,
+      },
+      degree: "minute", activeWave: "W3", direction: "UP",
+      state: "MINUTE_W3_STARTED_CONFIRMATION_PENDING",
+      origin: 7576.00, originArea: [7575.00, 7576.00],
+      confirmationLevels: [7848.50, 7906.25],
+      confirmationStatus: "PENDING", levels: minuteLevels,
+      nextLevel: nextLevel(minuteLevels, price),
+      lastTouchedLevel: lastTouchedLevel(minuteLevels), alertEligibleEvents: ALERT_EVENTS,
+    },
+    minor: {
+      // Nov 9 owner-marked Minor W2 completion / W3 UP developing research count.
+      // Uses the Nov 5 16:00 AZ 7322.25 candidate low that the owner selected
+      // as the W2 ending anchor; candle contract basis remains unverified.
+      // Separate model keeps earlier W2 retracements and canonical Minor W5 intact.
+      ownerMinorW3Nov9Research:{
+        version:"engine22.minorW3Nov9Research.v1",degree:"minor",
+        selectionStatus:"RESEARCH_ONLY",activeWave:"W3",direction:"UP",
+        stage:"DEVELOPING_OWNER_WORKING_COUNT",
+        parentDegree:"intermediate",parentWave:"W3",
+        w2CompletionStatus:"OWNER_MARKED_PRICE_REVISED_TIMESTAMP_PENDING",
+        w2CompletionConfirmedByOwner:true,
+        w2TimestampVerified:false,
+        w3StartStatus:"OWNER_WORKING_W3_UP_DEVELOPING",
+        anchors:{
+          w1Low:6485.00,w1LowLocalTime:"2026-04-30 17:00 AZ",
+          w1High:7901.75,w1HighLocalTime:"2026-08-14 03:00 AZ",
+          w1Length:1416.75,
+          w2EndingLow:7305.25,w2EndingLocalTime:null,
+          w2EndingAtUtc:null,
+          priorW2Ending:{price:7322.25,localTime:"2026-11-05 16:00 AZ",
+            atUtc:"2026-11-05T23:00:00Z",status:"SUPERSEDED_AS_END_BY_OWNER_RECOUNT"},
+          w2EndingPriceSource:"OWNER_20261119_CHART_OBSERVED_7305_25_TIME_PENDING",
+          ownerApprovalReference:"OWNER_20261119_MINOR_W2_REVISED_7305_25_TIME_PENDING",
+          originalApproximateW2Low:7325.00,
+          provenance:"OWNER_20261119_MINOR_W2_LOWER_END_PRICE_W3_UP_RESEARCH",
+        },
+        fibMethod:"W3_UP_W2_LOW_PLUS_W1_LENGTH_TIMES_RATIO",
+        levels:[0.618,1,1.272,1.618,2,2.618].map(ratio=>({
+          key:"e"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7305.25+(7901.75-6485.00)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,touchEvidenceType:null,
+          levelType:"MINOR_W3_UP_EXTENSION",
+        })),
+        // The FIRST smaller upward wave inside Minor W3 has no owner ending high.
+        // These are resistance references formed by retracing the preceding
+        // Minor W2 decline (7901.75 -> 7305.25), NOT predicted wave endings.
+        firstInternalWaveResistance:[0.236,0.382,0.5,0.618,0.786,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),ratio,
+          price:Math.round((7305.25+(7901.75-7305.25)*ratio)*4)/4,
+          status:"WATCH",provisional:true,touchEvidenceAvailable:false,
+          levelType:"MINOR_W3_FIRST_INTERNAL_WAVE_RESISTANCE_REFERENCE_NOT_END",
+        })),
+        firstInternalWaveEndHigh:null,
+        structuralReference:7305.25,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        priceBasisReconciliation:"PENDING",
+        canonicalMinorW5Unchanged:true,
+        olderW2RetracementLevelsPreserved:true,
+        noExecution:true,noPermissionCreated:true,
+      },
+      // Owner-approved CARD RESEARCH display, not a live count promotion.
+      // The current Minor W5 canonical data and touch history remain below.
+      ownerMinorW2Research:{
+        version:"engine22.minorW2ResearchCardNov5.v1",
+        degree:"minor",activeWave:"W2",direction:"DOWN",
+        stage:"DEVELOPING_RESEARCH",selectionStatus:"RESEARCH_ONLY",
+        parentDegree:"intermediate",parentWave:"W3",
+        anchors:{
+          w1Low:6485.00,w1LowLocalTime:"2026-04-30 17:00 AZ",
+          w1High:7901.75,w1HighLocalTime:"2026-08-14 03:00 AZ",
+          w2Start:7901.75,w2StartLocalTime:"2026-08-14 03:00 AZ",
+          w2ObservedCandidateLow:7325.00,w2CandidateDate:"2026-11-05",
+          w2CandidateLocalTime:null,w2CandidateApproximate:true,
+          provenance:"OWNER_MINOR_W1_W2_RESEARCH_20261105",
+        },
+        fibMethod:"W2_RETRACEMENT_FROM_W1_HIGH",
+        fibFormula:"w1High - (w1High - w1Low) * ratio",
+        levels:[0.236,0.382,0.5,0.618,0.786,0.886,1].map(ratio=>({
+          key:"r"+String(Math.round(ratio*1000)).padStart(4,"0"),
+          label:ratio.toFixed(3),
+          ratio,price:Math.round((7901.75-(7901.75-6485.00)*ratio)*4)/4,
+          status:"WATCH",touchEvidenceAvailable:false,
+          touchEvidenceType:null,levelType:"W2_RETRACEMENT",
+        })),
+        reviewReference:6485.00,reviewOnly:true,
+        officialInvalidation:null,earlyWarning:null,
+        nextWave:"W3",nextWaveStarted:false,
+        priorSelectedModel:"MINOR_W5_ACTIVE_CANDIDATE",
+        historicalMinorW5Preserved:true,
+        priceBasisReconciliation:"PENDING",noExecution:true,noPermissionCreated:true,
+      },
+      // Owner-confirmed current W5 reference; strictly separate from order stops.
+      ownerW5StructuralReference:{
+        version:"engine22.minorW5StructuralReference.v1",
+        pivotWave:"W4",price:7398.00,source:"OWNER_CHART_APPROVED_20261025",
+        rule:"MINOR_W5_ACTIVE_COUNT_REQUIRES_W4_ORIGIN_REVIEW_IF_BREACHED",
+        trigger:"INTRABAR_PRICE_BELOW_7398_00",
+        status:"OWNER_APPROVED_REFERENCE_NOT_LIVE_HARD_INVALIDATION",
+        noExecution:true,noPermissionCreated:true,
+      },
+      degree: "minor", activeWave: "W5", direction: "UP", state: "MINOR_W5_ACTIVE_CANDIDATE",
+      origin: 7398.00, invalidation: 7398.00,
+      confirmationStatus: "ACTIVE_CANDIDATE", levels: minorLevels,
+      nextLevel: nextLevel(minorLevels, price), lastTouchedLevel: lastTouchedLevel(minorLevels), alertEligibleEvents: ALERT_EVENTS,
+    },
+  };
+  const researchRoadmap=buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs});
+  const ownerRecount=buildOwnerRecountDegreesV8(researchRoadmap,{evaluationTimeMs});
+  if(ownerRecount) for(const degree of ["minor","minute","subminute","micro","submicro"])
+    degrees[degree].ownerRecountNov23V8=ownerRecount[degree];
+  return {
+    version: "engine22.currentWavelength.v1",
+    symbol: String(symbol || "ES").toUpperCase(),
+    currentPrice: round(price),
+    source: "MANAGER_LOCKED_CURRENT_WAVELENGTH_PHASE1",
+    sourceMode: "OVERRIDE_DISPLAY_INTELLIGENCE",
+    canonicalWaveStateConflict: true,
+    primaryActiveDegree: "subminute",
+    timingDegree: "micro",
+    tacticalParentDegree: "minute",
+    structuralParentDegree: "minor",
+    requiresPersistence: true,
+    persistenceMode: "TOUCH_STATUS_SHOULD_PERSIST_AFTER_FIRST_TOUCH",
+    persistenceNote: "Phase 1 records Manager-locked touch facts and current-price observations; it does not maintain historical touch state.",
+    degrees,
+    ownerResearchContext:String(symbol||"").toUpperCase()==="ES" ? buildOwnerNov23ResearchContextV1({evaluationTimeMs}) : null,
+    ownerWaveRoadmap:buildOwnerWaveRoadmapV1({symbol,evaluationTimeMs}),
+    // New lower-degree working research. Legacy degrees remain untouched for history.
+    ownerRecountV8:ownerRecount,
+    alertsPreview: [], // Future Engine 13 integration only; no sends.
+  };
+}

@@ -1,0 +1,106 @@
+{
+  "manifestSchema": "engine12.tradeInvestigator.fixtureExportManifest.v1",
+  "exportVersion": "engine12.tradeInvestigator.fixtureExport.v2",
+  "date": "2026-11-24",
+  "strategyId": "intraday_scalp@10m",
+  "createdAt": "2026-11-24T22:38:41.965Z",
+  "allSucceeded": true,
+  "results": [
+    {
+      "time": "0746",
+      "ok": true,
+      "status": "EXPORTED",
+      "sourceRelativePath": "2026-11-24/0746.json",
+      "before": {
+        "sha256": "592e1baa0d29993420ef807efbba9ad5cb31f7e164a903e9aaf3a9f0490a4a6a",
+        "byteLength": 6858716,
+        "mtimeMs": 1795559833991.2014,
+        "ino": "811651",
+        "readAt": "2026-11-24T22:38:41.743Z"
+      },
+      "after": {
+        "sha256": "592e1baa0d29993420ef807efbba9ad5cb31f7e164a903e9aaf3a9f0490a4a6a",
+        "byteLength": 6858716,
+        "mtimeMs": 1795559833991.2014,
+        "ino": "811651",
+        "readAt": "2026-11-24T22:38:41.801Z"
+      },
+      "sourceUnchanged": true,
+      "expectedHostSha256": "592e1baa0d29993420ef807efbba9ad5cb31f7e164a903e9aaf3a9f0490a4a6a",
+      "hostHashMatch": true,
+      "fixture": "2026-11-24_0746.fixture.json"
+    },
+    {
+      "time": "0752",
+      "ok": true,
+      "status": "EXPORTED",
+      "sourceRelativePath": "2026-11-24/0752.json",
+      "before": {
+        "sha256": "e1600a50352690098d06654de76800c4384146e14740d6db5ea3fb2f07eb8ec5",
+        "byteLength": 6663854,
+        "mtimeMs": 1795559833967.2014,
+        "ino": "811650",
+        "readAt": "2026-11-24T22:38:41.810Z"
+      },
+      "after": {
+        "sha256": "e1600a50352690098d06654de76800c4384146e14740d6db5ea3fb2f07eb8ec5",
+        "byteLength": 6663854,
+        "mtimeMs": 1795559833967.2014,
+        "ino": "811650",
+        "readAt": "2026-11-24T22:38:41.859Z"
+      },
+      "sourceUnchanged": true,
+      "expectedHostSha256": "e1600a50352690098d06654de76800c4384146e14740d6db5ea3fb2f07eb8ec5",
+      "hostHashMatch": true,
+      "fixture": "2026-11-24_0752.fixture.json"
+    },
+    {
+      "time": "1016",
+      "ok": true,
+      "status": "EXPORTED",
+      "sourceRelativePath": "2026-11-24/1016.json",
+      "before": {
+        "sha256": "43601e4fccd3a9f66b04f48478acc4bbe34eafc9b35884cb8f2b68185111758e",
+        "byteLength": 7083967,
+        "mtimeMs": 1795559833999.2014,
+        "ino": "811652",
+        "readAt": "2026-11-24T22:38:41.867Z"
+      },
+      "after": {
+        "sha256": "43601e4fccd3a9f66b04f48478acc4bbe34eafc9b35884cb8f2b68185111758e",
+        "byteLength": 7083967,
+        "mtimeMs": 1795559833999.2014,
+        "ino": "811652",
+        "readAt": "2026-11-24T22:38:41.910Z"
+      },
+      "sourceUnchanged": true,
+      "expectedHostSha256": "43601e4fccd3a9f66b04f48478acc4bbe34eafc9b35884cb8f2b68185111758e",
+      "hostHashMatch": true,
+      "fixture": "2026-11-24_1016.fixture.json"
+    },
+    {
+      "time": "1025",
+      "ok": true,
+      "status": "EXPORTED",
+      "sourceRelativePath": "2026-11-24/1025.json",
+      "before": {
+        "sha256": "0f4cc0272f957bf1ec4c15627ae90adc068933ddeb67986f2530ae3d08f02764",
+        "byteLength": 7045427,
+        "mtimeMs": 1795559835223.2017,
+        "ino": "811653",
+        "readAt": "2026-11-24T22:38:41.919Z"
+      },
+      "after": {
+        "sha256": "0f4cc0272f957bf1ec4c15627ae90adc068933ddeb67986f2530ae3d08f02764",
+        "byteLength": 7045427,
+        "mtimeMs": 1795559835223.2017,
+        "ino": "811653",
+        "readAt": "2026-11-24T22:38:41.958Z"
+      },
+      "sourceUnchanged": true,
+      "expectedHostSha256": "0f4cc0272f957bf1ec4c15627ae90adc068933ddeb67986f2530ae3d08f02764",
+      "hostHashMatch": true,
+      "fixture": "2026-11-24_1025.fixture.json"
+    }
+  ]
+}

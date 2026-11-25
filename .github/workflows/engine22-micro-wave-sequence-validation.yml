@@ -1,0 +1,49 @@
+name: Engine22 Micro wave sequence validation
+on:
+  push:
+    branches: [engine22-micro-wave-sequence-v1]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check-micro-sequence:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax and unit tests
+        run: |
+          node --check services/core/logic/engine22/wave/buildMicroWaveSequence.js
+          node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+          node --check services/core/logic/engine22/wave/buildEngine22Display.js
+          node --check services/core/logic/engine22/wave/buildMicroFiveMinuteEvidence.js
+          node --test services/core/tests/engine22MicroWaveSequence.test.js services/core/tests/engine22MicroFiveMinuteEvidence.test.js
+      - name: Install isolated snapshot dependencies
+        run: npm install --no-save --no-package-lock --ignore-scripts --no-audit --no-fund
+      - name: Build ES snapshot with existing read-only data credential
+        working-directory: services/core
+        env:
+          SYMBOL: ES
+          NODE_ENV: test
+          POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+          POLY_KEY: ${{ secrets.POLY_KEY }}
+        run: |
+          if [ -z "$POLYGON_API_KEY" ] && [ -n "$POLY_KEY" ]; then export POLYGON_API_KEY="$POLY_KEY"; fi
+          test -n "$POLYGON_API_KEY"
+          node jobs/buildStrategySnapshot.js
+      - name: Confirm Micro lifecycle contract in snapshot
+        run: |
+          jq -e '
+            .strategies["intraday_scalp@10m"].engine22WaveStrategy.currentWavelength.degrees.micro as $micro |
+            $micro.role == "TIMING_ONLY" and
+            $micro.microSequence.version == "engine22.microWaveSequence.v1" and
+            ($micro.microSequence.w1Completion.reasonCodes | type == "array") and
+            ($micro.microSequence.w1Completion.evidence | type == "object") and
+            ($micro.microSequence.w2TargetsAvailable == false) and
+            ($micro.microSequence.noExecution == true) and
+            ($micro.microSequence.noPermissionCreated == true)
+          ' /opt/render/project/src/services/core/data/strategy-snapshot-es.json

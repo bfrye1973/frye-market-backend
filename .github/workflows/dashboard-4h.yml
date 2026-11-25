@@ -1,0 +1,352 @@
+name: dashboard-4h
+
+on:
+  workflow_dispatch:
+
+  # Every successful 1H workflow completion can trigger
+  # an intraday developing-bar 4H refresh.
+  workflow_run:
+    workflows:
+      - dashboard-hourly
+    types:
+      - completed
+
+  schedule:
+    # Normal 4H backup schedule — Phoenix / MST (UTC-7 year-round)
+    - cron: "30 21 * * 0"         # Sunday 2:30 PM Phoenix
+    - cron: "30 1,5 * * 1-5"      # Sun-Thu 6:30 PM / 10:30 PM Phoenix
+    - cron: "30 9,13,17 * * 1-5"  # Mon-Fri 2:30 AM / 6:30 AM / 10:30 AM Phoenix
+    - cron: "30 21 * * 1-4"       # Mon-Thu 2:30 PM Phoenix
+    - cron: "0 20 * * 5"          # Friday 1:00 PM Phoenix
+
+jobs:
+  build_and_publish_4h:
+    name: Build and Publish 4H
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    permissions:
+      contents: write
+
+    concurrency:
+      group: dashboard-4h
+      cancel-in-progress: true
+
+    env:
+      TZ: America/Phoenix
+      LIVE_BRANCH: data-live-4h
+      PYTHONUNBUFFERED: "1"
+      FD_MAX_WORKERS: "16"
+      H4_INCLUDE_DEVELOPING: "false"
+
+      H4_LOOKBACK_DAYS: "14"
+      H4_LOOKBACK_BARS: "20"
+
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      POLY_KEY: ${{ secrets.POLY_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          pip install --upgrade requests python-dateutil tzdata
+
+      - name: Resolve 4H session mode
+        id: mode
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+
+          now = datetime.now(ZoneInfo("America/New_York"))
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "")
+          upstream_conclusion = os.environ.get("UPSTREAM_CONCLUSION", "")
+          upstream_branch = os.environ.get("UPSTREAM_BRANCH", "")
+
+          minutes = now.hour * 60 + now.minute
+          cash_active = (9 * 60 + 30) <= minutes < (16 * 60)
+
+          hourly_handoff = event_name == "workflow_run"
+
+          if hourly_handoff:
+              if upstream_branch and upstream_branch != "main":
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_NON_MAIN_BRANCH"
+
+              elif upstream_conclusion != "success":
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_UPSTREAM_NOT_SUCCESS"
+
+              elif cash_active:
+                  mode = "baseline"
+                  include_developing = True
+                  run = True
+                  reason = "HOURLY_HANDOFF_DEVELOPING_4H_REFRESH"
+
+              else:
+                  mode = "incremental"
+                  include_developing = False
+                  run = False
+                  reason = "HOURLY_HANDOFF_OUTSIDE_EQUITY_SESSION"
+
+          else:
+              # Manual runs and normal 4H scheduled checkpoints
+              # retain completed-bar behavior.
+              mode = "incremental"
+              include_developing = False
+              run = True
+              reason = "STANDARD_4H_CHECKPOINT"
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
+              f.write(f"MODE={mode}\n")
+              f.write(
+                  f"H4_INCLUDE_DEVELOPING="
+                  f"{'true' if include_developing else 'false'}\n"
+              )
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"run={'true' if run else 'false'}\n")
+              f.write(f"reason={reason}\n")
+
+          print("NY time:", now.isoformat())
+          print("event:", event_name or "unknown")
+          print("upstream conclusion:", upstream_conclusion or "none")
+          print("upstream branch:", upstream_branch or "none")
+          print(
+              "run:",
+              run,
+              "mode:",
+              mode,
+              "includeDeveloping:",
+              include_developing,
+              "reason:",
+              reason,
+          )
+          PY
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          UPSTREAM_BRANCH: ${{ github.event.workflow_run.head_branch }}
+
+      - name: Restore prior cache if exists
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+
+          if git ls-remote --exit-code --heads origin "${LIVE_BRANCH}" >/dev/null 2>&1; then
+            git fetch --no-tags --depth=1 origin "${LIVE_BRANCH}"
+
+            git show \
+              "origin/${LIVE_BRANCH}:data/4h_cache.json" \
+              > data/4h_cache.json 2>/dev/null || true
+
+            if [ -s data/4h_cache.json ]; then
+              echo "::notice:: Restored prior 4H cache"
+            else
+              echo "::notice:: No prior 4H cache found"
+            fi
+          else
+            echo "::notice:: Live branch ${LIVE_BRANCH} does not exist yet"
+          fi
+
+      - name: Build 4H sectorCards source
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+
+          mkdir -p data
+
+          python -u scripts/build_outlook_4h_source.py \
+            --mode "${MODE}" \
+            --sectors-dir "data/sectors" \
+            --lookback-bars "${H4_LOOKBACK_BARS}" \
+            --lookback-days "${H4_LOOKBACK_DAYS}" \
+            --cache "data/4h_cache.json" \
+            --out "data/outlook_source_4h.json"
+
+          python - <<'PY'
+          import json
+          import sys
+
+          with open(
+              "data/outlook_source_4h.json",
+              "r",
+              encoding="utf-8",
+          ) as f:
+              source = json.load(f)
+
+          cards = source.get("sectorCards") or []
+
+          if not isinstance(cards, list) or len(cards) == 0:
+              print("INVALID 4H source sectorCards")
+              sys.exit(2)
+
+          print("OK source cards =", len(cards))
+          PY
+
+      - name: Build 4H payload
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+
+          python -u scripts/make_dashboard_4h.py \
+            --source "data/outlook_source_4h.json" \
+            --out "data/outlook_4h.json"
+
+      - name: Compute 4H trend capsule
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          python -u scripts/compute_trend_4h.py
+
+      - name: Validate required keys
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+
+          python - <<'PY'
+          import json
+          import sys
+
+          with open(
+              "data/outlook_4h.json",
+              "r",
+              encoding="utf-8",
+          ) as f:
+              payload = json.load(f)
+
+          metrics = payload.get("metrics") or {}
+
+          required = (
+              "breadth_4h_pct",
+              "momentum_4h_pct",
+              "squeeze_4h_pct",
+              "liquidity_4h",
+              "volatility_4h_pct",
+              "trend_strength_4h_pct",
+          )
+
+          missing = [
+              key
+              for key in required
+              if key not in metrics
+          ]
+
+          cards = payload.get("sectorCards") or []
+
+          if (
+              missing
+              or not isinstance(cards, list)
+              or len(cards) != 11
+          ):
+              print(
+                  "missing:",
+                  missing,
+                  "len(sectorCards)=",
+                  len(cards),
+              )
+              sys.exit(1)
+
+          print("OK metrics & sectorCards")
+          PY
+
+      - name: Write heartbeat
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          date -u +'%Y-%m-%dT%H:%M:%SZ' \
+            > data/heartbeat_4h.txt
+
+      - name: Publish live branch
+        if: steps.mode.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+
+          TMP_DIR="$(mktemp -d)"
+
+          cp -f \
+            data/outlook_4h.json \
+            "${TMP_DIR}/outlook_4h.json"
+
+          cp -f \
+            data/heartbeat_4h.txt \
+            "${TMP_DIR}/heartbeat_4h.txt"
+
+          cp -f \
+            data/4h_cache.json \
+            "${TMP_DIR}/4h_cache.json"
+
+          git config user.email "user@local"
+          git config user.name "CI Bot"
+
+          git fetch --depth=1 origin "${LIVE_BRANCH}" || true
+
+          git rm -r --cached . 2>/dev/null || true
+          git reset --hard
+          git clean -fdx
+
+          if git ls-remote \
+            --exit-code \
+            --heads \
+            origin \
+            "${LIVE_BRANCH}" \
+            >/dev/null 2>&1
+          then
+            git checkout \
+              -B "${LIVE_BRANCH}" \
+              "origin/${LIVE_BRANCH}"
+          else
+            git checkout -B "${LIVE_BRANCH}"
+          fi
+
+          git branch \
+            --set-upstream-to="origin/${LIVE_BRANCH}" \
+            "${LIVE_BRANCH}" \
+            || true
+
+          mkdir -p data
+
+          mv \
+            "${TMP_DIR}/outlook_4h.json" \
+            data/outlook_4h.json
+
+          mv \
+            "${TMP_DIR}/heartbeat_4h.txt" \
+            data/heartbeat_4h.txt
+
+          mv \
+            "${TMP_DIR}/4h_cache.json" \
+            data/4h_cache.json
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+
+          git commit \
+            -m "4h publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          git push origin "${LIVE_BRANCH}"

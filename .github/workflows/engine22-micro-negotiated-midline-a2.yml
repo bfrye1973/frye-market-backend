@@ -1,0 +1,40 @@
+name: Engine22 Micro Negotiated Midline A2
+
+on:
+  push:
+    branches:
+      - engine22-micro-negotiated-midline-a2-confluence
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/microV2/buildMicroNegotiatedMidlineConfluence.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine22MicroNegotiatedMidlineConfluence.test.js"
+      - "services/core/tests/engine22MicroNegotiatedMidlineConfluenceWiring.test.js"
+      - ".github/workflows/engine22-micro-negotiated-midline-a2.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine22/microV2/buildMicroNegotiatedMidlineConfluence.js
+          node --check services/core/jobs/buildStrategySnapshot.js
+
+      - name: A++ confluence tests
+        run: |
+          node --test             services/core/tests/engine22MicroNegotiatedMidlineConfluence.test.js             services/core/tests/engine22MicroNegotiatedMidlineConfluenceWiring.test.js
+
+      - name: Micro and Strategy1 ownership regressions
+        run: |
+          node --test             services/core/tests/engine22MicroConsistencyReplayV2.test.js             services/core/tests/engine22MicroProductionMigrationV2.test.js             services/core/tests/engine26MicroTimingShadow.test.js             services/core/tests/engine26Strategy1DirectionRegression.test.js             services/core/tests/engine26BPipeline.test.js

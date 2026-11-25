@@ -1,0 +1,19 @@
+name: Engine22 Minor W2 Complete / W3 Research
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine22/wave/buildCurrentWavelength.js'
+      - 'services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js'
+      - 'services/core/tests/engine22MinorW2CompleteW3Nov9.test.js'
+      - '.github/workflows/engine22-minor-w2-complete-w3-nov9.yml'
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node --check services/core/logic/engine22/wave/buildCurrentWavelength.js
+      - run: node --check services/core/logic/engine22/wave/applyOwnerPriceTouchesV1.js
+      - run: node --test services/core/tests/engine22MinorW2CompleteW3Nov9.test.js services/core/tests/engine22MinorW2ResearchCardNov5.test.js

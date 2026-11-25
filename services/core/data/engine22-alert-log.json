@@ -1,0 +1,60 @@
+import fs from "fs";
+
+const FILE_PATH =
+  "/opt/render/project/src/services/core/data/engine22-alert-log.json";
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function readLog() {
+  try {
+    if (!fs.existsSync(FILE_PATH)) return [];
+    const raw = fs.readFileSync(FILE_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+function writeLog(data) {
+  fs.writeFileSync(FILE_PATH, JSON.stringify(data, null, 2));
+}
+
+function buildId(e) {
+  return `${e.symbol}:${e.strategyId}:${e.status}:${e.triggeredAt}`;
+}
+
+export function logEngine22Alert(event) {
+  if (!event || !event.status) return;
+
+  const log = readLog();
+
+  const entry = {
+    id: buildId(event),
+    symbol: event.symbol,
+    strategyId: event.strategyId,
+    tf: event.tf,
+    engine: "engine22",
+    type: event.type,
+    status: event.status,
+    direction: event.direction,
+    price: event.price,
+    confidence: event.confidence,
+    targetMove: event.targetMove,
+    invalidationLevel: event.invalidationLevel,
+    triggeredAt: event.triggeredAt || nowIso(),
+    sentToPhone: false,
+  };
+
+  // prevent duplicates
+  const exists = log.find((x) => x.id === entry.id);
+  if (exists) return;
+
+  log.push(entry);
+
+  // keep last 200 only
+  const trimmed = log.slice(-200);
+
+  writeLog(trimmed);
+}

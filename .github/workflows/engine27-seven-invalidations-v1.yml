@@ -1,0 +1,22 @@
+name: Engine27 Seven Degree Invalidation Registry
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/v2/buildSevenInvalidationsV1.js"
+      - "services/core/logic/engine27/buildEngine27Strategies.js"
+      - "services/core/tests/engine27SevenInvalidationsV1.test.js"
+      - ".github/workflows/engine27-seven-invalidations-v1.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Canonical seven-degree invalidation and legacy regression
+        run: node --test services/core/tests/engine27SevenInvalidationsV1.test.js services/core/tests/engine27TraderIntelligenceV2.test.js
+      - name: Syntax
+        run: |
+          node --check services/core/logic/engine27/v2/buildSevenInvalidationsV1.js
+          node --check services/core/logic/engine27/buildEngine27Strategies.js

@@ -1,0 +1,530 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  buildStrategyTimeline,
+  STAGE_ORDER,
+  STATUS,
+} from "./buildStrategyTimeline.js";
+
+const VALID_STATUSES = new Set(Object.values(STATUS));
+
+function baseFixture() {
+  return {
+    laneId: "minute",
+    strategyId: "intraday_scalp@10m",
+    symbol: "ES",
+    snapshotTime: "2026-07-20T16:28:50.804Z",
+    strategy: {
+      strategyId: "intraday_scalp@10m",
+      snapshotTime: "2026-07-20T16:28:50.804Z",
+    },
+    engine22: {
+      activeWave: "W3",
+      stage: "BREAKOUT_CANDIDATE",
+      direction: "UP",
+    },
+    engine26A: {
+      active: true,
+      status: "LOCATION_DETECTED",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      directionBias: "LONG",
+      currentPrice: 7528,
+      snapshotTime: "2026-07-20T16:28:50.804Z",
+    },
+    engine3: {
+      active: true,
+      authorized: true,
+      allowed: false,
+      authorizedReactionState: "REACTION_PENDING",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+    },
+    engine4: {
+      active: true,
+      allowed: false,
+      confirmed: false,
+      hardBlocked: false,
+      status: "WAITING_FOR_ENGINE3_REACTION",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+    },
+    engine6: {
+      decision: "PAPER_WATCH_FAST",
+      allowed: false,
+      mode: "PAPER_ONLY",
+      realExecutionAllowed: false,
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+    },
+    engine26B: {
+      active: true,
+      lifecycleStatus: "PROPOSED_GEOMETRY_AVAILABLE",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      direction: "LONG",
+      proposedEntryPrice: 7518.25,
+      proposedStopPrice: 7503.75,
+      proposedTargets: [],
+    },
+    engine27A: {
+      active: true,
+      currentWave: "W3",
+      internalWave: "UNKNOWN",
+      preferredTradeDirection: "LONG",
+      invalidated: false,
+      stage: "ACTIVE",
+      currentRead: "Minute is currently advancing in Wave 3.",
+    },
+    engine27B: {
+      currentPrice: 7528,
+      nextFib: "e100",
+      nextPrice: 7675.75,
+    },
+    engine27E: {
+      decisionState: "SETTING_UP",
+      direction: "LONG",
+      currentWave: "W3",
+      internalWave: "UNKNOWN",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      readiness: {
+        structureReady: true,
+        priceReady: false,
+        reactionReady: false,
+        participationReady: false,
+        permissionReady: false,
+        plannerReady: false,
+        invalidated: false,
+      },
+      waitingFor: ["ENGINE3_DIRECTIONAL_REACTION"],
+      blockers: [],
+      warnings: [],
+      recommendedAction: "MONITOR_STRUCTURE",
+    },
+    engine7A: {
+      active: true,
+      status: "PREVIEW_ONLY_SETUP_NOT_READY",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      direction: "LONG",
+    },
+    engine9: {
+      active: true,
+      official: false,
+      managementReady: false,
+      planStatus: "WAITING_FOR_UPSTREAM_CONFIRMATION",
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      direction: "LONG",
+    },
+    engine7B: {
+      active: true,
+      status: "WAITING_FOR_ENGINE9_OFFICIAL_PLAN",
+      allowed: false,
+      executableSizing: false,
+      finalContracts: 0,
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      direction: "LONG",
+    },
+    engine8: {
+      active: true,
+      status: "WAITING_FOR_ENGINE6_PERMISSION",
+      executable: false,
+      candidateId: "C1",
+      zoneId: "Z1",
+      strategyId: "intraday_scalp@10m",
+      symbol: "ES",
+      direction: "LONG",
+    },
+    engine10: null,
+  };
+}
+
+test("stable ten-stage contract", () => {
+  const timeline = buildStrategyTimeline(baseFixture());
+
+  assert.equal(timeline.stages.length, 10);
+  assert.deepEqual(
+    timeline.stages.map((stage) => stage.id),
+    STAGE_ORDER
+  );
+
+  for (const stage of timeline.stages) {
+    assert.ok(VALID_STATUSES.has(stage.status));
+    assert.ok(stage);
+  }
+});
+
+test("missing data does not throw and all stages remain present", () => {
+  const timeline = buildStrategyTimeline();
+
+  assert.equal(timeline.stages.length, 10);
+  assert.equal(timeline.state, "IDLE");
+  assert.equal(timeline.candidateId, null);
+  assert.equal(timeline.zoneId, null);
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+  assert.ok(timeline.stages.every((stage) => stage.status === "WAITING"));
+});
+
+test("Engine 8 exclusively owns executability", () => {
+  const fixture = baseFixture();
+  fixture.engine27E.decisionState = "READY";
+  fixture.engine27E.readiness = {
+    structureReady: true,
+    priceReady: true,
+    reactionReady: true,
+    participationReady: true,
+    permissionReady: true,
+    plannerReady: true,
+    invalidated: false,
+  };
+  fixture.engine6.allowed = true;
+  fixture.engine6.decision = "FAST_INTRADAY_PAPER_ALLOW";
+  fixture.engine8.executable = false;
+
+  const timeline = buildStrategyTimeline(fixture);
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("normal upstream waiting never becomes a false blocker", () => {
+  const timeline = buildStrategyTimeline(baseFixture());
+  const execution = timeline.stages.find((stage) => stage.id === "execution");
+  const management = timeline.stages.find((stage) => stage.id === "management");
+
+  assert.equal(execution.status, "WAITING");
+  assert.equal(management.status, "WAITING");
+  assert.ok(!timeline.blockers.includes("ENGINE6_PAPER_NOT_ALLOWED"));
+});
+
+test("explicit Engine 6 denial blocks permission without making execution ready", () => {
+  const fixture = baseFixture();
+  fixture.engine6.decision = "DENY";
+  fixture.engine6.allowed = false;
+
+  const timeline = buildStrategyTimeline(fixture);
+  const permission = timeline.stages.find((stage) => stage.id === "permission");
+  const execution = timeline.stages.find((stage) => stage.id === "execution");
+
+  assert.equal(permission.status, "BLOCKED");
+  assert.notEqual(execution.status, "READY");
+  assert.equal(timeline.executable, false);
+});
+
+test("candidate identity mismatch is exposed and source is not treated as ready", () => {
+  const fixture = baseFixture();
+  fixture.engine3.candidateId = "OTHER";
+  fixture.engine27E.readiness.reactionReady = true;
+
+  const timeline = buildStrategyTimeline(fixture);
+  const reaction = timeline.stages.find((stage) => stage.id === "reaction");
+
+  assert.equal(reaction.status, "BLOCKED");
+  assert.ok(reaction.reasonCodes.includes("CANDIDATE_ID_MISMATCH"));
+  assert.ok(timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+});
+
+test("accepted lifecycle progresses through all ten stages", () => {
+  const fixture = baseFixture();
+
+  fixture.engine27E.decisionState = "READY";
+  fixture.engine27E.recommendedAction = "REVIEW_PLANNER_TICKET";
+  fixture.engine27E.readiness = {
+    structureReady: true,
+    priceReady: true,
+    reactionReady: true,
+    participationReady: true,
+    permissionReady: true,
+    plannerReady: true,
+    invalidated: false,
+  };
+
+  fixture.engine3.allowed = true;
+  fixture.engine3.authorizedReactionState = "REACTION_CONFIRMED";
+  fixture.engine4.allowed = true;
+  fixture.engine4.confirmed = true;
+  fixture.engine4.status = "PARTICIPATION_CONFIRMED";
+  fixture.engine6.allowed = true;
+  fixture.engine6.decision = "FAST_INTRADAY_PAPER_ALLOW";
+  fixture.engine26B.lifecycleStatus = "FAST_INTRADAY_PAPER_TICKET_READY";
+  fixture.engine26B.proposedTargets = [{ price: 7675.75 }];
+  fixture.engine7B.status = "FINAL_SIZE_READY";
+  fixture.engine7B.allowed = true;
+  fixture.engine7B.executableSizing = true;
+  fixture.engine7B.finalContracts = 2;
+  fixture.engine9.official = true;
+  fixture.engine9.managementReady = true;
+  fixture.engine9.planStatus = "OFFICIAL_PLAN_READY";
+  fixture.engine8.status = "FILLED";
+  fixture.engine8.executable = true;
+  fixture.engine8.filled = true;
+  fixture.engine10 = {
+    lifecycleComplete: true,
+    finalExitRecorded: true,
+    candidateId: "C1",
+    zoneId: "Z1",
+    strategyId: "intraday_scalp@10m",
+    symbol: "ES",
+    direction: "LONG",
+  };
+
+  const timeline = buildStrategyTimeline(fixture);
+  const byId = Object.fromEntries(timeline.stages.map((stage) => [stage.id, stage]));
+
+  assert.equal(byId.reaction.status, "READY");
+  assert.equal(byId.participation.status, "READY");
+  assert.equal(byId.permission.status, "READY");
+  assert.equal(byId.geometry.status, "READY");
+  assert.equal(byId.sizing.status, "READY");
+  assert.equal(byId.management.status, "READY");
+  assert.equal(byId.execution.status, "COMPLETE");
+  assert.equal(byId.journal.status, "COMPLETE");
+  assert.equal(timeline.executable, true);
+});
+
+test("builder does not mutate input", () => {
+  const fixture = baseFixture();
+  const before = structuredClone(fixture);
+
+  buildStrategyTimeline(fixture);
+
+  assert.deepEqual(fixture, before);
+});
+
+
+test("Engine 26A owns candidateId and zoneId over conflicting strategy copies", () => {
+  const fixture = baseFixture();
+  fixture.strategy.candidateId = "STRATEGY-CANDIDATE";
+  fixture.strategy.zoneId = "STRATEGY-ZONE";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.candidateId, "C1");
+  assert.equal(timeline.zoneId, "Z1");
+  assert.ok(timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+  assert.ok(timeline.blockers.includes("ZONE_ID_MISMATCH"));
+});
+
+test("temporary NEUTRAL direction does not create an identity blocker", () => {
+  const fixture = baseFixture();
+  fixture.engine3.direction = "NEUTRAL";
+  fixture.engine4.direction = "NEUTRAL";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.direction, "LONG");
+  assert.ok(!timeline.blockers.includes("DIRECTION_MISMATCH"));
+  assert.ok(!timeline.stages.some((stage) => stage.reasonCodes.includes("DIRECTION_MISMATCH")));
+});
+
+test("identity mismatches are blockers but are not duplicated into warnings", () => {
+  const fixture = baseFixture();
+  fixture.engine3.candidateId = "OTHER";
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.ok(timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+  assert.ok(!timeline.warnings.includes("CANDIDATE_ID_MISMATCH"));
+});
+
+test("active LOCATION_DETECTED remains ACTIVE when boundaries are unknown", () => {
+  const fixture = baseFixture();
+  delete fixture.engine26A.zoneLow;
+  delete fixture.engine26A.zoneHigh;
+  delete fixture.engine26A.zoneMid;
+  delete fixture.engine26A.priceLocation;
+
+  const timeline = buildStrategyTimeline(fixture);
+  const location = timeline.stages.find((stage) => stage.id === "location");
+
+  assert.equal(timeline.location.priceLocation, "UNKNOWN");
+  assert.equal(location.status, "ACTIVE");
+});
+
+test("Engine 27E permissionReady cannot override Engine 6 allowed false", () => {
+  const fixture = baseFixture();
+  fixture.engine27E.readiness.permissionReady = true;
+  fixture.engine6.allowed = false;
+  fixture.engine6.decision = "FAST_INTRADAY_PAPER_ALLOW";
+
+  const timeline = buildStrategyTimeline(fixture);
+  const permission = timeline.stages.find((stage) => stage.id === "permission");
+
+  assert.equal(permission.status, "WAITING");
+});
+
+test("noExecution is true whenever Engine 8 executable is false", () => {
+  const fixture = baseFixture();
+  fixture.engine8.executable = false;
+  fixture.engine8.noExecution = false;
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("zone identity mismatch is exposed independently", () => {
+  const fixture = baseFixture();
+  fixture.engine4.zoneId = "OTHER-ZONE";
+
+  const timeline = buildStrategyTimeline(fixture);
+  const participation = timeline.stages.find((stage) => stage.id === "participation");
+
+  assert.equal(participation.status, "BLOCKED");
+  assert.ok(participation.reasonCodes.includes("ZONE_ID_MISMATCH"));
+  assert.ok(timeline.blockers.includes("ZONE_ID_MISMATCH"));
+  assert.ok(!timeline.blockers.includes("CANDIDATE_ID_MISMATCH"));
+});
+test("Subminute uses the same canonical ten-stage contract without Minute fallback", () => {
+  const fixture = baseFixture();
+  const candidateId = "E26C-SUBMINUTE-87288e1db54cb920bfd4";
+  const zoneId = "E26Z-SUBMINUTE-d15bf89c7c189d747288";
+
+  fixture.laneId = "subminute";
+  fixture.strategyId = "subminute_scalp@10m";
+  fixture.strategy = {
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+    snapshotTime: fixture.snapshotTime,
+  };
+
+  for (const key of [
+    "engine26A",
+    "engine3",
+    "engine4",
+    "engine6",
+    "engine26B",
+    "engine27E",
+    "engine7A",
+    "engine9",
+    "engine7B",
+    "engine8",
+  ]) {
+    fixture[key] = {
+      ...fixture[key],
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      candidateId,
+      zoneId,
+      symbol: "ES",
+    };
+  }
+
+  fixture.engine27A = {
+    ...fixture.engine27A,
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+  };
+  fixture.engine27B = {
+    ...fixture.engine27B,
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+  };
+
+  const timeline = buildStrategyTimeline(fixture);
+
+  assert.equal(timeline.displayName, "Subminute");
+  assert.equal(timeline.laneId, "subminute");
+  assert.equal(timeline.strategyId, "subminute_scalp@10m");
+  assert.equal(timeline.candidateId, candidateId);
+  assert.equal(timeline.zoneId, zoneId);
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+  assert.equal(timeline.stages.length, 10);
+
+  for (const stage of timeline.stages) {
+    assert.equal(stage.laneId, "subminute");
+    assert.equal(stage.strategyId, "subminute_scalp@10m");
+    assert.equal(stage.candidateId, candidateId);
+    assert.equal(stage.zoneId, zoneId);
+    assert.equal(stage.symbol, "ES");
+    assert.ok(VALID_STATUSES.has(stage.status));
+  }
+
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("missing Subminute downstream contracts remain honest WAITING stages", () => {
+  const timeline = buildStrategyTimeline({
+    laneId: "subminute",
+    strategyId: "subminute_scalp@10m",
+    symbol: "ES",
+    strategy: {
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      symbol: "ES",
+    },
+    engine26A: {
+      active: true,
+      status: "LOCATION_DETECTED",
+      laneId: "subminute",
+      strategyId: "subminute_scalp@10m",
+      candidateId: "SUB-C1",
+      zoneId: "SUB-Z1",
+      symbol: "ES",
+    },
+  });
+
+  assert.equal(timeline.stages.length, 10);
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+
+  for (const stage of timeline.stages) {
+    assert.ok(stage);
+    assert.ok(VALID_STATUSES.has(stage.status));
+    assert.equal(stage.laneId, "subminute");
+    assert.equal(stage.strategyId, "subminute_scalp@10m");
+    assert.equal(stage.candidateId, "SUB-C1");
+    assert.equal(stage.zoneId, "SUB-Z1");
+  }
+
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "permission").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "management").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "execution").status,
+    "WAITING"
+  );
+  assert.equal(
+    timeline.stages.find((stage) => stage.id === "journal").status,
+    "WAITING"
+  );
+  assert.equal(timeline.executable, false);
+  assert.equal(timeline.noExecution, true);
+});
+
+test("Minute defaults remain unchanged", () => {
+  const timeline = buildStrategyTimeline(baseFixture());
+
+  assert.equal(timeline.displayName, "Minute");
+  assert.equal(timeline.laneId, "minute");
+  assert.equal(timeline.strategyId, "intraday_scalp@10m");
+  assert.deepEqual(timeline.stages.map((stage) => stage.id), STAGE_ORDER);
+});

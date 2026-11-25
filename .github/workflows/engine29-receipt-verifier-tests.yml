@@ -1,0 +1,28 @@
+name: Engine29 Immutable Receipt Verifier P0
+on:
+  push:
+    branches:
+      - engine29/readonly-receipt-verifier-20261123
+      - engine29/verifier-es-replay-bound-20261123
+  workflow_dispatch:
+jobs:
+  receipt-verifier:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install runtime dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Verify syntax
+        run: |
+          node --check services/core/logic/engine29/verifyImmutableReceipt.js
+          node --check services/core/routes/engine29ReceiptVerify.js
+          node --check services/core/server.js
+      - name: Run security and integrity tests
+        run: node --test services/core/tests/engine29ReceiptVerifier.test.js
+      - name: Run all Engine29 regression tests
+        run: node --test services/core/tests/engine29*.test.js

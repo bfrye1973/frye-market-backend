@@ -1,0 +1,22 @@
+name: Engine25 Credit Detail Evidence
+on:
+  pull_request:
+    paths:
+      - 'services/core/routes/engine25FullDashboard.js'
+      - 'services/core/tests/engine25CreditDetailInputs.test.js'
+  push:
+    branches:
+      - engine25-credit-rates-detail-read-repair-20261105
+jobs:
+  credit-detail-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify display-only credit and FRED data bindings
+        run: node --test services/core/tests/engine25CreditDetailInputs.test.js
+      - name: Check route syntax
+        run: node --check services/core/routes/engine25FullDashboard.js

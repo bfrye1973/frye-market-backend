@@ -1,0 +1,26 @@
+name: Engine29 Backend-Local Receipt Audit Regression
+on:
+  push:
+    branches:
+      - engine29/one-shot-self-audit-20261123
+  workflow_dispatch:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install runtime dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
+      - name: Verify module syntax
+        run: |
+          node --check services/core/logic/engine29/runOneShotReceiptAudit.js
+          node --check services/core/server.js
+      - name: Backend-local audit security tests
+        run: node --test services/core/tests/engine29OneShotReceiptAudit.test.js
+      - name: Full Engine29 regression suite
+        run: node --test services/core/tests/engine29*.test.js

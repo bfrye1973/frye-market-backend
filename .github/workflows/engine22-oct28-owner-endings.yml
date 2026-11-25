@@ -1,0 +1,19 @@
+name: Engine22 Oct28 owner endings
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine22/wave/buildCurrentWavelength.js"
+      - "services/core/logic/engine22/wave/buildAuthorizedWorkingStructureV1.js"
+      - "services/core/tests/engine22Oct28OwnerEndings.test.js"
+      - ".github/workflows/engine22-oct28-owner-endings.yml"
+permissions:
+  contents: read
+jobs:
+  owner-endings:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test services/core/tests/engine22Oct28OwnerEndings.test.js services/core/tests/engine22SubmicroFiveUpOwnerOct27.test.js services/core/tests/engine22MicroOct27OwnerW1W2.test.js

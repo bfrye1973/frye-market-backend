@@ -1,0 +1,19 @@
+name: ES Snapshot Startup Readiness
+on:
+  pull_request:
+    paths:
+      - "services/core/server.js"
+      - "services/core/tests/startupEsSnapshotReady.test.js"
+      - ".github/workflows/es-snapshot-startup-readiness.yml"
+permissions:
+  contents: read
+jobs:
+  ready:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --check services/core/server.js
+      - run: node --test services/core/tests/startupEsSnapshotReady.test.js

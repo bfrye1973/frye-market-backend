@@ -1,0 +1,27 @@
+name: Engine22 Current Sheet Strategy-card Sync
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'services/core/data/waves/active/active-wave-state-es.json'
+      - 'services/core/logic/engine22/wave/buildDegreeStates.js'
+      - 'services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js'
+      - 'services/core/tests/engine22CurrentSheetStrategySync.test.js'
+      - '.github/workflows/engine22-current-sheet-strategy-sync.yml'
+permissions:
+  contents: read
+jobs:
+  current-card-to-chart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify new owner Current-sheet marks, node timestamps and empty degrees
+        run: |
+          node --check services/core/logic/engine22/wave/buildDegreeStates.js
+          node --check services/core/logic/engine22/wave/buildSelectedDegreeNodeModelsV1.js
+          node --test services/core/tests/engine22CurrentSheetStrategySync.test.js
+          node --test services/core/tests/engine22WorkingWaveNodesV1.test.js

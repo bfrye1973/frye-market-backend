@@ -1,0 +1,20 @@
+name: Engine27 Engine25 Engine29 Context
+on:
+  pull_request:
+    paths:
+      - "services/core/logic/engine27/v2/buildUnifiedMarketContextV1.js"
+      - "services/core/jobs/buildStrategySnapshot.js"
+      - "services/core/tests/engine27Engine25Engine29Context20261025.test.js"
+      - ".github/workflows/engine27-engine25-29-context.yml"
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test services/core/tests/engine27Engine25Engine29Context20261025.test.js services/core/tests/engine27FinalE22OwnerSync20261025.test.js
+      - run: |
+          node --check services/core/logic/engine27/v2/buildUnifiedMarketContextV1.js
+          node --check services/core/jobs/buildStrategySnapshot.js
