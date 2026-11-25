@@ -2,7 +2,7 @@
   "ok": true,
   "engine": "engine25.reconstructedEod.v1",
   "mode": "SHADOW_ONLY",
-  "updated_at_utc": "2026-11-25T04:51:48.654869+00:00",
+  "updated_at_utc": "2026-11-25T13:28:44.685442+00:00",
   "completedSessionDate": "2026-11-24",
   "score": 30.3,
   "state": "BEARISH",
@@ -205,9 +205,9 @@
       "available": true,
       "state": "RED",
       "sessionDate": "2026-11-24",
-      "close": 7164.25,
-      "ma10": 7312.2,
-      "ma20": 7445.6,
+      "close": 7083.75,
+      "ma10": 7304.15,
+      "ma20": 7441.575,
       "ma10Prior": 7360.0,
       "ma20Prior": 7475.425,
       "ma10Upsloping": false,
@@ -272,41 +272,41 @@
       }
     },
     "large": {
-      "members": 886,
-      "nh": 88,
-      "nl": 178,
+      "members": 884,
+      "nh": 87,
+      "nl": 177,
       "up": 6,
-      "down": 7,
-      "breadth_pct": 33.08,
-      "momentum_pct": 46.15,
+      "down": 6,
+      "breadth_pct": 32.95,
+      "momentum_pct": 50.0,
       "prior": {
         "nh": 50,
-        "nl": 535,
+        "nl": 533,
         "up": 6,
-        "down": 16,
-        "breadth_pct": 8.55,
-        "momentum_pct": 27.27
+        "down": 15,
+        "breadth_pct": 8.58,
+        "momentum_pct": 28.57
       }
     },
     "mid": {
-      "members": 1088,
-      "nh": 120,
-      "nl": 201,
+      "members": 1091,
+      "nh": 121,
+      "nl": 202,
       "up": 12,
-      "down": 8,
-      "breadth_pct": 37.38,
-      "momentum_pct": 60.0,
+      "down": 9,
+      "breadth_pct": 37.46,
+      "momentum_pct": 57.14,
       "prior": {
         "nh": 65,
-        "nl": 603,
+        "nl": 606,
         "up": 2,
-        "down": 13,
-        "breadth_pct": 9.73,
-        "momentum_pct": 13.33
+        "down": 14,
+        "breadth_pct": 9.69,
+        "momentum_pct": 12.5
       }
     },
     "small": {
-      "members": 3477,
+      "members": 3476,
       "nh": 253,
       "nl": 961,
       "up": 54,
@@ -315,10 +315,10 @@
       "momentum_pct": 50.94,
       "prior": {
         "nh": 173,
-        "nl": 1826,
+        "nl": 1825,
         "up": 32,
         "down": 69,
-        "breadth_pct": 8.65,
+        "breadth_pct": 8.66,
         "momentum_pct": 31.68
       }
     },
