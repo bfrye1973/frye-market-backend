@@ -22,7 +22,8 @@ const loginOk=(hb=15)=>frame(11,[ok,dbl(PROTOCOL_FIELDS.heartbeatInterval,hb)]);
 const bbo=(bid,ask)=>frame(151,[num(149138,3),dbl(100022,bid),num(159000,12),dbl(100025,ask),num(159002,9)]);
 const trade=(p,sz=2,ag=1)=>frame(150,[num(149138,1),dbl(100006,p),num(159008,sz),num(112003,ag)]);
 const ENV={RITHMIC_PAPER_CONNECT_ENABLED:'YES',RITHMIC_PAPER_USER:'paper-user-x',
- RITHMIC_PAPER_PASSWORD:'paper-secret-y',RITHMIC_PAPER_SYSTEM_NAME:PAPER_SYSTEM_NAME};
+ RITHMIC_PAPER_PASSWORD:'paper-secret-y',RITHMIC_PAPER_SYSTEM_NAME:PAPER_SYSTEM_NAME,
+ RITHMIC_TEST_USER:'test-user-z',RITHMIC_TEST_PASSWORD:'test-secret-w'};
 const GW='wss://paper-chi.rithmic.com:443';
 
 // Scripted fake: behavior(ws,templateId,bytes) is called for every client send.
@@ -39,9 +40,11 @@ function fakeFactory(behavior){
  return {FakeWS,log};
 }
 const happy=({gateways=[{name:'Chicago Area',uri:'paper-chi.rithmic.com:443'}],
- streamFrames=[],paperListed=true,loginFrame=loginOk()}={})=>(ws,id)=>{
- if(id===16)ws.reply(sysInfo(paperListed?['Rithmic Test',PAPER_SYSTEM_NAME]:['Rithmic Test']));
- if(id===20)ws.reply(gwInfo(gateways));
+ streamFrames=[],paperListed=true,loginFrame=loginOk(),discoveryLogin=loginOk(),gwCode='0'}={})=>(ws,id)=>{
+ const disc=ws.url===DISCOVERY_GATEWAY;
+ if(id===16)ws.reply(sysInfo(disc?['Rithmic Test']:paperListed?[PAPER_SYSTEM_NAME]:['Rithmic 01']));
+ if(id===10&&disc){ws.loggedIn=true;ws.reply(discoveryLogin);return}
+ if(id===20){if(ws.loggedIn)ws.reply(gwInfo(gateways,gwCode));return} // requires login
  if(id===10)ws.reply(loginFrame);
  if(id===18)ws.reply(frame(19,[ok]));
  if(id===100&&!ws.subscribed){ws.subscribed=true;ws.reply(frame(101,[ok]));
@@ -49,10 +52,12 @@ const happy=({gateways=[{name:'Chicago Area',uri:'paper-chi.rithmic.com:443'}],
  if(id===12)ws.reply(frame(13,[ok]));
 };
 
-test('config: disabled by default, explicit Paper creds, no Test fallback',()=>{
+test('config: disabled by default, explicit Paper creds, no Test fallback for the Paper session',()=>{
  assert.throws(()=>verifyPaperEnvironment({}),/disabled/);
  assert.throws(()=>verifyPaperEnvironment({RITHMIC_PAPER_CONNECT_ENABLED:'YES',
   RITHMIC_TEST_USER:'t',RITHMIC_TEST_PASSWORD:'t'}),/missing Rithmic Paper credentials/);
+ const {RITHMIC_TEST_USER,...noDiscovery}=ENV;void RITHMIC_TEST_USER;
+ assert.throws(()=>verifyPaperEnvironment(noDiscovery),/discovery login/);
  assert.throws(()=>verifyPaperEnvironment({...ENV,RITHMIC_PAPER_SYSTEM_NAME:'Rithmic 01'}),/Paper Trading/);
  assert.throws(()=>verifyPaperEnvironment({...ENV,RITHMIC_PAPER_SYMBOL:'ES'}),/outright ES/);
  assert.throws(()=>verifyPaperEnvironment({...ENV,RITHMIC_PAPER_GATEWAY_URI:'wss://evil.example.com:443'}),/rithmic\.com/);
@@ -121,18 +126,23 @@ test('summary: spread histogram, locked/crossed, tick alignment, merged one-side
  assert.equal(out.samples.length,1);
 });
 
-test('happy path: discovery -> login -> heartbeat -> subscribe -> window -> unsubscribe -> logout',async()=>{
+test('happy path: Test login discovery -> Paper login -> heartbeat -> subscribe -> window -> unsubscribe -> logout',async()=>{
  const stream=[];for(let i=0;i<40;i++)stream.push(bbo(6800,6800.25));stream.push(trade(6800.25));
  const {FakeWS,log}=fakeFactory(happy({streamFrames:stream}));
  const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
  assert.deepEqual(log.sockets,[DISCOVERY_GATEWAY,DISCOVERY_GATEWAY,GW,GW]);
- assert.deepEqual(r.sentTemplates,[16,20,16,10,18,100,100,12]);
+ assert.deepEqual(r.sentTemplates,[16,10,20,12,16,10,18,100,100,12]);
  assert.ok(r.sentTemplates.every(id=>SEND_ALLOWLIST.includes(id)));
  assert.ok(!log.sends.some(s=>[115,117,312,313,314].includes(s.id)));
- // Credentials go ONLY to the vendor-discovered Paper gateway, never to discovery.
- const loginSends=log.sends.filter(s=>s.id===10);
- assert.equal(loginSends.length,1);assert.equal(loginSends[0].url,GW);
- assert.ok(!log.sends.filter(s=>s.url===DISCOVERY_GATEWAY).some(s=>s.bytes.includes(Buffer.from('paper-secret-y'))));
+ // Paper creds go ONLY to the discovered Paper gateway; Test creds ONLY to the Test gateway.
+ const disc=log.sends.filter(s=>s.url===DISCOVERY_GATEWAY),paper=log.sends.filter(s=>s.url===GW);
+ assert.ok(!disc.some(s=>s.bytes.includes(Buffer.from('paper-secret-y'))||s.bytes.includes(Buffer.from('paper-user-x'))));
+ assert.ok(!paper.some(s=>s.bytes.includes(Buffer.from('test-secret-w'))));
+ const dLogin=decodeFields(disc.find(s=>s.id===10).bytes);
+ assert.equal(dLogin[PROTOCOL_FIELDS.systemName][0].toString(),'Rithmic Test');
+ const pLogin=decodeFields(paper.find(s=>s.id===10).bytes);
+ assert.equal(pLogin[PROTOCOL_FIELDS.systemName][0].toString(),PAPER_SYSTEM_NAME);
+ assert.equal(r.discovery.discoveryLoginRpCode,'0');
  const unsub=log.sends.filter(s=>s.id===100)[1];assert.equal(decodeFields(unsub.bytes)[100000][0],2);
  assert.equal(r.authenticated,true);assert.equal(r.heartbeat.acks>=1,true);
  assert.equal(r.subscriptionAccepted,true);assert.equal(r.stopReason,'WINDOW_COMPLETE');
@@ -142,7 +152,8 @@ test('happy path: discovery -> login -> heartbeat -> subscribe -> window -> unsu
  assert.equal(r.verdict,'STEP_A_PASS_PENDING_CHART_MATCH');assert.equal(r.chartMatch,'PENDING_EXTERNAL_COMPARISON');
  assert.equal(r.bookValid,false);assert.equal(r.dboTested,false);
  const text=JSON.stringify(r);
- assert.ok(!text.includes('paper-secret-y')&&!text.includes('paper-user-x'),'no credentials in output');
+ for(const secret of ['paper-secret-y','paper-user-x','test-secret-w','test-user-z'])
+  assert.ok(!text.includes(secret),'no credentials in output');
 });
 
 test('Test-like static feed (8-pt spread, no trades) fails Step A',async()=>{
@@ -153,11 +164,19 @@ test('Test-like static feed (8-pt spread, no trades) fails Step A',async()=>{
  assert.equal(r.checks.bboRateOver1PerSec,false);
 });
 
-test('Paper system not listed -> stop before any credential is sent',async()=>{
+test('selected gateway does not list Paper -> stop before Paper credentials are sent',async()=>{
  const {FakeWS,log}=fakeFactory(happy({paperListed:false}));
  const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
- assert.equal(r.stopReason,'PAPER_SYSTEM_NOT_LISTED');assert.deepEqual(r.sentTemplates,[16]);
- assert.ok(!log.sends.some(s=>s.id===10));
+ assert.equal(r.stopReason,'PAPER_NOT_LISTED_ON_SELECTED_GATEWAY');
+ assert.deepEqual(r.sentTemplates,[16,10,20,12,16]);
+ assert.ok(!log.sends.some(s=>s.url===GW&&s.id===10));
+});
+
+test('discovery login rejected -> stop, no gateway request, no Paper login',async()=>{
+ const {FakeWS,log}=fakeFactory(happy({discoveryLogin:frame(11,[str(PROTOCOL_FIELDS.rpCode,'13')])}));
+ const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
+ assert.equal(r.stopReason,'DISCOVERY_LOGIN_REJECTED');assert.equal(r.discovery.discoveryLoginRpCode,'13');
+ assert.deepEqual(r.sentTemplates,[16,10]);assert.ok(!log.sends.some(s=>s.url===GW));
 });
 
 test('ambiguous or non-rithmic gateways fail closed; no login',async()=>{
@@ -165,24 +184,23 @@ test('ambiguous or non-rithmic gateways fail closed; no login',async()=>{
   [{name:'X',uri:'x.example.com:443'}],[]]){
   const {FakeWS,log}=fakeFactory(happy({gateways}));
   const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
-  assert.equal(r.authenticated,false);assert.ok(!log.sends.some(s=>s.id===10),r.stopReason);
+  assert.equal(r.authenticated,false);assert.ok(!log.sends.some(s=>s.url!==DISCOVERY_GATEWAY),r.stopReason);
   assert.match(r.stopReason,/GATEWAY/);
  }
 });
 
-test('gateway info rejected (e.g. requires login) is reported, not bypassed',async()=>{
- const {FakeWS,log}=fakeFactory((ws,id)=>{
-  if(id===16)ws.reply(sysInfo([PAPER_SYSTEM_NAME]));if(id===20)ws.reply(gwInfo([],'3'))});
+test('gateway info rejected after login is reported, not bypassed; discovery logs out',async()=>{
+ const {FakeWS,log}=fakeFactory(happy({gwCode:'3'}));
  const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
  assert.equal(r.stopReason,'GATEWAY_INFO_REJECTED');assert.equal(r.discovery.gatewayInfoRpCode,'3');
- assert.ok(!log.sends.some(s=>s.id===10));
+ assert.deepEqual(r.sentTemplates,[16,10,20,12]);assert.ok(!log.sends.some(s=>s.url===GW));
 });
 
 test('login rejected -> no heartbeat, no subscription',async()=>{
  const {FakeWS}=fakeFactory(happy({loginFrame:frame(11,[str(PROTOCOL_FIELDS.rpCode,'13')])}));
  const r=await runPaperStepA({env:ENV,WebSocketImpl:FakeWS,durationMs:1000});
  assert.equal(r.stopReason,'LOGIN_REJECTED');assert.equal(r.loginRpCode,'13');
- assert.deepEqual(r.sentTemplates,[16,20,16,10]);
+ assert.deepEqual(r.sentTemplates,[16,10,20,12,16,10]);
 });
 
 test('forced logout stops the session immediately',async()=>{
