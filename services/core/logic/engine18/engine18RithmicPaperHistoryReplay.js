@@ -9,6 +9,7 @@ import {discoverPaperGateway,verifyPaperEnvironment,encodePaperLogin,parsePaperL
  encodeLogout,TEMPLATES,PAPER_SYSTEM_NAME} from './engine18RithmicPaperProbe.js';
 import {encodeConformanceHeartbeat} from './engine18RithmicConformanceTest.js';
 import {decodeFields} from './engine18RithmicTestProbe.js';
+import {createFlowReader} from './engine18FlowReader.js';
 
 export const HISTORY_SEND_ALLOWLIST=Object.freeze([10,12,16,18,20,202]);
 export const MAX_SECOND_BARS_SPAN=9900; // stays under the server's 10,000-record cap
@@ -145,6 +146,11 @@ export async function runPaperHistoryReplay({env=process.env,WebSocketImpl=WebSo
   });
  });
  r.barsReceived=bars.length;r.possiblyCapped=bars.length>=10000;
- if(bars.length){r.analysis=analyzeLevelEvent(bars,{level:cfg.level});r.minutes=minuteTable(bars)}
+ if(bars.length){r.analysis=analyzeLevelEvent(bars,{level:cfg.level});r.minutes=minuteTable(bars);
+  // Replay the minutes through the point-in-time flow reader (what it would have shown live).
+  // The final, possibly incomplete minute is excluded.
+  const reader=createFlowReader();const complete=r.minutes.filter(m=>m.t+60<=cfg.end);
+  r.flowReads=complete.map(m=>reader.onMinute(m)).filter(x=>x.reads.length)
+   .map(x=>({time:x.time,price:x.price,reads:x.reads.map(q=>q.type+(q.level!=null?'@'+q.level:'')+': '+q.read)}));}
  return r;
 }
