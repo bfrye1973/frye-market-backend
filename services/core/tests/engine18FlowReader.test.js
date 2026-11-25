@@ -52,6 +52,20 @@ test('QUIET_ACCUMULATION: quiet volume, rising lows by block, sellers aggressive
  assert.ok(types(b).includes('ZONE_BREAKOUT_UP'),JSON.stringify(b.reads));
 });
 
+test('ABSORPTION_CLUSTER after repeated absorption minutes (9:16-9:22 shape)',()=>{
+ n=0;const r=createFlowReader();let last;
+ for(let i=0;i<5;i++)last=r.onMinute(m(7005+i*3,7008+i*3,{delta:-200}));
+ assert.ok(types(last).includes('ABSORPTION_CLUSTER'),JSON.stringify(last.reads));
+});
+
+test('higher-low rule: window low early, last block holds above it (not a perfect staircase)',()=>{
+ n=0;const r=createFlowReader();
+ for(let i=0;i<45;i++)r.onMinute(m(7050,7049,{v:7000}));
+ const lowsSeq=[7001.5,7013,7004.5];let last;
+ for(let blk=0;blk<3;blk++)for(let i=0;i<10;i++){const lo=lowsSeq[blk];last=r.onMinute(m(lo+8,lo+10,{l:lo,h:7041,v:2700,delta:-40}))}
+ const q=last.reads.find(x=>x.type==='QUIET_ACCUMULATION');assert.ok(q,JSON.stringify(last.reads));
+});
+
 test('not quiet -> no accumulation read even with rising lows',()=>{
  n=0;const r=createFlowReader();
  for(let i=0;i<45;i++)r.onMinute(m(7050,7049,{v:3000}));

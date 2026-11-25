@@ -14,8 +14,11 @@ export const FLOW_DEFAULTS=Object.freeze({
  // defended ceiling / floor
  levelLookbackMin:45,levelTolPts:2,rejectPts:3,levelMinTouches:3,
  // quiet zone (act three)
- zoneWindowMin:30,zoneMaxRangePts:45,baselineMin:45,quietVolRatio:0.6,zoneBlocks:3,
+ zoneWindowMin:30,zoneMaxRangePts:45,baselineMin:45,quietVolRatio:0.65,zoneBlocks:3,
+ rthOpenUtcMin:14*60+30,      // session baseline counts RTH minutes only (ES RTH 09:30 ET)
+ rollingVolMax:1.0,            // and the zone must not be louder than the prior 45 min
  breakHoldMin:3,
+ clusterWindowMin:10,clusterMin:4, // repeated absorption / no-defense minutes
 });
 const median=a=>{if(!a.length)return null;const b=[...a].sort((x,y)=>x-y),m=b.length>>1;return b.length%2?b[m]:(b[m-1]+b[m])/2};
 const mst=t=>new Date((t-7*3600)*1000).toISOString().slice(11,16);
@@ -38,6 +41,12 @@ export function createFlowReader(params={}){
   if(strongDn||(nDn>=P.divNeed&&noDefense(cur)))out.push({type:'NO_DEFENSE',
    read:'Buyers lifting offers, price still falling: resting bids pulled / no defense',
    evidence:{minutes:last.map(b=>({time:mst(b.t),movePts:move(b),delta:delta(b)}))}});
+  const win=bars.slice(-P.clusterWindowMin);
+  const cUp=win.filter(absorbUp).length,cDn=win.filter(noDefense).length;
+  if(cUp>=P.clusterMin&&absorbUp(cur))out.push({type:'ABSORPTION_CLUSTER',
+   read:`Absorption repeated ${cUp} of last ${win.length} min: buyers persistently absorbing`,evidence:{count:cUp,window:win.length}});
+  if(cDn>=P.clusterMin&&noDefense(cur))out.push({type:'NO_DEFENSE_CLUSTER',
+   read:`No defense repeated ${cDn} of last ${win.length} min: bids persistently pulled`,evidence:{count:cDn,window:win.length}});
   return out;
  }
  function defendedLevels(){
@@ -53,24 +62,31 @@ export function createFlowReader(params={}){
    evidence:{touches:touchesLo.map(b=>({time:mst(b.t),low:b.l,close:b.c,delta:delta(b)}))}});
   return out;
  }
+ const isRth=b=>{const mod=Math.floor((b.t%86400)/60);return mod>=P.rthOpenUtcMin};
  function quietZone(){
   const W=P.zoneWindowMin;if(bars.length<W+P.baselineMin)return null;
-  const w=bars.slice(-W),base=bars.slice(-(W+P.baselineMin),-W);
+  const w=bars.slice(-W),before=bars.slice(0,-W);
+  // Session baseline: RTH minutes before the window (point-in-time); fall back to prior baselineMin.
+  const sess=before.filter(isRth);const base=sess.length>=P.baselineMin?sess:before.slice(-P.baselineMin);
+  const roll=before.slice(-P.baselineMin);
   const hi=Math.max(...w.map(b=>b.h)),lo=Math.min(...w.map(b=>b.l));
-  const baseVol=median(base.map(b=>b.v)),vol=median(w.map(b=>b.v));
-  const volRatio=baseVol?vol/baseVol:null;
+  const vol=median(w.map(b=>b.v)),baseVol=median(base.map(b=>b.v)),rollVol=median(roll.map(b=>b.v));
+  const volRatio=baseVol?vol/baseVol:null,rollRatio=rollVol?vol/rollVol:null;
   const k=Math.floor(W/P.zoneBlocks),blocks=[];for(let i=0;i<P.zoneBlocks;i++)blocks.push(w.slice(i*k,(i+1)*k));
   const lows=blocks.map(s=>Math.min(...s.map(b=>b.l))),highs=blocks.map(s=>Math.max(...s.map(b=>b.h)));
-  const rising=lows.every((x,i)=>i===0||x>=lows[i-1])&&lows.at(-1)>lows[0];
-  const falling=highs.every((x,i)=>i===0||x<=highs[i-1])&&highs.at(-1)<highs[0];
+  // Higher low: the window low was set before the last block and the last block holds above it.
+  const loIdx=w.findIndex(b=>b.l===lo),hiIdx=w.findIndex(b=>b.h===hi),lastStart=W-k;
+  const rising=loIdx<lastStart&&lows.at(-1)>lo;
+  const falling=hiIdx<lastStart&&highs.at(-1)<hi;
   const cumDelta=w.reduce((s,b)=>s+delta(b),0);
-  const quiet=volRatio!==null&&volRatio<=P.quietVolRatio,tight=hi-lo<=P.zoneMaxRangePts;
+  const quiet=volRatio!==null&&volRatio<=P.quietVolRatio&&(rollRatio===null||rollRatio<=P.rollingVolMax);
+  const tight=hi-lo<=P.zoneMaxRangePts;
   const ctx={rangeLow:lo,rangeHigh:hi,rangePts:hi-lo,volumeRatio:volRatio===null?null:Math.round(volRatio*100)/100,
-   lowsByBlock:lows,highsByBlock:highs,cumDelta};
+   volumeVsPrior45:rollRatio===null?null:Math.round(rollRatio*100)/100,lowsByBlock:lows,highsByBlock:highs,cumDelta};
   if(quiet&&tight&&rising&&cumDelta<0)return {type:'QUIET_ACCUMULATION',
-   read:`Quiet absorption ${lo}-${hi}: volume ${ctx.volumeRatio}x normal, lows rising, sellers aggressive yet price holding`,evidence:ctx};
+   read:`Quiet absorption ${lo}-${hi}: volume ${ctx.volumeRatio}x session, higher low ${lows.at(-1)} > ${lo}, sellers aggressive yet price holding`,evidence:ctx};
   if(quiet&&tight&&falling&&cumDelta>0)return {type:'QUIET_DISTRIBUTION',
-   read:`Quiet distribution ${lo}-${hi}: volume ${ctx.volumeRatio}x normal, highs falling, buyers aggressive yet price capped`,evidence:ctx};
+   read:`Quiet distribution ${lo}-${hi}: volume ${ctx.volumeRatio}x session, lower high ${highs.at(-1)} < ${hi}, buyers aggressive yet price capped`,evidence:ctx};
   return null;
  }
  return {
