@@ -64,6 +64,7 @@ function skip(reason, engine8PaperOrder = null) {
     engine8: engine8PaperOrder
       ? {
           status: engine8PaperOrder.status ?? null,
+          blockers: Array.isArray(engine8PaperOrder.blockers) ? engine8PaperOrder.blockers : [],
           executable: engine8PaperOrder.executable === true,
           direction: engine8PaperOrder.direction ?? null,
           candidateId: engine8PaperOrder.candidateId ?? null,
