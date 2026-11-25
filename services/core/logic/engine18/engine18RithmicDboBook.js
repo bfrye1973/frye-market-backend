@@ -29,11 +29,14 @@ const num=(f,v)=>Buffer.concat([uvar(f*8),uvar(v)]);
 const checkInstrument=(symbol,exchange)=>{
  if(!/^ES[HMUZ]\d$/.test(symbol)||exchange!=='CME')throw Error('ES/CME only')};
 // No depth_price: full-book snapshot / subscription.
-export function encodeDboSnapshotRequest({symbol,exchange}){checkInstrument(symbol,exchange);
- return Buffer.concat([num(F.templateId,115),str(F.symbol,symbol),str(F.exchange,exchange)])}
-export function encodeDboUpdatesRequest({symbol,exchange,subscribe}){checkInstrument(symbol,exchange);
- return Buffer.concat([num(F.templateId,117),num(F.request,subscribe?1:2),
+// No depth_price: full-book snapshot / subscription. user_msg (132760) carries a request id that
+// the server echoes, so responses can be correlated with the request that caused them.
+export function encodeDboSnapshotRequest({symbol,exchange,requestId=null}){checkInstrument(symbol,exchange);
+ return Buffer.concat([num(F.templateId,115),...(requestId?[str(F.userMsg,requestId)]:[]),
   str(F.symbol,symbol),str(F.exchange,exchange)])}
+export function encodeDboUpdatesRequest({symbol,exchange,subscribe,requestId=null}){checkInstrument(symbol,exchange);
+ return Buffer.concat([num(F.templateId,117),...(requestId?[str(F.userMsg,requestId)]:[]),
+  num(F.request,subscribe?1:2),str(F.symbol,symbol),str(F.exchange,exchange)])}
 
 // --- decoder with exact u64 (BigInt) varints and packed/unpacked repeated support ---
 export function decodeExact(frame){
@@ -70,12 +73,12 @@ export const templateOf=frame=>{const v=one(decodeExact(frame),F.templateId);ret
 export function parseSnapshotPart(frame){
  const m=decodeExact(frame);if(Number(one(m,F.templateId))!==116)throw Error('not 116');
  const rp=strs(m,F.rpCode),rq=strs(m,F.rqHandlerRpCode);
- const ids=strs(m,F.orderId),sizes=sizesOf(m),pri=big(m,F.priority),price=dbls(m,F.price)[0]??null;
+ const ids=strs(m,F.orderId),sizes=sizesOf(m),pri=big(m,F.priority),prices=dbls(m,F.price);
  const side=one(m,F.side);
- const aligned=sizes.length===ids.length&&(pri.length===0||pri.length===ids.length);
+ const aligned=sizes.length===ids.length&&(pri.length===0||pri.length===ids.length)&&prices.length<=1;
  return {final:rp.length>0,rpCode:rp[0]??null,more:rq.length>0,seq:one(m,F.sequence),
-  side:side===null?null:Number(side),price,ids,sizes,priorities:pri,aligned,
-  symbol:strs(m,F.symbol)[0]??null};
+  side:side===null?null:Number(side),price:prices[0]??null,ids,sizes,priorities:pri,aligned,
+  userMsg:strs(m,F.userMsg)[0]??null,symbol:strs(m,F.symbol)[0]??null,exchange:strs(m,F.exchange)[0]??null};
 }
 export function parseUpdate(frame){
  const m=decodeExact(frame);if(Number(one(m,F.templateId))!==160)throw Error('not 160');
@@ -87,110 +90,145 @@ export function parseUpdate(frame){
  const entries=aligned?ids.map((id,i)=>({type:types[i],side:sides[i],price:prices[i],
   size:sizes.length?sizes[i]:null,priority:pri.length?pri[i]:null,orderId:id,
   prevPrice:prev.length===n?prev[i]:null})):[];
- return {seq:one(m,F.sequence),aligned,entries,count:n,symbol:strs(m,F.symbol)[0]??null};
+ return {seq:one(m,F.sequence),aligned,entries,count:n,
+  symbol:strs(m,F.symbol)[0]??null,exchange:strs(m,F.exchange)[0]??null};
 }
 export function parseEndEvent(frame){
  const m=decodeExact(frame);if(Number(one(m,F.templateId))!==161)throw Error('not 161');
- return {seq:one(m,F.sequence)};
+ return {seq:one(m,F.sequence),symbol:strs(m,F.symbol)[0]??null,exchange:strs(m,F.exchange)[0]??null};
 }
 export function parseUpdatesAck(frame){
- const m=decodeExact(frame);const rp=strs(m,F.rpCode);return {accepted:rp.length>=1&&rp[0]==='0',rpCode:rp[0]??null};
+ const m=decodeExact(frame);const rp=strs(m,F.rpCode);
+ return {accepted:rp.length>=1&&rp[0]==='0',rpCode:rp[0]??null,userMsg:strs(m,F.userMsg)[0]??null};
 }
-
 // --- book ---
-const ZERO=()=>({missingInBook:0,extraInBook:0,sizeMismatch:0,priceOrSideMismatch:0});
-export function createDboBook({tick=0.25,mode='STRICT',maxOrders=300000,maxBuffered=300000}={}){
+const ZERO=()=>({missingInBook:0,extraInBook:0,sizeMismatch:0,priceOrSideMismatch:0,total:0});
+const FATAL=new Set(['ORDER_LIMIT','BUFFER_LIMIT']);
+export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null,maxOrders=300000,
+ maxBuffered=300000,now=Date.now}={}){
  if(mode!=='STRICT'&&mode!=='OBSERVE')throw Error('mode must be STRICT or OBSERVE');
- let state='UNSEEDED',reason=null,orders=new Map(),lastSeq=null;
- let staging=null,buffer=null,stagingSeqs=null,verifying=false;
- const st={snapshotsCompleted:0,snapshotParts:0,snapshotSeqSpread:0,bufferedDuringSeed:0,
-  droppedOverlap:0,replayedAfterSeed:0,updates:0,entries:0,equalSeq:0,gaps:0,gapTotal:'0',
-  outOfOrder:0,anomalies:{newExisting:0,changeMissing:0,deleteMissing:0,misaligned:0,
-  offTick:0,badSize:0,badSide:0,ignoredUnseeded:0},endEvents:0,endEventSeqMatches:0,
-  verifications:[],reseeds:0};
- const ticks=p=>{const t=Math.round(p/tick);if(Math.abs(p/tick-t)>1e-6){st.anomalies.offTick++;return null}return t};
- const invalidate=r=>{if(state!=='INVALID'){state='INVALID';reason=r}};
- const anomaly=k=>{st.anomalies[k]++;if(mode==='STRICT')invalidate('ANOMALY_'+k)};
- const addOrder=(map,id,side,price,size,priority)=>{
-  if(side!==SIDE.BID&&side!==SIDE.ASK){st.anomalies.badSide++;return false}
-  const t=ticks(price);const q=typeof size==='bigint'?toSafe(size):null;
-  if(t===null)return false;if(q===null||q<=0){st.anomalies.badSize++;return false}
-  map.set(id,{side,t,q,p:priority===null?null:String(priority)});
-  if(map.size>maxOrders){invalidate('ORDER_LIMIT');return false}return true};
- const stagePart=(p,map,seqs)=>{st.snapshotParts++;
-  if(p.seq!==null)seqs.add(p.seq);
-  if(!p.ids.length)return true;
-  if(!p.aligned||p.price===null){anomaly('misaligned');return false}
-  p.ids.forEach((id,i)=>addOrder(map,id,p.side,p.price,p.sizes[i],p.priorities[i]??null));return true};
- const snapSeqOf=seqs=>{if(!seqs.size)return null;const a=[...seqs].sort((x,y)=>x<y?-1:x>y?1:0);
-  if(a.length>1)st.snapshotSeqSpread=Math.max(st.snapshotSeqSpread,a.length);return a[a.length-1]};
+ let state='UNSEEDED',reason=null,orders=new Map(),lastSeq=null,lastAppliedAt=null,snap=null;
+ const failures=[]; // append-only: a later reseed never erases a recorded failure
+ const st={snapshotsCompleted:0,snapshotParts:0,unsolicitedParts:0,mismatchedParts:0,unechoedParts:0,
+  correlatedParts:0,bufferedDuringSeed:0,droppedOverlap:0,replayedAfterSeed:0,updates:0,entries:0,
+  equalSeq:0,gaps:0,gapTotal:'0',outOfOrder:0,missingSequence:0,missingInstrument:0,
+  anomalies:{newExisting:0,changeMissing:0,deleteMissing:0,misaligned:0,offTick:0,badPrice:0,
+   badSize:0,badSide:0,badOrderId:0,wrongInstrument:0,missingSequence:0,outOfOrder:0,ignoredUnseeded:0,ignoredInvalid:0},
+  semantics:{LAST_INCLUDED:0,NEXT_EXPECTED:0,AMBIGUOUS:0,NO_EQUAL_SEQUENCE_UPDATES:0,MISMATCH:0},
+  endEvents:0,endEventSeqMatches:0,verifications:[],reseeds:0};
+ const fail=(r,{force=false}={})=>{failures.push({atMs:now(),reason:r});
+  if(force||mode==='STRICT'||FATAL.has(r)){state='INVALID';reason=r}};
+ const anomaly=k=>{st.anomalies[k]++;fail('ANOMALY_'+k)};
+ const instrumentOk=f=>{if(f.symbol==null&&f.exchange==null){st.missingInstrument++;return true}
+  if((symbol&&f.symbol!==symbol)||(exchange&&f.exchange!==exchange)){anomaly('wrongInstrument');return false}return true};
+ const priceTicks=p=>{if(!Number.isFinite(p)||p<=0)return {err:'badPrice'};const t=Math.round(p/tick);
+  return Math.abs(p/tick-t)>1e-6?{err:'offTick'}:{t}};
+ const qtyOf=x=>typeof x==='bigint'&&x>0n&&x<=BigInt(Number.MAX_SAFE_INTEGER)?Number(x):null;
+ // --- snapshot staging (strict validation; any defect rejects the whole snapshot) ---
+ const stagePart=p=>{st.snapshotParts++;
+  if(p.seq!==null)snap.seqs.add(p.seq);
+  if(!instrumentOk(p)){snap.bad??='WRONG_INSTRUMENT';return}
+  if(!p.ids.length)return;
+  if(!p.aligned){snap.bad??='SNAPSHOT_MISALIGNED';return}
+  if(p.side!==1&&p.side!==2){snap.bad??='SNAPSHOT_BAD_SIDE';return}
+  const pt=priceTicks(p.price);if(pt.err){snap.bad??='SNAPSHOT_'+pt.err.toUpperCase();return}
+  p.ids.forEach((id,i)=>{
+   if(typeof id!=='string'||!id.length||id.length>64){snap.bad??='SNAPSHOT_BAD_ORDER_ID';return}
+   if(snap.staging.has(id)){snap.bad??='SNAPSHOT_DUPLICATE_ORDER_ID';return}
+   const q=qtyOf(p.sizes[i]);if(q===null){snap.bad??='SNAPSHOT_BAD_SIZE';return}
+   snap.staging.set(id,{side:p.side,t:pt.t,q,p:p.priorities[i]==null?null:String(p.priorities[i])})});
+  if(snap.staging.size>maxOrders)snap.bad??='ORDER_LIMIT'};
+ const snapshotVerdict=p=>{if(p.rpCode!=='0')return 'SNAPSHOT_REJECTED_'+(p.rpCode??'NONE');
+  if(snap.bad)return snap.bad;if(!snap.staging.size)return 'SNAPSHOT_EMPTY';
+  if(!snap.seqs.size)return 'SNAPSHOT_NO_SEQUENCE';if(snap.seqs.size>1)return 'SNAPSHOT_SEQUENCE_INCONSISTENT';return null};
+ // --- updates, always through the same sequence and integrity checks ---
  const applyEntries=(map,u)=>{
   for(const e of u.entries){st.entries++;
+   if(e.side!==1&&e.side!==2){anomaly('badSide');continue}
+   if(typeof e.orderId!=='string'||!e.orderId.length){anomaly('badOrderId');continue}
    const cur=map.get(e.orderId);
-   if(e.type===UPDATE.NEW){if(cur)anomaly('newExisting');addOrder(map,e.orderId,e.side,e.price,e.size,e.priority)}
-   else if(e.type===UPDATE.CHANGE){if(!cur){anomaly('changeMissing');continue}
-    addOrder(map,e.orderId,e.side,e.price,e.size??BigInt(cur.q),e.priority??(cur.p===null?null:BigInt(cur.p)))}
-   else if(e.type===UPDATE.DELETE){if(!cur){anomaly('deleteMissing');continue}map.delete(e.orderId)}
-   else anomaly('misaligned')}};
- const applyLive=u=>{st.updates++;
+   if(e.type===UPDATE.DELETE){if(!cur){anomaly('deleteMissing');continue}map.delete(e.orderId);continue}
+   if(e.type!==UPDATE.NEW&&e.type!==UPDATE.CHANGE){anomaly('misaligned');continue}
+   const pt=priceTicks(e.price);if(pt.err){anomaly(pt.err);continue}
+   const q=e.size==null&&cur?cur.q:qtyOf(e.size);if(q===null){anomaly('badSize');continue}
+   if(e.type===UPDATE.NEW&&cur)anomaly('newExisting');
+   if(e.type===UPDATE.CHANGE&&!cur){anomaly('changeMissing');continue}
+   map.set(e.orderId,{side:e.side,t:pt.t,q,p:e.priority==null?(cur?.p??null):String(e.priority)});
+   if(map.size>maxOrders){fail('ORDER_LIMIT');return}}};
+ const applyChecked=(map,u,ref)=>{st.updates++;
   if(!u.aligned){anomaly('misaligned');return}
-  if(u.seq!==null&&lastSeq!==null){
-   if(u.seq<lastSeq){st.outOfOrder++;if(mode==='STRICT')return invalidate('SEQUENCE_OUT_OF_ORDER')}
-   else if(u.seq===lastSeq)st.equalSeq++;
-   else if(u.seq>lastSeq+1n){st.gaps++;st.gapTotal=String(BigInt(st.gapTotal)+(u.seq-lastSeq-1n));
-    if(mode==='STRICT')return invalidate('SEQUENCE_GAP')}}
-  applyEntries(orders,u);if(u.seq!==null&&(lastSeq===null||u.seq>lastSeq))lastSeq=u.seq};
+  if(u.seq===null){st.missingSequence++;anomaly('missingSequence');if(mode==='STRICT')return}
+  else if(ref.v!==null){
+   if(u.seq<ref.v){st.outOfOrder++;anomaly('outOfOrder');return}
+   if(u.seq===ref.v)st.equalSeq++;
+   else if(u.seq>ref.v+1n){st.gaps++;st.gapTotal=String(BigInt(st.gapTotal)+(u.seq-ref.v-1n));
+    fail('SEQUENCE_GAP');if(mode==='STRICT')return}}
+  applyEntries(map,u);if(u.seq!==null&&(ref.v===null||u.seq>ref.v))ref.v=u.seq};
+ const applyLive=u=>{const ref={v:lastSeq};applyChecked(orders,u,ref);lastSeq=ref.v;lastAppliedAt=now()};
  const diff=(a,b)=>{const d=ZERO();
   for(const [id,o] of b){const x=a.get(id);if(!x){d.missingInBook++;continue}
    if(x.side!==o.side||x.t!==o.t)d.priceOrSideMismatch++;else if(x.q!==o.q)d.sizeMismatch++}
   for(const id of a.keys())if(!b.has(id))d.extraInBook++;
   d.total=d.missingInBook+d.extraInBook+d.sizeMismatch+d.priceOrSideMismatch;return d};
  const cloneMap=m=>new Map([...m].map(([k,v])=>[k,{...v}]));
+ const finishVerification=(S)=>{
+  const lt=[],eq=[],gt=[];
+  for(const u of snap.buffer){if(u.seq===null)gt.push(u);else if(u.seq<S)lt.push(u);else if(u.seq===S)eq.push(u);else gt.push(u)}
+  const work=cloneMap(orders),ref={v:lastSeq};
+  for(const u of lt)applyChecked(work,u,ref);
+  const dLt=diff(work,snap.staging);
+  const workEq=cloneMap(work),refEq={v:ref.v};
+  for(const u of eq)applyChecked(workEq,u,refEq);
+  const dLe=diff(workEq,snap.staging);
+  const semantics=!eq.length?'NO_EQUAL_SEQUENCE_UPDATES':dLe.total===0&&dLt.total!==0?'LAST_INCLUDED':
+   dLt.total===0&&dLe.total!==0?'NEXT_EXPECTED':dLt.total===0&&dLe.total===0?'AMBIGUOUS':'MISMATCH';
+  st.semantics[semantics]++;const match=dLt.total===0||dLe.total===0;
+  st.verifications.push({completed:true,snapshotSeq:String(S),orders:snap.staging.size,bufferedUpdates:snap.buffer.length,
+   equalSeqUpdates:eq.length,diffBeforeEqualSeq:dLt,diffAfterEqualSeq:dLe,semantics,match,completedAtMs:now()});
+  // Reseed from the authoritative snapshot; replay what the snapshot does not contain.
+  orders=snap.staging;st.reseeds++;
+  if(semantics==='NEXT_EXPECTED'){lastSeq=S-1n;snap=null;for(const u of [...eq,...gt])applyLive(u);return}
+  if(!match)fail('VERIFICATION_MISMATCH');
+  lastSeq=S;snap=null;
+  if(state==='INVALID')return; // STRICT mismatch: stays INVALID; failure history preserved
+  for(const u of gt)applyLive(u)};
  return {
   get state(){return state},get reason(){return reason},get orderCount(){return orders.size},
-  get lastSeq(){return lastSeq===null?null:String(lastSeq)},get verifying(){return verifying},
-  stats(){return JSON.parse(JSON.stringify(st))},
-  // Call BEFORE sending 117/115 so every update arriving meanwhile is buffered.
-  beginSnapshot(){state='SEEDING';reason=null;staging=new Map();buffer=[];stagingSeqs=new Set();verifying=false},
-  beginVerification(){if(state!=='VALID'||verifying)return false;
-   verifying=true;staging=new Map();buffer=[];stagingSeqs=new Set();return true},
+  get lastSeq(){return lastSeq===null?null:String(lastSeq)},get verifying(){return snap?.kind==='VERIFY'},
+  get snapshotPending(){return snap!==null},get failures(){return failures.slice()},
+  stats(){return JSON.parse(JSON.stringify({...st,failures}))},
+  // Explicit (re)seed. Call BEFORE sending 117/115 so updates arriving meanwhile are buffered.
+  beginSnapshot(requestId=null){state='SEEDING';reason=null;orders=new Map();lastSeq=null;
+   snap={kind:'SEED',requestId,staging:new Map(),seqs:new Set(),buffer:[],bad:null}},
+  beginVerification(requestId=null){if(state!=='VALID'||snap)return false;
+   snap={kind:'VERIFY',requestId,staging:new Map(),seqs:new Set(),buffer:[],bad:null};return true},
   onSnapshotPart(p){
-   if(state!=='SEEDING'&&!verifying)return;
-   stagePart(p,staging,stagingSeqs);
+   if(!snap){st.unsolicitedParts++;return}
+   if(p.userMsg!=null){if(snap.requestId&&p.userMsg!==snap.requestId){st.mismatchedParts++;return}st.correlatedParts++}
+   else st.unechoedParts++;
+   stagePart(p);
    if(!p.final)return;
-   if(p.rpCode!=='0'){verifying=false;return invalidate('SNAPSHOT_REJECTED_'+(p.rpCode??'NONE'))}
-   const S=snapSeqOf(stagingSeqs);
-   if(verifying){
-    // Compare at "seq < S" and at "seq <= S" to learn the snapshot sequence semantics.
-    const lt=[],eq=[],gt=[];
-    for(const u of buffer){if(u.seq===null||S===null)gt.push(u);else if(u.seq<S)lt.push(u);else if(u.seq===S)eq.push(u);else gt.push(u)}
-    const work=cloneMap(orders);
-    for(const u of lt)if(u.aligned)applyEntries(work,u);
-    const dLt=diff(work,staging);
-    for(const u of eq)if(u.aligned)applyEntries(work,u);
-    const dLe=diff(work,staging);
-    st.verifications.push({snapshotSeq:S===null?null:String(S),orders:staging.size,
-     bufferedUpdates:buffer.length,diffBeforeEqualSeq:dLt,diffAfterEqualSeq:dLe,
-     match:dLt.total===0||dLe.total===0});
-    if(mode==='STRICT'&&dLt.total!==0&&dLe.total!==0)reason='RESEEDED_AFTER_MISMATCH';
-    // Reseed from the authoritative snapshot, then apply later updates.
-    orders=staging;lastSeq=S;st.reseeds++;verifying=false;
-    for(const u of gt)applyLive(u);staging=null;buffer=null;
-    if(state==='INVALID'&&mode==='OBSERVE'){state='VALID'}
+   const bad=snapshotVerdict(p);const S=bad?null:[...snap.seqs][0];
+   if(snap.kind==='SEED'){
+    if(bad){fail(bad,{force:true});snap=null;return}
+    orders=snap.staging;lastSeq=S;st.snapshotsCompleted++;state='VALID';reason=null;lastAppliedAt=now();
+    const buf=snap.buffer;snap=null;
+    for(const u of buf){if(u.seq!==null&&u.seq<=S){st.droppedOverlap++;continue}
+     st.replayedAfterSeed++;applyLive(u);if(state==='INVALID')break}
     return}
-   orders=staging;lastSeq=S;st.snapshotsCompleted++;state='VALID';
-   for(const u of buffer){
-    if(S!==null&&u.seq!==null&&u.seq<=S){st.droppedOverlap++;continue}
-    st.replayedAfterSeed++;applyLive(u)}
-   staging=null;buffer=null},
+   if(bad){st.verifications.push({completed:false,reason:bad,completedAtMs:now()});fail('VERIFY_'+bad);
+    const buf=snap.buffer;snap=null;if(state!=='INVALID')for(const u of buf)applyLive(u);return}
+   finishVerification(S)},
   onUpdate(u){
-   if(state==='UNSEEDED'||state==='INVALID'&&!verifying){if(state==='UNSEEDED')st.anomalies.ignoredUnseeded++;return}
-   if(state==='SEEDING'||verifying){
-    if(buffer.length>=maxBuffered)return invalidate('BUFFER_LIMIT');
-    if(state==='SEEDING')st.bufferedDuringSeed++;buffer.push(u);return}
+   if(!instrumentOk(u))return;
+   if(state==='UNSEEDED'){st.anomalies.ignoredUnseeded++;return}
+   if(state==='INVALID'&&!snap){st.anomalies.ignoredInvalid++;return}
+   if(snap){if(snap.buffer.length>=maxBuffered){fail('BUFFER_LIMIT');snap=null;return}
+    if(snap.kind==='SEED')st.bufferedDuringSeed++;snap.buffer.push(u);return}
    applyLive(u)},
-  onEndEvent(e){st.endEvents++;if(e.seq!==null&&lastSeq!==null&&e.seq===lastSeq)st.endEventSeqMatches++},
-  reset(r='RECONNECT'){state='UNSEEDED';reason=r;orders=new Map();lastSeq=null;staging=null;buffer=null;verifying=false},
+  onEndEvent(e){if(!instrumentOk(e))return;st.endEvents++;
+   if(e.seq!==null&&lastSeq!==null&&e.seq===lastSeq)st.endEventSeqMatches++},
+  reset(r='RECONNECT'){state='UNSEEDED';reason=r;orders=new Map();lastSeq=null;snap=null;lastAppliedAt=null},
   levels(){const bid=new Map(),ask=new Map();
    for(const o of orders.values()){const m=o.side===SIDE.BID?bid:ask;const l=m.get(o.t)||{qty:0,orders:0};
     l.qty+=o.q;l.orders++;m.set(o.t,l)}return {bid,ask}},
@@ -198,20 +236,25 @@ export function createDboBook({tick=0.25,mode='STRICT',maxOrders=300000,maxBuffe
    const bb=bid.size?Math.max(...bid.keys()):null,ba=ask.size?Math.min(...ask.keys()):null;
    return {bid:bb===null?null:bb*tick,ask:ba===null?null:ba*tick,
     bidQty:bb===null?null:bid.get(bb).qty,askQty:ba===null?null:ask.get(ba).qty}},
-  // Quantities only at observed resting orders. "withinObservedRange" means some order rests at
-  // or beyond the target price on that side; it does NOT prove every intervening price was quoted.
-  coverage(distancesPts=[10,20,30,50]){
-   const {bid,ask}=this.levels();const out={state,verified:st.verifications.some(v=>v.match),
-    bookOrders:orders.size,bid:null,ask:null};
-   const sideReport=(m,dir)=>{if(!m.size)return null;const keys=[...m.keys()];
+  // Observed resting orders only. An absent price is NOT_OBSERVED (never 0): full-depth completeness
+  // is not proven. Distances are from each side's own touch. Suppressed unless VALID and fresh.
+  coverage(distancesPts=[10,20,30,50],{maxAgeMs=10000}={}){
+   const base={distanceBasis:'SIDE_TOUCH',completenessProven:false,bookOrders:orders.size,
+    verifiedSnapshots:st.verifications.filter(v=>v.match).length};
+   if(snap)return {...base,suppressed:true,reason:snap.kind==='SEED'?'SEEDING':'VERIFICATION_IN_PROGRESS'};
+   if(state!=='VALID')return {...base,suppressed:true,reason:'BOOK_'+state};
+   if(lastAppliedAt!==null&&now()-lastAppliedAt>maxAgeMs)return {...base,suppressed:true,reason:'STALE'};
+   const {bid,ask}=this.levels();
+   const side=(m,dir,touch)=>{if(!m.size)return null;const keys=[...m.keys()];
     const best=dir<0?Math.max(...keys):Math.min(...keys),far=dir<0?Math.min(...keys):Math.max(...keys);
-    const rows=distancesPts.map(d=>{const target=best+dir*Math.round(d/tick);
-     let cum=0,lv=0;for(const [t,l] of m){if(dir<0?(t<=best&&t>=target):(t>=best&&t<=target)){cum+=l.qty;lv++}}
-     const within=dir<0?far<=target:far>=target;
-     return {distancePts:d,price:target*tick,withinObservedRange:within,
-      qtyAtPrice:m.get(target)?.qty??(within?0:null),cumulativeQty:within?cum:null,
-      levelsWithOrdersInRange:lv}});
-    return {best:best*tick,farthest:far*tick,spanPts:Math.abs(far-best)*tick,levels:m.size,rows}};
-   out.bid=sideReport(bid,-1);out.ask=sideReport(ask,1);return out},
+    return {touch,best:best*tick,farthestObserved:far*tick,observedSpanPts:Math.abs(far-best)*tick,levelsWithOrders:m.size,
+     rows:distancesPts.map(d=>{const target=best+dir*Math.round(d/tick);let sum=0,lv=0;
+      for(const [t,l] of m)if(dir<0?(t<=best&&t>=target):(t>=best&&t<=target)){sum+=l.qty;lv++}
+      const lvl=m.get(target);
+      return {distancePts:d,price:target*tick,observation:lvl?'OBSERVED_ORDERS':'NOT_OBSERVED',
+       observedQtyAtPrice:lvl?lvl.qty:null,observedOrdersAtPrice:lvl?lvl.orders:null,
+       observedQtyTouchToPrice:sum,levelsWithOrdersTouchToPrice:lv,
+       targetWithinObservedSpan:dir<0?far<=target:far>=target}})}};
+   return {...base,suppressed:false,bid:side(bid,-1,'BEST_BID'),ask:side(ask,1,'BEST_ASK')}},
  };
 }

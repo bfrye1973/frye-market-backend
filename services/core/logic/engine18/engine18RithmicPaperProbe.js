@@ -344,7 +344,7 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
- const r={schema:'engine18.rithmicPaperStepA.v1',readOnly:true,trading:false,recording:false,
+ const r={schema:'engine18.rithmicPaperStepA.v2',measurementVersion:'SYNCHRONIZED_SPREAD_PRESENCE_BIT_TRADES',comparableOnlyWithSameMeasurementVersion:true,readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
    rejectedGatewayNames:[],paperListedOnSelectedGateway:false},

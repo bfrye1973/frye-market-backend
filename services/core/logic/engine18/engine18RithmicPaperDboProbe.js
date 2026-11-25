@@ -2,6 +2,9 @@
 // Requires BOTH RITHMIC_PAPER_CONNECT_ENABLED=YES and RITHMIC_PAPER_DBO_ENABLED=YES.
 // Sends only: 16/20 (discovery), 10 login, 18 heartbeat, 100 BBO|LastTrade, 117 DBO updates,
 // 115 DBO snapshot, 12 logout. No order plant, no recording, no persistence; summary output only.
+//
+// Output separates a DIAGNOSTIC RECEIPT (what was observed) from a VERIFIED-BOOK claim, which
+// is made only when every integrity check passes (see evaluateStepB).
 import WebSocket from 'ws';
 import {discoverPaperGateway,verifyPaperEnvironment,encodePaperLogin,parsePaperLogin,
  encodeMarketDataRequest,encodeLogout,parseInbound,createStepASummary,TEMPLATES,
@@ -14,6 +17,8 @@ import {decodeFields} from './engine18RithmicTestProbe.js';
 export const STEP_B_SEND_ALLOWLIST=Object.freeze([10,12,16,18,20,100,115,117]);
 export const MAX_STEP_B_MS=300000;
 const socketOpts={rejectUnauthorized:true,perMessageDeflate:false,maxPayload:4*1024*1024};
+const STRUCTURAL=['misaligned','offTick','badPrice','badSize','badSide','badOrderId','missingSequence',
+ 'outOfOrder','wrongInstrument','newExisting','changeMissing','deleteMissing'];
 
 export function verifyStepBEnvironment(env){
  const cfg=verifyPaperEnvironment(env);
@@ -21,38 +26,49 @@ export function verifyStepBEnvironment(env){
  return cfg;
 }
 export function evaluateStepB(r){
- const o=r.observeBook||{},a=o.stats?.anomalies||{},v=o.stats?.verifications||[];
+ const o=r.observeBook||{},s=r.strictBook||{},os=o.stats||{},ss=s.stats||{};
+ const ov=os.verifications||[],sv=ss.verifications||[];
+ const anomaliesZero=st=>STRUCTURAL.every(k=>(st.anomalies?.[k]??1)===0);
  const checks={
   authenticated:r.authenticated===true,
-  dboSubscriptionAccepted:r.dboSubscriptionAccepted===true,
-  snapshotCompleted:(o.stats?.snapshotsCompleted??0)>=1,
-  updatesReceived:(o.stats?.updates??0)>0,
-  atLeastTwoVerifications:v.length>=2,
-  allVerificationsMatch:v.length>0&&v.every(x=>x.match),
-  noStructuralAnomalies:(a.misaligned??1)===0&&(a.offTick??1)===0&&(a.badSide??1)===0&&(a.badSize??1)===0,
+  dboSubscriptionAcceptedAndCorrelated:r.dboSubscriptionAccepted===true&&r.dboAckCorrelation!=='UNCORRELATED',
+  seeded:(os.snapshotsCompleted??0)>=1,
+  updatesReceived:(os.updates??0)>0,
+  cleanFrames:r.invalidFrames===0,
+  finalObserveBookValid:o.state==='VALID',
+  atLeastTwoCompletedVerifications:ov.filter(v=>v.completed).length>=2,
+  noIncompleteVerification:ov.every(v=>v.completed)&&!r.verificationPendingAtClose,
+  allVerificationsMatch:ov.length>0&&ov.every(v=>v.match),
+  noStructuralAnomalies:anomaliesZero(os),
+  // Continuity evidence: the fail-closed STRICT shadow survived the whole window, its own periodic
+  // comparisons all matched, and no sequence gap was observed.
+  continuity:s.state==='VALID'&&(ss.failures?.length??1)===0&&sv.length>0&&sv.every(v=>v.match)&&(os.gaps??1)===0,
   fullWindow:r.stopReason==='WINDOW_COMPLETE',
  };
- return {checks,verdict:Object.values(checks).every(Boolean)?'STEP_B_BOOK_VERIFIED':'STEP_B_FAIL',
+ const verified=Object.values(checks).every(Boolean);
+ return {checks,failedChecks:Object.entries(checks).filter(([,ok])=>!ok).map(([k])=>k),
+  verdict:verified?'STEP_B_BOOK_VERIFIED':'STEP_B_FAIL',
+  verifiedBook:verified?{coverage:r.coverage,orders:o.orders,lastSeq:o.lastSeq}:null,
   // Distinct entitlements: BBO (Step A) vs DBO (this step).
   bboEntitlement:r.market?.bbo>0?'OBSERVED':'NOT_OBSERVED',
-  dboEntitlement:r.dboSubscriptionAccepted&&(o.stats?.snapshotsCompleted??0)>0?'OBSERVED':'NOT_OBSERVED',
-  strictBookSurvived:r.strictBook?.state==='VALID'};
+  dboEntitlement:r.dboSubscriptionAccepted&&(os.snapshotsCompleted??0)>0?'OBSERVED':'NOT_OBSERVED'};
 }
 
 export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,durationMs=180000,
- verifyEveryMs=45000,now=Date.now,loginTimeoutMs=15000,discoveryTimeoutMs=8000,onStatus=()=>{}}={}){
+ verifyEveryMs=45000,verifyGraceMs=10000,now=Date.now,loginTimeoutMs=15000,discoveryTimeoutMs=8000,onStatus=()=>{}}={}){
  const cfg=verifyStepBEnvironment(env); // throws before any network activity
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_B_MS)throw Error('invalid bounded Step B window');
  if(!Number.isSafeInteger(verifyEveryMs)||verifyEveryMs<200||verifyEveryMs>durationMs)throw Error('invalid verification interval');
  const sent=[];
- const r={schema:'engine18.rithmicPaperDboStepB.v1',readOnly:true,trading:false,recording:false,
+ const r={schema:'engine18.rithmicPaperDboStepB.v2',readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{},gatewaySource:null,gatewayName:null,gatewayHost:null,authenticated:false,
   loginRpCode:null,heartbeat:{sent:0,acks:0,rejects:0},bboSubscriptionAccepted:false,
-  dboSubscriptionAccepted:false,dboSubscriptionRpCode:null,snapshotRequests:0,seedMs:null,
-  snapshotParts:0,forcedLogout:false,logoutAcked:false,invalidFrames:0,otherTemplates:{},
-  bboCrossCheck:{compared:0,match:0,mismatch:0,samples:[]},stopReason:null,sentTemplates:sent,
-  market:null,observeBook:null,strictBook:null,coverageAtSeed:null,coverage:null};
+  dboSubscriptionAccepted:false,dboSubscriptionRpCode:null,dboAckCorrelation:null,uncorrelatedAcks:0,
+  snapshotRequests:0,seedMs:null,snapshotParts:0,verificationPendingAtClose:false,
+  forcedLogout:false,logoutAcked:false,invalidFrames:0,otherTemplates:{},
+  bboCrossCheck:{compared:0,match:0,mismatch:0,samples:[],note:'diagnostic only; CME BBO may include implied prices'},
+  stopReason:null,sentTemplates:sent,market:null,observeBook:null,strictBook:null,coverageAtSeed:null,coverage:null};
  const status=p=>{r.phase=p;onStatus({phase:p})};
  const done=reason=>{r.stopReason=reason;r.phase='STOPPED';onStatus({phase:'STOPPED',stopReason:reason});
   return {...r,...evaluateStepB(r)}};
@@ -61,32 +77,42 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
  if(!disc.ok)return done(disc.reason);
 
  status('AUTHENTICATING');
- const observe=createDboBook({mode:'OBSERVE'}),strict=createDboBook({mode:'STRICT'});
+ const bookOpts={symbol:cfg.symbol,exchange:cfg.exchange,now};
+ const observe=createDboBook({...bookOpts,mode:'OBSERVE'}),strict=createDboBook({...bookOpts,mode:'STRICT'});
+ const books=[observe,strict];
  const summary=createStepASummary({now});
- let ws,hb,loginT,windowT,logoutT,hardT,verifyT,t115=null,verifyInFlight=false,started=false;
+ let ws,hb,loginT,windowT,logoutT,hardT,verifyT,graceT,t115=null,snapSeq=0,snapInFlight=null,started=false;
  const reason=await new Promise(resolve=>{
-  let finished=false,closing=false;
+  let finished=false,closing=false,windowOver=false;
   const snap=()=>{r.observeBook={state:observe.state,reason:observe.reason,orders:observe.orderCount,
    lastSeq:observe.lastSeq,stats:observe.stats()};
    r.strictBook={state:strict.state,reason:strict.reason,orders:strict.orderCount,stats:strict.stats()}};
   const finish=why=>{if(finished)return;finished=true;
-   for(const t of [loginT,windowT,logoutT,hardT])clearTimeout(t);clearInterval(hb);clearInterval(verifyT);
+   for(const t of [loginT,windowT,logoutT,hardT,graceT])clearTimeout(t);clearInterval(hb);clearInterval(verifyT);
    if(started&&r.market===null)r.market=summary.finish();
-   snap();if(observe.state==='VALID')r.coverage=observe.coverage();
+   if(snapInFlight)r.verificationPendingAtClose=true;
+   snap();const c=observe.coverage();r.coverage=c.suppressed?null:c;
    try{ws?.removeAllListeners?.('message');ws?.close();ws?.terminate?.()}catch{}resolve(why)};
   const send=buf=>{const id=decodeFields(buf)[154467]?.[0];
    if(!STEP_B_SEND_ALLOWLIST.includes(id)){finish('TEMPLATE_NOT_ALLOWED');return false}
    try{ws.send(buf);sent.push(id);return true}catch{finish('SEND_FAILED');return false}};
   const sym={symbol:cfg.symbol,exchange:cfg.exchange};
-  const closeOut=why=>{if(closing)return;closing=true;clearInterval(hb);clearInterval(verifyT);
+  const closeOut=why=>{if(closing)return;closing=true;clearInterval(hb);clearInterval(verifyT);clearTimeout(graceT);
    r.stopReason=why;if(started)r.market=summary.finish();
-   snap();if(observe.state==='VALID')r.coverage=observe.coverage();
-   send(encodeDboUpdatesRequest({...sym,subscribe:false}));
+   if(snapInFlight)r.verificationPendingAtClose=true;
+   snap();const c=observe.coverage();r.coverage=c.suppressed?null:c;
+   send(encodeDboUpdatesRequest({...sym,subscribe:false,requestId:'dbo-unsub'}));
    send(encodeMarketDataRequest({...sym,subscribe:false}));send(encodeLogout());
    logoutT=setTimeout(()=>finish(why),2000)};
-  const requestVerification=()=>{if(closing||verifyInFlight)return;
-   if(observe.beginVerification()){verifyInFlight=true;r.snapshotRequests++;send(encodeDboSnapshotRequest(sym))}};
-  hardT=setTimeout(()=>finish('HARD_DEADLINE'),loginTimeoutMs+durationMs+30000);
+  // Window end: let an in-flight verification finish (bounded grace) so the last comparison completes.
+  const endWindow=()=>{windowOver=true;clearInterval(verifyT);
+   if(!snapInFlight)return closeOut('WINDOW_COMPLETE');
+   graceT=setTimeout(()=>closeOut('WINDOW_COMPLETE'),verifyGraceMs)};
+  const requestVerification=()=>{if(closing||windowOver||snapInFlight)return;
+   const id='snap-'+(++snapSeq);let any=false;
+   for(const b of books)if(b.beginVerification(id))any=true;
+   if(any){snapInFlight=id;r.snapshotRequests++;send(encodeDboSnapshotRequest({...sym,requestId:id}))}};
+  hardT=setTimeout(()=>finish('HARD_DEADLINE'),loginTimeoutMs+durationMs+verifyGraceMs+30000);
   loginT=setTimeout(()=>finish('LOGIN_TIMEOUT'),loginTimeoutMs);
   try{ws=new WebSocketImpl(disc.gateway.uri,socketOpts)}catch{return finish('SESSION_SOCKET_FAILED')}
   ws.on('error',()=>finish(closing?r.stopReason:'SESSION_SOCKET_ERROR'));
@@ -103,33 +129,41 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
      hb=setInterval(()=>{if(send(encodeConformanceHeartbeat()))r.heartbeat.sent++},
       Math.max(1000,Math.min(30000,Math.floor((L.heartbeatSec||10)*650))));
      send(encodeMarketDataRequest({...sym,subscribe:true}));summary.start();started=true;
-     observe.beginSnapshot();strict.beginSnapshot(); // buffer BEFORE subscribing
-     send(encodeDboUpdatesRequest({...sym,subscribe:true}));
-     t115=now();r.snapshotRequests++;send(encodeDboSnapshotRequest(sym));
-     windowT=setTimeout(()=>closeOut('WINDOW_COMPLETE'),durationMs);
+     const seedId='snap-'+(++snapSeq);
+     for(const b of books)b.beginSnapshot(seedId); // buffer BEFORE subscribing
+     snapInFlight=seedId;
+     send(encodeDboUpdatesRequest({...sym,subscribe:true,requestId:'dbo-sub'}));
+     t115=now();r.snapshotRequests++;send(encodeDboSnapshotRequest({...sym,requestId:seedId}));
+     windowT=setTimeout(endWindow,durationMs);
      verifyT=setInterval(requestVerification,verifyEveryMs);
      return}
     if(!r.authenticated)return;
     if(id===116){const p=parseSnapshotPart(data);r.snapshotParts++;
-     if(verifyInFlight){observe.onSnapshotPart(p);if(p.final){verifyInFlight=false;
-       if(observe.state==='VALID')r.coverage=observe.coverage()}}
-     else{const wasSeeding=observe.state==='SEEDING';observe.onSnapshotPart(p);strict.onSnapshotPart(p);
-      if(p.final&&wasSeeding){r.seedMs=now()-t115;if(observe.state==='VALID'){status('STREAMING');
-       r.coverageAtSeed=observe.coverage()}}}
+     const seeding=observe.state==='SEEDING';
+     for(const b of books)b.onSnapshotPart(p);
+     if(p.final&&(p.userMsg==null||p.userMsg===snapInFlight)){
+      snapInFlight=null;
+      if(seeding){r.seedMs=now()-t115;if(observe.state==='VALID'){status('STREAMING');
+       const c=observe.coverage();r.coverageAtSeed=c.suppressed?null:c}}
+      if(windowOver&&!closing)closeOut('WINDOW_COMPLETE')}
      return}
-    if(id===118){const a=parseUpdatesAck(data);r.dboSubscriptionRpCode=a.rpCode;
+    if(id===118){const a=parseUpdatesAck(data);
+     if(a.userMsg==='dbo-unsub')return;
+     if(a.userMsg!=null&&a.userMsg!=='dbo-sub'){r.uncorrelatedAcks++;return}
+     if(r.dboAckCorrelation)return; // only the first matching ack counts
+     r.dboAckCorrelation=a.userMsg==='dbo-sub'?'ECHOED':'UNECHOED_SINGLE_OUTSTANDING';
+     r.dboSubscriptionRpCode=a.rpCode;
      if(a.accepted)r.dboSubscriptionAccepted=true;else closeOut('DBO_SUBSCRIPTION_REJECTED');return}
-    if(id===160){const u=parseUpdate(data);if(!closing){observe.onUpdate(u);strict.onUpdate(u)}return}
-    if(id===161){const e=parseEndEvent(data);observe.onEndEvent(e);strict.onEndEvent(e);return}
+    if(id===160){const u=parseUpdate(data);if(!closing)for(const b of books)b.onUpdate(u);return}
+    if(id===161){const e=parseEndEvent(data);for(const b of books)b.onEndEvent(e);return}
     const m=parseInbound(data);
     if(m.kind==='HEARTBEAT'){if(m.accepted)r.heartbeat.acks++;else{r.heartbeat.rejects++;closeOut('HEARTBEAT_REJECTED')}return}
     if(m.kind==='SUBSCRIPTION'){if(!closing){if(m.accepted)r.bboSubscriptionAccepted=true;else closeOut('BBO_SUBSCRIPTION_REJECTED')}return}
     if(m.kind==='FORCED_LOGOUT'){r.forcedLogout=true;if(!closing){closing=true;r.stopReason='FORCED_LOGOUT'}return finish('FORCED_LOGOUT')}
     if(m.kind==='LOGOUT'){r.logoutAcked=true;if(closing)finish(r.stopReason);return}
     if(m.kind==='BBO'||m.kind==='TRADE'){if(closing)return;summary.observe(m);
-     // Book top vs BBO, only on messages carrying both sides (same event), book VALID, not verifying.
      if(m.kind==='BBO'&&m.bid!=null&&m.ask!=null&&(m.presence==null||(m.presence&3)===3)&&
-      observe.state==='VALID'&&!observe.verifying){
+      observe.state==='VALID'&&!observe.snapshotPending){
       const t=observe.top();r.bboCrossCheck.compared++;
       if(t.bid===m.bid&&t.ask===m.ask)r.bboCrossCheck.match++;
       else{r.bboCrossCheck.mismatch++;if(r.bboCrossCheck.samples.length<8)
