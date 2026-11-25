@@ -1,5 +1,6 @@
 // services/core/routes/runAllEngines.js
 import express from "express";
+import { buildPaperCycleReceipt } from "../logic/trading/engine8PaperCycleReceipt.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -419,29 +420,8 @@ async function handle(req, res) {
       });
     }
 
-    // Emit only allowlisted PAPER result fields; never log raw child output or secrets.
-    try {
-      const parsed = JSON.parse(step4.stdout);
-      const known = v => typeof v === "boolean" ? v : null;
-      const safeCode = v => typeof v === "string" && /^[A-Z0-9_]{1,100}$/.test(v) ? v : null;
-      console.log(JSON.stringify({
-        event: "ENGINE8_PAPER_CYCLE_RECEIPT",
-        observedAt: nowIso(),
-        code: step4.code,
-        status: safeCode(parsed?.status),
-        reason: safeCode(parsed?.reason),
-        adapterStatus: safeCode(parsed?.engine8?.status),
-        executable: known(parsed?.engine8?.executable),
-        skipped: known(parsed?.skipped),
-        orderCreated: known(parsed?.execution?.orderCreated),
-        fillCreated: known(parsed?.execution?.fillCreated),
-        journalCompleted: known(parsed?.execution?.journalCompleted),
-        journalPending: known(parsed?.execution?.journalPending),
-        executionStatus: safeCode(parsed?.execution?.status),
-      }));
-    } catch {
-      console.log(JSON.stringify({event:"ENGINE8_PAPER_CYCLE_RECEIPT", observedAt:nowIso(), code:step4.code, status:"RESULT_UNAVAILABLE"}));
-    }
+    // Diagnostic only: log sanitized outcome, not raw child stdout.
+    try { console.log(JSON.stringify(buildPaperCycleReceipt(step4, nowIso()))); } catch { /* diagnostics must not gate execution */ }
 
     // Optional non-authoritative diagnostic. Never gates or retries execution.
     if (process.env.ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED === "1" && step3a.code === 0) {
