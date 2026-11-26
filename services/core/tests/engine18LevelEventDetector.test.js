@@ -56,3 +56,26 @@ test('no lookahead: levels cannot be armed in the past; bars before armedAt are 
 test('round-number level source is point-in-time and side-aware',()=>{
  assert.deepEqual(roundNumberLevels(7012,{step:50,count:1}).map(l=>[l.price,l.side]),[[7000,'SUPPORT'],[7050,'RESISTANCE']]);
 });
+
+test('re-arm: after a sweep is classified, a second test is detected only after price leaves and comes back',()=>{
+ // sweep 7000 and reclaim, rally away (>5 pts), later come back and break for real
+ const bs=bars([[0,7010],[300,7001],[360,6994],[420,7003],[600,7030],[2400,7030],[2700,7002],[3000,6970],[7000,6950]]);
+ const ev=run({id:'r7000',price:7000,side:'SUPPORT',source:'ROUND_50'},bs);
+ assert.equal(ev.length,2);
+ assert.equal(ev[0].classification,'SWEEP_RECLAIMED');assert.ok(ev[0].outcomes['+10min'],'first event outcomes still tracked');
+ assert.equal(ev[1].classification,'ACCEPTED_BEYOND');assert.equal(ev[1].eventSeq,2);
+ assert.ok(ev[1].history[0].t>ev[0].history.at(-1).t,'second event starts after the first was classified');
+});
+
+test('re-arm: no new event while price stays at the level (must leave first)',()=>{
+ const bs=bars([[0,7010],[300,7001],[360,6994],[420,7003],[3000,7003]]);
+ const ev=run({id:'r7000',price:7000,side:'SUPPORT',source:'ROUND_50'},bs);
+ assert.equal(ev.length,1);
+});
+
+test('re-arm: a broken support is retested as resistance (side flips)',()=>{
+ const bs=bars([[0,7010],[300,7000],[900,6960],[1500,6960],[1800,6998],[1830,7004],[1890,6996],[6000,6950]]);
+ const ev=run({id:'r7000',price:7000,side:'SUPPORT',source:'ROUND_50'},bs);
+ assert.equal(ev[0].classification,'ACCEPTED_BEYOND');
+ assert.equal(ev[1].side,'RESISTANCE');assert.equal(ev[1].classification,'SWEEP_RECLAIMED');
+});
