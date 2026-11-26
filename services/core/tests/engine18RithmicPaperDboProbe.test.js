@@ -76,7 +76,7 @@ test('Step B needs its own DBO flag in addition to the Paper flag',()=>{
 
 test('end-to-end: seed, live updates, repeated re-snapshot verifications all match; BBO cross-check',async()=>{
  const {W,log}=fake();
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1600,verifyEveryMs:400});
  assert.equal(r.stopReason,'WINDOW_COMPLETE');assert.equal(r.authenticated,true);
  assert.equal(r.dboSubscriptionAccepted,true);
  const v=r.observeBook.stats.verifications;
@@ -100,7 +100,7 @@ test('end-to-end: seed, live updates, repeated re-snapshot verifications all mat
 
 test('a lost update is caught: STRICT book invalid on gap, OBSERVE verification shows the mismatch',async()=>{
  const {W}=fake({dropOne:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1200,verifyEveryMs:400});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1200,verifyEveryMs:400});
  assert.equal(r.strictBook.state,'INVALID');assert.equal(r.strictBook.reason,'SEQUENCE_GAP');
  assert.ok(r.observeBook.stats.gaps>=1);
  assert.ok(r.observeBook.stats.verifications.some(x=>!x.match),'first verification after the lost message must mismatch');
@@ -109,41 +109,41 @@ test('a lost update is caught: STRICT book invalid on gap, OBSERVE verification 
 
 test('DBO subscription rejected -> closes cleanly, dboEntitlement NOT_OBSERVED',async()=>{
  const {W}=fake({dboRp:'5'});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1500,verifyEveryMs:500});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1500,verifyEveryMs:500});
  assert.equal(r.stopReason,'DBO_SUBSCRIPTION_REJECTED');assert.equal(r.dboSubscriptionRpCode,'5');
  assert.equal(r.dboEntitlement,'NOT_OBSERVED');
 });
 
 test('BLOCKER 1: garbage frame -> cleanFrames false -> FAIL even if the book matches',async()=>{
  const {W}=fake({garbage:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1200,verifyEveryMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1200,verifyEveryMs:300});
  assert.ok(r.invalidFrames>=1);assert.equal(r.checks.cleanFrames,false);assert.equal(r.verdict,'STEP_B_FAIL');
  assert.equal(r.verifiedBook,null);
 });
 
 test('BLOCKER 1/2: wrong-instrument update -> STRICT invalid, continuity false, FAIL',async()=>{
  const {W}=fake({wrongSymbolAt:30});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1200,verifyEveryMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1200,verifyEveryMs:300});
  assert.equal(r.strictBook.state,'INVALID');assert.equal(r.checks.continuity,false);
  assert.equal(r.checks.noStructuralAnomalies,false);assert.equal(r.verdict,'STEP_B_FAIL');
 });
 
 test('BLOCKER 1: verification still pending at deadline -> grace, then FAIL (never silently passes)',async()=>{
  const {W}=fake({stallVerify:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1000,verifyEveryMs:300,verifyGraceMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1000,verifyEveryMs:300,verifyGraceMs:300});
  assert.equal(r.verificationPendingAtClose,true);assert.equal(r.checks.noIncompleteVerification,false);
  assert.equal(r.verdict,'STEP_B_FAIL');
 });
 
 test('BLOCKER 2: a stray ACK for another request is ignored; the correlated ACK decides',async()=>{
  const {W}=fake({straySubAck:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1200,verifyEveryMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1200,verifyEveryMs:300});
  assert.equal(r.uncorrelatedAcks,1);assert.equal(r.dboAckCorrelation,'ECHOED');assert.equal(r.dboSubscriptionAccepted,true);
 });
 
 test('BLOCKER 3: the STRICT shadow gets its own periodic comparisons',async()=>{
  const {W}=fake();
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1300,verifyEveryMs:300});
  assert.ok(r.strictBook.stats.verifications.length>=2);assert.ok(r.strictBook.stats.verifications.every(v=>v.match));
  assert.equal(r.strictBook.stats.failures.length,0);
 });
@@ -167,7 +167,7 @@ test('18D#1: no logout ack / rejected logout / socket error while closing -> FAI
 });
 test('18D#1: socket error during close keeps WINDOW_COMPLETE but fails cleanShutdown (end-to-end)',async()=>{
  const {W}=fake({errorOnLogout:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1300,verifyEveryMs:300});
  assert.equal(r.stopReason,'WINDOW_COMPLETE');assert.equal(r.shutdown.socketErrorDuringClose,true);
  assert.equal(r.checks.cleanShutdown,false);assert.equal(r.checks.cleanLogout,false);assert.equal(r.verdict,'STEP_B_FAIL');
 });
@@ -175,7 +175,7 @@ test('18D#3: AMBIGUOUS / NO_EQUAL_SEQUENCE_UPDATES only -> semantics not measure
  const a=mutate(r=>{for(const b of [r.observeBook,r.strictBook])b.stats.semanticsResolved=null});
  assert.equal(a.verdict,'STEP_B_FAIL');assert.ok(a.failedChecks.includes('snapshotSemanticsMeasured'));
  const {W}=fake({race:false}); // no update ever equals a snapshot sequence
- return runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300}).then(r=>{
+ return runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1300,verifyEveryMs:300}).then(r=>{
   assert.ok(r.observeBook.stats.verifications.every(v=>v.match));assert.equal(r.observeBook.state,'UNVERIFIED');
   assert.equal(r.checks.snapshotSemanticsMeasured,false);assert.equal(r.coverage,null);
   assert.equal(r.coverageSuppressedReason,'BOOK_UNVERIFIED');assert.equal(r.verdict,'STEP_B_FAIL');});
@@ -191,7 +191,7 @@ test('18D#2: crossed/locked book or data frames without instrument -> FAIL',()=>
 
 test('live Nov 26 shape: snapshot WITHOUT sequence -> no longer dead at seed; still never verified; layout + entitlement reported',async()=>{
  const {W}=fake({noSnapshotSeq:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1600,verifyEveryMs:400});
  assert.equal(r.stopReason,'WINDOW_COMPLETE');
  assert.notEqual(r.observeBook.state,'INVALID',JSON.stringify(r.observeBook.stats.failures));
  assert.equal(r.observeBook.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(r.observeBook.stats.unsequencedSnapshots>=1,true);
@@ -209,6 +209,12 @@ test('live Nov 26 shape: snapshot WITHOUT sequence -> no longer dead at seed; st
  assert.ok(!JSON.stringify(L).includes('ESZ6'),'no values in the layout');
  // diagnostic coverage is labeled and lives only in the receipt
  const d=r.diagnosticReceipt.diagnosticCoverage;assert.equal(d.verified,false);assert.equal(d.label,'DIAGNOSTIC_NOT_VERIFIED');
+ // Plan B (unsequenced periodic refresh) rides the same frames and snapshot requests
+ const pb=r.planB;assert.equal(pb.syncModeDecision.mode,'UNSEQUENCED_REFRESH');
+ assert.ok(pb.stats.refreshesCompleted>=1,JSON.stringify(pb.stats.history));assert.equal(pb.liquidity.verified,false);
+ assert.ok(['EMPIRICALLY_RECONCILED_UNVERIFIED','DIAGNOSTIC_NOT_VERIFIED'].includes(pb.liquidity.label));
+ assert.equal(pb.stats.exchangeTime.usedForPlacement,false);assert.ok(Array.isArray(pb.liquidity.keyLevels)||pb.liquidity.suppressed);
+ assert.ok(r.snapshotRequests<=Math.ceil(1600/400)+1,'Plan B adds no extra snapshot requests');
 });
 test('dboEntitlement OBSERVED when DBO data arrives even if the book is invalid',()=>{
  assert.ok(PASSING);const r=structuredClone(PASSING);r.observeBook.state='INVALID';r.observeBook.stats.snapshotsCompleted=0;
@@ -218,10 +224,24 @@ test('dboEntitlement OBSERVED when DBO data arrives even if the book is invalid'
 
 test('EMPIRICALLY_RECONCILED_UNVERIFIED is never granted when the candidate search hit its limit, a gap occurred, or a resnapshot mismatched',async()=>{
  const {W}=fake({noSnapshotSeq:true});
- const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:1600,verifyEveryMs:400});
  assert.equal(evaluateStepB(r).verdict,'EMPIRICALLY_RECONCILED_UNVERIFIED');
  const lim=structuredClone(r);lim.observeBook.candidateLimited=true;assert.equal(evaluateStepB(lim).verdict,'STEP_B_FAIL');
  const gap=structuredClone(r);gap.observeBook.stats.gaps=1;assert.equal(evaluateStepB(gap).verdict,'STEP_B_FAIL');
  const mis=structuredClone(r);mis.observeBook.stats.verifications.at(-1).match=false;assert.equal(evaluateStepB(mis).verdict,'STEP_B_FAIL');
  for(const x of [r,lim,gap,mis])assert.equal(evaluateStepB(x).verifiedBook,null);
+});
+
+test('18D ruling 3: live defaults (300 s window, 60 s cadence) and the 15 s hard minimum are enforced',async()=>{
+ const {W}=fake();
+ await assert.rejects(()=>runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:60000,verifyEveryMs:10000}),/15 s hard minimum/);
+ const src=runPaperDboStepB.toString();assert.match(src,/durationMs=PLANB_LIVE\.windowMs/);assert.match(src,/verifyEveryMs=PLANB_LIVE\.refreshEveryMs/);
+});
+
+test('18D ruling 3: a timed-out snapshot never blocks later refreshes',async()=>{
+ const {W}=fake({noSnapshotSeq:true,stallVerify:true});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,testTiming:true,durationMs:2000,verifyEveryMs:400,snapshotTimeoutMs:300,verifyGraceMs:100});
+ assert.ok(r.snapshotTimeouts>=1,String(r.snapshotTimeouts));
+ assert.ok(r.snapshotRequests>=3,'requests continue after a timeout: '+r.snapshotRequests);
+ assert.ok(r.planB.stats.refreshTimeouts>=1);assert.equal(r.planB.liquidity.label,'DIAGNOSTIC_NOT_VERIFIED');
 });

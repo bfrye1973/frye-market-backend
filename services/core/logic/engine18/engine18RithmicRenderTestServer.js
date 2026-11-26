@@ -53,7 +53,12 @@ app.listen(port,host,()=>{
   console.log(label+'_START readOnly=true trading=false recording=false');
   const onStatus=s=>{status.phase='PAPER_'+s.phase;status.connected=s.phase==='STREAMING'};
   (dbo?runPaperDboStepB({onStatus}):runPaperStepA({onStatus}))
-   .then(r=>{status.phase='PAPER_'+r.verdict;console.log(label+'_RESULT '+JSON.stringify(r))})
+   .then(r=>{status.phase='PAPER_'+r.verdict;
+    // Render truncates very long log lines: Plan B goes on its own line; failure lists are capped.
+    const {planB,...rest}=r;const cap=b=>{const f=b?.stats?.failures;if(Array.isArray(f)&&f.length>20){b.stats.failuresTotal=f.length;b.stats.failures=f.slice(0,20)}};
+    cap(rest.observeBook);cap(rest.strictBook);
+    if(planB)console.log(label+'_PLANB '+JSON.stringify(planB));
+    console.log(label+'_RESULT '+JSON.stringify(rest))})
    .catch(e=>{status.phase='PAPER_FAILED';
     const disabled=/disabled|missing/.test(e?.message||'');
     console.log(label+'_FAILED '+(disabled?(e.message.match(/\(([A-Z_/]+)\)/)?.[1]||'CONFIG'):'sanitized'))})

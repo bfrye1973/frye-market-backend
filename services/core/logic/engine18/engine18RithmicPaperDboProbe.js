@@ -13,6 +13,7 @@ import {encodeConformanceHeartbeat} from './engine18RithmicConformanceTest.js';
 import {createDboBook,encodeDboSnapshotRequest,encodeDboUpdatesRequest,parseSnapshotPart,
  parseUpdate,parseEndEvent,parseUpdatesAck,templateOf,decodeExact} from './engine18RithmicDboBook.js';
 import {decodeFields} from './engine18RithmicTestProbe.js';
+import {createRefreshBook,createSyncModeSelector,parseExchangeTime,roundKeyLevels,PLANB_LIVE} from './engine18RithmicRefreshBook.js';
 
 export const STEP_B_SEND_ALLOWLIST=Object.freeze([10,12,16,18,20,100,115,117]);
 export const MAX_STEP_B_MS=300000;
@@ -43,7 +44,14 @@ export function createLayoutRecorder(){
 export function verifyStepBEnvironment(env){
  const cfg=verifyPaperEnvironment(env);
  if(env.RITHMIC_PAPER_DBO_ENABLED!=='YES')throw Error('Rithmic Paper DBO probe disabled');
- return cfg;
+ return {...cfg,keyLevels:parseKeyLevels(env.RITHMIC_PAPER_KEY_LEVELS)};
+}
+// Owner key levels for Plan B readings, e.g. "7000,7211" (prices only; max 32; ES tick-aligned).
+export function parseKeyLevels(text){
+ if(text==null||text==='')return [];
+ const out=[];for(const raw of String(text).split(',').slice(0,32)){const v=Number(raw.trim());
+  if(!Number.isFinite(v)||v<1000||v>20000||Math.abs(v/0.25-Math.round(v/0.25))>1e-9)throw Error('invalid key level');
+  out.push({name:'KEY_'+v,price:v})}return out;
 }
 export function evaluateStepB(r){
  const o=r.observeBook||{},s=r.strictBook||{},os=o.stats||{},ss=s.stats||{};
@@ -104,11 +112,15 @@ export function evaluateStepB(r){
   dboEntitlement:r.dboSubscriptionAccepted&&((r.dboFrames?.snapshotParts??r.snapshotParts??0)>0||(r.dboFrames?.updates??0)>0)?'OBSERVED':'NOT_OBSERVED'};
 }
 
-export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,durationMs=180000,
- verifyEveryMs=45000,verifyGraceMs=10000,now=Date.now,loginTimeoutMs=15000,discoveryTimeoutMs=8000,onStatus=()=>{}}={}){
+// Live defaults follow 18D ruling 3 (Nov 26): 300 s window, 60 s snapshot cadence, hard 15 s minimum.
+// testTiming (offline tests only; never set by the Render server) allows sub-15 s cadences.
+export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,durationMs=PLANB_LIVE.windowMs,
+ verifyEveryMs=PLANB_LIVE.refreshEveryMs,verifyGraceMs=10000,snapshotTimeoutMs=20000,now=Date.now,loginTimeoutMs=15000,discoveryTimeoutMs=8000,
+ testTiming=false,onStatus=()=>{}}={}){
  const cfg=verifyStepBEnvironment(env); // throws before any network activity
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_B_MS)throw Error('invalid bounded Step B window');
  if(!Number.isSafeInteger(verifyEveryMs)||verifyEveryMs<200||verifyEveryMs>durationMs)throw Error('invalid verification interval');
+ if(!testTiming&&verifyEveryMs<PLANB_LIVE.hardMinRefreshMs)throw Error('snapshot cadence below the 15 s hard minimum');
  const sent=[];
  const r={schema:'engine18.rithmicPaperDboStepB.v3',readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
@@ -119,7 +131,8 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
   forcedLogout:false,logoutAcked:false,logoutRpCode:null,shutdown:{socketErrorDuringClose:false,closedBeforeLogoutAck:false},
   invalidFrames:0,otherTemplates:{},dboFrames:{snapshotParts:0,updates:0,endEvents:0},wireLayout:null,diagnosticCoverage:null,
   bboCrossCheck:{compared:0,match:0,mismatch:0,samples:[],note:'diagnostic only; CME BBO may include implied prices'},
-  stopReason:null,sentTemplates:sent,market:null,observeBook:null,strictBook:null,coverageAtSeed:null,coverage:null,coverageSuppressedReason:null};
+  stopReason:null,sentTemplates:sent,market:null,observeBook:null,strictBook:null,coverageAtSeed:null,coverage:null,coverageSuppressedReason:null,
+  planB:null,snapshotTimeouts:0,syncDowngrade:null};
  const status=p=>{r.phase=p;onStatus({phase:p})};
  const done=reason=>{r.stopReason=reason;r.phase='STOPPED';onStatus({phase:'STOPPED',stopReason:reason});
   return {...r,...evaluateStepB(r)}};
@@ -134,8 +147,14 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
  const layout=createLayoutRecorder();
  const observe=createDboBook({...bookOpts,mode:'OBSERVE'}),strict=createDboBook({...bookOpts,mode:'STRICT'});
  const books=[observe,strict];
+ // Plan B (owner decision Nov 26): unsequenced periodic-refresh book, fed the same frames and the
+ // same snapshot requests (no extra requests). Never VERIFIED; see engine18RithmicRefreshBook.js.
+ const minRefreshMs=testTiming?Math.min(PLANB_LIVE.hardMinRefreshMs,verifyEveryMs):PLANB_LIVE.hardMinRefreshMs;
+ const planB=createRefreshBook({symbol:cfg.symbol,exchange:cfg.exchange,now,minRefreshMs,refreshEveryMs:verifyEveryMs,snapshotTimeoutMs,testTiming});
+ // Sequence appearing then disappearing: invalidate and reseed Plan B (never continue as verified).
+ const syncSel=createSyncModeSelector({onDowngrade:d=>{r.syncDowngrade=d.reason;planB.forceReseed(d.reason)}});
  const summary=createStepASummary({now});
- let ws,hb,loginT,windowT,logoutT,hardT,verifyT,graceT,t115=null,snapSeq=0,snapInFlight=null,started=false;
+ let ws,hb,loginT,windowT,logoutT,hardT,verifyT,graceT,t115=null,snapSeq=0,snapInFlight=null,snapInFlightAt=null,started=false;
  const reason=await new Promise(resolve=>{
   let finished=false,closing=false,windowOver=false;
   const snap=()=>{for(const b of books)b.checkCrossed();
@@ -143,7 +162,10 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
    lastSeq:observe.lastSeq,crossedOrLocked:observe.crossedOrLocked,candidateLimited:observe.candidateLimited,stats:observe.stats()};
    r.strictBook={state:strict.state,reason:strict.reason,orders:strict.orderCount,crossedOrLocked:strict.crossedOrLocked,stats:strict.stats()}};
   // Coverage is captured once, at window end (before unsubscribe/logout), and only if publishable.
-  const captureCoverage=()=>{const c=observe.coverage();r.coverage=c.suppressed?null:c;r.coverageSuppressedReason=c.suppressed?c.reason:null;
+  // Round-number key levels use Plan B's own midpoint (18D ruling 3).
+  const capturePlanB=()=>{const mid=planB.midpoint();
+   r.planB={syncModeDecision:syncSel.decide(),liquidity:planB.liquidity({keyLevels:[...roundKeyLevels(mid),...(cfg.keyLevels||[])]}),stats:planB.stats()}};
+  const captureCoverage=()=>{capturePlanB();const c=observe.coverage();r.coverage=c.suppressed?null:c;r.coverageSuppressedReason=c.suppressed?c.reason:null;
    r.diagnosticCoverage=observe.coverage(undefined,{diagnostic:true});r.wireLayout=layout.result()};
   const finish=why=>{if(finished)return;finished=true;
    for(const t of [loginT,windowT,logoutT,hardT,graceT])clearTimeout(t);clearInterval(hb);clearInterval(verifyT);
@@ -166,17 +188,21 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
   const endWindow=()=>{windowOver=true;clearInterval(verifyT);
    if(!snapInFlight)return closeOut('WINDOW_COMPLETE');
    graceT=setTimeout(()=>closeOut('WINDOW_COMPLETE'),verifyGraceMs)};
-  const requestVerification=()=>{if(closing||windowOver||snapInFlight)return;
+  const requestVerification=()=>{if(closing||windowOver)return;
+   // A timed-out snapshot can never block later refreshes.
+   if(snapInFlight&&snapInFlightAt!==null&&now()-snapInFlightAt>snapshotTimeoutMs){r.snapshotTimeouts++;snapInFlight=null}
+   if(snapInFlight)return;
    const id='snap-'+(++snapSeq);let any=false;
    for(const b of books)if(b.beginVerification(id))any=true;
-   if(any){snapInFlight=id;r.snapshotRequests++;send(encodeDboSnapshotRequest({...sym,requestId:id}))}};
+   if(planB.beginRefresh(id))any=true;
+   if(any){snapInFlight=id;snapInFlightAt=now();r.snapshotRequests++;send(encodeDboSnapshotRequest({...sym,requestId:id}))}};
   hardT=setTimeout(()=>finish('HARD_DEADLINE'),loginTimeoutMs+durationMs+verifyGraceMs+30000);
   loginT=setTimeout(()=>finish('LOGIN_TIMEOUT'),loginTimeoutMs);
   try{ws=new WebSocketImpl(disc.gateway.uri,socketOpts)}catch{return finish('SESSION_SOCKET_FAILED')}
   // Shutdown evidence is reported separately: a socket error/close while closing keeps the stop
   // reason but fails the cleanShutdown / cleanLogout checks.
-  ws.on('error',()=>{if(closing)r.shutdown.socketErrorDuringClose=true;finish(closing?r.stopReason:'SESSION_SOCKET_ERROR')});
-  ws.on('close',()=>{if(closing&&!r.logoutAcked)r.shutdown.closedBeforeLogoutAck=true;finish(closing?r.stopReason:'SESSION_SOCKET_CLOSED')});
+  ws.on('error',()=>{if(closing)r.shutdown.socketErrorDuringClose=true;else planB.noteFailure('DISCONNECT');finish(closing?r.stopReason:'SESSION_SOCKET_ERROR')});
+  ws.on('close',()=>{if(closing&&!r.logoutAcked)r.shutdown.closedBeforeLogoutAck=true;else if(!closing)planB.noteFailure('DISCONNECT');finish(closing?r.stopReason:'SESSION_SOCKET_CLOSED')});
   ws.on('open',()=>send(encodePaperLogin(cfg)));
   ws.on('message',data=>{
    let id;try{id=templateOf(data)}catch{r.invalidFrames++;return}
@@ -191,7 +217,8 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
      send(encodeMarketDataRequest({...sym,subscribe:true}));summary.start();started=true;
      const seedId='snap-'+(++snapSeq);
      for(const b of books)b.beginSnapshot(seedId); // buffer BEFORE subscribing
-     snapInFlight=seedId;
+     planB.beginRefresh(seedId);
+     snapInFlight=seedId;snapInFlightAt=now();
      send(encodeDboUpdatesRequest({...sym,subscribe:true,requestId:'dbo-sub'}));
      t115=now();r.snapshotRequests++;send(encodeDboSnapshotRequest({...sym,requestId:seedId}));
      windowT=setTimeout(endWindow,durationMs);
@@ -202,6 +229,7 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
      layout.observe(116,data,{final:p.final,dataBearing:p.dataBearing});
      const seeding=observe.state==='SEEDING';
      for(const b of books)b.onSnapshotPart(p);
+     planB.onSnapshotPart(p);syncSel.observeSnapshotPart(p);
      if(p.final&&(p.userMsg==null||p.userMsg===snapInFlight)){
       snapInFlight=null;
       if(seeding){r.seedMs=now()-t115;if(observe.state==='VALID'||observe.state==='UNVERIFIED'){status('STREAMING');
@@ -215,7 +243,8 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
      r.dboAckCorrelation=a.userMsg==='dbo-sub'?'ECHOED':'UNECHOED_SINGLE_OUTSTANDING';
      r.dboSubscriptionRpCode=a.rpCode;
      if(a.accepted)r.dboSubscriptionAccepted=true;else closeOut('DBO_SUBSCRIPTION_REJECTED');return}
-    if(id===160){const u=parseUpdate(data);r.dboFrames.updates++;layout.observe(160,data);if(!closing)for(const b of books)b.onUpdate(u);return}
+    if(id===160){const u=parseUpdate(data);r.dboFrames.updates++;layout.observe(160,data);syncSel.observeUpdate(u);
+     if(!closing){for(const b of books)b.onUpdate(u);let et=null;try{et=parseExchangeTime(data)}catch{}planB.onUpdate(u,{exchangeTime:et})}return}
     if(id===161){const e=parseEndEvent(data);r.dboFrames.endEvents++;layout.observe(161,data);for(const b of books)b.onEndEvent(e);return}
     const m=parseInbound(data);
     if(m.kind==='HEARTBEAT'){if(m.accepted)r.heartbeat.acks++;else{r.heartbeat.rejects++;closeOut('HEARTBEAT_REJECTED')}return}
