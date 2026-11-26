@@ -28,7 +28,8 @@ test('seed, then matching refreshes -> RECONCILED; label only after K matches; n
  refresh(b,c,'s3',cur);assert.equal(b.label(),LABELS.DIAGNOSTIC);
  refresh(b,c,'s4',cur);assert.equal(b.label(),LABELS.RECONCILED);
  const L=b.liquidity();assert.equal(L.verified,false);assert.equal(L.label,'EMPIRICALLY_RECONCILED_UNVERIFIED');
- assert.equal(L.boundary,'UNKNOWN_NO_VENDOR_SEQUENCE');assert.equal(L.refreshMatchRate,1);assert.equal(L.quality,'RECONCILED');
+ assert.equal(L.boundary,'UNKNOWN_NO_VENDOR_SEQUENCE');assert.equal(L.exactMatchRate,1);assert.equal(L.overlapTolerantMatchRate,1);assert.equal(L.quality,'RECONCILED');
+ assert.deepEqual(L.labelBlockedBy,[]);assert.ok(L.streakObservedMs>=180000);
  assert.ok(!JSON.stringify(L).includes('"VERIFIED"'));
 });
 
@@ -44,23 +45,38 @@ test('drift (a missed update) is detected at refresh, counted unexplained, and c
  refresh(b,c,'s3',truth);assert.equal(b.quality(),QUALITY.RECONCILED);assert.equal(b.stats().matchStreak,1);
 });
 
-test('updates during an in-flight snapshot are EXPLAINED differences and the latest received event wins',()=>{
+test('18D ruling 1: disagreeing orders touched mid-snapshot are AMBIGUOUS_OVERLAP; snapshot-only evidence kept separate',()=>{
  const c=clock(),b=mk(c);b.beginRefresh('s1');sendSnap(b,'s1',BASE);
  c.adv(60000);assert.equal(b.beginRefresh('s2'),true);
  b.onSnapshotPart(part('s2',1,7000,['a'],[10]));
  b.onUpdate(upd([[3,1,6999.75,null,'b']]));          // b deleted while snapshot in flight
  b.onUpdate(upd([[1,2,7000.75,7,'f']]));             // f added while in flight
- // snapshot may or may not reflect those: here it still shows b and lacks f
+ // snapshot still shows b and lacks f: which is newer cannot be established
  for(const [oid,[side,price,q]] of Object.entries({b:BASE.b,c:BASE.c,d:BASE.d}))b.onSnapshotPart(part('s2',side,price,[oid],[q]));
  b.onSnapshotPart(fin('s2'));
- const h=b.stats().history.at(-1);assert.equal(h.match,true);assert.equal(h.diff.explained,2);assert.equal(h.diff.unexplained,0);
- assert.equal(b.quality(),QUALITY.RECONCILED);
- const L=b.liquidity();assert.equal(L.bid.rows[0].observedQtyTouchToPrice,10);  // b removed
- assert.equal(L.ask.rows[0].observedQtyTouchToPrice,8+4+7);                      // f kept
- // an update for an order the new snapshot already reflects is idempotent (counted, not structural)
- b.onUpdate(upd([[1,2,7000.75,7,'f']]));assert.equal(b.stats().driftSignals.newExisting,1);
- b.onUpdate(upd([[3,1,6999.75,null,'b']]));assert.equal(b.stats().driftSignals.deleteMissing,1);
- assert.equal(b.quality(),QUALITY.RECONCILED);
+ const h=b.stats().history.at(-1);assert.equal(h.diff.ambiguousOverlap,2);assert.equal(h.diff.unexplained,0);
+ assert.equal(h.match,true);assert.equal(h.exactMatch,false);assert.equal(h.diff.explained,undefined);
+ assert.equal(b.quality(),QUALITY.OVERLAP_AMBIGUOUS);assert.equal(b.stats().matchStreak,0);
+ const L=b.liquidity();assert.equal(L.evidence,'MIXED_ESTIMATE');assert.equal(L.ambiguousOverlap.orders,2);
+ assert.equal(L.bid.rows[0].observedQtyTouchToPrice,10);          // estimate: latest received (b deleted)
+ assert.equal(L.ask.rows[0].observedQtyTouchToPrice,8+4+7);       // estimate: f kept
+ assert.equal(L.snapshotOnly.evidence,'SNAPSHOT_ONLY');
+ assert.equal(L.snapshotOnly.bid[0].observedQtyTouchToPrice,10+5); // snapshot version of b kept separately
+ assert.equal(L.snapshotOnly.ask[0].observedQtyTouchToPrice,8+4);
+ assert.equal(L.exactMatchRate,0);assert.equal(L.overlapTolerantMatchRate,1);
+ // a later live event for an ambiguous order supersedes both versions
+ b.onUpdate(upd([[1,2,7000.75,7,'f']]));assert.equal(b.stats().driftSignals.newExisting,1);assert.equal(b.ambiguousCount,1);
+});
+
+test('18D ruling 1: an unusable overlapping update never drops or alters a genuine snapshot order',()=>{
+ const c=clock(),b=mk(c);b.beginRefresh('s1');sendSnap(b,'s1',BASE);
+ c.adv(60000);b.beginRefresh('s2');
+ b.onUpdate(upd([[2,1,6999.5,null,'g']]));           // CHANGE without size for an unknown order: unusable
+ b.onUpdate(upd([[3,2,7002,null,'zz']]));            // DELETE of an absent order: unusable
+ sendSnap(b,'s2',{...BASE,g:[1,6999.5,9],zz:[2,7002,3]});
+ assert.equal(b.orderCount,6);                        // g and zz kept from the snapshot
+ const L=b.liquidity();assert.equal(L.bid.rows[0].observedQtyTouchToPrice,10+5+9);
+ assert.equal(b.stats().driftSignals.changeMissingUnusable,1);
 });
 
 test('stale: no refresh within 2x the interval suppresses values (quality + label still reported)',()=>{
@@ -167,4 +183,72 @@ test('owner key levels from env are validated',()=>{
  assert.deepEqual(parseKeyLevels('7000, 7211'),[{name:'KEY_7000',price:7000},{name:'KEY_7211',price:7211}]);
  assert.deepEqual(parseKeyLevels(undefined),[]);
  assert.throws(()=>parseKeyLevels('7000.1'),/invalid key level/);assert.throws(()=>parseKeyLevels('abc'),/invalid key level/);
+});
+
+// ---- 18D Plan B rulings (Nov 26) ----
+import {createAutoSyncBook,PLANB_LIVE} from '../logic/engine18/engine18RithmicRefreshBook.js';
+
+test('18D ruling 2: label needs 3 exact clean matches over >=180 s at the approved 60 s cadence; any failure resets the streak',()=>{
+ // faster cadence (test timing) can never earn the label even with 3 exact matches
+ const c0=clock(),f=mk(c0,{refreshEveryMs:20000,minRefreshMs:1000,testTiming:true});f.beginRefresh('s1');sendSnap(f,'s1',BASE);
+ for(const id of ['s2','s3','s4'])refresh(f,c0,id,BASE,20000);
+ assert.equal(f.stats().matchStreak,3);assert.equal(f.label(),LABELS.DIAGNOSTIC);
+ assert.ok(f.liquidity().labelBlockedBy.includes('CADENCE_NOT_APPROVED'));
+ assert.ok(f.liquidity().labelBlockedBy.some(x=>x.startsWith('OBSERVATION_UNDER')));
+ // approved cadence: earns it, then each failure kind resets the streak
+ const c=clock(),b=mk(c);b.beginRefresh('s1');sendSnap(b,'s1',BASE);
+ for(const id of ['s2','s3','s4'])refresh(b,c,id,BASE);assert.equal(b.label(),LABELS.RECONCILED);
+ b.noteFailure('DISCONNECT');assert.equal(b.stats().matchStreak,0);assert.equal(b.label(),LABELS.DIAGNOSTIC);
+ refresh(b,c,'s5',BASE);refresh(b,c,'s6',BASE);
+ c.adv(60000);b.beginRefresh('s7');c.adv(21000);assert.equal(b.refreshDue(),true); // timeout freed the slot
+ assert.equal(b.stats().matchStreak,0);assert.equal(b.stats().refreshTimeouts,1);
+ assert.equal(b.beginRefresh('s8'),true);b.onSnapshotPart(fin('s8','5'));           // rejected refresh
+ assert.equal(b.stats().matchStreak,0);
+ refresh(b,c,'s9',BASE);assert.equal(b.stats().matchStreak,1);
+ // an unexplained near-touch difference is not exact -> reset
+ refresh(b,c,'s10',{...BASE,a:[1,7000,11]});assert.equal(b.stats().matchStreak,0);assert.equal(b.quality(),QUALITY.DRIFT_CORRECTED);
+ const L=b.liquidity();assert.ok(L.overlapTolerantMatchRate<1&&L.exactMatchRate<1);assert.equal(L.verified,false);
+});
+
+test('18D ruling 3: hard 15 s minimum, approved defaults, crossed output suppressed even mid-snapshot, memory limit after merge, own midpoint',()=>{
+ const c=clock();assert.throws(()=>createRefreshBook({...S,now:c.now,minRefreshMs:5000,refreshEveryMs:5000}),/hard minimum/);
+ assert.equal(PLANB_LIVE.refreshEveryMs,60000);assert.equal(PLANB_LIVE.hardMinRefreshMs,15000);assert.equal(PLANB_LIVE.windowMs,300000);
+ const b=mk(c);b.beginRefresh('s1');sendSnap(b,'s1',BASE);assert.equal(b.midpoint(),7000.125);
+ c.adv(60000);b.beginRefresh('s2');                       // in flight: periodic cross-check is skipped
+ b.onUpdate(upd([[1,1,7001,3,'x']]));                     // bid above best ask -> crossed
+ const L=b.liquidity();assert.equal(L.suppressed,true);assert.equal(L.reason,'BOOK_CROSSED_OR_LOCKED');assert.equal(b.midpoint(),null);
+ // memory: snapshot + ambiguous overlap counted together
+ const c2=clock(),m=mk(c2,{maxOrders:5});m.beginRefresh('s1');sendSnap(m,'s1',BASE);
+ c2.adv(60000);m.beginRefresh('s2');m.onUpdate(upd([[1,2,7003,1,'n1']]));      // running 5 orders, touched n1
+ sendSnap(m,'s2',{...BASE,n2:[2,7004,1]});                                   // snapshot 5 orders; merged 5 + ambiguous 2 > 5
+ assert.equal(m.quality(),QUALITY.INVALID);assert.equal(m.stats().invalidReason,'ORDER_LIMIT');
+ assert.equal(m.stats().history.at(-1).reason,'ORDER_LIMIT_AFTER_MERGE');
+});
+
+const seqPart=(id,side,price,ids,sizes,seq)=>part(id,side,price,ids,sizes,BigInt(seq));
+test('18D sequence mode: SEQUENCED only on full evidence and must pass its own acceptance; disappearing sequence -> invalidate and reseed',()=>{
+ const c=clock(),a=createAutoSyncBook({...S,now:c.now,minUpdates:3});
+ assert.equal(a.beginRefresh('s1'),true);
+ for(const [oid,[side,price,q]] of Object.entries(BASE))a.onSnapshotPart(seqPart('s1',side,price,[oid],[q],100));
+ a.onSnapshotPart(fin('s1'));
+ for(let k=0;k<3;k++)a.onUpdate(upd([[2,1,7000,11+k,'a']],101+k));
+ let s=a.status();assert.equal(s.syncMode,'SEQUENCED');assert.ok(a.sequenced);
+ assert.equal(s.verifiedEligible,false);            // sequenced book has not seeded from its own snapshot yet
+ assert.equal(a.refresh.label(),LABELS.DIAGNOSTIC);
+ a.onUpdate(upd([[2,1,7000,20,'a']],null));          // sequence disappears
+ s=a.status();assert.equal(s.syncMode,'UNSEQUENCED_REFRESH');assert.equal(s.downgrade.reason,'SEQUENCE_DISAPPEARED');
+ assert.equal(a.sequenced,null);assert.equal(s.seqInvalidations.length,1);assert.equal(s.verifiedEligible,false);
+ assert.equal(a.refresh.quality(),QUALITY.INVALID);assert.equal(a.refresh.stats().invalidReason,'SEQUENCE_DISAPPEARED');
+ assert.equal(a.refresh.refreshDue(),true);assert.equal(a.refresh.orderCount,0);   // must reseed
+ c.adv(15000);assert.equal(a.beginRefresh('s2'),true);sendSnap(a.refresh,'s2',BASE);assert.equal(a.refresh.quality(),QUALITY.SEEDED);
+});
+
+test('18D ruling 4: exchange timestamps never change placement',()=>{
+ const c=clock(),b1=mk(c),b2=mk(c);for(const b of [b1,b2]){b.beginRefresh('s1');sendSnap(b,'s1',BASE)}
+ const u=upd([[2,1,7000,15,'a']]);
+ b1.onUpdate(u,{exchangeTime:{ns:5n,hasUsecs:true,hasNsecs:true}});b2.onUpdate(u,{exchangeTime:{ns:1n,hasUsecs:true,hasNsecs:true}});
+ b1.onUpdate(upd([[2,1,7000,16,'a']]),{exchangeTime:{ns:1n,hasUsecs:true,hasNsecs:true}}); // older exchange time still applied in arrival order
+ b2.onUpdate(upd([[2,1,7000,16,'a']]),{exchangeTime:{ns:9n,hasUsecs:true,hasNsecs:true}});
+ assert.deepEqual(b1.liquidity().bid.rows,b2.liquidity().bid.rows);
+ assert.equal(b1.stats().exchangeTime.usedForPlacement,false);assert.equal(b1.stats().exchangeTime.backwards,1);
 });
