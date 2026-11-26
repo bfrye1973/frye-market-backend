@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createLiquidityMap,referenceCandidates,profileCandidates,provenCandidates} from '../logic/engine18/engine18LiquidityMap.js';
+import {createLiquidityMap,referenceCandidates,profileCandidates,provenCandidates,sweepCandidates,
+ parseOwnerZones,ownerZoneCandidates,zonesContaining} from '../logic/engine18/engine18LiquidityMap.js';
 
 const T=1795630000;
 
@@ -79,4 +80,59 @@ test('replay checkpoints: point-in-time map with fixed lines and RTH-only profil
 test('profile evidence must be refreshed (stale profile nodes stop counting)',()=>{
  const m=createLiquidityMap();m.add('PROFILE',{price:7150,label:'HVN',t:T});m.add('REFERENCE',{price:7150,label:'R',t:T});
  assert.equal(m.evaluate({t:T+100,price:7200}).drawn.length,1);assert.equal(m.evaluate({t:T+400,price:7200}).drawn.length,0);
+});
+
+// ---- step 3: sweep events + owner zones ----
+const sweepDay=()=>{const T0=1795617000;const mins=[];let p=7015;
+ for(let i=0;i<180;i++){let o=p,h,l,c;
+  if(i<15){c=7015-i*0.5;h=Math.max(o,c)+1;l=Math.min(o,c)-1}
+  else if(i<17){c=6995;h=7001;l=6992}          // sweep below 7000
+  else if(i===17){c=7003;h=7004;l=6996}        // close back above
+  else if(i===18){c=7004;h=7005;l=7001}        // hold above -> reclaimed
+  else{c=Math.min(7100,7004+(i-18)*1.5);h=c+1;l=c-1}
+  mins.push({t:T0+i*60,o,h,l,c,v:3000,buyAtAsk:i>=15&&i<17?2000:1500,sellAtBid:i>=15&&i<17?1000:1500});p=c}
+ return mins};
+
+test('sweepCandidates: reclaimed sweep becomes PROVEN at the fixed level; break becomes a flip level',()=>{
+ const ev=[{level:7000,side:'SUPPORT',penetration:8,classification:'SWEEP_RECLAIMED',
+   history:[{state:'APPROACHING',t:T},{state:'RECLAIMED',t:T+300,at:'x',evidence:{deltaWhileBeyond:1441}}]},
+  {level:7188,side:'SUPPORT',penetration:4,classification:'ACCEPTED_BEYOND',history:[{state:'ACCEPTED_BEYOND',t:T+400,evidence:{}}]},
+  {level:7150,side:'SUPPORT',classification:null,history:[]}];
+ const c=sweepCandidates(ev);assert.equal(c.length,2);
+ assert.equal(c[0].label,'SWEEP_RECLAIMED_SUPPORT');assert.equal(c[0].state,'SWEPT_AND_HELD');assert.equal(c[0].detail.deltaWhileBeyond,1441);
+ assert.equal(c[1].state,'BROKEN_FLIP');
+ assert.equal(sweepCandidates(ev,{since:T+300}).length,1); // no double counting
+ const m=createLiquidityMap();m.add('REFERENCE',{price:7000,label:'ROUND_50',t:T});m.add('PROVEN',c[0]);
+ const r=m.evaluate({t:T+600,price:7100});assert.equal(r.drawn[0].price,7000);assert.equal(r.drawn[0].state,'SWEPT_AND_HELD');
+});
+
+test('replay: 7000 sweep-and-reclaim keeps 7000 on the map after price runs away',async()=>{
+ const {replayLiquidityMap}=await import('../logic/engine18/engine18RithmicPaperHistoryReplay.js');
+ const cps=replayLiquidityMap(sweepDay(),{everyMin:30});
+ assert.ok(cps.sweepEvents.some(e=>e.level===7000&&e.classification==='SWEEP_RECLAIMED'));
+ const last=cps.at(-1);assert.ok(last.price>=7090);
+ const l=last.lines.find(x=>x.price===7000);assert.ok(l,'7000 still drawn');
+ assert.equal(l.side,'BUY');assert.ok(l.labels.includes('SWEEP_RECLAIMED_SUPPORT'));
+ for(const cp of cps)for(const x of cp.lines)assert.ok(Math.abs(x.price-cp.price)>=8);
+});
+
+test('owner zones: parse file format, edges are evidence, zones are context, nothing is moved',()=>{
+ const z=parseOwnerZones('7487.25-7541.00 | NEG 7501.25-7525.00 # main buy fill\n   | NEG 7050.10-7020.00  \n# note\njunk');
+ assert.deepEqual(z,[{kind:'PARENT',lo:7487.25,hi:7541},{kind:'NEG',lo:7501.25,hi:7525},{kind:'NEG',lo:7020,hi:7050}]);
+ const m=createLiquidityMap();for(const c of ownerZoneCandidates(z,{t:T}))m.add('OWNER_ZONE',c);
+ m.add('REFERENCE',{price:7050,label:'ROUND_50',t:T});
+ const r=m.evaluate({t:T,price:7100});assert.equal(r.drawn.length,1);assert.equal(r.drawn[0].price,7050);
+ assert.deepEqual(r.drawn[0].sourceTypes.sort(),['OWNER_ZONE','REFERENCE']);
+ assert.deepEqual(zonesContaining(z,7510),['PARENT 7487.25-7541','NEG 7501.25-7525']);
+});
+
+test('broken level: proof from before the break stops counting; it is marked, never strengthened',()=>{
+ const m=createLiquidityMap();
+ m.add('REFERENCE',{price:7188,label:'X',t:T});m.add('PROVEN',{price:7188,label:'FLOOR_DEFENDED',t:T,state:'DEFENDED'});
+ assert.equal(m.evaluate({t:T+10,price:7210}).drawn.length,1);
+ m.markBroken({price:7188,label:'BROKEN_SUPPORT',t:T+20});
+ const r=m.evaluate({t:T+30,price:7170});assert.equal(r.drawn.length,0);
+ // a NEW defense after the break (flip retest from below) counts again
+ m.add('PROVEN',{price:7188,label:'CEILING_DEFENDED',t:T+40,state:'DEFENDED'});
+ const r2=m.evaluate({t:T+50,price:7170});assert.equal(r2.drawn.length,1);assert.equal(r2.drawn[0].side,'SELL');
 });

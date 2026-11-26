@@ -7,6 +7,11 @@ import {probeRithmicDbo} from './engine18RithmicDboEntitlementProbe.js';
 import {runConformance} from './engine18RithmicConformanceTest.js';
 import {runPaperStepA} from './engine18RithmicPaperProbe.js';
 import {runPaperHistoryReplay} from './engine18RithmicPaperHistoryReplay.js';
+import {parseOwnerZones} from './engine18LiquidityMap.js';
+import fs from 'node:fs';
+import {fileURLToPath} from 'node:url';
+// Owner hand-drawn zones: read-only; never written or modified here.
+function loadOwnerZones(){try{return parseOwnerZones(fs.readFileSync(fileURLToPath(new URL('../../data/es-smz-manual-zones.txt',import.meta.url)),'utf8'))}catch{return []}}
 const port=Number(process.env.PORT||10000);
 const host='0.0.0.0';
 const status={phase:'STARTING',readOnly:true,attempts:0,completed:false,connected:false};
@@ -25,9 +30,10 @@ app.listen(port,host,()=>{
   if(status.attempts++)return;
   status.phase='PAPER_HISTORY_RUNNING';
   console.log('RITHMIC_PAPER_HISTORY_START readOnly=true plant=HISTORY trading=false recording=false');
-  runPaperHistoryReplay({onStatus:s=>{status.phase='PAPER_HISTORY_'+s.phase}}).then(r=>{
+  runPaperHistoryReplay({ownerZones:loadOwnerZones(),onStatus:s=>{status.phase='PAPER_HISTORY_'+s.phase}}).then(r=>{
    const {minutes,flowReads,liquidityMap,...rest}=r;status.phase='PAPER_HISTORY_'+r.stopReason;
    for(const cp of liquidityMap||[])console.log('RITHMIC_PAPER_HISTORY_MAP '+JSON.stringify(cp));
+   console.log('RITHMIC_PAPER_HISTORY_SWEEPS '+JSON.stringify(liquidityMap?.sweepEvents||[]));
    for(let i=0;i<(flowReads||[]).length;i+=25)
     console.log('RITHMIC_PAPER_HISTORY_FLOWREADS '+i+' '+JSON.stringify(flowReads.slice(i,i+25)));
    console.log('RITHMIC_PAPER_HISTORY_RESULT '+JSON.stringify(rest));

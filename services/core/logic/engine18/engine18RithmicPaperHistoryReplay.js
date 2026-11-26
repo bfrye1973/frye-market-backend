@@ -10,7 +10,9 @@ import {discoverPaperGateway,verifyPaperEnvironment,encodePaperLogin,parsePaperL
 import {encodeConformanceHeartbeat} from './engine18RithmicConformanceTest.js';
 import {decodeFields} from './engine18RithmicTestProbe.js';
 import {createFlowReader} from './engine18FlowReader.js';
-import {createLiquidityMap,referenceCandidates,profileCandidates,provenCandidates} from './engine18LiquidityMap.js';
+import {createLiquidityMap,referenceCandidates,profileCandidates,provenCandidates,sweepCandidates,
+ ownerZoneCandidates,zonesContaining} from './engine18LiquidityMap.js';
+import {createLevelEventDetector} from './engine18LevelEventDetector.js';
 
 export const HISTORY_SEND_ALLOWLIST=Object.freeze([10,12,16,18,20,202]);
 export const MAX_SECOND_BARS_SPAN=9900; // stays under the server's 10,000-record cap
@@ -114,7 +116,7 @@ export function analyzeLevelEvent(barsIn,{level,tick=0.25,holdSec=60}={}){
 
 // ---------- session ----------
 export async function runPaperHistoryReplay({env=process.env,WebSocketImpl=WebSocket,now=Date.now,
- timeoutMs=90000,discoveryTimeoutMs=8000,onStatus=()=>{}}={}){
+ timeoutMs=90000,discoveryTimeoutMs=8000,onStatus=()=>{},ownerZones=[]}={}){
  const cfg=verifyHistoryEnvironment(env);
  const sent=[];
  const r={schema:'engine18.rithmicHistoryCase.v1',readOnly:true,trading:false,recording:false,
@@ -157,21 +159,34 @@ export async function runPaperHistoryReplay({env=process.env,WebSocketImpl=WebSo
   const reader=createFlowReader();const complete=r.minutes.filter(m=>m.t+60<=cfg.end);
   r.flowReads=complete.map(m=>reader.onMinute(m)).filter(x=>x.reads.length)
    .map(x=>({time:x.time,price:x.price,reads:x.reads.map(q=>q.type+(q.level!=null?'@'+q.level:'')+': '+q.read)}));
-  r.liquidityMap=replayLiquidityMap(complete);}
+  r.liquidityMap=replayLiquidityMap(complete,{ownerZones});}
  return r;
 }
 
 // Point-in-time Liquidity Map checkpoints over a replay: every checkpoint uses only minutes up to it.
 const RTH_OPEN_UTC_MIN=14*60+30;
-export function replayLiquidityMap(minutes,{everyMin=30}={}){
+export function replayLiquidityMap(minutes,{everyMin=30,ownerZones=[]}={}){
  const reader=createFlowReader();
  const map=createLiquidityMap({staleSec:{PROFILE:everyMin*60+60}});
- const rth=[];let sessionOpen=null;const out=[];
+ // Track B sweep detector on the same minutes. Levels are armed BEFORE price reaches them,
+ // from point-in-time sources only (round numbers around current price, session open, owner zone edges).
+ const det=createLevelEventDetector({reclaimHoldSec:60});
+ const armed=new Set();let sweepSince=-Infinity;
+ const arm=(price,source,t,ref)=>{const k=price.toFixed(2);if(armed.has(k))return;armed.add(k);
+  det.arm({id:'A'+k,price,side:price<=ref?'SUPPORT':'RESISTANCE',source,armedAt:t})};
+ const rth=[];let sessionOpen=null;const out=[];let zonesAdded=false;
  minutes.forEach((m,i)=>{
   const snap=reader.onMinute(m);
   if(Math.floor((m.t%86400)/60)>=RTH_OPEN_UTC_MIN){rth.push(m);if(sessionOpen===null)sessionOpen=m.o}
   const t=m.t+60;
+  det.onBar({t,o:m.o,h:m.h,l:m.l,c:m.c,v:m.v,bid:m.sellAtBid,ask:m.buyAtAsk});
+  for(const {kind,...c} of sweepCandidates(det.events(),{since:sweepSince})){
+   if(kind==='HELD')map.add('PROVEN',c);else map.markBroken(c);sweepSince=Math.max(sweepSince,c.t)}
   for(const c of provenCandidates(snap))map.add('PROVEN',{...c,t});
+  if(!zonesAdded&&ownerZones.length){for(const c of ownerZoneCandidates(ownerZones,{t}))map.add('OWNER_ZONE',c);zonesAdded=true}
+  // arm for the NEXT bars (armedAt = this bar's close)
+  for(const c of referenceCandidates({t,price:m.c,sessionOpen}))arm(c.price,c.label,t,m.c);
+  for(const z of ownerZones){arm(z.lo,'OWNER_'+z.kind+'_LOW',t,m.c);arm(z.hi,'OWNER_'+z.kind+'_HIGH',t,m.c)}
   const isCheckpoint=(t%(everyMin*60)===0)||i===minutes.length-1;
   if(!isCheckpoint||rth.length<30)return;
   const pc=profileCandidates(rth,{t});
@@ -180,8 +195,11 @@ export function replayLiquidityMap(minutes,{everyMin=30}={}){
   const ev=map.evaluate({t,price:m.c,airPockets:pc.airPockets});
   out.push({time:new Date((t-7*3600)*1000).toISOString().slice(11,16)+' MST',price:m.c,
    lines:ev.drawn.map(d=>({side:d.side,price:d.price,strength:d.strength,sources:d.sourceTypes,
-    labels:Object.values(d.evidence).flatMap(e=>e.labels),state:d.state,airPocketsBetween:d.airPocketsBetween})),
+    labels:Object.values(d.evidence).flatMap(e=>e.labels),state:d.state,airPocketsBetween:d.airPocketsBetween,
+    insideOwnerZones:zonesContaining(ownerZones,d.price)})),
    noLineReason:ev.noLineReason});
  });
+ out.sweepEvents=det.events().filter(e=>e.classification).map(e=>({level:e.level,side:e.side,source:e.source,
+  classification:e.classification,penetrationPts:e.penetration,at:e.history.at(-1)?.at??null}));
  return out;
 }
