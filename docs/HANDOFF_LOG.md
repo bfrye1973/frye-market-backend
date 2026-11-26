@@ -8,3 +8,4 @@ Newest at the bottom. One short entry per work session.
 - Handbook created (this file, `CLAUDE.md`, `docs/engines/`).
 - Next: Engine 18 live worker + real-time panel v1 (offline first).
 - Waiting on owner: PR #240 preview; Rithmic login extension before Nov 30; Engine 18D re-audit of PR #400.
+- Handbook: added Engine 18 "Recording & history storage" section (Gate 1 recorder, PRs #291–#334, one real 1-min Ironbeam capture, standby worker, Rithmic plug-in path).

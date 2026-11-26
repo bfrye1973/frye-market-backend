@@ -82,6 +82,73 @@ Also pending: Engine 18D re-audit of #400 → live Step A (NYC Area, 120 s) and 
 - Research range ±75 pts; break margin / stop distance for labels.
 - Databento one-day Nov 25 MBO decision.
 
+## Recording & history storage (Gate 1 recorder) — built Nov 10–17, Ironbeam era
+
+**Purpose:** capture the raw order-book feed exactly as received, store it durably and privately, and replay it byte-for-byte later. This is the base for the learning loop. Capture comes before interpretation.
+
+**What was built** (all on the isolated Engine 18 branches, **not main**):
+- **Raw recorder** (`gate1RawRecorder.js`):
+  - Append-only gzip JSONL. Schema `engine18.raw.v2` stores the exact received bytes (`raw`, utf8 or base64).
+  - Envelope fields: `localSeq` (global order), `runId`, `receivedWallNs`/`receivedMonoNs`/`writtenMonoNs`, stream generation, message class and status.
+  - RECORDER_START/STOP events, and a GAP event after an unclean stop. It never fabricates data.
+- **Hourly files:** rotated by provider/contract/CME trade date/UTC hour. Each closed hour gets a SHA-256 manifest (counts, sequence range, times).
+- **Crash safety:** crash recovery, a durable high-watermark checkpoint, and a writer lock.
+- **Buffered, isolated ingest:** `engine18BufferedRecorder.js`, an IPC worker bridge, bounded queues and backpressure. The feed is never blocked by disk writes. Bounded recovery and exact replay.
+- **Backup:** `engine18S3PrivateStore.js`, an S3-compatible client for a private R2 bucket.
+  - AES-256-GCM encryption with a versioned key ID.
+  - Immutable conditional PUTs and no-delete keys.
+  - Hash-linked encrypted inventory with an externally pinned high-watermark (`engine18Phase5S3Coordinator.js`).
+  - Continuous closed-hour backup (`engine18ContinuousBackup.js`).
+- **Clocks:** receipt clock (`engine18ReceiptClock.js`). A ≤5 ms verified clock gate (Chrony) is required for any timing claims; otherwise clocks are labeled UNVERIFIED.
+- **Live source + gates:**
+  - `engine18IronbeamLiveRecorderSource.js` and `ironbeamV2RecorderAdapter.js`: read-only Ironbeam v2 quotes/depths/trades.
+  - `engine18ControlledLiveWorker.js`, plus the fail-closed readiness checks `engine18ControlledTrialReadiness.js` and `engine18ControlledTrialVerifier.js` (restore + replay SHA equality).
+- **Raw-only diagnostic** (`engine18RawOnlyDiagnosticWorker.js` / `...Entrypoint.js`): a manual, 1–5 minute, ESZ6-only first trial with explicit approval flags. Variable names are in `docs/engine18b/RAW_ONLY_DIAGNOSTIC_ACTIVATION_CHECKLIST_2026-11-16.md`.
+- **Daily session readiness** (`engine18DailyRawSessionReadiness.js`): contract/roll, CME calendar, disk ≥ max(25%, 10 GB) free, queue and backup gates. Recording stays OFF.
+- **HAND-zone history** (`engine18HandZoneR2History.js`): encrypted, immutable owner-zone history stored in the same private R2 bucket under its own prefix. No market frames are stored there.
+
+**PRs (all merged into the isolated foundation/standby branches, not main):**
+
+| PR | What it added |
+|---|---|
+| #291 | Synthetic recorder |
+| #292 | Phase 2 |
+| #293 | Phase 3 |
+| #295 | Phase 4 bounded recovery + mock encrypted backup |
+| #298 | Phase 5 S3/IPC/clocks |
+| #301 | Issue #300 final acceptance (SigV4/MinIO) |
+| #302 | Inventory cache, synthetic rehearsal |
+| #303 | Controlled live Ironbeam source + worker |
+| #320 | Raw-only diagnostic |
+| #326 | Real vs synthetic R2 inventory isolation |
+| #332 | HAND-zone watcher + R2 history |
+| #334 | Daily raw-session readiness |
+
+Docs: `docs/engine18/RECORDER_ARCHITECTURE_DECISIONS.md`, `GATE1_SPEC_AND_ACCEPTANCE.md`, `DAILY_RAW_ES_RECORDING_READINESS_20261117.md`, `docs/engine18b/*` (on branch `engine18b-private-recorder-standby-20261111`).
+
+**What actually ran, vs. only built:**
+- **Ran:** one operator-run real **1-minute RAW_FRAMES_ONLY** Ironbeam ES capture, around Nov 16–17 (verify the exact date).
+  - 492 ordered records (483 vendor frames), 0 recorder GAPs, clocks UNVERIFIED.
+  - Backed up and restored from the private R2 bucket (`engine18/raw-only/v1` prefix, pinned `lastSeq=492`).
+- **Ran:** CI across every phase (synthetic data only). Separately, a synthetic backup history exists under its own prefix; leave it untouched.
+- **Not run:** daily or sustained recording, five-session acceptance, verified-clock trials.
+- **Standby:** private Render worker `frye-engine18-private-recorder-standby-t6l7`, running standby only (no vendor socket), with a dedicated 50 GB disk at `/var/data/engine18-recorder`. The last logs (Nov 17) showed capture, connection and uploads all inactive. Re-check before any use.
+- **Never touch** the main backend's 100 GB `/var/data/replay` disk.
+
+**Where data lives:**
+- The private R2 bucket. Names and keys exist only in protected env vars and are never written here.
+- The dedicated recorder disk.
+
+**Current status:**
+- Built for Ironbeam MBP-10 and **not wired to Rithmic**.
+- The owner **approved Rithmic recording on Nov 25**, to start only after PR #400 (DBO book) passes acceptance and Engine 18D re-audits it.
+- Still to confirm first: Rithmic retention terms, the session-limit conflict with R Trader Pro, the login expiry (Nov 30), and the cost estimate.
+
+**Rithmic plug-in path (planned):**
+1. Write a Rithmic recorder source alongside the Ironbeam source. It feeds raw R|Protocol frames (DBO 116/118/160, LastTrade 150, BBO 151), stamped before decoding, into the same buffered recorder with provider `RITHMIC`.
+2. Reuse the hourly gzip + manifest, the encrypted R2 backup and inventory pin, the restore verifier and the readiness gates unchanged. Use a new R2 prefix, separate from the Ironbeam data.
+3. Replay recorded sessions through the PR #400 book and the Liquidity Map for the learning loop (+10/+30/+60 outcomes).
+
 ## Known gaps
 - Level detector tracks one event per level (no re-arm after an event closes) — verify before live use.
 - Live worker/panel not built; nothing runs continuously yet.
