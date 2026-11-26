@@ -27,7 +27,7 @@ export function createLiquidityMap(params={}){
  return {
   // Attach evidence. A new level is created at the candidate's price; later candidates within
   // mergeTolPts attach to it without moving it.
-  add(type,{price,label,t,state=null,detail=null}){
+  add(type,{price,label,t,state=null,detail=null,provenSide=null}){
    if(!SOURCE_TYPES.includes(type))throw Error('unknown source type '+type);
    if(!Number.isFinite(price)||!Number.isSafeInteger(t))throw Error('price and integer t required');
    if(lastT!==null&&t<lastT)throw Error('evidence must not be added in the past');
@@ -35,7 +35,9 @@ export function createLiquidityMap(params={}){
    let l=findNear(p);
    if(!l){l={id:'L'+toTick(p,P.tick),price:p,firstSeenT:t,sources:new Map(),state:null,history:[]};levels.set(l.id,l)}
    const prev=l.sources.get(type)||{labels:new Set(),firstT:t};
-   prev.labels.add(label);prev.lastT=t;if(detail)prev.detail=detail;l.sources.set(type,prev);
+   prev.labels.add(label);prev.lastT=t;if(detail)prev.detail=detail;
+   if(type==='PROVEN'){prev.proofs??=[];prev.proofs.push({label,t,side:provenSide??null})}
+   l.sources.set(type,prev);
    if(state&&state!==l.state){l.state=state;l.history.push({t,state,by:type})}
    return l.id;
   },
@@ -51,14 +53,21 @@ export function createLiquidityMap(params={}){
   evaluate({t,price,airPockets=[]}){
    if(!Number.isSafeInteger(t)||!Number.isFinite(price))throw Error('t and price required');
    lastT=t;
-   const current=l=>[...l.sources.entries()].filter(([type,s])=>{const ttl=P.staleSec[type];
-    if(type==='PROVEN'&&l.brokenT!=null&&s.lastT<=l.brokenT)return false; // proof before a break no longer counts
+   // PROVEN proof counts only on the side it was proven on (support proof while price is above,
+   // resistance proof while price is below) and only if it came after the latest break.
+   const validProofs=(l,side,s)=>(s.proofs||[]).filter(q=>(l.brokenT==null||q.t>l.brokenT)&&(q.side==null||q.side===side));
+   const current=(l,side)=>[...l.sources.entries()].filter(([type,s])=>{const ttl=P.staleSec[type];
+    if(type==='PROVEN')return validProofs(l,side,s).length>0;
     return ttl==null||t-s.lastT<=ttl});
-   const all=[...levels.values()].map(l=>{const cur=current(l);
-    return {id:l.id,price:l.price,side:l.price<price?'BUY':'SELL',distancePts:Math.abs(l.price-price),
-     sourceTypes:cur.map(([k])=>k),evidence:Object.fromEntries(cur.map(([k,s])=>[k,{labels:[...s.labels],lastT:s.lastT,...(s.detail?{detail:s.detail}:{})}])),
+   const all=[...levels.values()].map(l=>{const side=l.price<price?'BUY':'SELL';const cur=current(l,side);
+    const pr=l.sources.get('PROVEN');const valid=pr?validProofs(l,side,pr):[];
+    const flipped=pr&&!valid.length&&(pr.proofs||[]).some(q=>q.side&&q.side!==side&&(l.brokenT==null||q.t>l.brokenT));
+    const ev=([k,s])=>[k,{labels:k==='PROVEN'?[...new Set(valid.map(q=>q.label))]:[...s.labels],lastT:s.lastT,...(s.detail?{detail:s.detail}:{})}];
+    return {id:l.id,price:l.price,side,distancePts:Math.abs(l.price-price),
+     sourceTypes:cur.map(([k])=>k),evidence:Object.fromEntries(cur.map(ev)),
      staleSources:[...l.sources.keys()].filter(k=>!cur.some(([c])=>c===k)),
-     state:l.state,firstSeenT:l.firstSeenT}});
+     state:flipped?'FLIPPED':(pr&&!valid.length&&l.state!=='BROKEN_FLIP'?null:l.state),
+     ...(flipped?{flippedFrom:[...new Set(pr.proofs.map(q=>q.label))]}:{}),firstSeenT:l.firstSeenT}});
    const qualifies=x=>x.sourceTypes.length>=P.minSources&&x.distancePts>=P.minDistancePts;
    // ties: a level that was swept and HELD outranks one that was not, then the nearer one
    const held=x=>x.state==='SWEPT_AND_HELD'?1:0;
@@ -104,9 +113,9 @@ export function profileCandidates(minutes,{t,rows=120}={}){
 export function provenCandidates(snapshot){
  const out=[];
  for(const r of snapshot.reads||[]){
-  if(r.type==='CEILING_DEFENDED')out.push({price:r.level,label:'CEILING_DEFENDED',t:snapshot.t,state:'DEFENDED',
+  if(r.type==='CEILING_DEFENDED')out.push({price:r.level,label:'CEILING_DEFENDED',t:snapshot.t,state:'DEFENDED',provenSide:'SELL',
    detail:{touches:r.evidence?.touches?.length??null}});
-  if(r.type==='FLOOR_DEFENDED')out.push({price:r.level,label:'FLOOR_DEFENDED',t:snapshot.t,state:'DEFENDED',
+  if(r.type==='FLOOR_DEFENDED')out.push({price:r.level,label:'FLOOR_DEFENDED',t:snapshot.t,state:'DEFENDED',provenSide:'BUY',
    detail:{touches:r.evidence?.touches?.length??null}});
  }
  return out;
@@ -123,7 +132,7 @@ export function sweepCandidates(events,{since=-Infinity}={}){
   if(!at||at.t<=since)continue;
   const sweep=e.classification==='SWEEP_RECLAIMED';
   out.push({kind:sweep?'HELD':'BROKEN',price:e.level,label:sweep?`SWEEP_RECLAIMED_${e.side}`:`BROKEN_${e.side}`,t:at.t,
-   state:sweep?'SWEPT_AND_HELD':'BROKEN_FLIP',
+   state:sweep?'SWEPT_AND_HELD':'BROKEN_FLIP',provenSide:e.side==='SUPPORT'?'BUY':'SELL',
    detail:{penetrationPts:e.penetration,deltaWhileBeyond:at.evidence?.deltaWhileBeyond??at.evidence?.beyondFlow?.delta??null,at:at.at}});
  }
  return out;

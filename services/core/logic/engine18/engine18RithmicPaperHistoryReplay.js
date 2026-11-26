@@ -196,7 +196,7 @@ export function replayLiquidityMap(minutes,{everyMin=30,ownerZones=[]}={}){
   out.push({time:new Date((t-7*3600)*1000).toISOString().slice(11,16)+' MST',price:m.c,
    lines:ev.drawn.map(d=>({side:d.side,price:d.price,strength:d.strength,sources:d.sourceTypes,
     labels:Object.values(d.evidence).flatMap(e=>e.labels),state:d.state,airPocketsBetween:d.airPocketsBetween,
-    insideOwnerZones:zonesContaining(ownerZones,d.price)})),
+    insideOwnerZones:zonesContaining(ownerZones,d.price),...(d.flippedFrom?{flippedFrom:d.flippedFrom}:{})})),
    noLineReason:ev.noLineReason});
  });
  out.sweepEvents=det.events().filter(e=>e.classification).map(e=>({level:e.level,side:e.side,source:e.source,
