@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {EventEmitter} from 'node:events';
-import {runPaperDboStepB,verifyStepBEnvironment,STEP_B_SEND_ALLOWLIST} from '../logic/engine18/engine18RithmicPaperDboProbe.js';
+import {runPaperDboStepB,verifyStepBEnvironment,evaluateStepB,STEP_B_SEND_ALLOWLIST} from '../logic/engine18/engine18RithmicPaperDboProbe.js';
 import {decodeExact} from '../logic/engine18/engine18RithmicDboBook.js';
 
 const vb=n=>{n=BigInt(n);const b=[];do{let k=Number(n&127n);n>>=7n;if(n)k|=128;b.push(k)}while(n);return Buffer.from(b)};
@@ -15,6 +15,7 @@ const ENV={RITHMIC_PAPER_CONNECT_ENABLED:'YES',RITHMIC_PAPER_DBO_ENABLED:'YES',R
  RITHMIC_PAPER_PASSWORD:'pp-secret',RITHMIC_PAPER_DISCOVERY_URI:'rprotocol-de.rithmic.com:443',
  RITHMIC_PAPER_GATEWAY_NAME:'Chicago Area'};
 const ok=S(132766,'0');
+let PASSING=null; // a fully passing result, mutated below per Engine 18D counterexample
 
 // True exchange book: id -> {side,price,size}
 function exchange({dropOne=false}={}){
@@ -38,7 +39,7 @@ function exchange({dropOne=false}={}){
   return Buffer.concat([T(151),V(149138,3),D(100022,bid),V(159000,1),D(100025,ask),V(159002,1)])};
  return {step,snapshot,top};
 }
-function fake({dropOne=false,dboRp='0',garbage=false,stallVerify=false,wrongSymbolAt=null,straySubAck=false}={}){
+function fake({dropOne=false,dboRp='0',garbage=false,stallVerify=false,wrongSymbolAt=null,straySubAck=false,race=true,errorOnLogout=false}={}){
  const log={sends:[]};const ex=exchange({dropOne});
  class W extends EventEmitter{constructor(url){super();this.url=url;this.timers=[];queueMicrotask(()=>this.emit('open'))}
   r(b){queueMicrotask(()=>{if(!this.closed)this.emit('message',b)})}
@@ -57,8 +58,12 @@ function fake({dropOne=false,dboRp='0',garbage=false,stallVerify=false,wrongSymb
      if(garbage&&k===20)this.r(Buffer.from([0xff,0xff,0xff]));
      if(wrongSymbolAt&&k===wrongSymbolAt)this.r(Buffer.concat([T(160),S(110100,'ESH7'),S(110101,'CME'),V(112002,1),V(110121,1),V(153612,1),D(154405,7000),V(159009,1),S(149238,'x')]));
      if(Math.random()<0.3)this.r(ex.top())},5));return}
-   if(id===115){this.snaps=(this.snaps||0)+1;if(stallVerify&&this.snaps>1)return;for(const p of ex.snapshot(um))this.r(p);return}
-   if(id===12){this.timers.forEach(clearInterval);return this.r(Buffer.concat([T(13),ok]))}}
+   if(id===115){this.snaps=(this.snaps||0)+1;if(stallVerify&&this.snaps>1)return;
+    // race: one update is in flight when the snapshot is taken; the snapshot already contains it
+    // (LAST_INCLUDED). Its sequence EQUALS the snapshot sequence, so the semantics get measured.
+    if(race&&this.sub){const f=ex.step();if(f)this.r(f)}
+    for(const p of ex.snapshot(um))this.r(p);return}
+   if(id===12){this.timers.forEach(clearInterval);if(errorOnLogout)return queueMicrotask(()=>this.emit('error',new Error('x')));return this.r(Buffer.concat([T(13),ok]))}}
   close(){this.closed=true;this.timers.forEach(clearInterval)}terminate(){this.close()}}
  return {W,log};
 }
@@ -85,6 +90,11 @@ test('end-to-end: seed, live updates, repeated re-snapshot verifications all mat
  assert.ok(ids.indexOf(117)<ids.indexOf(115),'subscribe before snapshot');
  assert.deepEqual(ids.slice(-3),[117,100,12]); // unsubscribe DBO, unsubscribe BBO, logout
  assert.ok(!JSON.stringify(r).includes('pp-secret'));
+ assert.equal(r.observeBook.stats.semanticsResolved,'LAST_INCLUDED');assert.equal(r.checks.snapshotSemanticsMeasured,true);
+ assert.equal(r.checks.heartbeatClean,true);assert.equal(r.checks.cleanLogout,true);assert.equal(r.checks.cleanShutdown,true);
+ assert.equal(r.checks.freshTwoSidedCoverage,true);assert.equal(r.acceptance.verdict,'STEP_B_BOOK_VERIFIED');
+ assert.equal(r.diagnosticReceipt.note,'diagnostic only; not an acceptance claim');
+ PASSING=r;
 });
 
 test('a lost update is caught: STRICT book invalid on gap, OBSERVE verification shows the mismatch',async()=>{
@@ -135,4 +145,45 @@ test('BLOCKER 3: the STRICT shadow gets its own periodic comparisons',async()=>{
  const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300});
  assert.ok(r.strictBook.stats.verifications.length>=2);assert.ok(r.strictBook.stats.verifications.every(v=>v.match));
  assert.equal(r.strictBook.stats.failures.length,0);
+});
+
+// ---------- Engine 18D Nov 26 re-audit: verdict counterexamples (each passed on 03a945fe0) ----------
+const mutate=f=>{assert.ok(PASSING,'end-to-end test must run first');const r=structuredClone(PASSING);f(r);return evaluateStepB(r)};
+test('18D#1: no coverage / stale coverage -> FAIL',()=>{
+ assert.equal(evaluateStepB(structuredClone(PASSING)).verdict,'STEP_B_BOOK_VERIFIED','baseline');
+ const a=mutate(r=>{r.coverage=null});assert.equal(a.verdict,'STEP_B_FAIL');assert.ok(a.failedChecks.includes('freshTwoSidedCoverage'));
+ const b=mutate(r=>{r.coverage={suppressed:true,reason:'STALE'}});assert.equal(b.verdict,'STEP_B_FAIL');
+ const c=mutate(r=>{r.coverage.ask=null});assert.equal(c.verdict,'STEP_B_FAIL');assert.equal(c.verifiedBook,null);
+});
+test('18D#1: heartbeats never acknowledged -> FAIL',()=>{
+ const a=mutate(r=>{r.heartbeat={sent:4,acks:0,rejects:0}});assert.equal(a.verdict,'STEP_B_FAIL');assert.ok(a.failedChecks.includes('heartbeatClean'));
+ const b=mutate(r=>{r.heartbeat={sent:6,acks:2,rejects:0}});assert.equal(b.verdict,'STEP_B_FAIL');
+});
+test('18D#1: no logout ack / rejected logout / socket error while closing -> FAIL',()=>{
+ assert.equal(mutate(r=>{r.logoutAcked=false}).verdict,'STEP_B_FAIL');
+ assert.ok(mutate(r=>{r.logoutRpCode='7'}).failedChecks.includes('cleanLogout'));
+ assert.ok(mutate(r=>{r.shutdown.socketErrorDuringClose=true}).failedChecks.includes('cleanShutdown'));
+});
+test('18D#1: socket error during close keeps WINDOW_COMPLETE but fails cleanShutdown (end-to-end)',async()=>{
+ const {W}=fake({errorOnLogout:true});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300});
+ assert.equal(r.stopReason,'WINDOW_COMPLETE');assert.equal(r.shutdown.socketErrorDuringClose,true);
+ assert.equal(r.checks.cleanShutdown,false);assert.equal(r.checks.cleanLogout,false);assert.equal(r.verdict,'STEP_B_FAIL');
+});
+test('18D#3: AMBIGUOUS / NO_EQUAL_SEQUENCE_UPDATES only -> semantics not measured -> FAIL',()=>{
+ const a=mutate(r=>{for(const b of [r.observeBook,r.strictBook])b.stats.semanticsResolved=null});
+ assert.equal(a.verdict,'STEP_B_FAIL');assert.ok(a.failedChecks.includes('snapshotSemanticsMeasured'));
+ const {W}=fake({race:false}); // no update ever equals a snapshot sequence
+ return runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1300,verifyEveryMs:300}).then(r=>{
+  assert.ok(r.observeBook.stats.verifications.every(v=>v.match));assert.equal(r.observeBook.state,'UNVERIFIED');
+  assert.equal(r.checks.snapshotSemanticsMeasured,false);assert.equal(r.coverage,null);
+  assert.equal(r.coverageSuppressedReason,'BOOK_UNVERIFIED');assert.equal(r.verdict,'STEP_B_FAIL');});
+});
+test('18D#3: a sequence gap with every snapshot matching -> FAIL (equality is not continuity)',()=>{
+ const a=mutate(r=>{r.observeBook.stats.gaps=1});assert.equal(a.verdict,'STEP_B_FAIL');assert.ok(a.failedChecks.includes('continuity'));
+});
+test('18D#2: crossed/locked book or data frames without instrument -> FAIL',()=>{
+ assert.ok(mutate(r=>{r.observeBook.stats.crossedStates=1}).failedChecks.includes('noCrossedOrLockedBook'));
+ assert.ok(mutate(r=>{r.observeBook.crossedOrLocked=true}).failedChecks.includes('noCrossedOrLockedBook'));
+ assert.ok(mutate(r=>{r.observeBook.stats.anomalies.missingInstrument=1}).failedChecks.includes('noStructuralAnomalies'));
 });

@@ -14,7 +14,7 @@ const part=({seq,side,price,orders=[],final=false,rp='0',size32=false,sym='ESZ6'
  ...(um?[S(132760,um)]:[]),final?S(132766,rp):S(132764,'0'),...(sym?[S(110100,sym)]:[]),...(exch?[S(110101,exch)]:[]),
  ...(seq===undefined?[]:[V(112002,seq)]),...(side?[V(153612,side)]:[]),...(price!==undefined?[D(154405,price)]:[]),
  ...orders.map(o=>V(size32?154406:159009,o.size)),...orders.map(o=>V(153613,o.pri??1)),...orders.map(o=>S(149238,o.id))]);
-const upd=(seq,entries,{sym='ESZ6',exch='CME'}={})=>Buffer.concat([T(160),S(110100,sym),S(110101,exch),
+const upd=(seq,entries,{sym='ESZ6',exch='CME'}={})=>Buffer.concat([T(160),...(sym?[S(110100,sym)]:[]),...(exch?[S(110101,exch)]:[]),
  ...(seq===null?[]:[V(112002,seq)]),
  ...entries.map(e=>V(110121,e.type)),...entries.map(e=>V(153612,e.side)),
  ...entries.map(e=>D(154405,e.price)),...entries.map(e=>V(159009,e.size??0)),...entries.map(e=>S(149238,e.id))]);
@@ -28,6 +28,11 @@ const seed=(book,seq=100)=>{book.beginSnapshot();for(const p of seedParts(seq))b
 const verifyWith=(book,seq,levels=SEED_LEVELS)=>{
  for(const [side,price,os] of levels)book.onSnapshotPart(P(part({seq,side,price,orders:os.map(([id,size])=>({id,size}))})));
  book.onSnapshotPart(P(part({seq,final:true})))};
+// Measure LAST_INCLUDED: an update EQUAL to the snapshot sequence arrives during the verification
+// and the snapshot already contains it.
+const LEVELS_A2_51=SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='a2'?51:q])]);
+const resolveLI=(book,seq=101)=>{book.beginVerification();
+ book.onUpdate(U(upd(seq,[{type:UPDATE.CHANGE,side:2,price:7050.25,size:51,id:'a2'}])));verifyWith(book,seq,LEVELS_A2_51)};
 
 test('requests: full-book 115/117 without depth_price, with echoed request id; ES/CME only',()=>{
  const s=decodeExact(encodeDboSnapshotRequest({symbol:'ESZ6',exchange:'CME',requestId:'snap-1'}));
@@ -51,8 +56,9 @@ test('decoder keeps u64 exact and accepts both size tags and packed arrays',()=>
 test('multipart snapshot completes only on the final rp_code message',()=>{
  const b=mk();b.beginSnapshot();
  b.onSnapshotPart(P(part({seq:10,side:SIDE.BID,price:7000,orders:[{id:'b1',size:1}]})));
+ b.onSnapshotPart(P(part({seq:10,side:SIDE.ASK,price:7000.25,orders:[{id:'a1',size:1}]})));
  assert.equal(b.state,'SEEDING');b.onSnapshotPart(P(part({seq:10,final:true})));
- assert.equal(b.state,'VALID');assert.equal(b.orderCount,1);assert.equal(b.lastSeq,'10');
+ assert.equal(b.state,'UNVERIFIED','seeded, boundary semantics not yet measured');assert.equal(b.orderCount,2);assert.equal(b.lastSeq,'10');
  const r=mk();r.beginSnapshot();r.onSnapshotPart(P(part({seq:1,side:1,price:7000,orders:[{id:'q',size:1}]})));
  r.onSnapshotPart(P(part({final:true,rp:'7'})));assert.equal(r.state,'INVALID');assert.equal(r.reason,'SNAPSHOT_REJECTED_7');
 });
@@ -84,7 +90,7 @@ test('BLOCKER 2: INVALID is never overwritten; failure history survives an expli
  b.onSnapshotPart(P(part({seq:200,final:true})));
  b.onUpdate(U(upd(106,[{type:UPDATE.NEW,side:1,price:6994,size:1,id:'y'}])));
  assert.equal(b.state,'INVALID');assert.equal(b.stats().unsolicitedParts,1);assert.equal(b.stats().anomalies.ignoredInvalid,1);
- seed(b,300);assert.equal(b.state,'VALID');
+ seed(b,300);assert.equal(b.state,'UNVERIFIED');
  assert.ok(b.failures.some(f=>f.reason==='SEQUENCE_GAP'),'prior failure retained');
 });
 
@@ -95,20 +101,20 @@ test('BLOCKER 2: instrument validated on every DBO frame; correlation by echoed 
  const c=mk();c.beginSnapshot('snap-1');
  c.onSnapshotPart(P(part({seq:5,side:1,price:7000,um:'snap-OTHER',orders:[{id:'x',size:1}]})));
  for(const p of seedParts(5,'snap-1'))c.onSnapshotPart(p);
- assert.equal(c.state,'VALID');assert.equal(c.orderCount,5);
+ assert.equal(c.state,'UNVERIFIED');assert.equal(c.orderCount,5);
  assert.equal(c.stats().mismatchedParts,1);assert.equal(c.stats().correlatedParts,5);
  const e=mk();seed(e);e.onEndEvent(parseEndEvent(Buffer.concat([T(161),S(110100,'ESH7'),V(112002,100)])));
  assert.equal(e.state,'INVALID');
 });
 
-test('buffered seed: overlap (<= snapshot seq) dropped, later ones replayed through checks',()=>{
+test('buffered seed: below-snapshot updates dropped; EQUAL-seq updates held (not assumed), later ones replayed',()=>{
  const b=mk();b.beginSnapshot();
  b.onUpdate(U(upd(99,[{type:UPDATE.NEW,side:1,price:6999,size:1,id:'old'}])));
  b.onUpdate(U(upd(100,[{type:UPDATE.NEW,side:1,price:6998,size:1,id:'dup'}])));
  b.onUpdate(U(upd(101,[{type:UPDATE.NEW,side:1,price:6997,size:2,id:'n1'}])));
  for(const p of seedParts(100))b.onSnapshotPart(p);
- const s=b.stats();assert.equal(s.droppedOverlap,2);assert.equal(s.replayedAfterSeed,1);
- assert.equal(b.orderCount,6);assert.equal(b.lastSeq,'101');assert.equal(b.state,'VALID');
+ const s=b.stats();assert.equal(s.droppedOverlap,1);assert.equal(s.heldEqualSeqAtSeed,1);assert.equal(s.replayedAfterSeed,1);
+ assert.equal(b.orderCount,6);assert.equal(b.lastSeq,'101');assert.equal(b.state,'UNVERIFIED');
  const g=mk();g.beginSnapshot();g.onUpdate(U(upd(103,[{type:UPDATE.NEW,side:1,price:6997,size:2,id:'n1'}])));
  for(const p of seedParts(100))g.onSnapshotPart(p);
  assert.equal(g.state,'INVALID');assert.equal(g.reason,'SEQUENCE_GAP');
@@ -122,7 +128,7 @@ test('NEW / CHANGE (size and price move) / DELETE maintain exact per-order state
  const {bid,ask}=b.levels();
  assert.equal(bid.get(28000).qty,2);assert.equal(bid.get(27999).qty,3);
  assert.equal(ask.has(28001),false);assert.equal(ask.get(28002).qty,6);
- assert.deepEqual(b.top(),{bid:7000,ask:7000.5,bidQty:2,askQty:6});assert.equal(b.state,'VALID');
+ assert.deepEqual(b.top(),{bid:7000,ask:7000.5,bidQty:2,askQty:6});assert.equal(b.state,'UNVERIFIED');
 });
 
 test('STRICT fails closed on gap, out-of-order, missing sequence, unknown order; OBSERVE counts',()=>{
@@ -137,7 +143,7 @@ test('STRICT fails closed on gap, out-of-order, missing sequence, unknown order;
  const ob=mk({mode:'OBSERVE'});seed(ob);
  ob.onUpdate(U(upd(105,[{type:UPDATE.NEW,side:1,price:6995,size:1,id:'z'}])));
  ob.onUpdate(U(upd(105,[{type:UPDATE.DELETE,side:1,price:6995,id:'z'}])));
- const s=ob.stats();assert.equal(ob.state,'VALID');assert.equal(s.gaps,1);assert.equal(s.gapTotal,'4');assert.equal(s.equalSeq,1);
+ const s=ob.stats();assert.equal(ob.state,'UNVERIFIED');assert.equal(s.gaps,1);assert.equal(s.gapTotal,'4');assert.equal(s.equalSeq,1);
  assert.ok(ob.failures.some(f=>f.reason==='SEQUENCE_GAP'),'OBSERVE still records the failure');
 });
 
@@ -160,6 +166,7 @@ test('BLOCKER 3: LAST_INCLUDED detected; reseed exact; later updates replayed',(
  assert.equal(v.diffBeforeEqualSeq.total,1);assert.equal(v.diffAfterEqualSeq.total,0);
  assert.equal(v.semantics,'LAST_INCLUDED');assert.equal(v.match,true);
  assert.equal(b.orderCount,5);assert.equal(b.lastSeq,'103');assert.equal(b.verifying,false);
+ assert.equal(b.state,'VALID');assert.equal(b.semantics,'LAST_INCLUDED');
 });
 
 test('BLOCKER 3: NEXT_EXPECTED detected; equal-seq updates replayed AFTER reseed, not dropped',()=>{
@@ -180,6 +187,8 @@ test('BLOCKER 3: both comparisons matching is reported AMBIGUOUS, never inferred
  b.onUpdate(U(upd(100,[{type:UPDATE.NEW,side:1,price:6980,size:1,id:'t'},{type:UPDATE.DELETE,side:1,price:6980,id:'t'}])));
  verifyWith(b,100);
  assert.equal(b.stats().verifications[0].semantics,'AMBIGUOUS');assert.equal(b.stats().semantics.AMBIGUOUS,1);
+ // 18D Nov26 #3: AMBIGUOUS never establishes semantics -> book stays UNVERIFIED, no coverage published
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.semantics,null);assert.equal(b.coverage().reason,'BOOK_UNVERIFIED');
 });
 
 test('BLOCKER 3: verification replay runs sequence checks (gap inside replay -> STRICT INVALID)',()=>{
@@ -193,10 +202,11 @@ test('BLOCKER 3: mismatch is a recorded failure; STRICT stays INVALID, OBSERVE r
  for(const mode of ['STRICT','OBSERVE']){
   const b=mk({mode});seed(b,100);b.beginVerification();
   b.onSnapshotPart(P(part({seq:150,side:1,price:7000,orders:[{id:'b1',size:9}]})));
+  b.onSnapshotPart(P(part({seq:150,side:2,price:7000.25,orders:[{id:'a1',size:4}]})));
   b.onSnapshotPart(P(part({seq:150,final:true})));
   const v=b.stats().verifications[0];assert.equal(v.match,false);assert.equal(v.semantics,'NO_EQUAL_SEQUENCE_UPDATES');
   assert.ok(b.failures.some(f=>f.reason==='VERIFICATION_MISMATCH'));
-  assert.equal(b.state,mode==='STRICT'?'INVALID':'VALID');
+  assert.equal(b.state,mode==='STRICT'?'INVALID':'UNVERIFIED');
  }
 });
 
@@ -204,7 +214,7 @@ test('reconnect resets to UNSEEDED; updates ignored until reseeded',()=>{
  const b=mk();seed(b);b.reset();assert.equal(b.state,'UNSEEDED');assert.equal(b.orderCount,0);
  b.onUpdate(U(upd(200,[{type:UPDATE.NEW,side:1,price:7000,size:1,id:'x'}])));
  assert.equal(b.orderCount,0);assert.equal(b.stats().anomalies.ignoredUnseeded,1);
- seed(b,300);assert.equal(b.state,'VALID');assert.equal(b.orderCount,5);
+ seed(b,300);assert.equal(b.state,'UNVERIFIED');assert.equal(b.orderCount,5);
 });
 
 test('bounded memory: order and buffer limits fail closed',()=>{
@@ -218,7 +228,7 @@ test('bounded memory: order and buffer limits fail closed',()=>{
 });
 
 test('BLOCKER 4: coverage reports observed orders only; absent prices NOT_OBSERVED; side-touch basis',()=>{
- const b=mk();seed(b);const c=b.coverage([10,20,50]);
+ const b=mk();seed(b);resolveLI(b);assert.equal(b.state,'VALID');const c=b.coverage([10,20,50]);
  assert.equal(c.suppressed,false);assert.equal(c.completenessProven,false);assert.equal(c.distanceBasis,'SIDE_TOUCH');
  assert.equal(c.bid.touch,'BEST_BID');assert.equal(c.bid.best,7000);assert.equal(c.ask.best,7000.25);
  const b10=c.bid.rows[0];assert.equal(b10.price,6990);assert.equal(b10.observation,'OBSERVED_ORDERS');
@@ -230,8 +240,9 @@ test('BLOCKER 4: coverage reports observed orders only; absent prices NOT_OBSERV
 test('BLOCKER 4: coverage suppressed when INVALID, seeding, verifying or stale',()=>{
  let t=1000;const b=mk({now:()=>t});
  b.beginSnapshot();assert.equal(b.coverage().reason,'SEEDING');
- for(const p of seedParts(100))b.onSnapshotPart(p);assert.equal(b.coverage().suppressed,false);
- b.beginVerification();assert.equal(b.coverage().reason,'VERIFICATION_IN_PROGRESS');verifyWith(b,100);
+ for(const p of seedParts(100))b.onSnapshotPart(p);assert.equal(b.coverage().reason,'BOOK_UNVERIFIED');
+ resolveLI(b);assert.equal(b.coverage().suppressed,false);
+ b.beginVerification();assert.equal(b.coverage().reason,'VERIFICATION_IN_PROGRESS');verifyWith(b,101,LEVELS_A2_51);
  t+=20000;assert.equal(b.coverage(undefined,{maxAgeMs:10000}).reason,'STALE');
  b.onUpdate(U(upd(105,[{type:UPDATE.NEW,side:1,price:6995,size:1,id:'z'}])));assert.equal(b.coverage().reason,'BOOK_INVALID');
 });
@@ -239,4 +250,69 @@ test('BLOCKER 4: coverage suppressed when INVALID, seeding, verifying or stale',
 test('end events are counted only',()=>{
  const b=mk();seed(b,100);b.onEndEvent(parseEndEvent(Buffer.concat([T(161),S(110100,'ESZ6'),S(110101,'CME'),V(112002,100)])));
  assert.equal(b.stats().endEvents,1);assert.equal(b.stats().endEventSeqMatches,1);
+});
+
+// ---------- Engine 18D Nov 26 re-audit: adversarial tests (each fails on 03a945fe0) ----------
+test('18D#2: crossed, locked or one-sided snapshots are INVALID (both modes)',()=>{
+ const two=(bp,ap)=>[part({seq:1,side:1,price:bp,orders:[{id:'b',size:1}]}),part({seq:1,side:2,price:ap,orders:[{id:'a',size:1}]})];
+ for(const mode of ['STRICT','OBSERVE'])for(const [why,parts] of [['SNAPSHOT_CROSSED_OR_LOCKED',two(7001,7000)],
+  ['SNAPSHOT_CROSSED_OR_LOCKED',two(7000,7000)],['SNAPSHOT_NOT_TWO_SIDED',[part({seq:1,side:1,price:7000,orders:[{id:'b',size:1}]})]]]){
+  const b=mk({mode});b.beginSnapshot();for(const f of parts)b.onSnapshotPart(P(f));b.onSnapshotPart(P(part({seq:1,final:true})));
+  assert.equal(b.state,'INVALID',mode+why);assert.equal(b.reason,why);
+ }
+});
+test('18D#2: a book crossed at a batch end (161) fails closed and never publishes coverage',()=>{
+ const end=Buffer.concat([T(161),S(110100,'ESZ6'),S(110101,'CME'),V(112002,101)]);
+ const s=mk();seed(s);s.onUpdate(U(upd(101,[{type:UPDATE.NEW,side:1,price:7001,size:1,id:'x'}])));s.onEndEvent(parseEndEvent(end));
+ assert.equal(s.state,'INVALID');assert.equal(s.reason,'BOOK_CROSSED_OR_LOCKED');assert.equal(s.stats().crossedStates,1);
+ const o=mk({mode:'OBSERVE'});seed(o);resolveLI(o);o.onUpdate(U(upd(102,[{type:UPDATE.NEW,side:1,price:7000.25,size:1,id:'x'}])));
+ assert.equal(o.crossedOrLocked,true);assert.equal(o.coverage().reason,'BOOK_CROSSED_OR_LOCKED');
+});
+test('18D#2: data-bearing frames need symbol AND exchange; control terminators / 161 may omit them',()=>{
+ const noInst=mk();noInst.beginSnapshot();
+ noInst.onSnapshotPart(P(part({seq:1,side:1,price:7000,sym:null,exch:null,orders:[{id:'b',size:1}]})));
+ noInst.onSnapshotPart(P(part({seq:1,side:2,price:7000.25,orders:[{id:'a',size:1}]})));
+ noInst.onSnapshotPart(P(part({seq:1,final:true})));assert.equal(noInst.reason,'SNAPSHOT_MISSING_INSTRUMENT');
+ const noEx=mk({mode:'OBSERVE'});noEx.beginSnapshot();
+ noEx.onSnapshotPart(P(part({seq:1,side:1,price:7000,exch:null,orders:[{id:'b',size:1}]})));
+ noEx.onSnapshotPart(P(part({seq:1,final:true})));assert.equal(noEx.state,'INVALID');
+ const u=mk();seed(u);u.onUpdate(U(upd(101,[{type:UPDATE.NEW,side:1,price:6995,size:1,id:'z'}],{sym:null,exch:null})));
+ assert.equal(u.reason,'ANOMALY_missingInstrument');assert.equal(u.stats().anomalies.missingInstrument,1);
+ const c=mk();c.beginSnapshot();for(const p of seedParts(1).slice(0,-1))c.onSnapshotPart(p);
+ c.onSnapshotPart(P(part({seq:1,final:true,sym:null,exch:null})));assert.equal(c.state,'UNVERIFIED','control terminator accepted');
+ c.onEndEvent(parseEndEvent(Buffer.concat([T(161),V(112002,1)])));assert.equal(c.state,'UNVERIFIED');
+ assert.equal(c.stats().controlFramesWithoutInstrument,2);
+});
+test('18D#2: a data-bearing part with sizes/prices but no order IDs is malformed, not skipped',()=>{
+ const bad=Buffer.concat([T(116),S(132764,'0'),S(110100,'ESZ6'),S(110101,'CME'),V(112002,1),V(153612,1),D(154405,6990),V(159009,5)]);
+ const b=mk({mode:'OBSERVE'});b.beginSnapshot();for(const p of seedParts(1).slice(0,-1))b.onSnapshotPart(p);
+ b.onSnapshotPart(P(bad));b.onSnapshotPart(P(part({seq:1,final:true})));
+ assert.equal(b.state,'INVALID');assert.equal(b.reason,'SNAPSHOT_MALFORMED_PART');
+});
+test('18D#3: equal-seq update at seed is NOT silently dropped; NEXT_EXPECTED truth resolved by candidates',()=>{
+ const b=mk({mode:'STRICT'});b.beginSnapshot();
+ b.onUpdate(U(upd(100,[{type:UPDATE.NEW,side:1,price:6980,size:7,id:'x'}]))); // snapshot S=100 = next expected: x NOT in it
+ for(const p of seedParts(100))b.onSnapshotPart(p);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.coverage().reason,'BOOK_UNVERIFIED');
+ b.beginVerification();verifyWith(b,101,[...SEED_LEVELS,[SIDE.BID,6980,[['x',7]]]]); // later snapshot contains x
+ const v=b.stats().verifications[0];
+ assert.equal(v.match,true,JSON.stringify(v));assert.equal(v.resolvedBy,'SEED_CANDIDATES');
+ assert.equal(b.semantics,'NEXT_EXPECTED');assert.equal(b.state,'VALID');assert.equal(b.orderCount,6);
+ assert.equal(b.failures.length,0);
+});
+test('18D#3: measured semantics must stay consistent; a contradicting observation is a failure',()=>{
+ const b=mk({mode:'OBSERVE'});seed(b);resolveLI(b);assert.equal(b.semantics,'LAST_INCLUDED');
+ b.beginVerification();b.onUpdate(U(upd(102,[{type:UPDATE.DELETE,side:1,price:7000,id:'b2'}])));
+ verifyWith(b,102,LEVELS_A2_51); // snapshot does NOT contain the seq-102 delete -> looks NEXT_EXPECTED
+ const v=b.stats().verifications.at(-1);assert.equal(v.semantics,'NEXT_EXPECTED');assert.equal(v.match,false);
+ assert.ok(b.failures.some(f=>f.reason==='SEMANTICS_CONFLICT'));assert.equal(b.stats().semanticsConflicts,1);
+});
+test('18D#3: NEW+DELETE sharing one lost sequence: snapshots still match, but the gap is recorded',()=>{
+ const b=mk({mode:'OBSERVE'});seed(b);
+ b.onUpdate(U(upd(101,[{type:UPDATE.CHANGE,side:1,price:7000,size:6,id:'b1'}])));
+ // seq 102 {NEW z, DELETE z} lost; 103 arrives
+ b.onUpdate(U(upd(103,[{type:UPDATE.CHANGE,side:1,price:6990,size:21,id:'b3'}])));
+ b.beginVerification();verifyWith(b,103,SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='b1'?6:id==='b3'?21:q])]));
+ assert.equal(b.stats().verifications[0].match,true,'equality alone cannot see the loss');
+ assert.equal(b.stats().gaps,1,'the gap counter does');
 });

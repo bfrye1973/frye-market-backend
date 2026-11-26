@@ -244,3 +244,12 @@ test('unauthenticated discovery on a multi-system rprotocol host: no credentials
  assert.ok(!log.sends.filter(s=>s.url===DE).some(s=>s.id===10||s.bytes.includes(Buffer.from('paper-secret-y'))));
  assert.equal(r.gatewayName,'Chicago Area');assert.equal(r.authenticated,true);
 });
+
+test('18D#5: LastTrade with NO presence bits is counted separately as unknown, never as a trade',async()=>{
+ const {createStepASummary}=await import('../logic/engine18/engine18RithmicPaperProbe.js');
+ let t=0;const s=createStepASummary({now:()=>t});s.start();
+ s.observe({kind:'TRADE',presence:null,price:6800,size:5,aggressor:1});
+ s.observe({kind:'TRADE',presence:undefined,price:6800,size:5,aggressor:2});
+ s.observe({kind:'TRADE',presence:1,price:6800.25,size:1,aggressor:1});t=1000;
+ const m=s.finish();assert.equal(m.trades,1);assert.equal(m.lastTradeUnknownPresence,2);assert.equal(m.tradeVolume,1);
+});

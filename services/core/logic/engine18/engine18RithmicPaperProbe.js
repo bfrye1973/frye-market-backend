@@ -166,7 +166,7 @@ export function parseInbound(frame){
  if(id===TEMPLATES.marketDataResp){const c=strings(f,F.rpCode);
   return {kind:'SUBSCRIPTION',accepted:okCodes(c),rpCode:safeCode(c[0])}}
  if(id===TEMPLATES.forcedLogout)return {kind:'FORCED_LOGOUT'};
- if(id===TEMPLATES.logoutResp)return {kind:'LOGOUT'};
+ if(id===TEMPLATES.logoutResp){const c=strings(f,F.rpCode);return {kind:'LOGOUT',accepted:okCodes(c),rpCode:c.length?safeCode(c[0]):null}}
  if(id===TEMPLATES.loginResp)return {kind:'LOGIN'};
  return {kind:'OTHER',templateId:Number.isSafeInteger(id)?id:null};
 }
@@ -175,7 +175,7 @@ export function parseInbound(frame){
 const onTick=p=>Math.abs(p/ES_TICK-Math.round(p/ES_TICK))<1e-6;
 export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
  const s={startMs:null,endMs:null,bbo:0,bboSnapshots:0,trades:0,tradeSnapshots:0,
-  lastTradeNonTradeUpdates:0,tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
+  lastTradeNonTradeUpdates:0,lastTradeUnknownPresence:0,tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
   spreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},
   // Synchronized = both sides' latest values carry the SAME gateway timestamp (same event).
   syncedSpreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},syncedObservations:0,
@@ -202,7 +202,10 @@ export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
    }else if(m.kind==='TRADE'){
     // presence bit LAST_TRADE(1) marks an actual trade; other LastTrade messages carry
     // only volume / net change / VWAP updates and are not trades.
-    if(m.presence!==null&&m.presence!==undefined&&(m.presence&1)===0){s.lastTradeNonTradeUpdates++;return}
+    // A LastTrade with NO presence bits has undocumented semantics: counted separately as unknown,
+    // never as a trade.
+    if(m.presence===null||m.presence===undefined){s.lastTradeUnknownPresence++;return}
+    if((m.presence&1)===0){s.lastTradeNonTradeUpdates++;return}
     s.trades++;if(m.snapshot)s.tradeSnapshots++;
     if(m.price!==null){price(m.price);s.last=m.price;
      s.minTrade=s.minTrade===null?m.price:Math.min(s.minTrade,m.price);
@@ -344,7 +347,7 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
- const r={schema:'engine18.rithmicPaperStepA.v2',measurementVersion:'SYNCHRONIZED_SPREAD_PRESENCE_BIT_TRADES',comparableOnlyWithSameMeasurementVersion:true,readOnly:true,trading:false,recording:false,
+ const r={schema:'engine18.rithmicPaperStepA.v2',measurementVersion:'SYNCHRONIZED_SPREAD_PRESENCE_BIT_TRADES_V2',comparableOnlyWithSameMeasurementVersion:true,readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
    rejectedGatewayNames:[],paperListedOnSelectedGateway:false},
