@@ -18,7 +18,7 @@ const ok=S(132766,'0');
 let PASSING=null; // a fully passing result, mutated below per Engine 18D counterexample
 
 // True exchange book: id -> {side,price,size}
-function exchange({dropOne=false}={}){
+function exchange({dropOne=false,noSnapshotSeq=false}={}){
  const book=new Map();let seq=1000,n=0;
  for(let i=0;i<20;i++){book.set('b'+i,{side:1,price:7000-i*0.25*4,size:1+i});book.set('a'+i,{side:2,price:7000.25+i*0.25*4,size:2+i})}
  const step=()=>{seq++;n++;const ids=[...book.keys()];const pick=ids[n%ids.length];const o=book.get(pick);
@@ -32,15 +32,16 @@ function exchange({dropOne=false}={}){
  const snapshot=(um)=>{const lv=new Map();for(const [id,o] of book){const k=o.side+':'+o.price;
    if(!lv.has(k))lv.set(k,{side:o.side,price:o.price,orders:[]});lv.get(k).orders.push({id,...o})}
   const echo=um?[S(132760,um)]:[];
-  const parts=[...lv.values()].map(l=>Buffer.concat([T(116),...echo,S(132764,'0'),S(110100,'ESZ6'),S(110101,'CME'),V(112002,seq),V(153612,l.side),
+  const sq=noSnapshotSeq?[]:[V(112002,seq)];
+  const parts=[...lv.values()].map(l=>Buffer.concat([T(116),...echo,S(132764,'0'),S(110100,'ESZ6'),S(110101,'CME'),...sq,V(153612,l.side),
    D(154405,l.price),...l.orders.map(o=>V(159009,o.size)),...l.orders.map(()=>V(153613,1)),...l.orders.map(o=>S(149238,o.id))]));
-  parts.push(Buffer.concat([T(116),...echo,ok,V(112002,seq)]));return parts};
+  parts.push(Buffer.concat([T(116),...echo,ok,...sq]));return parts};
  const top=()=>{let bid=-Infinity,ask=Infinity;for(const o of book.values()){if(o.side===1)bid=Math.max(bid,o.price);else ask=Math.min(ask,o.price)}
   return Buffer.concat([T(151),V(149138,3),D(100022,bid),V(159000,1),D(100025,ask),V(159002,1)])};
  return {step,snapshot,top};
 }
-function fake({dropOne=false,dboRp='0',garbage=false,stallVerify=false,wrongSymbolAt=null,straySubAck=false,race=true,errorOnLogout=false}={}){
- const log={sends:[]};const ex=exchange({dropOne});
+function fake({noSnapshotSeq=false,dropOne=false,dboRp='0',garbage=false,stallVerify=false,wrongSymbolAt=null,straySubAck=false,race=true,errorOnLogout=false}={}){
+ const log={sends:[]};const ex=exchange({dropOne,noSnapshotSeq});
  class W extends EventEmitter{constructor(url){super();this.url=url;this.timers=[];queueMicrotask(()=>this.emit('open'))}
   r(b){queueMicrotask(()=>{if(!this.closed)this.emit('message',b)})}
   send(buf){const m=decodeExact(buf);const id=Number(m.get(154467)[0]);const um=m.get(132760)?.[0]?.toString();log.sends.push({url:this.url,id});
@@ -186,4 +187,41 @@ test('18D#2: crossed/locked book or data frames without instrument -> FAIL',()=>
  assert.ok(mutate(r=>{r.observeBook.stats.crossedStates=1}).failedChecks.includes('noCrossedOrLockedBook'));
  assert.ok(mutate(r=>{r.observeBook.crossedOrLocked=true}).failedChecks.includes('noCrossedOrLockedBook'));
  assert.ok(mutate(r=>{r.observeBook.stats.anomalies.missingInstrument=1}).failedChecks.includes('noStructuralAnomalies'));
+});
+
+test('live Nov 26 shape: snapshot WITHOUT sequence -> no longer dead at seed; still never verified; layout + entitlement reported',async()=>{
+ const {W}=fake({noSnapshotSeq:true});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ assert.equal(r.stopReason,'WINDOW_COMPLETE');
+ assert.notEqual(r.observeBook.state,'INVALID',JSON.stringify(r.observeBook.stats.failures));
+ assert.equal(r.observeBook.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(r.observeBook.stats.unsequencedSnapshots>=1,true);
+ assert.ok(r.observeBook.stats.updates>0,'updates are applied, not ignored');
+ const v=r.observeBook.stats.verifications;assert.ok(v.length>=2&&v.every(x=>x.unsequenced&&x.match),JSON.stringify(v));
+ // acceptance is never granted without measured semantics: boundary unknown + reconciled evidence is LABELED, not verified
+ assert.equal(r.verdict,'EMPIRICALLY_RECONCILED_UNVERIFIED');assert.equal(r.acceptance.boundary,'UNKNOWN_UNSEQUENCED_SNAPSHOT');assert.ok(r.failedChecks.includes('snapshotSemanticsMeasured'));
+ assert.ok(r.failedChecks.includes('finalObserveBookValid'));assert.equal(r.verifiedBook,null);assert.equal(r.coverage,null);
+ // entitlement reflects DBO data received, independent of validity
+ assert.equal(r.dboEntitlement,'OBSERVED');assert.ok(r.dboFrames.updates>0&&r.dboFrames.snapshotParts>0);
+ // sanitized wire layout: tag numbers + counts only
+ const L=r.wireLayout;assert.equal(L.sequenceField112002.snapshotPartsWithSeq,0);assert.ok(L.sequenceField112002.updatesWithSeq>0);
+ assert.equal(L.templates['116'].tagFrames['112002'],undefined);assert.ok(L.templates['160'].tagFrames['112002']>0);
+ assert.ok(Object.values(L.templates).every(t=>Object.values(t.tagFrames).every(n=>Number.isInteger(n))));
+ assert.ok(!JSON.stringify(L).includes('ESZ6'),'no values in the layout');
+ // diagnostic coverage is labeled and lives only in the receipt
+ const d=r.diagnosticReceipt.diagnosticCoverage;assert.equal(d.verified,false);assert.equal(d.label,'DIAGNOSTIC_NOT_VERIFIED');
+});
+test('dboEntitlement OBSERVED when DBO data arrives even if the book is invalid',()=>{
+ assert.ok(PASSING);const r=structuredClone(PASSING);r.observeBook.state='INVALID';r.observeBook.stats.snapshotsCompleted=0;
+ assert.equal(evaluateStepB(r).dboEntitlement,'OBSERVED');
+ r.dboFrames={snapshotParts:0,updates:0,endEvents:0};r.snapshotParts=0;assert.equal(evaluateStepB(r).dboEntitlement,'NOT_OBSERVED');
+});
+
+test('EMPIRICALLY_RECONCILED_UNVERIFIED is never granted when the candidate search hit its limit, a gap occurred, or a resnapshot mismatched',async()=>{
+ const {W}=fake({noSnapshotSeq:true});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ assert.equal(evaluateStepB(r).verdict,'EMPIRICALLY_RECONCILED_UNVERIFIED');
+ const lim=structuredClone(r);lim.observeBook.candidateLimited=true;assert.equal(evaluateStepB(lim).verdict,'STEP_B_FAIL');
+ const gap=structuredClone(r);gap.observeBook.stats.gaps=1;assert.equal(evaluateStepB(gap).verdict,'STEP_B_FAIL');
+ const mis=structuredClone(r);mis.observeBook.stats.verifications.at(-1).match=false;assert.equal(evaluateStepB(mis).verdict,'STEP_B_FAIL');
+ for(const x of [r,lim,gap,mis])assert.equal(evaluateStepB(x).verifiedBook,null);
 });

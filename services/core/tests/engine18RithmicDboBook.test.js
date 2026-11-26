@@ -316,3 +316,108 @@ test('18D#3: NEW+DELETE sharing one lost sequence: snapshots still match, but th
  assert.equal(b.stats().verifications[0].match,true,'equality alone cannot see the loss');
  assert.equal(b.stats().gaps,1,'the gap counter does');
 });
+
+// ---- Live Nov 26 finding: Rithmic Paper 116 snapshot carried NO sequence_number on any part ----
+const unseqParts=(levels=SEED_LEVELS,um)=>[...levels.map(([side,price,os])=>P(part({side,price,um,orders:os.map(([id,size])=>({id,size}))}))),
+ P(part({final:true,um,sym:null,exch:null}))]; // final terminator without instrument, as observed live
+const mkU=(o={})=>mk({unsequencedSnapshots:'BOUNDARY_SEARCH',...o});
+test('live-shape: unsequenced snapshot is still REJECTED by default (SNAPSHOT_NO_SEQUENCE)',()=>{
+ for(const mode of ['STRICT','OBSERVE']){const b=mk({mode});b.beginSnapshot();for(const p of unseqParts())b.onSnapshotPart(p);
+  assert.equal(b.state,'INVALID');assert.equal(b.reason,'SNAPSHOT_NO_SEQUENCE')}
+});
+test('BOUNDARY_SEARCH: unsequenced seed never becomes VALID; verified coverage suppressed; diagnostic coverage labeled',()=>{
+ const b=mkU({mode:'STRICT'});b.beginSnapshot();for(const p of unseqParts())b.onSnapshotPart(p);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(b.semantics,null);
+ assert.equal(b.coverage().suppressed,true);assert.equal(b.coverage().reason,'BOOK_UNVERIFIED');
+ const d=b.coverage(undefined,{diagnostic:true});assert.equal(d.suppressed,false);assert.equal(d.verified,false);
+ assert.equal(d.label,'DIAGNOSTIC_NOT_VERIFIED');
+ // updates continue; an unsequenced re-snapshot that matches still does not make it VALID
+ b.onUpdate(U(upd(500,[{type:UPDATE.CHANGE,side:1,price:7000,size:6,id:'b1'}])));
+ b.beginVerification();
+ for(const p of unseqParts(SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='b1'?6:q])])))b.onSnapshotPart(p);
+ const v=b.stats().verifications.at(-1);assert.equal(v.unsequenced,true);assert.equal(v.match,true);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.semantics,null);
+});
+test('BOUNDARY_SEARCH: a NEW already in the snapshot rules out the boundary before it (defect), leaving one book',()=>{
+ const b=mkU({mode:'STRICT'});b.beginSnapshot();
+ b.onUpdate(U(upd(200,[{type:UPDATE.NEW,side:1,price:6980,size:7,id:'x'}])));
+ for(const p of unseqParts([...SEED_LEVELS,[SIDE.BID,6980,[['x',7]]]]))b.onSnapshotPart(p);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.unsequencedCandidates,1);assert.equal(b.orderCount,6);
+ assert.equal(b.stats().unsequencedSeeds[0].consistentBoundaries,1);
+});
+test('BOUNDARY_SEARCH: ambiguous boundary keeps candidates; a re-snapshot eliminates the wrong one',()=>{
+ const b=mkU({mode:'OBSERVE'});b.beginSnapshot();
+ b.onUpdate(U(upd(300,[{type:UPDATE.CHANGE,side:1,price:7000,size:9,id:'b1'}]))); // included or not? unknown
+ for(const p of unseqParts())b.onSnapshotPart(p); // truth: snapshot taken BEFORE the change (b1=5)
+ assert.equal(b.unsequencedCandidates,2);
+ assert.equal(b.coverage(undefined,{diagnostic:true}).reason,'UNSEQUENCED_CANDIDATES_UNRESOLVED');
+ // next re-snapshot shows b1=9 and b2 changed to 4 by a later update
+ b.onUpdate(U(upd(301,[{type:UPDATE.CHANGE,side:1,price:7000,size:4,id:'b2'}])));
+ b.beginVerification();
+ for(const p of unseqParts(SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='b1'?9:id==='b2'?4:q])])))b.onSnapshotPart(p);
+ const v=b.stats().verifications.at(-1);assert.equal(v.candidatesBefore,2);assert.equal(v.candidatesSurviving,1,JSON.stringify(v));
+ assert.equal(b.unsequencedCandidates,1);assert.equal(b.state,'UNVERIFIED');
+});
+test('BOUNDARY_SEARCH: re-snapshot matching no candidate is a mismatch (STRICT -> INVALID)',()=>{
+ const b=mkU({mode:'STRICT'});b.beginSnapshot();for(const p of unseqParts())b.onSnapshotPart(p);
+ b.beginVerification();for(const p of unseqParts(SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='a1'?99:q])])))b.onSnapshotPart(p);
+ assert.equal(b.stats().verifications.at(-1).match,false);assert.equal(b.state,'INVALID');
+});
+test('BOUNDARY_SEARCH: oversized seed buffer fails closed; updates without sequence leave no consistent candidate',()=>{
+ const b=mkU({mode:'OBSERVE',maxBoundarySearch:2});b.beginSnapshot();
+ for(let i=0;i<3;i++)b.onUpdate(U(upd(400+i,[{type:UPDATE.CHANGE,side:1,price:7000,size:6+i,id:'b1'}])));
+ for(const p of unseqParts())b.onSnapshotPart(p);assert.equal(b.state,'INVALID');assert.equal(b.reason,'SNAPSHOT_UNSEQUENCED_BUFFER_TOO_LARGE');
+ const c=mkU({mode:'OBSERVE'});c.beginSnapshot();for(const p of unseqParts())c.onSnapshotPart(p);
+ c.onUpdate(U(upd(null,[{type:UPDATE.CHANGE,side:1,price:7000,size:6,id:'b1'}])));
+ assert.equal(c.state,'UNVERIFIED'); // single candidate: real sink; missing sequence recorded
+ assert.equal(c.stats().missingSequence,1);
+});
+test('18D qualification: an alternate candidate with recorded defects can never be selected, even if it matches',()=>{
+ const b=mk({mode:'OBSERVE'});b.beginSnapshot();
+ // equal-seq batch: CHANGE b1 + DELETE of an order the snapshot lacks -> the NEXT_EXPECTED candidate records a defect
+ b.onUpdate(U(upd(100,[{type:UPDATE.CHANGE,side:1,price:7000,size:6,id:'b1'},{type:UPDATE.DELETE,side:1,price:6980,id:'ghost'}])));
+ for(const p of seedParts(100))b.onSnapshotPart(p);
+ b.beginVerification();verifyWith(b,101,SEED_LEVELS.map(([s,p,os])=>[s,p,os.map(([id,q])=>[id,id==='b1'?6:q])]));
+ const v=b.stats().verifications.at(-1);
+ assert.equal(v.candidates.nextExpectedCandidateDiff,0,'the defective candidate does equal the snapshot');
+ assert.equal(v.candidates.altSelectable,false);assert.equal(v.match,false,JSON.stringify(v));
+ assert.notEqual(b.semantics,'NEXT_EXPECTED');assert.equal(b.stats().candidateRejectedForDefects,1);
+});
+
+// ---- 18D operational correction (Nov 26): bounded candidate search ----
+// 1,500-order snapshot: 750 bid levels below 7000, 750 ask levels above (one order each).
+const BIG_LEVELS=[...Array.from({length:750},(_,i)=>[SIDE.BID,7000-i*0.25,[['B'+i,10]]]),
+ ...Array.from({length:750},(_,i)=>[SIDE.ASK,7000.25+i*0.25,[['A'+i,10]]])];
+test('bounded search: 1,500-part snapshot + 400 distinct buffered updates stops at maxCandidates with ZERO full copies',()=>{
+ const b=mkU({mode:'OBSERVE',maxCandidates:32});b.beginSnapshot();
+ for(let i=0;i<400;i++)b.onUpdate(U(upd(1000+i,[{type:UPDATE.CHANGE,side:1,price:7000-i*0.25,size:11,id:'B'+i}])));
+ const t0=Date.now();for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);const ms=Date.now()-t0;
+ const s=b.stats(),seed=s.unsequencedSeeds.at(-1);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.reason,'CANDIDATE_LIMIT');assert.equal(b.candidateLimited,true);
+ assert.equal(seed.candidateLimit,'MAX_CANDIDATES');assert.equal(seed.materializedCopies,0);
+ assert.ok(seed.distinctCandidateBooks<=32,JSON.stringify(seed));assert.equal(s.candidateLimitHits,1);
+ assert.ok(ms<3000,'bounded time: '+ms+'ms');
+ // unusable until reseeded: coverage suppressed (even diagnostic), live updates ignored, never VALID
+ assert.equal(b.coverage(undefined,{diagnostic:true}).reason,'CANDIDATE_LIMIT');
+ b.onUpdate(U(upd(2000,[{type:UPDATE.CHANGE,side:1,price:7000,size:12,id:'B0'}])));
+ assert.equal(b.stats().updatesIgnoredWhileLimited,1);assert.notEqual(b.state,'VALID');
+ // the next (quiet) re-snapshot reseeds the book instead of verifying an arbitrary candidate
+ assert.equal(b.beginVerification(),true);for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ assert.equal(b.candidateLimited,false);assert.equal(b.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(b.state,'UNVERIFIED');
+ assert.equal(b.orderCount,1500);assert.equal(b.stats().reseeds,1);
+});
+test('bounded search: duplicates are removed by fingerprint BEFORE materializing (toggle updates -> 2 copies, not 302)',()=>{
+ const b=mkU({mode:'OBSERVE'});b.beginSnapshot();
+ for(let i=0;i<301;i++)b.onUpdate(U(upd(3000+i,[{type:UPDATE.CHANGE,side:1,price:7000,size:i%2?10:11,id:'B0'}])));
+ for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ const seed=b.stats().unsequencedSeeds.at(-1);
+ assert.equal(seed.consistentBoundaries,302); // every boundary ends at B0=11 except 'none applied' (B0=10)assert.equal(seed.distinctCandidateBooks,2);assert.equal(seed.materializedCopies,2);
+ assert.equal(seed.candidateLimit,null);assert.equal(b.unsequencedCandidates,2);
+});
+test('bounded search: maxCandidateOrders caps total materialized orders (CANDIDATE_LIMIT, nothing materialized)',()=>{
+ const b=mkU({mode:'OBSERVE',maxCandidateOrders:2000});b.beginSnapshot();
+ b.onUpdate(U(upd(5000,[{type:UPDATE.CHANGE,side:1,price:7000,size:11,id:'B0'}])));
+ for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ const seed=b.stats().unsequencedSeeds.at(-1);
+ assert.equal(seed.candidateLimit,'MAX_CANDIDATE_ORDERS');assert.equal(seed.materializedCopies,0);assert.equal(b.reason,'CANDIDATE_LIMIT');
+});
