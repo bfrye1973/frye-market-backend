@@ -61,6 +61,7 @@ Example: Nov 25 06:30–14:00 MST = `1795613400`–`1795640400`.
 Broke 7,000 at 07:43:12 MST, low 6,982.50 at 07:45:10, held reclaim 07:46:24; higher lows 6,996.5 / 7,001.5 / 7,004.5; run 09:53 → 7,159 at 10:55. Delta +1,441 during penetration, −769 during reclaim (resting orders drove price). Flow reader: NO_DEFENSE 07:31–07:43; quiet accumulation 09:06–09:11 and 09:27–09:59. Map replay (Nov 26 fixes): BUY 7,000 held all day; SELL 7,200 / 7,211 inside owner zones 7165–7264 / NEG 7190.25–7234.75.
 
 ## Locked owner decisions
+- **Data source: Rithmic only (Nov 26).** Ironbeam is retired for Engine 18. No new Ironbeam work; the Ironbeam recorder source and research service stay as history only. New recording uses Rithmic.
 - Confirmation only; warning + confirmation.
 - Recording **approved** (Nov 25) — starts only after PR #400 passes acceptance.
 - Detect "act three" quiet absorption live; real-time Engine 18 panel (separate panel, no LIVE chart change).
