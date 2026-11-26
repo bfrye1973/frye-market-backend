@@ -136,3 +136,18 @@ test('broken level: proof from before the break stops counting; it is marked, ne
  m.add('PROVEN',{price:7188,label:'CEILING_DEFENDED',t:T+40,state:'DEFENDED'});
  const r2=m.evaluate({t:T+50,price:7170});assert.equal(r2.drawn.length,1);assert.equal(r2.drawn[0].side,'SELL');
 });
+
+test('side-aware proof: a held ceiling stops counting once price is above it (shown as FLIPPED, not support)',()=>{
+ const m=createLiquidityMap();
+ m.add('REFERENCE',{price:7100,label:'ROUND_50',t:T});
+ m.add('PROVEN',{price:7100,label:'SWEEP_RECLAIMED_RESISTANCE',t:T,state:'SWEPT_AND_HELD',provenSide:'SELL'});
+ const below=m.evaluate({t:T+60,price:7080});assert.equal(below.drawn.length,1);assert.equal(below.drawn[0].side,'SELL');
+ const above=m.evaluate({t:T+120,price:7130});assert.equal(above.drawn.length,0); // only REFERENCE counts now
+ m.add('PROFILE',{price:7100,label:'HVN',t:T+130});
+ const r=m.evaluate({t:T+140,price:7130});assert.equal(r.drawn.length,1);assert.equal(r.drawn[0].side,'BUY');
+ assert.equal(r.drawn[0].state,'FLIPPED');assert.ok(!r.drawn[0].sourceTypes.includes('PROVEN'));
+ assert.deepEqual(r.drawn[0].flippedFrom,['SWEEP_RECLAIMED_RESISTANCE']);
+ // a support proof on the new side counts
+ m.add('PROVEN',{price:7100,label:'FLOOR_DEFENDED',t:T+150,state:'DEFENDED',provenSide:'BUY'});
+ const r2=m.evaluate({t:T+160,price:7130});assert.ok(r2.drawn[0].sourceTypes.includes('PROVEN'));assert.equal(r2.drawn[0].strength,3);
+});
