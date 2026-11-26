@@ -39,17 +39,30 @@ export function createLiquidityMap(params={}){
    if(state&&state!==l.state){l.state=state;l.history.push({t,state,by:type})}
    return l.id;
   },
+  // Mark a level BROKEN (price went through and stayed). Not evidence FOR the level: earlier PROVEN
+  // evidence stops counting; only PROVEN evidence added after the break (e.g. a flip retest) counts.
+  markBroken({price,label,t,detail=null}){
+   if(!Number.isFinite(price)||!Number.isSafeInteger(t))throw Error('price and integer t required');
+   if(lastT!==null&&t<lastT)throw Error('evidence must not be added in the past');
+   const p=toTick(price,P.tick)*P.tick;let l=findNear(p);
+   if(!l){l={id:'L'+toTick(p,P.tick),price:p,firstSeenT:t,sources:new Map(),state:null,history:[]};levels.set(l.id,l)}
+   l.brokenT=t;l.state='BROKEN_FLIP';l.history.push({t,state:'BROKEN_FLIP',by:label,...(detail?{detail}:{})});return l.id;
+  },
   evaluate({t,price,airPockets=[]}){
    if(!Number.isSafeInteger(t)||!Number.isFinite(price))throw Error('t and price required');
    lastT=t;
-   const current=l=>[...l.sources.entries()].filter(([type,s])=>{const ttl=P.staleSec[type];return ttl==null||t-s.lastT<=ttl});
+   const current=l=>[...l.sources.entries()].filter(([type,s])=>{const ttl=P.staleSec[type];
+    if(type==='PROVEN'&&l.brokenT!=null&&s.lastT<=l.brokenT)return false; // proof before a break no longer counts
+    return ttl==null||t-s.lastT<=ttl});
    const all=[...levels.values()].map(l=>{const cur=current(l);
     return {id:l.id,price:l.price,side:l.price<price?'BUY':'SELL',distancePts:Math.abs(l.price-price),
      sourceTypes:cur.map(([k])=>k),evidence:Object.fromEntries(cur.map(([k,s])=>[k,{labels:[...s.labels],lastT:s.lastT,...(s.detail?{detail:s.detail}:{})}])),
      staleSources:[...l.sources.keys()].filter(k=>!cur.some(([c])=>c===k)),
      state:l.state,firstSeenT:l.firstSeenT}});
    const qualifies=x=>x.sourceTypes.length>=P.minSources&&x.distancePts>=P.minDistancePts;
-   const rank=(a,b)=>b.sourceTypes.length-a.sourceTypes.length||a.distancePts-b.distancePts;
+   // ties: a level that was swept and HELD outranks one that was not, then the nearer one
+   const held=x=>x.state==='SWEPT_AND_HELD'?1:0;
+   const rank=(a,b)=>b.sourceTypes.length-a.sourceTypes.length||held(b)-held(a)||a.distancePts-b.distancePts;
    const pick=side=>all.filter(x=>x.side===side&&qualifies(x)).sort(rank).slice(0,P.maxPerSide);
    const buy=pick('BUY'),sell=pick('SELL');
    // Air pockets between price and each drawn level (fast-travel zones toward that level).
@@ -98,3 +111,39 @@ export function provenCandidates(snapshot){
  }
  return out;
 }
+// Level-event detector (Track B) events -> proven levels. Only CLASSIFIED events count, and only
+// at the moment they were classified (the detector records evidence point-in-time).
+//  SWEEP_RECLAIMED: price went through, failed to stay, came back -> the level held (resting orders).
+//  ACCEPTED_BEYOND: price went through and stayed -> the level BROKE (use map.markBroken, not add).
+export function sweepCandidates(events,{since=-Infinity}={}){
+ const out=[];
+ for(const e of events){
+  if(!e.classification)continue;
+  const at=e.history.find(h=>h.state===(e.classification==='SWEEP_RECLAIMED'?'RECLAIMED':'ACCEPTED_BEYOND'));
+  if(!at||at.t<=since)continue;
+  const sweep=e.classification==='SWEEP_RECLAIMED';
+  out.push({kind:sweep?'HELD':'BROKEN',price:e.level,label:sweep?`SWEEP_RECLAIMED_${e.side}`:`BROKEN_${e.side}`,t:at.t,
+   state:sweep?'SWEPT_AND_HELD':'BROKEN_FLIP',
+   detail:{penetrationPts:e.penetration,deltaWhileBeyond:at.evidence?.deltaWhileBeyond??at.evidence?.beyondFlow?.delta??null,at:at.at}});
+ }
+ return out;
+}
+// Owner hand-drawn zones (read-only). Text format of es-smz-manual-zones.txt:
+//   "PARENT_LO-PARENT_HI | NEG LO-HI # comment"  (either side optional, ranges may be reversed).
+export function parseOwnerZones(text,{tick=0.25}={}){
+ const r=x=>Math.round(Number(x)/tick)*tick;const zones=[];
+ for(const raw of String(text||'').split(/\r?\n/)){
+  const line=raw.replace(/#.*$/,'').trim();if(!line)continue;
+  for(const part of line.split('|')){const s=part.trim();if(!s)continue;
+   const m=s.match(/^(NEG\s+)?(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)$/i);if(!m)continue;
+   const a=r(m[2]),b=r(m[3]);zones.push({kind:m[1]?'NEG':'PARENT',lo:Math.min(a,b),hi:Math.max(a,b)})}
+ }
+ return zones;
+}
+// Zone EDGES are the evidence (where institutional rotation happens); zones are never moved or edited.
+export function ownerZoneCandidates(zones,{t}){
+ return zones.flatMap(z=>[{price:z.lo,label:`OWNER_${z.kind}_LOW`,t,detail:{zone:`${z.lo}-${z.hi}`}},
+  {price:z.hi,label:`OWNER_${z.kind}_HIGH`,t,detail:{zone:`${z.lo}-${z.hi}`}}]);
+}
+// Context only (not counted as a source): which owner zones contain a price.
+export function zonesContaining(zones,price){return zones.filter(z=>price>=z.lo&&price<=z.hi).map(z=>`${z.kind} ${z.lo}-${z.hi}`)}
