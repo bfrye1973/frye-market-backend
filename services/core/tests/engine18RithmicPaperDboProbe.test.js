@@ -197,8 +197,8 @@ test('live Nov 26 shape: snapshot WITHOUT sequence -> no longer dead at seed; st
  assert.equal(r.observeBook.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(r.observeBook.stats.unsequencedSnapshots>=1,true);
  assert.ok(r.observeBook.stats.updates>0,'updates are applied, not ignored');
  const v=r.observeBook.stats.verifications;assert.ok(v.length>=2&&v.every(x=>x.unsequenced&&x.match),JSON.stringify(v));
- // acceptance is never granted without measured semantics
- assert.equal(r.verdict,'STEP_B_FAIL');assert.ok(r.failedChecks.includes('snapshotSemanticsMeasured'));
+ // acceptance is never granted without measured semantics: boundary unknown + reconciled evidence is LABELED, not verified
+ assert.equal(r.verdict,'EMPIRICALLY_RECONCILED_UNVERIFIED');assert.equal(r.acceptance.boundary,'UNKNOWN_UNSEQUENCED_SNAPSHOT');assert.ok(r.failedChecks.includes('snapshotSemanticsMeasured'));
  assert.ok(r.failedChecks.includes('finalObserveBookValid'));assert.equal(r.verifiedBook,null);assert.equal(r.coverage,null);
  // entitlement reflects DBO data received, independent of validity
  assert.equal(r.dboEntitlement,'OBSERVED');assert.ok(r.dboFrames.updates>0&&r.dboFrames.snapshotParts>0);
@@ -214,4 +214,14 @@ test('dboEntitlement OBSERVED when DBO data arrives even if the book is invalid'
  assert.ok(PASSING);const r=structuredClone(PASSING);r.observeBook.state='INVALID';r.observeBook.stats.snapshotsCompleted=0;
  assert.equal(evaluateStepB(r).dboEntitlement,'OBSERVED');
  r.dboFrames={snapshotParts:0,updates:0,endEvents:0};r.snapshotParts=0;assert.equal(evaluateStepB(r).dboEntitlement,'NOT_OBSERVED');
+});
+
+test('EMPIRICALLY_RECONCILED_UNVERIFIED is never granted when the candidate search hit its limit, a gap occurred, or a resnapshot mismatched',async()=>{
+ const {W}=fake({noSnapshotSeq:true});
+ const r=await runPaperDboStepB({env:ENV,WebSocketImpl:W,durationMs:1600,verifyEveryMs:400});
+ assert.equal(evaluateStepB(r).verdict,'EMPIRICALLY_RECONCILED_UNVERIFIED');
+ const lim=structuredClone(r);lim.observeBook.candidateLimited=true;assert.equal(evaluateStepB(lim).verdict,'STEP_B_FAIL');
+ const gap=structuredClone(r);gap.observeBook.stats.gaps=1;assert.equal(evaluateStepB(gap).verdict,'STEP_B_FAIL');
+ const mis=structuredClone(r);mis.observeBook.stats.verifications.at(-1).match=false;assert.equal(evaluateStepB(mis).verdict,'STEP_B_FAIL');
+ for(const x of [r,lim,gap,mis])assert.equal(evaluateStepB(x).verifiedBook,null);
 });

@@ -383,3 +383,41 @@ test('18D qualification: an alternate candidate with recorded defects can never 
  assert.equal(v.candidates.altSelectable,false);assert.equal(v.match,false,JSON.stringify(v));
  assert.notEqual(b.semantics,'NEXT_EXPECTED');assert.equal(b.stats().candidateRejectedForDefects,1);
 });
+
+// ---- 18D operational correction (Nov 26): bounded candidate search ----
+// 1,500-order snapshot: 750 bid levels below 7000, 750 ask levels above (one order each).
+const BIG_LEVELS=[...Array.from({length:750},(_,i)=>[SIDE.BID,7000-i*0.25,[['B'+i,10]]]),
+ ...Array.from({length:750},(_,i)=>[SIDE.ASK,7000.25+i*0.25,[['A'+i,10]]])];
+test('bounded search: 1,500-part snapshot + 400 distinct buffered updates stops at maxCandidates with ZERO full copies',()=>{
+ const b=mkU({mode:'OBSERVE',maxCandidates:32});b.beginSnapshot();
+ for(let i=0;i<400;i++)b.onUpdate(U(upd(1000+i,[{type:UPDATE.CHANGE,side:1,price:7000-i*0.25,size:11,id:'B'+i}])));
+ const t0=Date.now();for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);const ms=Date.now()-t0;
+ const s=b.stats(),seed=s.unsequencedSeeds.at(-1);
+ assert.equal(b.state,'UNVERIFIED');assert.equal(b.reason,'CANDIDATE_LIMIT');assert.equal(b.candidateLimited,true);
+ assert.equal(seed.candidateLimit,'MAX_CANDIDATES');assert.equal(seed.materializedCopies,0);
+ assert.ok(seed.distinctCandidateBooks<=32,JSON.stringify(seed));assert.equal(s.candidateLimitHits,1);
+ assert.ok(ms<3000,'bounded time: '+ms+'ms');
+ // unusable until reseeded: coverage suppressed (even diagnostic), live updates ignored, never VALID
+ assert.equal(b.coverage(undefined,{diagnostic:true}).reason,'CANDIDATE_LIMIT');
+ b.onUpdate(U(upd(2000,[{type:UPDATE.CHANGE,side:1,price:7000,size:12,id:'B0'}])));
+ assert.equal(b.stats().updatesIgnoredWhileLimited,1);assert.notEqual(b.state,'VALID');
+ // the next (quiet) re-snapshot reseeds the book instead of verifying an arbitrary candidate
+ assert.equal(b.beginVerification(),true);for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ assert.equal(b.candidateLimited,false);assert.equal(b.reason,'SNAPSHOT_UNSEQUENCED');assert.equal(b.state,'UNVERIFIED');
+ assert.equal(b.orderCount,1500);assert.equal(b.stats().reseeds,1);
+});
+test('bounded search: duplicates are removed by fingerprint BEFORE materializing (toggle updates -> 2 copies, not 302)',()=>{
+ const b=mkU({mode:'OBSERVE'});b.beginSnapshot();
+ for(let i=0;i<301;i++)b.onUpdate(U(upd(3000+i,[{type:UPDATE.CHANGE,side:1,price:7000,size:i%2?10:11,id:'B0'}])));
+ for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ const seed=b.stats().unsequencedSeeds.at(-1);
+ assert.equal(seed.consistentBoundaries,302); // every boundary ends at B0=11 except 'none applied' (B0=10)assert.equal(seed.distinctCandidateBooks,2);assert.equal(seed.materializedCopies,2);
+ assert.equal(seed.candidateLimit,null);assert.equal(b.unsequencedCandidates,2);
+});
+test('bounded search: maxCandidateOrders caps total materialized orders (CANDIDATE_LIMIT, nothing materialized)',()=>{
+ const b=mkU({mode:'OBSERVE',maxCandidateOrders:2000});b.beginSnapshot();
+ b.onUpdate(U(upd(5000,[{type:UPDATE.CHANGE,side:1,price:7000,size:11,id:'B0'}])));
+ for(const p of unseqParts(BIG_LEVELS))b.onSnapshotPart(p);
+ const seed=b.stats().unsequencedSeeds.at(-1);
+ assert.equal(seed.candidateLimit,'MAX_CANDIDATE_ORDERS');assert.equal(seed.materializedCopies,0);assert.equal(b.reason,'CANDIDATE_LIMIT');
+});

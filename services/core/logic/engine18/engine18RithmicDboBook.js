@@ -115,23 +115,42 @@ export function parseUpdatesAck(frame){
 //  -> VALID (semantics measured as LAST_INCLUDED or NEXT_EXPECTED). INVALID is fail-closed.
 // Until semantics are measured, a seed that buffered updates EQUAL to the snapshot sequence keeps
 // two candidate books (equal-seq dropped vs applied); a later re-snapshot decides which was right.
+// Copy-on-write overlay of a snapshot map: stores only touched orders (null = deleted). Supports the
+// get/set/delete/size operations the update path uses; materialize() makes the single full copy.
+const cloneMapTop=m=>new Map([...m].map(([k,v])=>[k,{...v}]));
+function overlay(base){const d=new Map();let n=base.size;
+ const o={d,get(k){return d.has(k)?(d.get(k)??undefined):base.get(k)},has(k){return o.get(k)!==undefined},
+  set(k,v){if(o.get(k)===undefined)n++;d.set(k,v);return o},
+  delete(k){if(o.get(k)===undefined)return false;n--;d.set(k,null);return true},
+  get size(){return n},
+  materialize(){const m=cloneMapTop(base);for(const [k,v] of d){if(v===null)m.delete(k);else m.set(k,{...v})}return m}};
+ return o}
+const eqOrder=(x,y)=>x===y||(!!x&&!!y&&x.side===y.side&&x.t===y.t&&x.q===y.q);
+const sameDelta=(a,b)=>{if(a.size!==b.size)return false;
+ for(const k of a.d.keys())if(!eqOrder(a.get(k),b.get(k)))return false;
+ for(const k of b.d.keys())if(!eqOrder(a.get(k),b.get(k)))return false;return true};
+const fnv=(seed,str)=>{let h=seed>>>0;for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619)>>>0}return h};
+const okey=(k,o)=>k+':'+o.side+':'+o.t+':'+o.q;
+const hA=(k,o)=>fnv(2166136261,okey(k,o)),hB=(k,o)=>fnv(0x9747b28c,okey(k,o));
 const ZERO=()=>({missingInBook:0,extraInBook:0,sizeMismatch:0,priceOrSideMismatch:0,total:0});
 const FATAL=new Set(['ORDER_LIMIT','BUFFER_LIMIT']);
 const RESOLVED=new Set(['LAST_INCLUDED','NEXT_EXPECTED']);
 export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null,maxOrders=300000,
- maxBuffered=300000,unsequencedSnapshots='REJECT',maxBoundarySearch=500,now=Date.now}={}){
+ maxBuffered=300000,unsequencedSnapshots='REJECT',maxBoundarySearch=500,maxCandidates=32,
+ maxCandidateOrders=200000,now=Date.now}={}){
  if(mode!=='STRICT'&&mode!=='OBSERVE')throw Error('mode must be STRICT or OBSERVE');
  if(unsequencedSnapshots!=='REJECT'&&unsequencedSnapshots!=='BOUNDARY_SEARCH')throw Error('bad unsequenced snapshot policy');
  let state='UNSEEDED',reason=null,orders=new Map(),lastSeq=null,lastAppliedAt=null,snap=null;
  let alt=null;          // NEXT_EXPECTED-interpretation candidate while semantics are unmeasured
  let semantics=null;    // measured snapshot-boundary semantics (never inferred)
  let ucands=null;       // unsequenced seed: distinct candidate books still consistent with the evidence
+ let limited=false;     // candidate search hit its resource limit: book is UNVERIFIED and not usable until reseeded
  const failures=[]; // append-only: a later reseed never erases a recorded failure
  const st={snapshotsCompleted:0,snapshotParts:0,unsolicitedParts:0,mismatchedParts:0,unechoedParts:0,
   correlatedParts:0,bufferedDuringSeed:0,droppedOverlap:0,heldEqualSeqAtSeed:0,replayedAfterSeed:0,updates:0,entries:0,
   equalSeq:0,gaps:0,gapTotal:'0',outOfOrder:0,missingSequence:0,controlFramesWithoutInstrument:0,
   crossedStates:0,semanticsResolved:null,semanticsConflicts:0,candidateResolutions:0,candidateRejectedForDefects:0,
-  unsequencedSnapshots:0,unsequencedSeeds:[],unsequencedVerifications:0,
+  unsequencedSnapshots:0,unsequencedSeeds:[],unsequencedVerifications:0,candidateLimitHits:0,updatesIgnoredWhileLimited:0,
   anomalies:{newExisting:0,changeMissing:0,deleteMissing:0,misaligned:0,offTick:0,badPrice:0,
    badSize:0,badSide:0,badOrderId:0,wrongInstrument:0,missingInstrument:0,missingSequence:0,outOfOrder:0,ignoredUnseeded:0,ignoredInvalid:0},
   semantics:{LAST_INCLUDED:0,NEXT_EXPECTED:0,AMBIGUOUS:0,NO_EQUAL_SEQUENCE_UPDATES:0,MISMATCH:0,UNSEQUENCED:0},
@@ -201,7 +220,7 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
   ucands=ucands.filter(c=>c.defects===0);
   if(!ucands.length){ucands=null;fail('SNAPSHOT_UNSEQUENCED_ALL_CANDIDATES_DEFECTIVE',{force:true});return}
   orders=ucands[0].orders;lastSeq=ucands[0].lastSeq;lastAppliedAt=now();if(ucands.length===1)ucands=null};
- const applyLive=u=>{if(ucands)return applyCands(u);
+ const applyLive=u=>{if(limited){st.updatesIgnoredWhileLimited++;return}if(ucands)return applyCands(u);
   const ref={v:lastSeq};applyChecked(orders,u,ref);lastSeq=ref.v;lastAppliedAt=now();
   if(alt){const r={v:alt.lastSeq};applyChecked(alt.orders,u,r,quietSink(alt));alt.lastSeq=r.v}};
  const diff=(a,b)=>{const d=ZERO();
@@ -263,19 +282,34 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
  // A boundary is consistent if replaying buf[k..] onto the snapshot raises no defect. Seeding requires
  // >=1 consistent boundary AND all consistent boundaries producing an identical book. Never VALID.
  const sig=m=>[...m].sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0).map(([id,o])=>id+':'+o.side+':'+o.t+':'+o.q).join('|');
- const MAX_UNSEQ_CANDIDATES=64;
  const dedupe=list=>{const seen=new Map();for(const c of list){const k=sig(c.orders);if(!seen.has(k))seen.set(k,c)}return [...seen.values()]};
- const unsequencedSeed=(staging,buf)=>{st.unsequencedSnapshots++;
+ // Resource-bounded search. Each boundary is replayed on a copy-on-write OVERLAY of the snapshot (only
+ // touched orders are stored), fingerprinted incrementally, and de-duplicated (exact delta comparison on
+ // a fingerprint hit) BEFORE any full book copy is made. At most maxCandidates distinct candidates are
+ // kept and at most maxCandidateOrders orders are materialized; past either limit the search stops,
+ // the book is marked UNVERIFIED with reason CANDIDATE_LIMIT and is not used until a later snapshot reseeds it.
+ const unsequencedSeed=(staging,buf)=>{st.unsequencedSnapshots++;limited=false;
   if(buf.length>maxBoundarySearch){fail('SNAPSHOT_UNSEQUENCED_BUFFER_TOO_LARGE',{force:true});return}
-  const ok=[];
-  for(let k=0;k<=buf.length;k++){const work=cloneMap(staging),c={defects:0},ref={v:null};
-   for(const u of buf.slice(k))applyChecked(work,u,ref,quietSink(c));
-   if(c.defects===0)ok.push({orders:work,lastSeq:ref.v,defects:0})}
-  const cands=dedupe(ok);
-  st.unsequencedSeeds.push({boundariesTested:buf.length+1,consistentBoundaries:ok.length,distinctCandidateBooks:cands.length,bufferedUpdates:buf.length});
-  if(!cands.length){fail('SNAPSHOT_UNSEQUENCED_NO_CONSISTENT_BOUNDARY',{force:true});return}
-  if(cands.length>MAX_UNSEQ_CANDIDATES){fail('SNAPSHOT_UNSEQUENCED_TOO_MANY_CANDIDATES',{force:true});return}
-  st.snapshotsCompleted++;orders=cands[0].orders;lastSeq=cands[0].lastSeq;alt=null;lastAppliedAt=now();
+  const fpOf=ov=>{let a=0,b=0;for(const [k,v] of ov.d){const o=staging.get(k);
+    if(o){a=(a-hA(k,o))>>>0;b=(b-hB(k,o))>>>0}if(v){a=(a+hA(k,v))>>>0;b=(b+hB(k,v))>>>0}}return a+':'+b};
+  const buckets=new Map(),distinct=[];let consistent=0,limitHit=null;
+  for(let k=0;k<=buf.length;k++){const ov=overlay(staging),c={defects:0},ref={v:null};
+   for(let i=k;i<buf.length&&!c.defects;i++)applyChecked(ov,buf[i],ref,quietSink(c));
+   if(c.defects)continue;consistent++;
+   const fp=fpOf(ov),bucket=buckets.get(fp)||[];
+   if(bucket.some(x=>sameDelta(x.ov,ov)))continue;
+   if(distinct.length>=maxCandidates){limitHit='MAX_CANDIDATES';break}
+   const cand={ov,lastSeq:ref.v};bucket.push(cand);buckets.set(fp,bucket);distinct.push(cand)}
+  if(!limitHit&&distinct.length*staging.size>maxCandidateOrders)limitHit='MAX_CANDIDATE_ORDERS';
+  const rec={boundariesTested:buf.length+1,consistentBoundaries:consistent,distinctCandidateBooks:distinct.length,
+   bufferedUpdates:buf.length,materializedCopies:0,candidateLimit:limitHit};
+  st.unsequencedSeeds.push(rec);
+  if(!distinct.length&&!limitHit){fail('SNAPSHOT_UNSEQUENCED_NO_CONSISTENT_BOUNDARY',{force:true});return}
+  st.snapshotsCompleted++;alt=null;ucands=null;
+  if(limitHit){st.candidateLimitHits++;limited=true;orders=new Map();lastSeq=null;lastAppliedAt=null;
+   failures.push({atMs:now(),reason:'CANDIDATE_LIMIT'});state='UNVERIFIED';reason='CANDIDATE_LIMIT';return}
+  const cands=distinct.map(d=>({orders:d.ov.materialize(),lastSeq:d.lastSeq,defects:0}));rec.materializedCopies=cands.length;
+  orders=cands[0].orders;lastSeq=cands[0].lastSeq;lastAppliedAt=now();
   ucands=cands.length>1?cands:null;state='UNVERIFIED';reason='SNAPSHOT_UNSEQUENCED'};
  // Unsequenced re-snapshot: a candidate survives only if, at some defect-free boundary within the
  // buffered updates, it equals the snapshot exactly. Zero survivors = mismatch.
@@ -303,10 +337,10 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
   get state(){return state},get reason(){return reason},get orderCount(){return orders.size},
   get lastSeq(){return lastSeq===null?null:String(lastSeq)},get verifying(){return snap?.kind==='VERIFY'},
   get snapshotPending(){return snap!==null},get failures(){return failures.slice()},
-  get semantics(){return semantics},get unsequencedCandidates(){return ucands?ucands.length:(state==='INVALID'||state==='UNSEEDED'?0:1)},get crossedOrLocked(){return touch(orders).crossedOrLocked},
+  get semantics(){return semantics},get candidateLimited(){return limited},get unsequencedCandidates(){return ucands?ucands.length:(state==='INVALID'||state==='UNSEEDED'?0:1)},get crossedOrLocked(){return touch(orders).crossedOrLocked},
   stats(){return JSON.parse(JSON.stringify({...st,failures}))},
   // Explicit (re)seed. Call BEFORE sending 117/115 so updates arriving meanwhile are buffered.
-  beginSnapshot(requestId=null){state='SEEDING';reason=null;orders=new Map();lastSeq=null;alt=null;ucands=null;
+  beginSnapshot(requestId=null){state='SEEDING';reason=null;orders=new Map();lastSeq=null;alt=null;ucands=null;limited=false;
    snap={kind:'SEED',requestId,staging:new Map(),seqs:new Set(),buffer:[],bad:null}},
   beginVerification(requestId=null){if((state!=='VALID'&&state!=='UNVERIFIED')||snap)return false;
    this.checkCrossed();if(state==='INVALID')return false;
@@ -328,7 +362,9 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
     return}
    if(bad){st.verifications.push({completed:false,reason:bad,completedAtMs:now()});fail('VERIFY_'+bad);
     const buf=snap.buffer;snap=null;if(state!=='INVALID')for(const u of buf)applyLive(u);return}
+   if(unseq&&limited){const staging=snap.staging,buf=snap.buffer;snap=null;st.reseeds++;unsequencedSeed(staging,buf);return}
    if(unseq)return unsequencedVerification();
+   if(limited){limited=false;fail('SNAPSHOT_SEQUENCE_APPEARED_WHILE_CANDIDATE_LIMITED',{force:true});snap=null;return}
    if(ucands){ucands=null;fail('SNAPSHOT_SEQUENCE_APPEARED_WHILE_UNSEQUENCED_CANDIDATES',{force:true});snap=null;return}
    finishVerification(S)},
   onUpdate(u){
@@ -343,7 +379,7 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
    if(e.seq!==null&&lastSeq!==null&&e.seq===lastSeq)st.endEventSeqMatches++;
    if(!snap)this.checkCrossed()},
   checkCrossed(){if((state==='VALID'||state==='UNVERIFIED')&&touch(orders).crossedOrLocked){st.crossedStates++;fail('BOOK_CROSSED_OR_LOCKED')}},
-  reset(r='RECONNECT'){state='UNSEEDED';reason=r;orders=new Map();lastSeq=null;snap=null;alt=null;ucands=null;lastAppliedAt=null},
+  reset(r='RECONNECT'){state='UNSEEDED';reason=r;orders=new Map();lastSeq=null;snap=null;alt=null;ucands=null;limited=false;lastAppliedAt=null},
   levels(){const bid=new Map(),ask=new Map();
    for(const o of orders.values()){const m=o.side===SIDE.BID?bid:ask;const l=m.get(o.t)||{qty:0,orders:0};
     l.qty+=o.q;l.orders++;m.set(o.t,l)}return {bid,ask}},
@@ -362,6 +398,7 @@ export function createDboBook({tick=0.25,mode='STRICT',symbol=null,exchange=null
     ...(diagnostic?{label:'DIAGNOSTIC_NOT_VERIFIED'}:{})};
    if(snap)return {...base,suppressed:true,reason:snap.kind==='SEED'?'SEEDING':'VERIFICATION_IN_PROGRESS'};
    if(state!=='VALID'&&!(diagnostic&&state==='UNVERIFIED'))return {...base,suppressed:true,reason:'BOOK_'+state};
+   if(limited)return {...base,suppressed:true,reason:'CANDIDATE_LIMIT'};
    if(ucands)return {...base,suppressed:true,reason:'UNSEQUENCED_CANDIDATES_UNRESOLVED',candidates:ucands.length};
    if(lastAppliedAt===null||now()-lastAppliedAt>maxAgeMs)return {...base,suppressed:true,reason:'STALE'};
    const tc=touch(orders);

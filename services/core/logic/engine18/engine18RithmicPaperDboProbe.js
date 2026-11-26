@@ -79,9 +79,17 @@ export function evaluateStepB(r){
  };
  const verified=Object.values(checks).every(Boolean);
  const failedChecks=Object.entries(checks).filter(([,ok])=>!ok).map(([k])=>k);
- const verdict=verified?'STEP_B_BOOK_VERIFIED':'STEP_B_FAIL';
+ // Boundary unknown (unsequenced snapshots) but the evidence reconciles: label it, never VERIFIED.
+ const uv=ov.filter(v=>v.unsequenced);
+ const empiricallyReconciled=!verified&&(os.unsequencedSnapshots??0)>0&&!(o.candidateLimited)&&
+  checks.authenticated&&checks.heartbeatClean&&checks.dboSubscriptionAcceptedAndCorrelated&&checks.seeded&&
+  checks.updatesReceived&&checks.cleanFrames&&checks.noStructuralAnomalies&&checks.noCrossedOrLockedBook&&
+  checks.noIncompleteVerification&&checks.fullWindow&&checks.cleanLogout&&checks.cleanShutdown&&
+  (os.gaps??1)===0&&uv.length>=1&&ov.every(v=>v.match)&&o.state==='UNVERIFIED';
+ const verdict=verified?'STEP_B_BOOK_VERIFIED':empiricallyReconciled?'EMPIRICALLY_RECONCILED_UNVERIFIED':'STEP_B_FAIL';
  return {checks,failedChecks,verdict,
-  acceptance:{verdict,failedChecks,continuityBasis:CONTINUITY_BASIS},
+  acceptance:{verdict,failedChecks,continuityBasis:CONTINUITY_BASIS,
+   boundary:(os.unsequencedSnapshots??0)>0?'UNKNOWN_UNSEQUENCED_SNAPSHOT':'MEASURED_OR_NOT_REACHED'},
   verifiedBook:verified?{coverage:c,orders:o.orders,lastSeq:o.lastSeq,snapshotSemantics:os.semanticsResolved}:null,
   diagnosticReceipt:{observedSemantics:os.semantics??null,semanticsResolved:os.semanticsResolved??null,
    verifications:ov.length,gaps:os.gaps??null,equalSeq:os.equalSeq??null,endEvents:os.endEvents??null,
@@ -132,7 +140,7 @@ export async function runPaperDboStepB({env=process.env,WebSocketImpl=WebSocket,
   let finished=false,closing=false,windowOver=false;
   const snap=()=>{for(const b of books)b.checkCrossed();
    r.observeBook={state:observe.state,reason:observe.reason,orders:observe.orderCount,
-   lastSeq:observe.lastSeq,crossedOrLocked:observe.crossedOrLocked,stats:observe.stats()};
+   lastSeq:observe.lastSeq,crossedOrLocked:observe.crossedOrLocked,candidateLimited:observe.candidateLimited,stats:observe.stats()};
    r.strictBook={state:strict.state,reason:strict.reason,orders:strict.orderCount,crossedOrLocked:strict.crossedOrLocked,stats:strict.stats()}};
   // Coverage is captured once, at window end (before unsubscribe/logout), and only if publishable.
   const captureCoverage=()=>{const c=observe.coverage();r.coverage=c.suppressed?null:c;r.coverageSuppressedReason=c.suppressed?c.reason:null;
