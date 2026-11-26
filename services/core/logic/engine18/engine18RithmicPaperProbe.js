@@ -38,7 +38,7 @@ const F=Object.freeze({...PROTOCOL_FIELDS,rqHandlerRpCode:132764,gatewayName:153
  gatewayUri:153641,symbol:110100,exchange:110101,request:100000,updateBits:154211,
  presenceBits:149138,clearBits:154571,isSnapshot:110121,bidPrice:100022,bidSize:100030,
  bidSize64:159000,askPrice:100025,askSize:100031,askSize64:159002,tradePrice:100006,
- tradeSize:100178,tradeSize64:159008,aggressor:112003,ssboe:150100});
+ tradeSize:100178,tradeSize64:159008,aggressor:112003,ssboe:150100,usecs:150101});
 const UPDATE_BITS={LAST_TRADE:1,BBO:2};
 
 // --- protobuf wire helpers (same encoding as the conformance module) ---
@@ -153,18 +153,20 @@ export const encodeLogout=()=>num(F.templateId,TEMPLATES.logout);
 
 // --- inbound market data ---
 const size=(f,k64,k32)=>int(f,k64)??int(f,k32);
+// Gateway timestamp in microseconds (ssboe*1e6+usecs; < 2^53 until year 2255) or null.
+const gwTs=f=>{const a=int(f,F.ssboe),b=int(f,F.usecs);return a===null?null:a*1e6+(b??0)};
 export function parseInbound(frame){
  const f=decodeFields(frame),id=first(f,F.templateId);
  if(id===TEMPLATES.bbo)return {kind:'BBO',presence:int(f,F.presenceBits),clear:int(f,F.clearBits),
   snapshot:int(f,F.isSnapshot)===1,bid:dbl(f,F.bidPrice),bidSize:size(f,F.bidSize64,F.bidSize),
-  ask:dbl(f,F.askPrice),askSize:size(f,F.askSize64,F.askSize)};
- if(id===TEMPLATES.lastTrade)return {kind:'TRADE',snapshot:int(f,F.isSnapshot)===1,
-  price:dbl(f,F.tradePrice),size:size(f,F.tradeSize64,F.tradeSize),aggressor:int(f,F.aggressor)};
+  ask:dbl(f,F.askPrice),askSize:size(f,F.askSize64,F.askSize),ts:gwTs(f)};
+ if(id===TEMPLATES.lastTrade)return {kind:'TRADE',presence:int(f,F.presenceBits),snapshot:int(f,F.isSnapshot)===1,
+  price:dbl(f,F.tradePrice),size:size(f,F.tradeSize64,F.tradeSize),aggressor:int(f,F.aggressor),ts:gwTs(f)};
  if(id===TEMPLATES.heartbeatResp)return {kind:'HEARTBEAT',accepted:okCodes(strings(f,F.rpCode))||!strings(f,F.rpCode).length};
  if(id===TEMPLATES.marketDataResp){const c=strings(f,F.rpCode);
   return {kind:'SUBSCRIPTION',accepted:okCodes(c),rpCode:safeCode(c[0])}}
  if(id===TEMPLATES.forcedLogout)return {kind:'FORCED_LOGOUT'};
- if(id===TEMPLATES.logoutResp)return {kind:'LOGOUT'};
+ if(id===TEMPLATES.logoutResp){const c=strings(f,F.rpCode);return {kind:'LOGOUT',accepted:okCodes(c),rpCode:c.length?safeCode(c[0]):null}}
  if(id===TEMPLATES.loginResp)return {kind:'LOGIN'};
  return {kind:'OTHER',templateId:Number.isSafeInteger(id)?id:null};
 }
@@ -173,8 +175,11 @@ export function parseInbound(frame){
 const onTick=p=>Math.abs(p/ES_TICK-Math.round(p/ES_TICK))<1e-6;
 export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
  const s={startMs:null,endMs:null,bbo:0,bboSnapshots:0,trades:0,tradeSnapshots:0,
-  tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
-  spreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},nonTickPrices:0,
+  lastTradeNonTradeUpdates:0,lastTradeUnknownPresence:0,tradeVolume:0,aggressor:{buy:0,sell:0,unknown:0},twoSided:0,
+  spreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},
+  // Synchronized = both sides' latest values carry the SAME gateway timestamp (same event).
+  syncedSpreadTicks:{one:0,two:0,threePlus:0,lockedOrCrossed:0},syncedObservations:0,
+  oneSidedBboUpdates:0,bidTs:null,askTs:null,nonTickPrices:0,
   outOfRangePrices:0,minTrade:null,maxTrade:null,bid:null,ask:null,last:null,samples:[],nextSampleMs:null};
  const price=p=>{if(p===null)return;if(!onTick(p))s.nonTickPrices++;if(p<1000||p>20000)s.outOfRangePrices++};
  return {
@@ -183,12 +188,24 @@ export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
    const t=now();
    if(m.kind==='BBO'){
     s.bbo++;if(m.snapshot)s.bboSnapshots++;
-    if(m.clear&1)s.bid=null;if(m.clear&2)s.ask=null;
-    if(m.bid!==null){price(m.bid);s.bid=m.bid}if(m.ask!==null){price(m.ask);s.ask=m.ask}
+    if(m.clear&1){s.bid=null;s.bidTs=null}if(m.clear&2){s.ask=null;s.askTs=null}
+    const hasBid=m.bid!=null&&(m.presence==null||(m.presence&1)!==0);
+    const hasAsk=m.ask!=null&&(m.presence==null||(m.presence&2)!==0);
+    if(hasBid){price(m.bid);s.bid=m.bid;s.bidTs=m.ts??null}
+    if(hasAsk){price(m.ask);s.ask=m.ask;s.askTs=m.ts??null}
+    if(hasBid!==hasAsk)s.oneSidedBboUpdates++;
+    const bucket=(h,k)=>{if(k<=0)h.lockedOrCrossed++;else if(k===1)h.one++;else if(k===2)h.two++;else h.threePlus++};
     if(s.bid!==null&&s.ask!==null){s.twoSided++;const k=Math.round((s.ask-s.bid)/ES_TICK);
-     if(k<=0)s.spreadTicks.lockedOrCrossed++;else if(k===1)s.spreadTicks.one++;
-     else if(k===2)s.spreadTicks.two++;else s.spreadTicks.threePlus++;}
+     bucket(s.spreadTicks,k);
+     const synced=(hasBid&&hasAsk)||(s.bidTs!==null&&s.bidTs===s.askTs);
+     if(synced){s.syncedObservations++;bucket(s.syncedSpreadTicks,k)}}
    }else if(m.kind==='TRADE'){
+    // presence bit LAST_TRADE(1) marks an actual trade; other LastTrade messages carry
+    // only volume / net change / VWAP updates and are not trades.
+    // A LastTrade with NO presence bits has undocumented semantics: counted separately as unknown,
+    // never as a trade.
+    if(m.presence===null||m.presence===undefined){s.lastTradeUnknownPresence++;return}
+    if((m.presence&1)===0){s.lastTradeNonTradeUpdates++;return}
     s.trades++;if(m.snapshot)s.tradeSnapshots++;
     if(m.price!==null){price(m.price);s.last=m.price;
      s.minTrade=s.minTrade===null?m.price:Math.min(s.minTrade,m.price);
@@ -202,10 +219,11 @@ export function createStepASummary({now=Date.now,sampleEveryMs=10000}={}){
     s.nextSampleMs+=sampleEveryMs;}
   },
   finish(){s.endMs=now();const secs=Math.max(1,(s.endMs-s.startMs)/1000);
-   const {nextSampleMs,...out}=s;
+   const {nextSampleMs,bidTs,askTs,...out}=s;
    return {...out,observedMs:s.endMs-s.startMs,
     bboPerSec:Math.round(s.bbo/secs*100)/100,tradesPerSec:Math.round(s.trades/secs*100)/100,
-    oneTickShare:s.twoSided?Math.round(s.spreadTicks.one/s.twoSided*1000)/1000:null};}
+    oneTickShare:s.twoSided?Math.round(s.spreadTicks.one/s.twoSided*1000)/1000:null,
+    syncedOneTickShare:s.syncedObservations?Math.round(s.syncedSpreadTicks.one/s.syncedObservations*1000)/1000:null};}
  };
 }
 export function evaluateStepA(r){
@@ -218,8 +236,9 @@ export function evaluateStepA(r){
   fullWindow:r.stopReason==='WINDOW_COMPLETE',
   bboRateOver1PerSec:(m.bboPerSec??0)>1,
   tradesPresent:(m.trades??0)>0,
-  mostlyOneTickSpread:(m.oneTickShare??0)>=0.8,
-  noLockedOrCrossed:(m.spreadTicks?.lockedOrCrossed??1)===0,
+  // Judged only on synchronized two-sided observations (>=30 needed); threshold unchanged.
+  mostlyOneTickSpread:(m.syncedObservations??0)>=30&&(m.syncedOneTickShare??0)>=0.8,
+  noLockedOrCrossed:(m.syncedSpreadTicks?.lockedOrCrossed??1)===0,
   pricesTickAligned:(m.nonTickPrices??1)===0&&(m.outOfRangePrices??1)===0,
  };
  const pass=Object.values(checks).every(Boolean);
@@ -328,7 +347,7 @@ export async function runPaperStepA({env=process.env,WebSocketImpl=WebSocket,
  if(!Number.isSafeInteger(durationMs)||durationMs<1000||durationMs>MAX_STEP_A_MS)
   throw Error('invalid bounded Step A window');
  const sent=[];
- const r={schema:'engine18.rithmicPaperStepA.v1',readOnly:true,trading:false,recording:false,
+ const r={schema:'engine18.rithmicPaperStepA.v2',measurementVersion:'SYNCHRONIZED_SPREAD_PRESENCE_BIT_TRADES_V2',comparableOnlyWithSameMeasurementVersion:true,readOnly:true,trading:false,recording:false,
   system:PAPER_SYSTEM_NAME,symbol:cfg.symbol,exchange:cfg.exchange,phase:'DISCOVERY',
   discovery:{paperListedOnDiscoveryGateway:false,discoveryLoginRpCode:null,gatewayInfoRpCode:null,gatewayNames:[],
    rejectedGatewayNames:[],paperListedOnSelectedGateway:false},
