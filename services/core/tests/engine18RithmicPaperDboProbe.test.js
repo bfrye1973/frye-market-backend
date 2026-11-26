@@ -209,6 +209,12 @@ test('live Nov 26 shape: snapshot WITHOUT sequence -> no longer dead at seed; st
  assert.ok(!JSON.stringify(L).includes('ESZ6'),'no values in the layout');
  // diagnostic coverage is labeled and lives only in the receipt
  const d=r.diagnosticReceipt.diagnosticCoverage;assert.equal(d.verified,false);assert.equal(d.label,'DIAGNOSTIC_NOT_VERIFIED');
+ // Plan B (unsequenced periodic refresh) rides the same frames and snapshot requests
+ const pb=r.planB;assert.equal(pb.syncModeDecision.mode,'UNSEQUENCED_REFRESH');
+ assert.ok(pb.stats.refreshesCompleted>=1,JSON.stringify(pb.stats.history));assert.equal(pb.liquidity.verified,false);
+ assert.ok(['EMPIRICALLY_RECONCILED_UNVERIFIED','DIAGNOSTIC_NOT_VERIFIED'].includes(pb.liquidity.label));
+ assert.equal(pb.stats.exchangeTime.usedForPlacement,false);assert.ok(Array.isArray(pb.liquidity.keyLevels)||pb.liquidity.suppressed);
+ assert.ok(r.snapshotRequests<=Math.ceil(1600/400)+1,'Plan B adds no extra snapshot requests');
 });
 test('dboEntitlement OBSERVED when DBO data arrives even if the book is invalid',()=>{
  assert.ok(PASSING);const r=structuredClone(PASSING);r.observeBook.state='INVALID';r.observeBook.stats.snapshotsCompleted=0;
