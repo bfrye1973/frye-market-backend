@@ -11,6 +11,9 @@ Automated ES trading research platform (backend: this repo; frontend: bfrye1973/
 - **Owner (Brian):** final authority. Approves every live-market action, merge to LIVE, and every new cost.
 - **Claude:** lead engineer — design, code, tests, bounded live runs the owner approved.
 - **Engine 18D (GPT):** independent auditor. Where an audit is required, nothing merges/deploys until 18D re-audits the exact SHA.
+- **Claude Engine 8 teammate:** programs Engine 8 (PAPER execution): issue #425 and the Engine 8 trading files (`engine8CanonicalPaperAdapter.js`, `engine8DuplicateState.js`, `engine8PaperAcceptanceEligibility.js`, `engine8PaperExecutor.js`, `runEngine8Paper*.js`). Reviewed by the ChatGPT Engine 8 Manager. Start with `docs/engines/ENGINE8.md`.
+- **Claude Engine 28:** owns the #412 verification package (PRs #417/#419/#422/#420/#423) and the Engine 28 plan. Reviewed by the ChatGPT Engine 8 / Engine 28 Managers.
+- **Shared file:** `jobs/autoExecuteCanonicalPaperTrade.js`. Agree on #425 who edits it before anyone does. One owner per file.
 - Owner prefers **concise, plain-language answers**.
 
 ## Guardrails (never break)
