@@ -12,6 +12,9 @@ on:
       - 'services/core/tests/engine8DailyEvidenceReader.test.js'
       - 'services/core/logic/trading/engine8PaperCoverage.js'
       - 'services/core/tests/engine8PaperCoverage.test.js'
+      - 'services/core/logic/trading/engine8PaperReceiptObserver.js'
+      - 'services/core/tests/engine8PaperReceiptObserver.test.js'
+      - 'services/core/jobs/autoExecuteCanonicalPaperTrade.js'
       - '.github/workflows/engine8e-daily-fill-evidence.yml'
 permissions:
   contents: read
@@ -23,4 +26,5 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js services/core/tests/engine8PaperCoverage.test.js
+      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js services/core/tests/engine8PaperCoverage.test.js services/core/tests/engine8PaperReceiptObserver.test.js
+      - run: node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
