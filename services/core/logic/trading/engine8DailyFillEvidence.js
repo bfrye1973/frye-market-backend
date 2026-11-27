@@ -23,10 +23,13 @@ export function projectPaperDailyFills({date,orders,executions}={}) {
   if(matches.length!==1){issues.add(matches.length?"IDENTITY_CONFLICT":"ORDER_MISSING");continue;}
   const y=matches[0];if(y.paper!==true){issues.add("PAPER_IDENTITY_UNVERIFIED");continue;}
   if(!keys.every(f=>id(x[f])&&x[f]===y[f])||!["NEW_ENTRY","REDUCE","EXIT"].includes(x.action)){issues.add("IDENTITY_CONFLICT");continue;}
-  const sig=y.sourceSignal||{}, es=x.sourceSignal??x.ourceSignal??{};
-  if(["candidateId","planId","executionId","tradeId"].some(f=>id(sig[f])&&id(es[f])&&sig[f]!==es[f])){issues.add("IDENTITY_CONFLICT");continue;}
+  const sources=[y,x,y.sourceSignal,y.ourceSignal,x.sourceSignal,x.ourceSignal].filter(Boolean);
+  const vals=f=>[...new Set(sources.map(s=>id(s[f])).filter(Boolean))];
+  if(sources.some(s=>s.paper===false||[s.accountMode,s.mode].some(m=>typeof m==="string"&&["REAL","LIVE"].includes(m.toUpperCase())))){issues.add("PAPER_IDENTITY_UNVERIFIED");continue;}
+  if(["orderId","strategyId","action","idempotencyKey","candidateId","planId","executionId","tradeId","symbol","side"].some(f=>vals(f).length>1)){issues.add("IDENTITY_CONFLICT");continue;}
+  const sig=Object.fromEntries(["candidateId","planId","executionId","tradeId"].map(f=>[f,vals(f)[0]??null]));
   if(!filled(x)||!filled(y)||!validFill(x)||!validFill(y)||x.filledQty!==y.filledQty||x.avgPrice!==y.avgPrice||time(y.filledAt??y.ts)!==t){issues.add("FILL_UNVERIFIED");continue;}
-  rows.push({strategyId:y.strategyId,candidateId:id(sig.candidateId),planId:id(sig.planId),executionId:id(sig.executionId),orderId:k,tradeId:null,action:x.action,fillStatus:"FILLED",filledQuantity:x.filledQty,fillPrice:x.avgPrice,fillTime:x.ts,journalStatus:"UNKNOWN"});
+  rows.push({strategyId:y.strategyId,candidateId:id(sig.candidateId),planId:id(sig.planId),executionId:id(sig.executionId),orderId:k,idempotencyKey:x.idempotencyKey,tradeId:id(sig.tradeId),action:x.action,fillStatus:"FILLED",filledQuantity:x.filledQty,fillPrice:x.avgPrice,fillTime:x.ts,journalStatus:"UNKNOWN"});
  }
  return {schemaVersion:"engine8.dailyFillEvidence.v1",date,timezone:"America/Phoenix",coverage:"UNPROVEN",verdict:rows.length?"YES":"UNKNOWN",verifiedFillCount:rows.length,openingFillCount:rows.filter(x=>x.action==="NEW_ENTRY").length,exitFillCount:rows.filter(x=>x.action!=="NEW_ENTRY").length,issues:[...issues,"INTERVAL_COVERAGE_UNPROVEN"],fills:rows};
 }
