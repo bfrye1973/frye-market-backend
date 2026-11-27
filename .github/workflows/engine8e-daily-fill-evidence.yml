@@ -1,0 +1,44 @@
+name: Engine8E daily fill evidence offline
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/trading/engine8DailyFillEvidence.js'
+      - 'services/core/tests/engine8DailyFillEvidence.test.js'
+      - 'services/core/logic/trading/engine8DailyJournalEvidence.js'
+      - 'services/core/tests/engine8DailyJournalEvidence.test.js'
+      - 'services/core/logic/trading/engine8PrivatePaperReceipt.js'
+      - 'services/core/tests/engine8PrivatePaperReceipt.test.js'
+      - 'services/core/logic/trading/engine8DailyEvidenceReader.js'
+      - 'services/core/tests/engine8DailyEvidenceReader.test.js'
+      - 'services/core/logic/trading/engine8PaperCoverage.js'
+      - 'services/core/tests/engine8PaperCoverage.test.js'
+      - 'services/core/logic/trading/engine8PaperReceiptObserver.js'
+      - 'services/core/tests/engine8PaperReceiptObserver.test.js'
+      - 'services/core/logic/trading/engine8PaperReceiptReader.js'
+      - 'services/core/tests/engine8PaperReceiptReader.test.js'
+      - 'services/core/logic/trading/engine8ObservedApprovalWindow.js'
+      - 'services/core/tests/engine8ObservedApprovalWindow.test.js'
+      - 'services/core/logic/trading/engine8LifecycleReceiptObserver.js'
+      - 'services/core/tests/engine8LifecycleReceiptObserver.test.js'
+      - 'services/core/logic/trading/engine8PaperObserverHealth.js'
+      - 'services/core/tests/engine8PaperObserverHealth.test.js'
+      - 'services/core/logic/trading/engine8PaperScheduleDiagnostics.js'
+      - 'services/core/tests/engine8PaperScheduleDiagnostics.test.js'
+      - 'services/core/logic/trading/engine8DailyVerificationProducer.js'
+      - 'services/core/tests/engine8DailyVerificationProducer.test.js'
+      - 'services/core/jobs/autoExecuteCanonicalPaperTrade.js'
+      - 'services/core/routes/runAllEngines.js'
+      - '.github/workflows/engine8e-daily-fill-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js services/core/tests/engine8PaperCoverage.test.js services/core/tests/engine8PaperReceiptObserver.test.js services/core/tests/engine8PaperReceiptReader.test.js services/core/tests/engine8ObservedApprovalWindow.test.js services/core/tests/engine8LifecycleReceiptObserver.test.js services/core/tests/engine8PaperObserverHealth.test.js services/core/tests/engine8PaperScheduleDiagnostics.test.js services/core/tests/engine8DailyVerificationProducer.test.js
+      - run: node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
+      - run: node --check services/core/routes/runAllEngines.js

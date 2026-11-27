@@ -1,5 +1,9 @@
 // services/core/routes/runAllEngines.js
 import express from "express";
+import {randomUUID} from "node:crypto";
+import {observeCompletedPaperCycle,persistPrivateReceipt} from "../logic/trading/engine8PaperReceiptObserver.js";
+import {buildPrivatePaperReceipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
+import {observeLifecycleOutcome} from "../logic/trading/engine8LifecycleReceiptObserver.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -179,6 +183,21 @@ function runStep({ name, cmd, args, cwd, env = {} }) {
   });
 }
 
+// Record scheduler boundaries independently; these are not trading decisions.
+function observeSchedulerBoundary(kind,runId,startedAt,outcome=null) {
+  if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
+  try {
+    const receipt=buildPrivatePaperReceipt({mode:"PAPER",cycleKind:kind,schedulerRunId:runId,cycleId:runId+":"+kind,cycleTime:startedAt,strategyId:"intraday_scalp@10m",reportedOutcome:outcome},nowIso());
+    void persistPrivateReceipt(process.env.ENGINE8_PAPER_VERIFICATION_DIR,receipt).catch(()=>{});
+  } catch { /* diagnostic only */ }
+}
+// Capture only scheduler skips that never enter the bridge; the bridge owns its own receipt.
+// Fire-and-forget after decision; no await, retry, or trading-state mutation.
+function observePaperSchedulerSkip(reason,cycleTime,runId) {
+  if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
+  try { void observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}).catch(()=>{}); } catch { /* observational only */ }
+}
+
 // ------------------------------
 // main handler
 // ------------------------------
@@ -203,6 +222,9 @@ async function handle(req, res) {
   IS_RUNNING = true;
   const routeStartedMs = Date.now();
   const startedAt = nowIso();
+  const verificationRunId=randomUUID();
+  let verificationRunOutcome="UNKNOWN";
+  observeSchedulerBoundary("SCHEDULER_START",verificationRunId,startedAt);
 
   console.log(`[run-all-engines] REQUEST START @ ${startedAt}`);
 
@@ -222,6 +244,9 @@ async function handle(req, res) {
       args: [ENGINE8_AUTO_PAPER_LIFECYCLE_JOB],
       cwd: CORE_DIR,
     });
+    if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
+      try { void observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR}).catch(()=>{}); } catch { /* diagnostic only */ }
+    }
 
     // ---------------------------------
     // STEP 1: Engine 1 + Shelves
@@ -234,6 +259,7 @@ async function handle(req, res) {
     });
 
     if (step1.code !== 0) {
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt,verificationRunId);
       const endedAt = nowIso();
       const totalElapsedMs = elapsedMs(routeStartedMs);
 
@@ -416,7 +442,10 @@ async function handle(req, res) {
         cmd: "node",
         args: [ENGINE8_AUTO_PAPER_EXECUTOR_JOB],
         cwd: CORE_DIR,
+        env: {ENGINE8_VERIFICATION_SCHEDULER_RUN_ID:verificationRunId},
       });
+    } else {
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt,verificationRunId);
     }
 
     // Optional non-authoritative diagnostic. Never gates or retries execution.
@@ -514,6 +543,7 @@ async function handle(req, res) {
       step3audit.code === 0 &&
       step4.code === 0;
 
+    verificationRunOutcome=ok?"COMPLETED":"REJECTED";
     const code =
       step0.code !== 0
         ? step0.code
@@ -628,6 +658,7 @@ async function handle(req, res) {
       totalElapsedMs,
     });
   } finally {
+    observeSchedulerBoundary("SCHEDULER_END",verificationRunId,startedAt,verificationRunOutcome);
     IS_RUNNING = false;
     console.log(`[run-all-engines] LOCK RELEASED @ ${nowIso()}`);
   }

@@ -13,6 +13,8 @@
 // Those decisions must already be complete in the frozen snapshot.
 
 import fs from "fs";
+import {createHash,randomUUID} from "node:crypto";
+import {observeCompletedPaperCycle} from "../logic/trading/engine8PaperReceiptObserver.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -37,13 +39,19 @@ function upper(value) {
   return String(value ?? "").trim().toUpperCase();
 }
 
-function printAndExit(payload, code = 0) {
+const verificationCycleTime=nowIso();
+const schedulerRunId=process.env.ENGINE8_VERIFICATION_SCHEDULER_RUN_ID||null;
+let verificationContext={executorInvoked:false,schedulerRunId};
+async function printAndExit(payload, code = 0) {
   console.log(JSON.stringify(payload, null, 2));
+  if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
+    try { await observeCompletedPaperCycle({step:{stdout:JSON.stringify(payload)},context:verificationContext,cycleTime:verificationCycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}); } catch { /* observational only */ }
+  }
   process.exit(code);
 }
 
-function reject(reason, detail = null) {
-  printAndExit(
+async function reject(reason, detail = null) {
+  await printAndExit(
     {
       ok: false,
       status: "AUTO_PAPER_EXECUTION_BRIDGE_ERROR",
@@ -55,8 +63,8 @@ function reject(reason, detail = null) {
   );
 }
 
-function skip(reason, engine8PaperOrder = null) {
-  printAndExit({
+async function skip(reason, engine8PaperOrder = null) {
+  await printAndExit({
     ok: true,
     skipped: true,
     status: "AUTO_PAPER_EXECUTION_SKIPPED",
@@ -77,21 +85,26 @@ function skip(reason, engine8PaperOrder = null) {
 if (
   process.env.ENGINE8_AUTO_PAPER_EXECUTION_ENABLED !== "1"
 ) {
-  skip("ENGINE8_AUTO_PAPER_EXECUTION_DISABLED");
+  await skip("ENGINE8_AUTO_PAPER_EXECUTION_DISABLED");
 }
 
 if (!fs.existsSync(SNAPSHOT_FILE)) {
-  reject("ES_STRATEGY_SNAPSHOT_NOT_FOUND", SNAPSHOT_FILE);
+  await reject("ES_STRATEGY_SNAPSHOT_NOT_FOUND", SNAPSHOT_FILE);
 }
 
 let snapshot;
 
 try {
-  snapshot = JSON.parse(
-    fs.readFileSync(SNAPSHOT_FILE, "utf8")
-  );
+  const snapshotBytes=fs.readFileSync(SNAPSHOT_FILE, "utf8");
+  snapshot = JSON.parse(snapshotBytes);
+  if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
+    try {
+      const lane=snapshot?.strategies?.[STRATEGY_ID];
+      verificationContext={executorInvoked:false,schedulerRunId,adapter:lane?.engine8PaperOrder,engine6Permission:typeof lane?.permission?.paper?.allowed==="boolean"?lane.permission.paper.allowed:null,approvalSnapshotTime:lane?.permission?.paper?.snapshotTime??snapshot?.now??null,approvalSnapshotHash:createHash("sha256").update(snapshotBytes).digest("hex")};
+    } catch { /* observational only */ }
+  }
 } catch (error) {
-  reject(
+  await reject(
     "ES_STRATEGY_SNAPSHOT_UNREADABLE",
     String(error?.message || error)
   );
@@ -102,38 +115,38 @@ const engine8PaperOrder =
     ?.engine8PaperOrder || null;
 
 if (!engine8PaperOrder) {
-  reject("ENGINE8_CANONICAL_ADAPTER_NOT_FOUND");
+  await reject("ENGINE8_CANONICAL_ADAPTER_NOT_FOUND");
 }
 
 // Validate the execution environment on every enabled cycle,
 // even when no trade is currently ready. This prevents a valid
 // future GO from discovering a missing safety/admin setting too late.
 if (process.env.ENGINE8_PAPER_ONLY !== "1") {
-  reject("ENGINE8_PAPER_ONLY_NOT_SET");
+  await reject("ENGINE8_PAPER_ONLY_NOT_SET");
 }
 
 if (
   process.env.ENGINE8_CANONICAL_EXECUTOR_ENABLED !== "1"
 ) {
-  reject("ENGINE8_CANONICAL_EXECUTOR_ENABLED_NOT_SET");
+  await reject("ENGINE8_CANONICAL_EXECUTOR_ENABLED_NOT_SET");
 }
 
 if (process.env.ENGINE8_KILL_SWITCH === "1") {
-  reject("ENGINE8_KILL_SWITCH_ACTIVE");
+  await reject("ENGINE8_KILL_SWITCH_ACTIVE");
 }
 
 if (
   process.env.ENGINE8_LIVE_TRADING_ENABLED === "1" ||
   process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1"
 ) {
-  reject("LIVE_EXECUTION_FLAGS_PRESENT");
+  await reject("LIVE_EXECUTION_FLAGS_PRESENT");
 }
 
 if (
   process.env.REPLAY_MODE === "1" ||
   process.env.ENGINE12_REPLAY_MODE === "1"
 ) {
-  reject("REPLAY_EXECUTION_FORBIDDEN");
+  await reject("REPLAY_EXECUTION_FORBIDDEN");
 }
 
 const adminSecret = String(
@@ -141,14 +154,14 @@ const adminSecret = String(
 ).trim();
 
 if (!adminSecret) {
-  reject("ENGINE8_ADMIN_SECRET_NOT_CONFIGURED");
+  await reject("ENGINE8_ADMIN_SECRET_NOT_CONFIGURED");
 }
 
 if (
   upper(engine8PaperOrder.status) !== READY_STATUS ||
   engine8PaperOrder.executable !== true
 ) {
-  skip(
+  await skip(
     "ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED",
     engine8PaperOrder
   );
@@ -175,6 +188,7 @@ let payload = null;
 let raw = "";
 
 try {
+  verificationContext.executorInvoked=true;
   response = await fetch(url, {
     method: "POST",
     headers: {
@@ -196,7 +210,7 @@ try {
 } catch (error) {
   clearTimeout(timeout);
 
-  reject(
+  await reject(
     "CANONICAL_PAPER_EXECUTION_REQUEST_FAILED",
     String(error?.message || error)
   );
@@ -205,7 +219,7 @@ try {
 }
 
 if (!response?.ok || payload?.ok !== true) {
-  reject(
+  await reject(
     "CANONICAL_PAPER_EXECUTION_REJECTED",
     {
       httpStatus: response?.status ?? null,
@@ -215,7 +229,7 @@ if (!response?.ok || payload?.ok !== true) {
   );
 }
 
-printAndExit({
+await printAndExit({
   ok: true,
   skipped: false,
   status: "AUTO_PAPER_EXECUTION_COMPLETED",
