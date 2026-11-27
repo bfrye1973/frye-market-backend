@@ -1,5 +1,7 @@
 // services/core/routes/runAllEngines.js
 import express from "express";
+import {randomUUID} from "node:crypto";
+import {observeCompletedPaperCycle} from "../logic/trading/engine8PaperReceiptObserver.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -179,6 +181,13 @@ function runStep({ name, cmd, args, cwd, env = {} }) {
   });
 }
 
+// Capture only scheduler skips that never enter the bridge; the bridge owns its own receipt.
+// Fire-and-forget after decision; no await, retry, or trading-state mutation.
+function observePaperSchedulerSkip(reason,cycleTime) {
+  if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
+  try { void observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}).catch(()=>{}); } catch { /* observational only */ }
+}
+
 // ------------------------------
 // main handler
 // ------------------------------
@@ -234,6 +243,7 @@ async function handle(req, res) {
     });
 
     if (step1.code !== 0) {
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt);
       const endedAt = nowIso();
       const totalElapsedMs = elapsedMs(routeStartedMs);
 
@@ -417,6 +427,8 @@ async function handle(req, res) {
         args: [ENGINE8_AUTO_PAPER_EXECUTOR_JOB],
         cwd: CORE_DIR,
       });
+    } else {
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt);
     }
 
     // Optional non-authoritative diagnostic. Never gates or retries execution.
