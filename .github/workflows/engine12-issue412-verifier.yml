@@ -1,0 +1,44 @@
+name: Engine12 Issue412 daily verifier
+# exact-head restack trigger
+on:
+  push:
+    branches:
+      - engine12/issue412-daily-verifier-consumer
+      - engine12/issue412-daily-verifier-restack
+  pull_request:
+    paths:
+      - "services/core/logic/investigator/engine12DailyPaperVerification.js"
+      - "services/core/routes/tradeInvestigator.js"
+      - "services/core/tests/engine12DailyPaperVerification*.test.js"
+      - "services/core/tests/engine12Issue412ConsumerRegressions.test.js"
+      - "services/core/logic/investigator/engine12ObservedReplayDay.js"
+      - "services/core/logic/trading/engine8PaperReceiptReader.js"
+      - "services/core/logic/trading/engine8PaperReceiptObserver.js"
+      - "services/core/logic/trading/engine8PaperCoverage.js"
+      - ".github/workflows/engine12-issue412-verifier.yml"
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install --ignore-scripts --no-audit --no-fund --no-package-lock
+      - name: Syntax
+        run: |
+          node --check services/core/logic/investigator/engine12DailyPaperVerification.js
+          node --check services/core/routes/tradeInvestigator.js
+          node --check services/core/logic/investigator/engine12ObservedReplayDay.js
+      - name: Engine12 Issue412 tests
+        run: |
+          node --test services/core/tests/engine12DailyPaperVerification.test.js
+          node --test services/core/tests/engine12DailyPaperVerificationRoute.test.js
+          node --test services/core/tests/engine12Issue412ConsumerRegressions.test.js
+      - name: Producer receipt-reader contract regression
+        run: node --test services/core/tests/engine8PaperReceiptReader.test.js services/core/tests/engine8PrivatePaperReceipt.test.js
+      - name: Existing Trade Investigator route regression
+        run: node --test services/core/tests/tradeInvestigatorRoute.test.js

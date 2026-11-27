@@ -176,11 +176,12 @@ test("executor job: slow, hung or failing receipt storage never changes its resu
       }
 
       // Healthy storage still records a receipt, so the bound does not drop good evidence.
-      const before = (await fsp.readdir(realReceiptDir)).filter((f) => f.endsWith(".json")).length;
+      const countReceipts = async () => { let n = 0; for (const e of await fsp.readdir(realReceiptDir, { withFileTypes: true })) { if (e.isDirectory()) n += (await fsp.readdir(path.join(realReceiptDir, e.name))).filter((f) => f.endsWith(".json")).length; else if (e.name.endsWith(".json")) n += 1; } return n; };
+      const before = await countReceipts();
       const ok = await runJob({ enabled: c.enabled, verification: true, receiptDir: realReceiptDir });
       assert.equal(ok.code, baseline.code);
       assert.deepEqual(decision(ok.stdout), decision(baseline.stdout));
-      const after = (await fsp.readdir(realReceiptDir)).filter((f) => f.endsWith(".json")).length;
+      const after = await countReceipts();
       assert.equal(after, before + 1, `${c.name}: healthy storage did not record exactly one receipt`);
       assert.doesNotMatch(ok.stderr, /ENGINE28A_OBSERVER_EVIDENCE_GAP/);
     }
@@ -217,6 +218,7 @@ test("scheduler: every verification write is bounded; trading steps and gating a
   assert.doesNotMatch(s, /void\s+observeCompletedPaperCycle/);
   assert.doesNotMatch(s, /void\s+observeLifecycleOutcome/);
   assert.equal((s.match(/OBSERVER_LIMITER\.dispatch\(/g) || []).length, 3);
+  assert.match(s, /observeSchedulerBoundary\("SCHEDULER_SKIPPED"/);
   // Execution gating is an owner decision (#412 7225818697); E28A does not change it.
   assert.match(s, /step3doctor\.code === 0/);
   // The skip response itself is unchanged; only a log line is added.

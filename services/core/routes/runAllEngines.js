@@ -220,6 +220,8 @@ async function handle(req, res) {
     // Engine 28A #412: a skipped slot is otherwise invisible (200 before any
     // receipt). Log it so coverage can mark the slot, not assume it ran.
     try { console.log(`[run-all-engines] SLOT SKIPPED ALREADY_RUNNING @ ${nowIso()}`); } catch { /* diagnostic only */ }
+    // Durable private record of the skipped slot (bounded, fire-and-forget).
+    try { observeSchedulerBoundary("SCHEDULER_SKIPPED",randomUUID(),nowIso(),"SKIPPED"); } catch { /* diagnostic only */ }
     return res.json({
       ok: true,
       skipped: true,

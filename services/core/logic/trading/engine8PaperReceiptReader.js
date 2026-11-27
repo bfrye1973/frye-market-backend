@@ -2,6 +2,7 @@
 // No approval certification or absence-of-trade claim is made by this module.
 import fs from "node:fs/promises";
 import path from "node:path";
+import {RECEIPT_DAY_CAP} from "./engine8PaperReceiptObserver.js";
 import {constants} from "node:fs";
 import {createHash} from "node:crypto";
 import {validatePrivatePaperReceipt} from "./engine8PrivatePaperReceipt.js";
@@ -14,14 +15,15 @@ export async function readPrivatePaperReceipts({root,date,now=new Date().toISOSt
   if(typeof root!=="string"||!path.isAbsolute(root)||path.resolve(root)!==root||await fs.realpath(root)!==root)throw Error("ROOT");
   const st=await fs.stat(root);
   if(!st.isDirectory()||(st.mode&0o077)!==0)throw Error("ROOT");
-  const directory=await fs.opendir(root);let count=0;
+  // #412 (F-3): receipts live in root/<date>/; older receipts may be flat in root.
+  const scan=async(dir,limit)=>{const directory=await fs.opendir(dir);let count=0;
   for await(const entry of directory){
-   if(++count>50000){issues.push("RECEIPT_SCAN_LIMIT");break;}
+   if(++count>limit){issues.push("RECEIPT_SCAN_LIMIT");break;}
    if(!entry.name.startsWith(date+"-"))continue;
    if(!entry.isFile()||!/^[0-9-]{10}-[a-f0-9]{64}\.json$/.test(entry.name)){issues.push("UNSAFE_RECEIPT_FILE");continue;}
    let fd;
    try{
-    fd=await fs.open(path.join(root,entry.name),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+    fd=await fs.open(path.join(dir,entry.name),constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
     const before=await fd.stat();
     if(!before.isFile()||(before.mode&0o077)!==0||before.size>8192)throw Error("UNSAFE");
     const bytes=Buffer.alloc(before.size+1);
@@ -36,6 +38,11 @@ export async function readPrivatePaperReceipts({root,date,now=new Date().toISOSt
     seen.add(receipt.cycleId);receipts.push(receipt);
    }catch{issues.push("RECEIPT_READ_FAILED");}finally{if(fd)await fd.close().catch(()=>{});}
   }
+  };
+  await scan(root,50000);
+  const dayDir=path.join(root,date);
+  const ds=await fs.lstat(dayDir).catch(()=>null);
+  if(ds){if(ds.isSymbolicLink()||!ds.isDirectory()||(ds.mode&0o077)!==0)issues.push("UNSAFE_RECEIPT_DAY_DIR");else await scan(dayDir,RECEIPT_DAY_CAP+1);}
  }catch{issues.push("RECEIPT_ARCHIVE_UNAVAILABLE");}
  return {date,readAt:now,receipts,issues:[...new Set(issues)],coverage:"UNPROVEN"};
 }
