@@ -1,6 +1,6 @@
 # Engine 8 — PAPER execution (passover + design review)
 
-**Written:** 2026-11-27 by Claude, from a direct read of `main` @ `19ffc3c` (the version running in production) and Render scheduler logs. For a new Engine 8 teammate (Claude or another provider). Read `CLAUDE.md`, then this file, then the open items in section 7.
+**Written:** 2026-11-27 by Claude, from a direct read of `main` @ `19ffc3c` (the version running in production) and Render scheduler logs. For the Engine 8 manager (Claude) and reviewer (ChatGPT Engine 8). Read `CLAUDE.md`, then this file, then the open items in section 7.
 
 **One-line summary:** Engine 6 *is* approving trades; Engine 8 refused every one because it was still locked in the original "one acceptance test trade" mode. **Fix released Nov 27** (PR #402 code + Render setting); it needs confirming on the next approved trade.
 
@@ -96,20 +96,29 @@ This is **proposed**, not approved; it needs owner approval. It keeps every real
 
 ## 7. Open items
 
+**Roles (owner decision, Nov 27):** Claude is the Engine 8 manager (management and programming). ChatGPT Engine 8 does the independent engineering review, at an exact SHA with CI green. Engine 28A owns scheduler and observer safety, Engine 12 independent trade verification, Engine 10B Journal accuracy. The owner authorizes production.
+
 - [x] Owner authorized; PR #402 code merged (`f7d1bc4` via #426) and setting on (Nov 27, section 4)
+- [ ] **P0, before the next approval: read-only production preflight.** ChatGPT's #402 release gate required it, and it was **not done before release** (#425 answers 1–4). Run `scripts/engine8/preflight-readonly.sh` in the Render Shell of `frye-market-backend-1`. It prints settings as set/unset only, store file presence/parse/counts, acceptance booleans, ledger status counts and instruction-lock count/age. Report as PASS/FAIL/UNKNOWN on #425, never values. Never reset, unlock or retry anything because of it.
 - [ ] **Verify on the next Engine 6 approval** that an order is created (section 4)
-- [ ] Confirm the underlying blocker for Nov 25 11:31 and Nov 27 4:46 from Replay before about Dec 9–10 (preservation script: PR #423)
-- [ ] ChatGPT Engine 8 manager: review this file; correct anything wrong; provide the passover items in section 8
-- [ ] Agree on the section 6 design, then build it as one PR with the section 6 tests (Claude builds, Engine 8 manager reviews)
-- [ ] Coordinate with #412 (PRs #417/#419/#422): they touch `autoExecuteCanonicalPaperTrade.js`, so keep one owner per file
+- [ ] Preserve original Nov 24–27 evidence and confirm the underlying blocker for Nov 25 11:31 and Nov 27 4:46 from Replay before about Dec 9–10 (preservation script: PR #423). Do not conflate with other windows.
+- [ ] First redesign PR = **D2+D3+D4 diagnostics only** (specific reason codes, all blockers logged every cycle, UNKNOWN/not-evaluated distinguished). No trading change; keep status compatibility for Engine 28A/12 consumers; golden before/after tests. ChatGPT agreed (#425 answer 20).
+- [ ] Then D1/D5/D6/D7 per ChatGPT's conditions (#425 answer 18): keep historical trial audit and operator disable; never auto-unlock; the pure evaluator plus a fresh authoritative recheck inside the lock; step 7 is effectful and outside the pure function; one primary reason plus all blockers.
+- [ ] Close stale PRs after checking nothing unique is lost (#425 answer 9): #388, #401, #398 (Ironbeam retired), #311, #327, #333; compare #309; Engine 7 to confirm #307; Engine 10B to confirm #308. #160/#162/#165 (REAL Schwab) stay on HOLD pending owner/Engine 10.
+- [ ] REAL-path audit: the production start command also runs `watchEngine8RealSchwabFills.js` (broker GET-only per source). Confirm no REAL order path is reachable (#425 answer 10).
+- [x] Shared file `jobs/autoExecuteCanonicalPaperTrade.js`: Engine 8 owns the trading path, Engine 28 owns only the observer code (#419/#422). Agreed on #425 (answer 22).
 
-## 8. Still needed from the Engine 8 manager
+## 8. Answered by ChatGPT Engine 8 (#425, Nov 27): key points
 
-- Why the durable store started without an acceptance file, and whether the old store held a completed-trial record
-- Every open Engine 8 PR, what it fixes, its tested head, and why it is unmerged
-- Production settings that affect PAPER execution (names only, never values)
-- Rules Engine 8 considers non-negotiable safety
-- Known stranded locks or reconciliation work pending
+- **Unknown, not absent:** current settings, durable store contents, stranded locks, pending Journal acks, and whether production has ever placed a PAPER fill. ChatGPT's Render tools can't read settings or disk. Four post-release cycles exited cleanly; that proves process completion only.
+- **Store started empty** for isolation from legacy state (no migration). Whether an old completed-trial record exists is unknown; do not fabricate or migrate one.
+- **After the first close**, the second trade needs the continuous flag, and every other guard still applies (operator/kill, identity, corrupt receipt, same plan, open position, pending Journal, duplicate ledger, instruction lock, route guards).
+- **PAPER fills are internal** (`executeTradeTicket`, no broker). Futures fill at `futuresEntryPrice`; lifecycle exits fill at the stop or target price; no slippage is applied. Review this before the redesign.
+- **Same-bar stop+target** → `AUTO_PAPER_LIFECYCLE_ATTENTION_REQUIRED`, logged but not alerted; reconciled from ordered data, never guessed.
+- **Journal ack pending** = durable fill without a confirmed Engine 10 ack. It blocks duplicates. Fix it by reconciling the same fill, never by placing another order.
+- **Size** comes from Engine 7 as a positive integer; no hard-coded execution fallback seen in the executor (adapter/route audit still open).
+- **Non-negotiable safety (answer 17):** explicit PAPER authorization; no REAL/replay execution; authenticated route; operator/kill; current E6 approval; exact E26/E9/E7 identity/geometry/quantity; no stale snapshot; durable cross-process lock and idempotency; corrupt/unavailable state fails closed; no open-position overlap; unresolved fill/ack blocks duplicates; immutable event IDs; exits never exceed remaining qty or reverse; same-bar ambiguity not guessed; observers never change trading; independent acceptance and owner release. No resets or blind retries.
+- **Keep these checks in any refactor (answer 19):** missing vs corrupt receipt, explicit authorization, completed-candidate replay, operator-disable independent of the trial, duplicate key/active plan/open Journal/ack, lock hard-crash semantics, route admin and replay/live gates, frozen geometry, quantity integrity, separate lifecycle event IDs, no order retry after a fill.
 
 ## Key files
 

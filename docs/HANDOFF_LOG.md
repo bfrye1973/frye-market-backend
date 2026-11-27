@@ -20,3 +20,9 @@ Newest at the bottom. One short entry per work session.
 - Waiting on owner: PR #402 merge **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`.
 - Next: Engine 8 manager review of ENGINE8.md; agree on the section 6 redesign.
 - Later (Nov 27, 1:08 PM AZ): owner authorized the fix. PR #402 head `018266d` merged as `f7d1bc4` (PR #426); `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1` set on frye-market-backend-1; deploy live 20:08 UTC; first cycle clean. **Next:** confirm `AUTO_PAPER_EXECUTION_COMPLETED` on the next Engine 6 approval. Engine 8 work now belongs to the Claude Engine 8 teammate (#425).
+
+## 2026-11-27 (afternoon) — Engine 8 (Claude, now Engine 8 manager)
+- Owner made Claude the Engine 8 manager; ChatGPT Engine 8 is the independent reviewer. 22 questions on #425, all answered by ChatGPT; key points recorded in `docs/engines/ENGINE8.md` sections 7–8.
+- Found: the read-only production preflight ChatGPT required before releasing #402 was not done. Added `scripts/engine8/preflight-readonly.sh` (read-only; set/unset, counts and booleans only).
+- Waiting on owner: run the preflight in the Render Shell before the next approval (market reopens Sunday 4 PM AZ).
+- Next: verify the first post-release approval places an order; first redesign PR = D2+D3+D4 diagnostics only.
