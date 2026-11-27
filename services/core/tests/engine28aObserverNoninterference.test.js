@@ -16,6 +16,7 @@ import {
   runBounded,
   createInFlightLimiter,
   resolveObserverTimeoutMs,
+  resolveMaxInFlight,
   GAP_EVENT,
   ENGINE28A_OBSERVER_DEFAULT_TIMEOUT_MS,
 } from "../logic/engine28a/boundedObserverDispatch.js";
@@ -60,7 +61,7 @@ test("observer timeout is clamped; bad values fall back to the default", () => {
   assert.equal(resolveObserverTimeoutMs(undefined), ENGINE28A_OBSERVER_DEFAULT_TIMEOUT_MS);
   assert.equal(resolveObserverTimeoutMs("abc"), ENGINE28A_OBSERVER_DEFAULT_TIMEOUT_MS);
   assert.equal(resolveObserverTimeoutMs(1), 100);
-  assert.equal(resolveObserverTimeoutMs(999999), 10000);
+  assert.equal(resolveObserverTimeoutMs(999999), 5000);
 });
 
 // ---------- unit: in-flight limiter ----------
@@ -227,4 +228,28 @@ test("executor: the observer is awaited only through runBounded", () => {
   const s = fs.readFileSync(JOB, "utf8");
   assert.match(s, /await runBounded\(\(\)=>observeCompletedPaperCycle\(/);
   assert.doesNotMatch(s, /try \{ await observeCompletedPaperCycle\(/);
+});
+
+test("limiter: configured cap is bounded; fulfilled UNKNOWN counts as a failure and is logged with its run id", async () => {
+  assert.equal(resolveMaxInFlight("100000"), 32);
+  assert.equal(resolveMaxInFlight("0"), 8);
+  assert.equal(resolveMaxInFlight(undefined), 8);
+  const logs = [];
+  const lim = createInFlightLimiter({ max: "2", log: (x) => logs.push(x) });
+  assert.equal(lim.stats().cap, 2);
+  lim.dispatch("LIFECYCLE_RECEIPT", async () => ({ status: "UNKNOWN" }), { runId: "run-1" });
+  await new Promise((r) => setImmediate(r));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(lim.stats().failed, 1);
+  const gap = logs.find((x) => x.reason === "OBSERVER_REPORTED_UNKNOWN");
+  assert.ok(gap, "fulfilled UNKNOWN must be logged");
+  assert.deepEqual(gap.context, { runId: "run-1" });
+});
+
+test("runBounded logs an observer that completes but reports UNKNOWN", async () => {
+  const logs = [];
+  const r = await runBounded(async () => ({ status: "UNKNOWN" }), { timeoutMs: 150, context: { schedulerRunId: "s1" }, log: (x) => logs.push(x) });
+  assert.equal(r.status, "COMPLETED");
+  assert.equal(logs[0].reason, "OBSERVER_REPORTED_UNKNOWN");
+  assert.deepEqual(logs[0].context, { schedulerRunId: "s1" });
 });

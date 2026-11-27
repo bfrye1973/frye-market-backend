@@ -48,7 +48,7 @@ async function printAndExit(payload, code = 0) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
     // Engine 28A #412: bounded observer. Slow, hung or failing receipt storage
     // never delays this exit or changes its code; the gap is logged as UNKNOWN.
-    try { await runBounded(()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify(payload)},context:verificationContext,cycleTime:verificationCycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}),{timeoutMs:process.env.ENGINE28A_OBSERVER_TIMEOUT_MS,label:"ENTRY_RECEIPT",log:r=>console.error(JSON.stringify(r))}); } catch { /* observational only */ }
+    try { await runBounded(()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify(payload)},context:verificationContext,cycleTime:verificationCycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}),{timeoutMs:process.env.ENGINE28A_OBSERVER_TIMEOUT_MS,label:"ENTRY_RECEIPT",context:{schedulerRunId},log:r=>console.error(JSON.stringify(r))}); } catch { /* observational only */ }
   }
   process.exit(code);
 }

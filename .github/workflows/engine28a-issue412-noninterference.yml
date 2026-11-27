@@ -4,6 +4,8 @@ on:
     paths:
       - 'services/core/logic/engine28a/boundedObserverDispatch.js'
       - 'services/core/tests/engine28aObserverNoninterference.test.js'
+      - 'services/core/tests/engine28aSchedulerIntegration.test.js'
+      - 'services/core/logic/trading/engine8PrivatePaperReceipt.js'
       - 'services/core/jobs/autoExecuteCanonicalPaperTrade.js'
       - 'services/core/routes/runAllEngines.js'
       - 'services/core/logic/trading/engine8PaperReceiptObserver.js'
@@ -19,6 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test services/core/tests/engine28aObserverNoninterference.test.js
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: node --test services/core/tests/engine28aObserverNoninterference.test.js services/core/tests/engine28aSchedulerIntegration.test.js
       - run: node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
       - run: node --check services/core/routes/runAllEngines.js

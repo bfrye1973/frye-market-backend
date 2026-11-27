@@ -187,21 +187,21 @@ function runStep({ name, cmd, args, cwd, env = {} }) {
 // Engine 28A #412: every fire-and-forget verification write goes through one
 // bounded limiter. A hung filesystem cannot accumulate pending writes in this
 // process; writes beyond the cap are dropped and logged as UNKNOWN evidence.
-const OBSERVER_LIMITER=createInFlightLimiter({max:Number(process.env.ENGINE28A_OBSERVER_MAX_IN_FLIGHT)||undefined,log:r=>console.error(JSON.stringify(r))});
+const OBSERVER_LIMITER=createInFlightLimiter({max:process.env.ENGINE28A_OBSERVER_MAX_IN_FLIGHT,log:r=>console.error(JSON.stringify(r))});
 
 // Record scheduler boundaries independently; these are not trading decisions.
 function observeSchedulerBoundary(kind,runId,startedAt,outcome=null) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
   try {
     const receipt=buildPrivatePaperReceipt({mode:"PAPER",cycleKind:kind,schedulerRunId:runId,cycleId:runId+":"+kind,cycleTime:startedAt,strategyId:"intraday_scalp@10m",reportedOutcome:outcome},nowIso());
-    OBSERVER_LIMITER.dispatch(kind,()=>persistPrivateReceipt(process.env.ENGINE8_PAPER_VERIFICATION_DIR,receipt));
+    OBSERVER_LIMITER.dispatch(kind,()=>persistPrivateReceipt(process.env.ENGINE8_PAPER_VERIFICATION_DIR,receipt),{runId});
   } catch { /* diagnostic only */ }
 }
 // Capture only scheduler skips that never enter the bridge; the bridge owns its own receipt.
 // Fire-and-forget after decision; no await, retry, or trading-state mutation.
 function observePaperSchedulerSkip(reason,cycleTime,runId) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
-  try { OBSERVER_LIMITER.dispatch("SCHEDULER_SKIP_RECEIPT",()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))})); } catch { /* observational only */ }
+  try { OBSERVER_LIMITER.dispatch("SCHEDULER_SKIP_RECEIPT",()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}),{runId}); } catch { /* observational only */ }
 }
 
 // ------------------------------
@@ -254,7 +254,7 @@ async function handle(req, res) {
       cwd: CORE_DIR,
     });
     if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
-      try { OBSERVER_LIMITER.dispatch("LIFECYCLE_RECEIPT",()=>observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR})); } catch { /* diagnostic only */ }
+      try { OBSERVER_LIMITER.dispatch("LIFECYCLE_RECEIPT",()=>observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR}),{runId:verificationRunId}); } catch { /* diagnostic only */ }
     }
 
     // ---------------------------------

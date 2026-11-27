@@ -15,8 +15,9 @@
 
 export const ENGINE28A_OBSERVER_DEFAULT_TIMEOUT_MS = 2000;
 export const ENGINE28A_OBSERVER_MIN_TIMEOUT_MS = 100;
-export const ENGINE28A_OBSERVER_MAX_TIMEOUT_MS = 10000;
+export const ENGINE28A_OBSERVER_MAX_TIMEOUT_MS = 5000;
 export const ENGINE28A_OBSERVER_DEFAULT_MAX_IN_FLIGHT = 8;
+export const ENGINE28A_OBSERVER_MAX_IN_FLIGHT_CAP = 32;
 
 export const GAP_EVENT = "ENGINE28A_OBSERVER_EVIDENCE_GAP";
 
@@ -40,7 +41,11 @@ export function resolveObserverTimeoutMs(raw) {
 // Await `task()` for at most `timeoutMs`. Returns one of:
 //   {status:"COMPLETED", value}
 //   {status:"UNKNOWN", reason:"OBSERVER_TIMEOUT"|"OBSERVER_FAILED"}
-export async function runBounded(task, { timeoutMs, label = "observer", log, now = () => new Date().toISOString() } = {}) {
+//
+// Limits (documented, not hidden): Promise.race stops WAITING at the timeout;
+// it cannot interrupt synchronous work or cancel I/O already in flight. The
+// executor calls process.exit() right after, which ends any pending I/O.
+export async function runBounded(task, { timeoutMs, label = "observer", context = null, log, now = () => new Date().toISOString() } = {}) {
   const limit = resolveObserverTimeoutMs(timeoutMs);
   let timer = null;
   const timeout = new Promise((resolve) => {
@@ -60,22 +65,32 @@ export async function runBounded(task, { timeoutMs, label = "observer", log, now
   const result = await Promise.race([work, timeout]);
   clearTimeout(timer);
   if (result.status !== "COMPLETED") {
-    safeLog(log, { event: GAP_EVENT, label, reason: result.reason, timeoutMs: limit, at: now(), verification: "UNKNOWN" });
+    safeLog(log, { event: GAP_EVENT, label, context, reason: result.reason, timeoutMs: limit, at: now(), verification: "UNKNOWN" });
+  } else if (result.value && typeof result.value === "object" && result.value.status === "UNKNOWN") {
+    // The observer finished but itself reported UNKNOWN (e.g. storage error it caught).
+    safeLog(log, { event: GAP_EVENT, label, context, reason: "OBSERVER_REPORTED_UNKNOWN", at: now(), verification: "UNKNOWN" });
   }
   return result;
 }
 
 // Fire-and-forget with a hard cap on pending observer writes.
-export function createInFlightLimiter({ max = ENGINE28A_OBSERVER_DEFAULT_MAX_IN_FLIGHT, log, now = () => new Date().toISOString() } = {}) {
-  const cap = Number.isInteger(max) && max > 0 ? max : ENGINE28A_OBSERVER_DEFAULT_MAX_IN_FLIGHT;
+export function resolveMaxInFlight(raw) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n <= 0) return ENGINE28A_OBSERVER_DEFAULT_MAX_IN_FLIGHT;
+  return Math.min(ENGINE28A_OBSERVER_MAX_IN_FLIGHT_CAP, n);
+}
+
+export function createInFlightLimiter({ max, log, now = () => new Date().toISOString() } = {}) {
+  const cap = resolveMaxInFlight(max);
   let inFlight = 0;
   let dropped = 0;
   let failed = 0;
   return {
-    dispatch(label, task) {
+    // `context` (e.g. {runId}) ties every gap to its scheduler run in private logs.
+    dispatch(label, task, context = null) {
       if (inFlight >= cap) {
         dropped += 1;
-        safeLog(log, { event: GAP_EVENT, label, reason: "OBSERVER_BACKPRESSURE_DROPPED", inFlight, cap, at: now(), verification: "UNKNOWN" });
+        safeLog(log, { event: GAP_EVENT, label, context, reason: "OBSERVER_BACKPRESSURE_DROPPED", inFlight, cap, at: now(), verification: "UNKNOWN" });
         return false;
       }
       inFlight += 1;
@@ -85,9 +100,15 @@ export function createInFlightLimiter({ max = ENGINE28A_OBSERVER_DEFAULT_MAX_IN_
       } catch {
         p = Promise.reject(new Error("OBSERVER_FAILED"));
       }
-      p.catch(() => {
+      p.then((value) => {
+        // A task that resolves with {status:"UNKNOWN"} caught its own failure: count it.
+        if (value && typeof value === "object" && value.status === "UNKNOWN") {
+          failed += 1;
+          safeLog(log, { event: GAP_EVENT, label, context, reason: "OBSERVER_REPORTED_UNKNOWN", at: now(), verification: "UNKNOWN" });
+        }
+      }, () => {
         failed += 1;
-        safeLog(log, { event: GAP_EVENT, label, reason: "OBSERVER_FAILED", at: now(), verification: "UNKNOWN" });
+        safeLog(log, { event: GAP_EVENT, label, context, reason: "OBSERVER_FAILED", at: now(), verification: "UNKNOWN" });
       }).finally(() => {
         inFlight -= 1;
       });
