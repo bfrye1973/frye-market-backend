@@ -100,13 +100,15 @@ This is **proposed**, not approved; it needs owner approval. It keeps every real
 
 - [x] Owner authorized; PR #402 code merged (`f7d1bc4` via #426) and setting on (Nov 27, section 4)
 - [ ] **P0, before the next approval: read-only production preflight.** ChatGPT's #402 release gate required it, and it was **not done before release** (#425 answers 1–4). Run `scripts/engine8/preflight-readonly.sh` in the Render Shell of `frye-market-backend-1`. It prints settings as set/unset only, store file presence/parse/counts, acceptance booleans, ledger status counts and instruction-lock count/age. Report as PASS/FAIL/UNKNOWN on #425, never values. Never reset, unlock or retry anything because of it.
-- [ ] **Verify on the next Engine 6 approval** that an order is created (section 4)
-- [ ] Preserve original Nov 24–27 evidence and confirm the underlying blocker for Nov 25 11:31 and Nov 27 4:46 from Replay before about Dec 9–10 (preservation script: PR #423). Do not conflate with other windows.
+- [ ] **Verify on the next Engine 6 approval** end-to-end: durable order + fill + Engine 10 Journal ack + independent Engine 12 verification, not the bridge completion string alone (section 4)
+- [ ] **Start now, in parallel (ChatGPT, #425):** preserve original Nov 24–27 evidence (read-only acquisition, owner-approved private retention) and confirm the underlying blocker for Nov 25 11:31 and Nov 27 4:46 from Replay before about Dec 9–10 (preservation script: PR #423). Do not conflate with other windows.
 - [ ] First redesign PR = **D2+D3+D4 diagnostics only** (specific reason codes, all blockers logged every cycle, UNKNOWN/not-evaluated distinguished). No trading change; keep status compatibility for Engine 28A/12 consumers; golden before/after tests. ChatGPT agreed (#425 answer 20).
 - [ ] Then D1/D5/D6/D7 per ChatGPT's conditions (#425 answer 18): keep historical trial audit and operator disable; never auto-unlock; the pure evaluator plus a fresh authoritative recheck inside the lock; step 7 is effectful and outside the pure function; one primary reason plus all blockers.
 - [ ] Close stale PRs after checking nothing unique is lost (#425 answer 9): #388, #401, #398 (Ironbeam retired), #311, #327, #333; compare #309; Engine 7 to confirm #307; Engine 10B to confirm #308. #160/#162/#165 (REAL Schwab) stay on HOLD pending owner/Engine 10.
 - [ ] REAL-path audit: the production start command also runs `watchEngine8RealSchwabFills.js` (broker GET-only per source). Confirm no REAL order path is reachable (#425 answer 10).
 - [x] Shared file `jobs/autoExecuteCanonicalPaperTrade.js`: Engine 8 owns the trading path, Engine 28 owns only the observer code (#419/#422). Agreed on #425 (answer 22).
+
+- [ ] **Fill model (separate, versioned, owner approval; NOT part of D2–D4):** today a PAPER stop exit fills at the stop price even when price gaps through it. That is **optimistic in gaps** and overstates P&L. ChatGPT's recommended model: LONG stop → if the next eligible bar opens below the stop, fill at that open (SHORT mirrored); otherwise a verified touch fills at the stop with documented slippage. Targets are a separate limit model with no gap improvement. Ambiguous → UNKNOWN/manual, never invented. Keep current semantics and historical Journal until approved; tests both directions, gap/no gap, same-bar, costs, Engine 9/10/12 compatibility.
 
 ## 8. Answered by ChatGPT Engine 8 (#425, Nov 27): key points
 
