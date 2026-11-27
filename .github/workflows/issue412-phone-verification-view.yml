@@ -1,0 +1,18 @@
+name: Issue412 phone verification view
+on:
+  pull_request:
+    paths:
+      - 'services/core/public/paper-verification.html'
+      - 'services/core/tests/paperVerificationPhoneView.test.js'
+      - '.github/workflows/issue412-phone-verification-view.yml'
+permissions:
+  contents: read
+jobs:
+  view:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/paperVerificationPhoneView.test.js
