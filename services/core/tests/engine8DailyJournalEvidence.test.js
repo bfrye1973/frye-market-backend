@@ -1,0 +1,16 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {attachPaperJournalEvidence as join,attachDailyJournalEvidence} from "../logic/trading/engine8DailyJournalEvidence.js";
+const row={orderId:"O1",executionId:"E1",strategyId:"S1",candidateId:"C1",planId:"P1",tradeId:null,action:"NEW_ENTRY",filledQuantity:3,fillPrice:6000,fillTime:"2026-11-27T15:00:00Z"};
+const trade={tradeId:"T1",accountMode:"PAPER",strategyId:"S1",identity:{orderId:"O1",openingExecutionId:"E1",candidateId:"C1",planId:"P1"},entry:{qty:3,price:6000,time:row.fillTime},status:"OPEN",qty:{remainingQty:3}};
+test("exact opening evidence",()=>{const x=join(row,[trade]);assert.equal(x.journalStatus,"OPEN");assert.equal(x.tradeId,"T1");});
+test("absent or unavailable Journal is unknown",()=>{assert.equal(join(row,[]).journalMatch,"NO_MATCHING_JOURNAL_EVIDENCE");assert.equal(join(row,null).journalMatch,"JOURNAL_UNAVAILABLE");});
+test("REAL never matches",()=>assert.equal(join(row,[{...trade,accountMode:"REAL"}]).journalStatus,"UNKNOWN"));
+test("conflicting identity rejected",()=>{assert.equal(join(row,[{...trade,strategyId:"S2"}]).journalMatch,"IDENTITY_CONFLICT");assert.equal(join(row,[{...trade,identity:{...trade.identity,planId:"P2"}}]).journalMatch,"IDENTITY_CONFLICT");});
+test("ambiguous opening rejected",()=>assert.equal(join(row,[trade,{...trade,tradeId:"T2"}]).journalMatch,"IDENTITY_CONFLICT"));
+test("wrong fill details rejected",()=>assert.equal(join(row,[{...trade,entry:{...trade.entry,price:6001}}]).journalMatch,"JOURNAL_FILL_MISMATCH"));
+test("partial exit matches exact event, not opening order",()=>{const e={orderId:"O2",executionId:"E2",qtyClosed:1,price:6010,ts:"2026-11-27T15:05:00Z"};const x=join({...row,orderId:"O2",executionId:"E2",action:"REDUCE",filledQuantity:1,fillPrice:6010,fillTime:e.ts},[{...trade,qty:{remainingQty:2},events:[e]}]);assert.equal(x.journalStatus,"OPEN");assert.equal(x.journalRemainingQty,2);});
+test("final exit matches exact event and CLOSED zero",()=>{const e={orderId:"O3",executionId:"E3",qtyClosed:2,price:6020,ts:"2026-11-27T15:10:00Z"};const x=join({...row,orderId:"O3",executionId:"E3",action:"EXIT",filledQuantity:2,fillPrice:6020,fillTime:e.ts},[{...trade,status:"CLOSED",qty:{remainingQty:0},events:[e]}]);assert.equal(x.journalStatus,"CLOSED");});
+test("zero quantity synthetic close marker is not an execution",()=>assert.equal(join({...row,orderId:"O4",action:"EXIT"},[{...trade,events:[{orderId:"O4",qtyClosed:0}]}]).journalStatus,"UNKNOWN"));
+test("closed with nonzero balance is unknown",()=>assert.equal(join(row,[{...trade,status:"CLOSED"}]).journalMatch,"JOURNAL_LIFECYCLE_UNVERIFIED"));
+test("Journal counts unique trades, preserves fill evidence",()=>{const p=attachDailyJournalEvidence({verdict:"YES",fills:[row,row]},[trade]);assert.equal(p.journalOpenMatched,1);assert.equal(p.verdict,"YES");});
