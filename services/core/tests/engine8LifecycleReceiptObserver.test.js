@@ -1,0 +1,13 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {lifecycleReceipts,observeLifecycleOutcome} from "../logic/trading/engine8LifecycleReceiptObserver.js";
+import {validatePrivatePaperReceipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
+const t="2026-11-27T15:00:00Z",end="2026-11-27T15:00:10Z";
+const action=(a,orderId,extra={})=>({action:a,result:{ok:true,payload:{action:a,tradeId:"T1",candidateId:"C1",planId:"P1",orderId,executionId:"E"+orderId,orderCreated:true,fillCreated:true,journalCompleted:true,...extra}}});
+const step={startedAt:t,stdout:JSON.stringify({ok:true,results:[{tradeId:"T1",actions:[action("REDUCE","O2"),action("EXIT","O3",{journalCompleted:false,journalPending:true})]}]})};
+const input={step,runId:"RUN1",cycleTime:t,createdAt:end};
+test("partial and final exits retain own identities and ACKs; no fill inferred",()=>{const rows=lifecycleReceipts(input);assert.equal(rows.length,3);assert.deepEqual(rows.slice(1).map(x=>x.reportedAction),["REDUCE","EXIT"]);assert.deepEqual(rows.slice(1).map(x=>x.orderId),["O2","O3"]);assert.equal(rows[2].journalAckStatus,"JOURNAL_PENDING");assert.ok(rows.every(x=>x.schedulerRunId==="RUN1"&&x.engine6Permission===null&&validatePrivatePaperReceipt(x,{now:end}).valid));assert.equal(rows[1].fillStatus,"UNKNOWN");});
+test("duplicate response does not become a new order",()=>{const rows=lifecycleReceipts({...input,step:{...step,stdout:JSON.stringify({ok:true,results:[{tradeId:"T1",actions:[action("EXIT","O2",{duplicate:true})]}]})}});assert.equal(rows[1].orderCreated,null);});
+test("malformed lifecycle result remains unknown",()=>{const rows=lifecycleReceipts({...input,step:{...step,stdout:"bad"}});assert.equal(rows[0].reportedOutcome,"UNKNOWN");});
+test("observer disk failure cannot change lifecycle outcome",async()=>{const original=JSON.stringify(step);const result=await observeLifecycleOutcome({step,runId:"RUN1",now:()=>end,persist:async()=>{throw Error("disk full")}});assert.equal(result.status,"UNKNOWN");assert.equal(JSON.stringify(step),original);});
+test("separate concurrent scheduler runs cannot share receipt IDs",()=>{const a=lifecycleReceipts(input),b=lifecycleReceipts({...input,runId:"RUN2"});assert.equal(new Set([...a,...b].map(x=>x.cycleId)).size,a.length+b.length);});
