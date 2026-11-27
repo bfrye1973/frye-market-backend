@@ -94,9 +94,13 @@ function matchJournal(fill,trades,ledger){
  return {status:"MATCHED",reason:null,tradeId:camp.tradeId,currentStatus:state,currentRemainingQty:remaining,historicalEventRemainingQty:event?.remainingQty??null,ackStatus:ack.status};
 }
 
-export function validateTrustedArizonaCoverage(a,date){
+// Consumer regression 3 (7223782428): NO needs an elapsed day, an attestation the
+// server generated after the day ended, bound by hash to the exact evidence read,
+// and no receipt read errors. Shape and counts alone are never enough.
+export function validateTrustedArizonaCoverage(a,date,{now=null,evidence=null,receiptIssues=null}={}){
  const {start,end}=dayBounds(date),fail=reason=>({trusted:false,reason});
  if(!a||typeof a!=="object")return fail("COVERAGE_ATTESTATION_MISSING");
+ if(MS(now)===null||MS(now)<end)return fail("DAY_NOT_ELAPSED");
  if(a.schemaVersion!=="engine8.paperVerificationCoverage.v1")return fail("COVERAGE_SCHEMA_UNKNOWN");
  if(a.timezone!=="America/Phoenix"||a.date!==date)return fail("COVERAGE_DATE_OR_TZ_MISMATCH");
  if(MS(a.intervalStart)!==start||MS(a.intervalEnd)!==end)return fail("COVERAGE_INTERVAL_MISMATCH");
@@ -106,14 +110,21 @@ export function validateTrustedArizonaCoverage(a,date){
  for(const f of ["gaps","duplicates","errors"])if(!Array.isArray(a[f])||a[f].length)return fail("COVERAGE_"+f.toUpperCase());
  if(!a.stores||["orders","executions","lifecycle","ledger","journal"].some(k=>a.stores[k]!=="COVERED"))return fail("STORE_COVERAGE_INCOMPLETE");
  if(a.originalApprovalEvidence!=="COVERED")return fail("APPROVAL_COVERAGE_INCOMPLETE");
+ if(a.generatedBy!=="engine8.server"||MS(a.generatedAt)===null||MS(a.generatedAt)<end)return fail("COVERAGE_NOT_SERVER_GENERATED_AFTER_DAY");
+ if(!Array.isArray(receiptIssues)||receiptIssues.length)return fail("RECEIPT_READ_ISSUES");
+ const st=evidence?.stores||{};
+ for(const k of ["orders","executions","journal","ledger"]){const want=a.evidenceBinding?.[k]?.sha256,got=st?.[k]?.sha256;if(typeof want!=="string"||!/^[a-f0-9]{64}$/.test(want)||want!==got)return fail("COVERAGE_NOT_BOUND_TO_EVIDENCE");}
  return {trusted:true,reason:null};
 }
 
-export function buildDailyPaperVerification({date,evidence,coverageAttestation=null}={}){
+export function buildDailyPaperVerification({date,evidence,coverageAttestation=null,now=null,receiptIssues=null}={}){
  const {start,end}=dayBounds(date),issues=new Set(),v=evidence?.values||{},stores=evidence?.stores||{};
  if(evidence?.stability!=="NO_CHANGE_OBSERVED")issues.add("EVIDENCE_READ_UNSTABLE");
  for(const k of ["orders","executions","journal","ledger"])if(stores?.[k]?.status!=="OK")issues.add(k.toUpperCase()+"_STORE_UNAVAILABLE");
- const orders=Array.isArray(v.orders)?v.orders:[],execs=Array.isArray(v.executions)?v.executions:[],journal=Array.isArray(v.journal)?v.journal:[],ledger=v.ledger;
+ // Consumer regression 4: a fill is certified only from a stable read of available order and execution stores.
+ const certifiable=evidence?.stability==="NO_CHANGE_OBSERVED"&&stores?.orders?.status==="OK"&&stores?.executions?.status==="OK";
+ if(!certifiable)issues.add("FILLS_NOT_CERTIFIED_EVIDENCE_UNSTABLE_OR_UNAVAILABLE");
+ const orders=certifiable&&Array.isArray(v.orders)?v.orders:[],execs=certifiable&&Array.isArray(v.executions)?v.executions:[],journal=Array.isArray(v.journal)?v.journal:[],ledger=v.ledger;
  const om=new Map(),em=new Map();for(const o of orders){const k=STR(o?.orderId);if(!k){issues.add("ORDER_ID_MISSING");continue;}const a=om.get(k)||[];a.push(o);om.set(k,a);}
  for(const e of execs){const k=STR(e?.orderId);if(!k){issues.add("EXECUTION_ORDER_ID_MISSING");continue;}const a=em.get(k)||[];a.push(e);em.set(k,a);}
  const fills=[];
@@ -125,32 +136,60 @@ export function buildDailyPaperVerification({date,evidence,coverageAttestation=n
   const row={strategyId:STR(os[0]?.strategyId),action,idempotencyKey:STR(os[0]?.idempotencyKey),candidateId:q.identity.candidateId,planId:q.identity.planId,executionId:q.identity.executionId,orderId:q.orderId,tradeId:q.identity.tradeId,filledQuantity:q.filledQuantity,fillPrice:q.fillPrice,fillTime:e.ts,approvalLinkStatus:q.identity.candidateId&&q.identity.planId?"IDENTITY_PRESENT":"UNKNOWN"};
   row.journal=matchJournal(row,journal,ledger);fills.push(row);
  }
- const coverage=validateTrustedArizonaCoverage(coverageAttestation,date);
- const verdict=fills.length?"YES":coverage.trusted&&issues.size===0?"NO":"UNKNOWN";
+ const coverage=validateTrustedArizonaCoverage(coverageAttestation,date,{now,evidence,receiptIssues});
+ const verdict=!certifiable?"UNKNOWN":fills.length?"YES":coverage.trusted&&issues.size===0?"NO":"UNKNOWN";
  const unique=s=>new Set(fills.filter(f=>f.journal?.status==="MATCHED"&&f.journal?.currentStatus===s).map(f=>f.journal.tradeId).filter(Boolean)).size;
  return {schemaVersion:"engine12.dailyPaperVerification.v2",date,timezone:"America/Phoenix",intervalStart:new Date(start).toISOString(),intervalEnd:new Date(end).toISOString(),verdict,evidenceReadAt:evidence?.readAt??null,evidenceFinishedAt:evidence?.finishedAt??null,evidenceStability:evidence?.stability??"UNKNOWN",coverage,
   counts:{verifiedFills:fills.length,openingFills:fills.filter(f=>f.action==="NEW_ENTRY").length,exitFills:fills.filter(f=>f.action!=="NEW_ENTRY").length,journalOpen:unique("OPEN"),journalClosed:unique("CLOSED"),journalUnverified:fills.filter(f=>f.journal?.status!=="MATCHED").length,pendingJournalAck:fills.filter(f=>f.journal?.ackStatus==="PENDING_JOURNAL_ACK").length},
   issues:[...issues].sort(),fills,stores,note:"YES requires independently revalidated durable fill evidence. NO requires trusted complete Arizona-day coverage plus zero verified fills. Otherwise UNKNOWN."};
 }
 
-function independentlyMatchedFill(daily,candidate){
- if(!candidate)return null;
- const hits=(daily?.fills||[]).filter(f=>f.strategyId===candidate.strategyId&&f.candidateId===candidate.candidateId&&f.planId===candidate.planId);
- return hits.length===1?hits[0]:null;
+// Consumer regression 2: the opening is matched on its own (NEW_ENTRY + exact
+// strategy/candidate/plan, and the reported orderId when one exists), so a later
+// REDUCE/EXIT can never hide a valid entry. Lifecycle fills are listed separately.
+export function independentlyMatchedFills(daily,candidate,reportedOrderId=null){
+ if(!candidate)return {opening:null,lifecycle:[],openingIssue:"NO_CANDIDATE"};
+ const same=f=>f.strategyId===candidate.strategyId&&f.candidateId===candidate.candidateId&&f.planId===candidate.planId;
+ const fills=(daily?.fills||[]).filter(same);
+ let openings=fills.filter(f=>f.action==="NEW_ENTRY");
+ if(STR(reportedOrderId))openings=openings.filter(f=>f.orderId===reportedOrderId);
+ const opening=openings.length===1?openings[0]:null;
+ const tradeId=opening?.journal?.tradeId??null;
+ const lifecycle=fills.filter(f=>f.action!=="NEW_ENTRY"&&(!tradeId||!f.journal?.tradeId||f.journal.tradeId===tradeId));
+ return {opening,lifecycle,openingIssue:opening?null:openings.length>1?"MULTIPLE_OPENING_FILLS":"NO_INDEPENDENT_OPENING_FILL"};
 }
 
-export function buildLatestApprovedCandidateVerification({daily,attempts,approvalReplay=null}={}){
+// Status for one approved candidate, shared by the latest view and the per-approval list.
+function candidateStatus(fill,r){
+ if(fill)return fill.journal?.status==="MATCHED"?(fill.journal?.ackStatus==="JOURNAL_COMPLETE"?"FILLED_JOURNALED":"FILLED_JOURNAL_RECORD_MATCHED_ACK_UNVERIFIED"):"FILLED_JOURNAL_UNKNOWN";
+ if(r?.orderCreated===true)return "ORDER_REPORTED_NO_INDEPENDENT_FILL";
+ if(r?.skipReason)return "APPROVAL_REPORTED_SKIPPED";
+ if(r?.rejectReason)return "APPROVAL_REPORTED_REJECTED";
+ return "APPROVAL_REPORTED_NOT_INDEPENDENTLY_VERIFIED";
+}
+
+// Per-approval YES / NO / UNKNOWN. YES = independently matched opening fill.
+// NO = trusted complete-day coverage and no matching opening fill. Else UNKNOWN.
+export function buildPerApprovalVerification({daily,attempts}={}){
+ const list=Array.isArray(attempts?.candidates)?attempts.candidates:[];
+ return list.map(c=>{const r=c?.latestReceipt||{},m=independentlyMatchedFills(daily,c,r.orderId??null);
+  const verdict=m.opening?"YES":daily?.verdict!=="UNKNOWN"&&daily?.coverage?.trusted===true&&!m.opening?"NO":"UNKNOWN";
+  const reported=r.skipReason||r.rejectReason||(Array.isArray(r.blockers)&&r.blockers[0])||null;
+  return {strategyId:c.strategyId,candidateId:c.candidateId,planId:c.planId,firstObservedApprovalTime:c.firstObservedApprovalTime??null,lastObservedCycleTime:c.lastObservedCycleTime??null,attemptCount:c.attemptCount??null,
+   verdict,status:candidateStatus(m.opening,r),firstBlocker:m.opening?null:reported,firstBlockerSource:m.opening||!reported?null:"ENGINE8_REPORTED_RECEIPT",
+   independentOpeningFill:m.opening?{orderId:m.opening.orderId,filledQuantity:m.opening.filledQuantity,fillPrice:m.opening.fillPrice,fillTime:m.opening.fillTime,journal:m.opening.journal?.status??null,ack:m.opening.journal?.ackStatus??null}:null,
+   lifecycleFills:m.lifecycle.map(f=>({action:f.action,filledQuantity:f.filledQuantity,fillPrice:f.fillPrice,fillTime:f.fillTime,journal:f.journal?.status??null})),openingIssue:m.openingIssue};});
+}
+
+export function buildLatestApprovedCandidateVerification({daily,attempts,approvalReplay=null,observedReplay=null}={}){
  const candidate=attempts?.latestObservedApprovedCandidate??null;
- if(!candidate)return {schemaVersion:"engine12.latestApprovedPaperVerification.v1",date:daily?.date??attempts?.date??null,status:"UNKNOWN",reason:"NO_REPORTED_APPROVED_CANDIDATE",dailyVerdict:daily?.verdict??"UNKNOWN",reported:null,independent:{approvalReplay:approvalReplay??{status:"UNKNOWN"},fill:null,journal:null}};
- const fill=independentlyMatchedFill(daily,candidate);
+ // Consumer regression 1: with no reported approval, still show the original Replay blocker chronology.
+ if(!candidate)return {schemaVersion:"engine12.latestApprovedPaperVerification.v1",date:daily?.date??attempts?.date??null,status:"UNKNOWN",reason:"NO_REPORTED_APPROVED_CANDIDATE",dailyVerdict:daily?.verdict??"UNKNOWN",reported:null,independent:{approvalReplay:approvalReplay??{status:"UNKNOWN"},fill:null,journal:null},observedReplay:observedReplay??null};
  const r=candidate.latestReceipt||{};
- let status="APPROVAL_REPORTED_NOT_INDEPENDENTLY_VERIFIED";
- if(fill)status=fill.journal?.status==="MATCHED"?(fill.journal?.ackStatus==="JOURNAL_COMPLETE"?"FILLED_JOURNALED":"FILLED_JOURNAL_RECORD_MATCHED_ACK_UNVERIFIED"):"FILLED_JOURNAL_UNKNOWN";
- else if(r.orderCreated===true)status="ORDER_REPORTED_NO_INDEPENDENT_FILL";
- else if(r.skipReason)status="APPROVAL_REPORTED_SKIPPED";
- else if(r.rejectReason)status="APPROVAL_REPORTED_REJECTED";
+ const m=independentlyMatchedFills(daily,candidate,r.orderId??null),fill=m.opening;
+ const status=candidateStatus(fill,r);
  return {schemaVersion:"engine12.latestApprovedPaperVerification.v1",date:daily?.date??attempts?.date??null,status,dailyVerdict:daily?.verdict??"UNKNOWN",
   reported:{strategyId:candidate.strategyId,candidateId:candidate.candidateId,planId:candidate.planId,firstObservedApprovalTime:candidate.firstObservedApprovalTime,lastObservedCycleTime:candidate.lastObservedCycleTime,attemptCount:candidate.attemptCount,outcome:candidate.outcome,skipReason:r.skipReason??null,rejectReason:r.rejectReason??null,blockers:r.blockers??[],orderCreated:r.orderCreated??null,orderId:r.orderId??null,journalAckStatus:r.journalAckStatus??null,approvalSnapshotTime:r.approvalSnapshotTime??null,approvalSnapshotHash:r.approvalSnapshotHash??null,evidenceKind:r.evidenceKind??null},
-  independent:{approvalReplay:approvalReplay??{status:"UNKNOWN",reason:"NOT_CHECKED"},fill:fill??null,journal:fill?.journal??null},
+  independent:{approvalReplay:approvalReplay??{status:"UNKNOWN",reason:"NOT_CHECKED"},fill:fill??null,journal:fill?.journal??null,lifecycleFills:m.lifecycle,openingIssue:m.openingIssue},observedReplay:observedReplay??null,
   note:"Reported receipt fields are Engine8 observational evidence, not independent Engine12 certification. Fill/Journal fields are independently revalidated from durable stores."};
 }

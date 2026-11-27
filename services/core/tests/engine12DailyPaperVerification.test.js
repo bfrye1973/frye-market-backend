@@ -3,20 +3,43 @@ import assert from "node:assert/strict";
 import {buildDailyPaperVerification,buildLatestApprovedCandidateVerification,validateTrustedArizonaCoverage} from "../logic/investigator/engine12DailyPaperVerification.js";
 
 const date="2026-11-27",fillTime="2026-11-27T15:10:00.000Z";
+const H={orders:"1".repeat(64),executions:"2".repeat(64),journal:"3".repeat(64),ledger:"4".repeat(64)};
+const AFTER_DAY="2026-11-28T07:05:00.000Z";
 function evidence({orders=[],executions=[],journal=[],ledger={},stability="NO_CHANGE_OBSERVED"}={}){
  return {readAt:"2026-11-27T16:00:00.000Z",finishedAt:"2026-11-27T16:00:00.010Z",stability,
-  stores:{orders:{status:"OK"},executions:{status:"OK"},journal:{status:"OK"},ledger:{status:"OK"}},
+  stores:{orders:{status:"OK",sha256:H.orders},executions:{status:"OK",sha256:H.executions},journal:{status:"OK",sha256:H.journal},ledger:{status:"OK",sha256:H.ledger}},
   values:{orders,executions,journal,ledger,lifecycle:{},acceptance:{}}};
 }
 function order(o={}){return {paper:true,orderId:"O1",strategyId:"intraday_scalp@10m",action:"NEW_ENTRY",idempotencyKey:"I1",status:"FILLED",filledQty:3,avgPrice:6000,filledAt:fillTime,symbol:"ES",side:"BUY",sourceSignal:{candidateId:"C1",planId:"P1",executionId:"X1"},...o};}
 function exec(o={}){return {orderId:"O1",strategyId:"intraday_scalp@10m",action:"NEW_ENTRY",idempotencyKey:"I1",status:"FILLED",filledQty:3,avgPrice:6000,ts:fillTime,symbol:"ES",side:"BUY",sourceSignal:{candidateId:"C1",planId:"P1",executionId:"X1"},...o};}
 function trade(o={}){return {tradeId:"T1",accountMode:"PAPER",strategyId:"intraday_scalp@10m",status:"OPEN",identity:{candidateId:"C1",planId:"P1",orderId:"O1",openingExecutionId:"X1",idempotencyKey:"I1"},orderLink:{orderId:"O1",executionId:"X1",idempotencyKey:"I1"},entry:{time:fillTime,price:6000,qty:3},qty:{originalQty:3,remainingQty:3},events:[],...o};}
-function coverage(o={}){return {schemaVersion:"engine8.paperVerificationCoverage.v1",timezone:"America/Phoenix",date,intervalStart:"2026-11-27T00:00:00-07:00",intervalEnd:"2026-11-28T00:00:00-07:00",watermarkThrough:"2026-11-28T00:00:00-07:00",status:"COMPLETE",expectedCycles:100,observedCycles:100,gaps:[],duplicates:[],errors:[],stores:{orders:"COVERED",executions:"COVERED",lifecycle:"COVERED",ledger:"COVERED",journal:"COVERED"},originalApprovalEvidence:"COVERED",...o};}
+function coverage(o={}){return {schemaVersion:"engine8.paperVerificationCoverage.v1",timezone:"America/Phoenix",date,intervalStart:"2026-11-27T00:00:00-07:00",intervalEnd:"2026-11-28T00:00:00-07:00",watermarkThrough:"2026-11-28T00:00:00-07:00",status:"COMPLETE",expectedCycles:100,observedCycles:100,gaps:[],duplicates:[],errors:[],stores:{orders:"COVERED",executions:"COVERED",lifecycle:"COVERED",ledger:"COVERED",journal:"COVERED"},originalApprovalEvidence:"COVERED",generatedBy:"engine8.server",generatedAt:AFTER_DAY,evidenceBinding:{orders:{sha256:H.orders},executions:{sha256:H.executions},journal:{sha256:H.journal},ledger:{sha256:H.ledger}},...o};}
+const trustedNoArgs={now:AFTER_DAY,receiptIssues:[]};
 
 test("verified fill => YES; no fill without trusted coverage => UNKNOWN; trusted empty => NO",()=>{
  assert.equal(buildDailyPaperVerification({date,evidence:evidence({orders:[order()],executions:[exec()],journal:[trade()]})}).verdict,"YES");
  assert.equal(buildDailyPaperVerification({date,evidence:evidence()}).verdict,"UNKNOWN");
- assert.equal(buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage()}).verdict,"NO");
+ // Elapsed-day proof (7223782428 #3): NO only after the day ended, with a server attestation bound to the evidence read.
+ assert.equal(buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage(),...trustedNoArgs}).verdict,"NO");
+});
+test("NO is refused before the day ends, without hash binding, or with receipt read issues",()=>{
+ const v=o=>buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage(),...trustedNoArgs,...o});
+ assert.equal(v({now:"2026-11-27T23:00:00.000Z"}).coverage.reason,"DAY_NOT_ELAPSED");
+ assert.equal(v({now:"2026-11-27T23:00:00.000Z"}).verdict,"UNKNOWN");
+ assert.equal(v({now:undefined}).verdict,"UNKNOWN");
+ assert.equal(v({receiptIssues:["RECEIPT_READ_FAILED"]}).coverage.reason,"RECEIPT_READ_ISSUES");
+ assert.equal(v({receiptIssues:null}).verdict,"UNKNOWN");
+ assert.equal(buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage({evidenceBinding:{...coverage().evidenceBinding,journal:{sha256:"9".repeat(64)}}}),...trustedNoArgs}).coverage.reason,"COVERAGE_NOT_BOUND_TO_EVIDENCE");
+ assert.equal(buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage({generatedAt:"2026-11-27T20:00:00.000Z"}),...trustedNoArgs}).coverage.reason,"COVERAGE_NOT_SERVER_GENERATED_AFTER_DAY");
+ assert.equal(buildDailyPaperVerification({date,evidence:evidence(),coverageAttestation:coverage({generatedBy:"caller"}),...trustedNoArgs}).verdict,"UNKNOWN");
+});
+test("unstable or unavailable evidence never certifies a fill, even when rows are supplied (7223782428 #4)",()=>{
+ const rows={orders:[order()],executions:[exec()],journal:[trade()]};
+ const unstable=buildDailyPaperVerification({date,evidence:evidence({...rows,stability:"CHANGED_DURING_READ"})});
+ assert.equal(unstable.verdict,"UNKNOWN");assert.equal(unstable.counts.verifiedFills,0);
+ assert.ok(unstable.issues.includes("FILLS_NOT_CERTIFIED_EVIDENCE_UNSTABLE_OR_UNAVAILABLE"));
+ const ev=evidence(rows);ev.stores.executions={status:"ERROR"};
+ assert.equal(buildDailyPaperVerification({date,evidence:ev}).verdict,"UNKNOWN");
 });
 test("coverage gap prevents NO",()=>assert.equal(validateTrustedArizonaCoverage(coverage({gaps:["x"]}),date).trusted,false));
 test("REAL execution cannot certify PAPER fill",()=>{

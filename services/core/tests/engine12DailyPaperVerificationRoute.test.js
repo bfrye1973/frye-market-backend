@@ -42,3 +42,13 @@ test("verified durable fill still produces YES",async()=>{
  fs.writeFileSync(path.join(sc.journalDir,"trade-journal.json"),JSON.stringify([{tradeId:"T1",accountMode:"PAPER",strategyId:"intraday_scalp@10m",status:"OPEN",identity:{candidateId:"C1",planId:"P1",orderId:"O1",openingExecutionId:"X1",idempotencyKey:"I1"},orderLink:{orderId:"O1",executionId:"X1",idempotencyKey:"I1"},entry:{time:t,price:6000,qty:3},qty:{originalQty:3,remainingQty:3},events:[]}]));
  const srv=await serve(sc),b=await (await fetch(srv.base+"/daily?date=2026-11-27",{headers:auth})).json();assert.equal(b.verdict,"YES");assert.equal(b.counts.verifiedFills,1);await srv.close();fs.rmSync(sc.root,{recursive:true,force:true});
 });
+test("#412 daily exposes per-approval answers, observed Replay chronology, observer health and receipt coverage",async()=>{
+ const sc=fixture(),created="2026-11-27T15:01:01.000Z";
+ saveReceipt(sc,buildPrivatePaperReceipt({mode:"PAPER",cycleId:"cycle-9",approvalSnapshotTime:"2026-11-27T15:00:00.000Z",approvalSnapshotHash:"a".repeat(64),cycleTime:"2026-11-27T15:01:00.000Z",strategyId:"intraday_scalp@10m",candidateId:"C9",planId:"P9",engine6Permission:true,engine8Executable:false,executorInvoked:false,skipReason:"PAPER_ACCEPTANCE_STATE_UNAVAILABLE",blockers:["PAPER_ACCEPTANCE_STATE_UNAVAILABLE"],orderCreated:false,journalAckStatus:"UNKNOWN"},created));
+ const srv=await serve(sc),b=await (await fetch(srv.base+"/daily?date=2026-11-27",{headers:auth})).json();
+ assert.equal(b.verdict,"UNKNOWN");
+ assert.equal(b.perApproval.length,1);assert.equal(b.perApproval[0].verdict,"UNKNOWN");assert.equal(b.perApproval[0].firstBlocker,"PAPER_ACCEPTANCE_STATE_UNAVAILABLE");
+ assert.equal(b.observedReplay.reason,"REPLAY_DATE_NOT_FOUND");assert.equal(b.observedReplay.classification,"UNKNOWN");
+ assert.ok(Array.isArray(b.observerHealth.alerts));assert.equal(b.receiptCoverage.status,"INCOMPLETE");
+ await srv.close();fs.rmSync(sc.root,{recursive:true,force:true});
+});

@@ -4,7 +4,10 @@ import path from "node:path";
 import {createHash,timingSafeEqual} from "node:crypto";
 import {performance} from "node:perf_hooks";
 import {buildInvestigation} from "../logic/investigator/buildInvestigation.js";
-import {buildDailyPaperVerification,buildLatestApprovedCandidateVerification} from "../logic/investigator/engine12DailyPaperVerification.js";
+import {buildDailyPaperVerification,buildLatestApprovedCandidateVerification,buildPerApprovalVerification} from "../logic/investigator/engine12DailyPaperVerification.js";
+import {summarizeObservedReplayDay} from "../logic/investigator/engine12ObservedReplayDay.js";
+import {projectPaperObserverHealth} from "../logic/trading/engine8PaperObserverHealth.js";
+import {projectObservedPaperCoverage} from "../logic/trading/engine8PaperCoverage.js";
 import {extractEngineTimeline,extractLaneIdentity} from "../logic/investigator/extractEngineTimeline.js";
 import {lookupReplayWindow} from "../logic/investigator/lookupReplayWindow.js";
 import {readEvidenceJson} from "../logic/investigator/readEvidenceFile.js";
@@ -59,8 +62,11 @@ export function makeTradeInvestigatorRouter({settings=process.env,now=()=>Date.n
   let receipts={date,receipts:[],issues:["RECEIPT_ARCHIVE_NOT_CONFIGURED"],coverage:"UNPROVEN"};
   if(config.receiptDir){try{receipts=await readPrivatePaperReceipts({root:config.receiptDir,date,now:new Date(now()).toISOString()});}catch{receipts={date,receipts:[],issues:["RECEIPT_READ_FAILED"],coverage:"UNPROVEN"};}}
   const attempts=projectObservedPaperAttempts({date,receipts:receipts.receipts,now:new Date(now()).toISOString()});
-  let daily;try{daily=buildDailyPaperVerification({date,evidence,coverageAttestation:coverage});}catch{return p.send(500,{ok:false,error:"DAILY_VERIFICATION_FAILED"},{date});}
-  let result;if(kind==="daily")result={...daily,reportedAttempts:{reportedApprovedCandidates:attempts.reportedApprovedCandidates,reportedAttempts:attempts.reportedAttempts,latestObservedApprovedCandidate:attempts.latestObservedApprovedCandidate,issues:[...new Set([...(receipts.issues||[]),...(attempts.issues||[])])]}};else{const latest=attempts.latestObservedApprovedCandidate,approval=latest?.latestReceipt?verifyApprovalAgainstReplay(latest.latestReceipt,config):{status:"UNKNOWN",reason:"NO_REPORTED_APPROVED_CANDIDATE"};result=buildLatestApprovedCandidateVerification({daily,attempts,approvalReplay:approval});}
+  const receiptIssues=[...new Set([...(receipts.issues||[]),...(attempts.issues||[])])];
+  let daily;try{daily=buildDailyPaperVerification({date,evidence,coverageAttestation:coverage,now:new Date(now()).toISOString(),receiptIssues});}catch{return p.send(500,{ok:false,error:"DAILY_VERIFICATION_FAILED"},{date});}
+  let observedReplay;try{observedReplay=summarizeObservedReplayDay({root:config.replayRoot,date});}catch{observedReplay={classification:"UNKNOWN",reason:"REPLAY_SUMMARY_FAILED",rows:[],issues:["REPLAY_SUMMARY_FAILED"]};}
+  let result;let observerHealth,receiptCoverage;try{const nowIso=new Date(now()).toISOString();observerHealth=projectPaperObserverHealth({date,receipts:receipts.receipts,now:nowIso,evidence});const c=projectObservedPaperCoverage({date,receipts:receipts.receipts,now:nowIso});receiptCoverage={status:c.status,schedulerRunsObserved:c.schedulerRunsObserved,completedObservedRuns:c.completedObservedRuns,skippedSlotsObserved:c.skippedSlotsObserved??0,runGapCount:c.runGaps.length,gaps:c.gaps,latestReceiptCreatedAt:c.latestReceiptCreatedAt};}catch{observerHealth={status:"UNKNOWN",alerts:["OBSERVER_HEALTH_UNAVAILABLE"]};receiptCoverage={status:"UNKNOWN"};}
+  if(kind==="daily")result={...daily,perApproval:buildPerApprovalVerification({daily,attempts}),observedReplay,observerHealth,receiptCoverage,reportedAttempts:{reportedApprovedCandidates:attempts.reportedApprovedCandidates,reportedAttempts:attempts.reportedAttempts,latestObservedApprovedCandidate:attempts.latestObservedApprovedCandidate,issues:receiptIssues}};else{const latest=attempts.latestObservedApprovedCandidate,approval=latest?.latestReceipt?verifyApprovalAgainstReplay(latest.latestReceipt,config):{status:"UNKNOWN",reason:"NO_REPORTED_APPROVED_CANDIDATE"};result=buildLatestApprovedCandidateVerification({daily,attempts,approvalReplay:approval,observedReplay});}
   const body=redactInvestigationPayload({ok:true,...result,coverageSource:{status:covRead.status,reason:covRead.reason??null,sha256:covRead.sha256??null,readAt:covRead.readAt??null},receiptSource:{configured:!!config.receiptDir,readAt:receipts.readAt??null,issues:receipts.issues??[],coverage:receipts.coverage??"UNPROVEN"}}),size=Buffer.byteLength(JSON.stringify(body));if(size>LIMITS.maxResponseBytesSummary)return p.send(413,{ok:false,error:"RESPONSE_TOO_LARGE",bytes:size,limit:LIMITS.maxResponseBytesSummary},{date});return p.send(200,body,{date,verdict:daily.verdict,bytes:size});};
  router.all("/trade-investigator/daily",handler("daily"));router.all("/trade-investigator/latest",handler("latest"));return router;
 }
