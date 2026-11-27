@@ -13,7 +13,6 @@
 // Those decisions must already be complete in the frozen snapshot.
 
 import fs from "fs";
-import { alertIfApprovedNotOrdered } from "../logic/trading/engine8ApprovedNotOrderedAlert.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -46,6 +45,17 @@ function printAndExit(payload, code = 0) {
 // Set once the snapshot is read, so any later refusal of an Engine 6-approved
 // trade is logged and alerted (owner directive #425: never fail silently).
 let currentEngine8PaperOrder = null;
+
+// Loaded lazily and guarded: the alert is observational, so a missing or broken
+// alert module can never stop this bridge or change its decision or exit code.
+async function alertIfApprovedNotOrdered(args) {
+  try {
+    const m = await import("../logic/trading/engine8ApprovedNotOrderedAlert.js");
+    return await m.alertIfApprovedNotOrdered(args);
+  } catch {
+    return null;
+  }
+}
 
 async function reject(reason, detail = null) {
   const alert = await alertIfApprovedNotOrdered({
