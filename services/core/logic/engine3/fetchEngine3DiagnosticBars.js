@@ -24,6 +24,7 @@ export async function fetchEngine3DiagnosticBars({
   limit = 120,
   coreBase,
   fetchJson,
+  includeSourceEvidence = false,
 } = {}) {
   if (!ALLOWED_TIMEFRAMES.has(timeframe)) {
     return failClosed(timeframe, "UNSUPPORTED_DIAGNOSTIC_TIMEFRAME");
@@ -36,9 +37,11 @@ export async function fetchEngine3DiagnosticBars({
   url.searchParams.set("symbol", String(symbol || "ES").toUpperCase());
   url.searchParams.set("timeframe", timeframe);
   url.searchParams.set("limit", String(limit));
+  if(includeSourceEvidence===true)url.searchParams.set("evidence","1");
 
   try {
     const response = await fetchJson(url.toString(), 15000);
+    const consumerReceivedAtMs = Date.now();
     if (response?.ok !== true) {
       return failClosed(
         timeframe,
@@ -54,6 +57,18 @@ export async function fetchEngine3DiagnosticBars({
       source: "/api/v1/futures/ohlc",
       reasonCode: null,
       detail: null,
+      ...(includeSourceEvidence===true ? {
+        engine11SourceEvidence: {
+          schema:"engine3.shadowSourceTransport.v1",
+          trustStatus:"UNVERIFIED",
+          receipt:response?.json?.engine11Receipt??null,
+          selectedBarReferences:Array.isArray(response?.json?.selectedBarReferences)
+            ? response.json.selectedBarReferences : [],
+          consumerReceivedAtMs,
+          engine3ConsumptionAttested:false,
+          calibrationAdmissible:false,recordingActivated:false,
+        }
+      } : {}),
     };
   } catch (error) {
     return failClosed(
@@ -70,6 +85,7 @@ export async function fetchEngine3DiagnosticBarStack(options = {}) {
     limit: options.limit ?? 120,
     coreBase: options.coreBase,
     fetchJson: options.fetchJson,
+    includeSourceEvidence: options.includeSourceEvidence===true,
   };
   const [oneMinute, fiveMinute] = await Promise.all([
     fetchEngine3DiagnosticBars({ ...shared, timeframe: "1m" }),

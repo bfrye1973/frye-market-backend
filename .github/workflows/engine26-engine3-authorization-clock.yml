@@ -1,0 +1,38 @@
+name: Engine26 Engine3 Authorization Clock
+
+on:
+  push:
+    branches:
+      - engine26/issue-341-engine3-authorization-clock
+  pull_request:
+    branches: [main]
+    paths:
+      - "services/core/logic/engine26/engine3AuthorizationClock.js"
+      - "services/core/logic/engine26/buildEngine26LocationCandidate.js"
+      - "services/core/tests/engine26Engine3AuthorizationClock.test.js"
+      - ".github/workflows/engine26-engine3-authorization-clock.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Syntax check
+        run: |
+          node --check logic/engine26/engine3AuthorizationClock.js
+          node --check logic/engine26/buildEngine26LocationCandidate.js
+          node --check tests/engine26Engine3AuthorizationClock.test.js
+      - name: Engine26 authorization clock focused tests
+        run: node --test tests/engine26Engine3AuthorizationClock.test.js
+      - name: Engine26 Strategy1 regression tests
+        run: |
+          node --test \
+            tests/engine26Strategy1V2BidirectionalRotation.test.js \
+            tests/engine26Strategy1RolloverContinuity.test.js \
+            tests/engine26Strategy1LocationEvent.test.js
