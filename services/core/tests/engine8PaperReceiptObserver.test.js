@@ -1,0 +1,15 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
+import os from "node:os";
+import {receiptFromCycle,observeCompletedPaperCycle,persistPrivateReceipt} from "../logic/trading/engine8PaperReceiptObserver.js";
+const t="2026-11-27T15:00:00Z";
+const context={executorInvoked:false,engine6Permission:true,approvalSnapshotTime:t,approvalSnapshotHash:"a".repeat(64),adapter:{candidateId:"C1",planId:"P1",executable:false,blockers:["PAPER_ACCEPTANCE_STATE_UNAVAILABLE"]}};
+const step={stdout:JSON.stringify({ok:true,skipped:true,reason:"ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED"})};
+const input={step,context,cycleTime:t,cycleId:"cycle1",createdAt:t};
+test("skip records approval and actual blocker, not fill",()=>{const r=receiptFromCycle(input);assert.equal(r.engine6Permission,true);assert.equal(r.executorInvoked,false);assert.deepEqual(r.blockers,["PAPER_ACCEPTANCE_STATE_UNAVAILABLE"]);assert.equal(r.orderCreated,null);});
+test("success with no exact fill details is unknown, not fill proof",()=>{const r=receiptFromCycle({...input,context:{...context,executorInvoked:true},step:{stdout:JSON.stringify({ok:true,execution:{orderCreated:true,orderId:"O1",fillCreated:true}})}});assert.equal(r.fillStatus,"UNKNOWN");});
+test("observer write failure and log failure do not mutate execution result",async()=>{const original=JSON.stringify(step);const r=await observeCompletedPaperCycle({...input,now:()=>t,persist:async()=>{throw Error("disk full")},log:()=>{throw Error("log failed")}});assert.equal(r.status,"UNKNOWN");assert.equal(JSON.stringify(step),original);});
+test("private append-only receipt survives duplicate capture without overwrite",async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),"e8-receipts-"));try{const r=receiptFromCycle(input);await persistPrivateReceipt(root,r);const files=await fs.readdir(root);assert.equal(files.length,1);const p=path.join(root,files[0]);assert.equal((await fs.stat(p)).mode&0o777,0o600);await assert.rejects(persistPrivateReceipt(root,{...r,orderCreated:true}));assert.deepEqual(JSON.parse(await fs.readFile(p,"utf8")),r);}finally{await fs.rm(root,{recursive:true,force:true});}});
+test("unsafe root permissions rejected",async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),"e8-receipts-"));try{await fs.chmod(root,0o755);await assert.rejects(persistPrivateReceipt(root,receiptFromCycle(input)));}finally{await fs.rm(root,{recursive:true,force:true});}});
