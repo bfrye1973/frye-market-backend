@@ -20,3 +20,5 @@ Newest at the bottom. One short entry per work session.
 - Key findings: observer exit code gates PAPER execution (F-1); executor awaits receipt storage with no timeout (F-2); receipt store stops at 50,000 files, about 4–5 weeks (F-3); #417/#418 edit the same files with different content.
 - Waiting on owner: decisions D-1…D-6 in the master plan; Replay archive for Nov 24–27 cases before 14-day retention.
 - Next: Manager review → assignment 28A-001 (observer non-interference).
+- Later (Nov 27): owner made #412 P0. E28A acknowledged the editor agreement (#412 7225818697). Draft PR #419 (bounded observers + noninterference tests, base 09565bb, CI green). Draft PR #420 (phone view `/paper-verification.html`, CI green). Checkpoint: #412 7225971453.
+- Waiting on: E8 review of #419; E12 restack + `perApproval`; E10B re-review; owner decisions on Step 4 gating, Render read secret, evidence preservation.
