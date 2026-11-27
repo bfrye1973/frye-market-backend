@@ -2,7 +2,7 @@
 
 **Written:** 2026-11-27 by Claude, from a direct read of `main` @ `19ffc3c` (the version running in production) and Render scheduler logs. For a new Engine 8 teammate (Claude or another provider). Read `CLAUDE.md`, then this file, then the open items in section 7.
 
-**One-line summary:** Engine 6 *is* approving trades. Engine 8 refuses every one of them because it is still locked in the original "one acceptance test trade" mode. The fix is known (PR #402 **plus** a Render setting) and needs the owner's authorization.
+**One-line summary:** Engine 6 *is* approving trades; Engine 8 refused every one because it was still locked in the original "one acceptance test trade" mode. **Fix released Nov 27** (PR #402 code + Render setting); it needs confirming on the next approved trade.
 
 ---
 
@@ -49,7 +49,15 @@ In all three, the step 4 reason was `ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED
 
 **Not yet confirmed:** that the Nov 25 11:31 and Nov 27 4:46 approvals had the same underlying blocker. Their labels match, but confirming needs the Replay snapshots `2026-11-25/1131.json` and `2026-11-27/0446.json`, kept until about Dec 9–10.
 
-## 4. The fix that exists
+## 4. The fix: RELEASED Nov 27, 2026 (owner-authorized)
+
+**Status (1:08 PM AZ, Nov 27):**
+- **Code:** PR #402's exact reviewed head `018266d` was merged to `main` as `f7d1bc4` through PR #426 (#402 was a draft and couldn't be un-drafted over REST; #402 is closed as superseded).
+- **Setting:** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1` was set on Render service `frye-market-backend-1` (merged into the existing settings, nothing else changed).
+- **Deploy:** `dep-dc4u5ulvbd1s73burjc0` went live at 20:08:39 UTC. The first cycle afterwards (20:09 UTC) ran cleanly in 37 s.
+- **Not yet proven:** the market was closed (holiday session), so no Engine 6 approval has occurred since the release. **Proof = the next approved trade's step 4 output shows `AUTO_PAPER_EXECUTION_COMPLETED`.** If it shows `DUPLICATE_ORDER_BLOCKED` again, read that snapshot's `engine8PaperOrder.blockers` before changing anything.
+
+### Background (what the fix does)
 
 **PR #402** (draft, head `018266d`): when the acceptance file is genuinely missing **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`, eligibility is allowed (`CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL`). A present but corrupt file still fails closed. Engine 8's manager passed it on Nov 25 (29/29 tests; full simulated campaigns; duplicate, kill-switch, operator-disable and stranded-lock safeguards kept). **It has not been merged.**
 
@@ -94,7 +102,8 @@ This is **proposed**, not approved; it needs owner approval. It keeps every real
 
 ## 7. Open items
 
-- [ ] Owner: authorize PR #402 merge **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1` (section 4)
+- [x] Owner authorized; PR #402 code merged (`f7d1bc4` via #426) and setting on (Nov 27, section 4)
+- [ ] **Verify on the next Engine 6 approval** that an order is created (section 4)
 - [ ] Confirm the underlying blocker for Nov 25 11:31 and Nov 27 4:46 from Replay before about Dec 9–10 (preservation script: PR #423)
 - [ ] ChatGPT Engine 8 manager: review this file; correct anything wrong; provide the passover items in section 8
 - [ ] Agree on the section 6 design, then build it as one PR with the section 6 tests (Claude builds, Engine 8 manager reviews)
