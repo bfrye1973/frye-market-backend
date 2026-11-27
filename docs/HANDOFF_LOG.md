@@ -14,3 +14,22 @@ Newest at the bottom. One short entry per work session.
 - Owner decision: Engine 18 uses **Rithmic only**; Ironbeam retired. Old Ironbeam research service (`frye-engine18-liquidity-research`) to be suspended by owner. Recorder standby worker kept for Rithmic recording.
 - Owner sent Rithmic tech support: login extension, second session, data-retention terms.
 - Next: Engine 18D re-audit request for PR #400 → live Step A/B → Rithmic recorder source.
+
+## 2026-11-27 — Engine 8 design review (Claude)
+- Done: traced three owner-flagged missed trades (Nov 25 8:01, 11:31 long; Nov 27 4:46 short) through scheduler logs. All were approved by Engine 6 and blocked by Engine 8 `DUPLICATE_ORDER_BLOCKED`. Root cause in code: the legacy one-time acceptance-trial lock. The acceptance file is missing in the new durable store, which deadlocks every order. Passover + design review: `docs/engines/ENGINE8.md`.
+- Waiting on owner: PR #402 merge **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`.
+- Next: Engine 8 manager review of ENGINE8.md; agree on the section 6 redesign.
+- Later (Nov 27, 1:08 PM AZ): owner authorized the fix. PR #402 head `018266d` merged as `f7d1bc4` (PR #426); `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1` set on frye-market-backend-1; deploy live 20:08 UTC; first cycle clean. **Next:** confirm `AUTO_PAPER_EXECUTION_COMPLETED` on the next Engine 6 approval. Engine 8 work now belongs to the Claude Engine 8 teammate (#425).
+
+## 2026-11-27 (afternoon) — Engine 8 (Claude, now Engine 8 manager)
+- Owner made Claude the Engine 8 manager; ChatGPT Engine 8 is the independent reviewer. 22 questions on #425, all answered by ChatGPT; key points recorded in `docs/engines/ENGINE8.md` sections 7–8.
+- Found: the read-only production preflight ChatGPT required before releasing #402 was not done. Added `scripts/engine8/preflight-readonly.sh` (read-only; set/unset, counts and booleans only).
+- Waiting on owner: run the preflight in the Render Shell before the next approval (market reopens Sunday 4 PM AZ).
+- Next: verify the first post-release approval places an order; first redesign PR = D2+D3+D4 diagnostics only.
+
+## 2026-11-27 (late afternoon) — Engine 8 (Claude, Engine 8 manager)
+- Owner directive (#425): Engine 8 never stops an Engine 6-approved trade. Owner decided: Engine 6 owns overlap; bad inputs refused + alerted; same-trade pending ack and lock = duplicate guard.
+- Built PR #427 (draft): shared guard, acceptance lock and open-trade gate removed, hidden global Journal-pending/active-trade gates narrowed to the same trade, blockers logged every cycle, Pushover alert on approved-but-not-ordered. End-to-end proof: no lock file / flag off, while another trade is open, after a prior trade, after a restart. No new regressions; Engine 8C/8D CI green.
+- Signed off #419/#422 from Engine 8's side (observer-only; tested combined with #427).
+- Waiting on: ChatGPT Engine 8 Manager review of #427; owner OK to merge #427 and the #412 stack (whichever merges second, Engine 8 rebases the shared bridge file).
+- Known: `engine6e-final-crossengine-isolated.yml` is broken (0 jobs on every push).
