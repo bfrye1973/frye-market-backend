@@ -1,0 +1,12 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {projectPaperObserverHealth as health} from "../logic/trading/engine8PaperObserverHealth.js";
+import {buildPrivatePaperReceipt as receipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
+const date="2026-11-27",now="2026-11-27T16:00:00Z";
+const evidence={stability:"NO_CHANGE_OBSERVED",stores:{ledger:{status:"OK"}},values:{ledger:{}}};
+const args={date,now,evidence,receipts:[]};
+test("empty current archive alerts stale, not no trades",()=>{const x=health(args);assert.ok(x.alerts.includes("VERIFICATION_OBSERVER_STALE"));assert.equal(x.coverageStatus,"INCOMPLETE");});
+test("historical interval does not trigger current freshness alert",()=>assert.ok(!health({...args,now:"2026-11-29T16:00:00Z"}).alerts.includes("VERIFICATION_OBSERVER_STALE")));
+test("fresh incomplete scheduler run alerts receipt gap",()=>{const r=receipt({mode:"PAPER",cycleKind:"SCHEDULER_START",schedulerRunId:"RUN",cycleId:"RUN:START",strategyId:"S1",cycleTime:now},now);const x=health({...args,receipts:[r]});assert.ok(x.alerts.includes("SCHEDULER_RECEIPT_GAP"));assert.ok(!x.alerts.includes("VERIFICATION_OBSERVER_STALE"));});
+test("durable pending ACK independent of reported receipt; REAL excluded",()=>{const a={paper:true,status:"filled",journalStatus:"JOURNAL_PENDING",filledAt:"2026-11-27T15:00:00Z"};const x=health({...args,evidence:{...evidence,values:{ledger:{A:a,B:{...a,paper:false}}}}});assert.equal(x.pendingAckCount,1);assert.ok(x.alerts.includes("PENDING_JOURNAL_ACK"));});
+test("unstable ledger cannot certify zero pending ACK",()=>{const x=health({...args,evidence:{...evidence,stability:"CHANGED"}});assert.equal(x.pendingAckCount,null);assert.ok(x.alerts.includes("DURABLE_LEDGER_UNAVAILABLE"));});
