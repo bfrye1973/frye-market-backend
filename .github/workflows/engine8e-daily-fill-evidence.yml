@@ -1,0 +1,18 @@
+name: Engine8E daily fill evidence offline
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/trading/engine8DailyFillEvidence.js'
+      - 'services/core/tests/engine8DailyFillEvidence.test.js'
+      - '.github/workflows/engine8e-daily-fill-evidence.yml'
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js
