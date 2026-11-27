@@ -1,0 +1,113 @@
+name: Engine12 Nov27 acceptance forensic probe
+on:
+  push:
+    branches: [engine12/nov27-acceptance-forensic-probe]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Read-only production Replay and durable read surfaces
+        env:
+          BASE_URL: https://frye-market-backend-1.onrender.com
+        run: |
+          node <<'NODE'
+          const BASE=process.env.BASE_URL;
+          const S1="intraday_scalp@10m";
+          const get=async(url)=>{
+            const r=await fetch(url,{headers:{accept:"application/json","cache-control":"no-store"}});
+            const text=await r.text();
+            let json=null;try{json=text?JSON.parse(text):null;}catch{}
+            return {status:r.status,ok:r.ok,json,text:text.slice(0,300)};
+          };
+          const keepPrimitive=(v)=>v===null||["string","number","boolean"].includes(typeof v);
+          const interestingKey=(k)=>/(candidateid|planid|orderid|executionid|tradeid|paperallowed|allowed|permission|executable|ordercreated|status|blocker|reasoncode|direction|evaluatedat|snapshottime|firstfailingengine|rootcause|pipelinestatus)/i.test(k);
+          function scan(obj,path="",out={},depth=0){
+            if(depth>8||obj==null)return out;
+            if(Array.isArray(obj)){
+              if(obj.length<=12&&obj.every(keepPrimitive)&&interestingKey(path.split(".").at(-1)||""))out[path]=obj;
+              return out;
+            }
+            if(typeof obj!=="object")return out;
+            for(const [k,v] of Object.entries(obj)){
+              const p=path?path+"."+k:k;
+              if(keepPrimitive(v)){
+                if(interestingKey(k))out[p]=v;
+              }else if(Array.isArray(v)){
+                if(v.length<=12&&v.every(keepPrimitive)&&interestingKey(k))out[p]=v;
+              }else scan(v,p,out,depth+1);
+            }
+            return out;
+          }
+          const timesRes=await get(`${BASE}/api/v1/replay/es/times?date=2026-11-27`);
+          if(!timesRes.ok)throw new Error("times endpoint "+timesRes.status+" "+timesRes.text);
+          const times=(timesRes.json?.times||[]).filter(t=>t>="0645"&&t<="0730");
+          console.log("FORENSIC_TIMES",JSON.stringify(times));
+          const snapshots=[];
+          const ids={candidate:new Set(),plan:new Set(),order:new Set(),execution:new Set(),trade:new Set()};
+          for(const t of times){
+            const u=`${BASE}/api/v1/replay/es/snapshot?date=2026-11-27&time=${t}&strategyId=${encodeURIComponent(S1)}`;
+            const r=await get(u);
+            if(!r.ok){console.log("SNAPSHOT_ERROR",t,r.status,r.text);continue;}
+            const snap=r.json||{},lane=snap?.strategies?.[S1]||{};
+            const fields=scan(lane);
+            for(const [p,v] of Object.entries(fields)){
+              const s=typeof v==="string"?v:null;
+              if(!s)continue;
+              if(/candidateId$/i.test(p))ids.candidate.add(s);
+              if(/planId$/i.test(p))ids.plan.add(s);
+              if(/orderId$/i.test(p))ids.order.add(s);
+              if(/executionId$/i.test(p))ids.execution.add(s);
+              if(/tradeId$/i.test(p))ids.trade.add(s);
+            }
+            const compact={
+              time:t,
+              replaySnapshotTime:snap.snapshotTime??snap.generatedAtUtc??null,
+              laneSnapshotTime:lane.snapshotTime??null,
+              fields
+            };
+            snapshots.push(compact);
+            console.log("SNAPSHOT_SUMMARY",JSON.stringify(compact));
+          }
+          console.log("IDENTITIES",JSON.stringify(Object.fromEntries(Object.entries(ids).map(([k,s])=>[k,[...s]]))));
+          async function endpoint(path){
+            const r=await get(BASE+path);
+            console.log("ENDPOINT_STATUS",path,r.status);
+            return r.ok?r.json:null;
+          }
+          const ordersPayload=await endpoint("/api/trading/orders");
+          const execPayload=await endpoint("/api/trading/executions");
+          const journalPayload=await endpoint("/api/v1/trade-journal?strategyId="+encodeURIComponent(S1)+"&accountMode=PAPER");
+          const cand=ids.candidate,plans=ids.plan,orders=ids.order,execs=ids.execution,trades=ids.trade;
+          const match=(x)=>{
+            const raw=JSON.stringify(x);
+            return [...cand,...plans,...orders,...execs,...trades].some(id=>id&&raw.includes(id));
+          };
+          const sanitize=(x)=>({
+            strategyId:x?.strategyId??x?.identity?.strategyId??null,
+            candidateId:x?.candidateId??x?.sourceSignal?.candidateId??x?.ourceSignal?.candidateId??x?.identity?.candidateId??x?.setup?.candidateId??null,
+            planId:x?.planId??x?.sourceSignal?.planId??x?.ourceSignal?.planId??x?.identity?.planId??x?.setup?.planId??null,
+            orderId:x?.orderId??x?.identity?.orderId??x?.orderLink?.orderId??null,
+            executionId:x?.executionId??x?.sourceSignal?.executionId??x?.ourceSignal?.executionId??x?.identity?.executionId??x?.identity?.openingExecutionId??x?.orderLink?.executionId??null,
+            tradeId:x?.tradeId??x?.identity?.tradeId??null,
+            status:x?.status??null,action:x?.action??null,
+            paper:x?.paper??null,accountMode:x?.accountMode??null,
+            qty:x?.qty??x?.filledQty??x?.entry?.qty??null,
+            filledQty:x?.filledQty??null,avgPrice:x?.avgPrice??x?.entry?.price??null,
+            ts:x?.ts??x?.filledAt??x?.entry?.time??x?.createdAt??null,
+            journalStatus:x?.journalStatus??null,
+            remainingQty:x?.qty?.remainingQty??x?.remainingQty??null,
+          });
+          const ordersArr=Array.isArray(ordersPayload)?ordersPayload:(ordersPayload?.orders||[]);
+          const execArr=Array.isArray(execPayload)?execPayload:(execPayload?.executions||[]);
+          const journalArr=Array.isArray(journalPayload)?journalPayload:(journalPayload?.trades||[]);
+          console.log("MATCHED_ORDERS",JSON.stringify(ordersArr.filter(match).map(sanitize)));
+          console.log("MATCHED_EXECUTIONS",JSON.stringify(execArr.filter(match).map(sanitize)));
+          console.log("MATCHED_JOURNAL",JSON.stringify(journalArr.filter(match).map(sanitize)));
+          NODE
