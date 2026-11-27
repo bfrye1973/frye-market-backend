@@ -180,13 +180,13 @@
         ["Approval vs Replay", esc((ind.approvalReplay && ind.approvalReplay.status) || "UNKNOWN")]
       ]);
       html += '<p class="quiet" style="margin:8px 0 0">"Reported" fields come from Engine 8 receipts. Fill and Journal are independently checked by Engine 12.</p>';
-    } else if (latest.reason) {
-      html += '<p class="quiet" style="margin:0">' + esc(latest.reason) + "</p>";
+    } else {
+      html += '<p class="quiet" style="margin:0">No approved trade was reported today. See \u201cWhat the engines saw\u201d for each blocker.</p>';
     }
     return html + "</div>";
   }
 
-  // Per-approval answers, if Engine 12 provides them (proposed field `perApproval`).
+  // Per-approval answers from Engine 12's `perApproval` field.
   function renderPerApproval(daily) {
     var list = daily && Array.isArray(daily.perApproval) ? daily.perApproval : null;
     if (!list) {
@@ -197,8 +197,55 @@
       var v = verdictOf(a && a.verdict);
       return '<div class="approval"><div class="row" style="justify-content:space-between"><b>' + esc(azTime(a && a.firstObservedApprovalTime)) + '</b><span class="chip v-' + v + '">' + v + "</span></div>" +
         '<div class="quiet">' + esc((a && (a.statusText || a.status)) || "") + "</div>" +
-        (a && a.firstBlocker ? '<div class="quiet">First blocker: ' + esc(a.firstBlocker) + "</div>" : "") + "</div>";
+        (a && a.firstBlocker ? '<div class="quiet">First blocker: ' + esc(a.firstBlocker) + (a.firstBlockerSource === "ENGINE8_REPORTED_RECEIPT" ? " (reported by Engine 8)" : "") + "</div>" : "") +
+        (a && a.independentOpeningFill ? '<div class="quiet">Filled ' + esc(a.independentOpeningFill.filledQuantity + " @ " + a.independentOpeningFill.fillPrice + " \u00b7 " + azTime(a.independentOpeningFill.fillTime)) + "</div>" : "") + "</div>";
     }).join("") + "</div>";
+  }
+
+  var ALERT_TEXT = {
+    VERIFICATION_OBSERVER_STALE: "Verification records have stopped arriving.",
+    SCHEDULER_RECEIPT_GAP: "Some scheduler runs are missing records.",
+    RECEIPT_EVIDENCE_INVALID: "Some verification records failed integrity checks.",
+    PENDING_JOURNAL_ACK: "A fill is waiting longer than expected for its Journal acknowledgment.",
+    DURABLE_LEDGER_UNAVAILABLE: "The Engine 8 ledger could not be read reliably.",
+    OBSERVER_HEALTH_UNAVAILABLE: "Health check unavailable."
+  };
+
+  function renderHealth(daily) {
+    var h = daily && daily.observerHealth;
+    var c = daily && daily.receiptCoverage;
+    if (!h && !c) return "";
+    var alerts = h && Array.isArray(h.alerts) ? h.alerts : [];
+    var html = '<div class="card"><h2>Health</h2>';
+    html += alerts.length
+      ? '<ul class="plain">' + alerts.map(function (a) { return "<li>" + esc(ALERT_TEXT[a] || a) + "</li>"; }).join("") + "</ul>"
+      : '<p class="quiet" style="margin:0 0 6px">No alerts from the verification observer.</p>';
+    if (c) html += kv([
+      ["Scheduler runs recorded", esc(c.schedulerRunsObserved == null ? "\u2014" : c.schedulerRunsObserved)],
+      ["Runs with complete records", esc(c.completedObservedRuns == null ? "\u2014" : c.completedObservedRuns)],
+      ["Skipped slots (scheduler busy)", esc(c.skippedSlotsObserved == null ? "\u2014" : c.skippedSlotsObserved)],
+      ["Last record", esc(azTime(c.latestReceiptCreatedAt))]
+    ]);
+    return html + "</div>";
+  }
+
+  // Original Replay chronology: what Engine 6 and the first blocker looked like through the day.
+  function renderObservedReplay(r) {
+    if (!r || typeof r !== "object") return "";
+    var rows = Array.isArray(r.rows) ? r.rows : [];
+    var counts = r.firstBlockerCounts || {};
+    var countText = Object.keys(counts).map(function (k) { return k + " \u00d7" + counts[k]; });
+    var html = '<div class="card"><h2>What the engines saw (Replay)</h2>';
+    if (!rows.length) return html + '<p class="quiet" style="margin:0">' + esc(r.reason || "No Replay snapshots for this day.") + "</p></div>";
+    html += kv([
+      ["Snapshots read", esc(r.snapshotsRead) + " of " + esc(r.snapshotsListed)],
+      ["Approvals observed", esc(r.observedApprovals)],
+      ["Summary", esc(r.classification === "NO_APPROVAL_OBSERVED" ? "No approval observed; blocked upstream" : r.classification === "APPROVAL_OBSERVED" ? "At least one approval observed" : "Unknown")],
+      ["First blockers", countText.length ? chips(countText) : '<span class="quiet">none recorded</span>']
+    ]);
+    if (r.blockerAuthority === "INCLUDES_REGISTRY_UNVERIFIED_DATES") html += '<p class="quiet" style="margin:6px 0 0">Blockers are Engine 28A\u2019s recorded diagnosis; the authority registry is not yet proven for this date.</p>';
+    html += '<p class="quiet" style="margin:6px 0 0">' + esc(r.note || "") + "</p>";
+    return html + "</div>";
   }
 
   function renderFills(daily) {
@@ -223,8 +270,8 @@
   }
 
   function renderAll(daily, latest) {
-    return renderVerdict(daily) + renderLatest(latest) + renderPerApproval(daily) + renderCounts(daily) +
-      renderCoverage(daily) + renderFills(daily) + renderIssues(daily) +
+    return renderVerdict(daily) + renderLatest(latest) + renderPerApproval(daily) + renderObservedReplay(daily && daily.observedReplay) +
+      renderCounts(daily) + renderHealth(daily) + renderCoverage(daily) + renderFills(daily) + renderIssues(daily) +
       '<p class="quiet">' + esc((daily && daily.note) || "") + "</p>";
   }
 
@@ -241,7 +288,7 @@
     return d.toISOString().slice(0, 10);
   }
 
-  root.PaperVerificationView = { renderAll: renderAll, renderVerdict: renderVerdict, renderLatest: renderLatest, renderPerApproval: renderPerApproval, errorText: errorText, arizonaToday: arizonaToday, esc: esc };
+  root.PaperVerificationView = { renderAll: renderAll, renderVerdict: renderVerdict, renderLatest: renderLatest, renderPerApproval: renderPerApproval, renderHealth: renderHealth, renderObservedReplay: renderObservedReplay, errorText: errorText, arizonaToday: arizonaToday, esc: esc };
 
   // ---------- browser wiring ----------
   if (typeof document === "undefined") return;

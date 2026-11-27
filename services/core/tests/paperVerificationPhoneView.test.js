@@ -104,3 +104,20 @@ test("security: key only in a request header, same-origin API, no external resou
   // Display-only: no write methods anywhere.
   assert.doesNotMatch(html, /method:\s*"(POST|PUT|PATCH|DELETE)"/i);
 });
+
+test("Replay chronology: Nov 27 style day reads as blocked upstream with blocker counts", () => {
+  const out = load().renderObservedReplay({ snapshotsRead: 15, snapshotsListed: 15, observedApprovals: 0, classification: "NO_APPROVAL_OBSERVED", firstBlockerCounts: { engine3: 7, engine4: 8 }, blockerAuthority: "INCLUDES_REGISTRY_UNVERIFIED_DATES", rows: [{}], note: "Original Replay observations only." });
+  assert.match(out, /No approval observed; blocked upstream/);
+  assert.match(out, /engine3 \u00d77/);
+  assert.match(out, /engine4 \u00d78/);
+  assert.match(out, /not yet proven for this date/);
+  assert.match(load().renderObservedReplay({ rows: [], reason: "REPLAY_DATE_NOT_FOUND" }), /REPLAY_DATE_NOT_FOUND/);
+});
+
+test("health alerts are shown in plain words with receipt coverage counts", () => {
+  const out = load().renderHealth({ observerHealth: { alerts: ["VERIFICATION_OBSERVER_STALE", "PENDING_JOURNAL_ACK"] }, receiptCoverage: { schedulerRunsObserved: 10, completedObservedRuns: 9, skippedSlotsObserved: 1, latestReceiptCreatedAt: "2026-11-27T18:00:00.000Z" } });
+  assert.match(out, /stopped arriving/);
+  assert.match(out, /Journal acknowledgment/);
+  assert.match(out, /Skipped slots/);
+  assert.match(load().renderHealth({ observerHealth: { alerts: [] } }), /No alerts/);
+});
