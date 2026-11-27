@@ -65,7 +65,7 @@ test("P0: unknown legacy reason cannot reinterpret an explicit false setting", (
 
 test("P0: missing/ambiguous/corrupt-shaped authorization fails closed", () => {
   for (const [state, present] of [
-    [null, false],
+    [null, true],
     [{}, true],
     [[completed], true],
     [{ ...completed, newPaperOrdersAllowed: "false" }, true],
@@ -122,4 +122,14 @@ test("P0: alternative legacy Engine 10 receipt requires CLOSED and zero remainin
   ]) {
     assert.equal(resolve({ ...authorized, state: { ...legacy, ...broken } }).allowed, false);
   }
+});
+
+test("explicit continuous PAPER authorization admits absent legacy receipt only", () => {
+  const input = { ...authorized, state: null, storePresent: false };
+  assert.equal(resolve(input).reason, "CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL");
+  assert.equal(resolve(input).allowed, true);
+  assert.equal(resolve({ ...input, continuousPaperAuthorized: false }).allowed, false);
+  assert.equal(resolve({ ...input, operatorPaperDisabled: true }).allowed, false);
+  assert.equal(resolve({ ...input, storePresent: true }).allowed, false);
+  assert.equal(resolve({ ...input, state: {} }).allowed, false);
 });

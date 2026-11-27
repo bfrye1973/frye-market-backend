@@ -50,6 +50,17 @@ export function resolveEngine8PaperAcceptanceEligibility({
     priorTrialProven: false,
   });
   if (operatorPaperDisabled === true) return fail("ENGINE8_OPERATOR_PAPER_ORDERS_DISABLED");
+  // Explicit continuous PAPER authorization permits a genuinely absent legacy
+  // trial receipt. A present but unreadable or malformed receipt still fails closed.
+  // This does not create a receipt or bypass downstream duplicate/risk checks.
+  if (storePresent === false && state === null && continuousPaperAuthorized === true) {
+    return {
+      allowed: true,
+      reason: "CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL",
+      priorTrialCompleted: false,
+      priorTrialProven: false,
+    };
+  }
   if (storePresent !== true || !state || typeof state !== "object" ||
       Array.isArray(state)) return fail("PAPER_ACCEPTANCE_STATE_UNAVAILABLE");
   if (typeof state.acceptanceTradeCompleted !== "boolean" ||
