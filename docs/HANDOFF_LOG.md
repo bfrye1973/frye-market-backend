@@ -26,3 +26,10 @@ Newest at the bottom. One short entry per work session.
 - Found: the read-only production preflight ChatGPT required before releasing #402 was not done. Added `scripts/engine8/preflight-readonly.sh` (read-only; set/unset, counts and booleans only).
 - Waiting on owner: run the preflight in the Render Shell before the next approval (market reopens Sunday 4 PM AZ).
 - Next: verify the first post-release approval places an order; first redesign PR = D2+D3+D4 diagnostics only.
+
+## 2026-11-27 (late afternoon) — Engine 8 (Claude, Engine 8 manager)
+- Owner directive (#425): Engine 8 never stops an Engine 6-approved trade. Owner decided: Engine 6 owns overlap; bad inputs refused + alerted; same-trade pending ack and lock = duplicate guard.
+- Built PR #427 (draft): shared guard, acceptance lock and open-trade gate removed, hidden global Journal-pending/active-trade gates narrowed to the same trade, blockers logged every cycle, Pushover alert on approved-but-not-ordered. End-to-end proof: no lock file / flag off, while another trade is open, after a prior trade, after a restart. No new regressions; Engine 8C/8D CI green.
+- Signed off #419/#422 from Engine 8's side (observer-only; tested combined with #427).
+- Waiting on: ChatGPT Engine 8 Manager review of #427; owner OK to merge #427 and the #412 stack (whichever merges second, Engine 8 rebases the shared bridge file).
+- Known: `engine6e-final-crossengine-isolated.yml` is broken (0 jobs on every push).

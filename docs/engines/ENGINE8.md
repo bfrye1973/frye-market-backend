@@ -96,6 +96,8 @@ This is **proposed**, not approved; it needs owner approval. It keeps every real
 
 ## 7. Open items
 
+**OWNER DIRECTIVE (locked, Nov 27, #425 comment 7228300105):** Engine 6 is the final authority. Engine 8 answers only "what actually executed?" and **never stops an Engine 6-approved trade**, except for: kill switch, PAPER-only/live-flag guard, the PAPER on/off switch, and the true duplicate guard (same candidate/plan/instruction, the same trade active, the same trade's pending Engine 10 ack, the instruction lock). Owner decisions on the edges: **Engine 6 owns overlap** (Engine 8 places a trade even while another is open); missing or mismatched upstream inputs are refused with a reason code and an alert. Every refusal of an approved trade is logged every cycle and alerted. Implemented in **PR #427** (awaiting the ChatGPT Engine 8 Manager's review and the owner's OK). This supersedes the D1/D7 redesign items below for entry gating.
+
 **Roles (owner decision, Nov 27):** Claude is the Engine 8 manager (management and programming). ChatGPT Engine 8 does the independent engineering review, at an exact SHA with CI green. Engine 28A owns scheduler and observer safety, Engine 12 independent trade verification, Engine 10B Journal accuracy. The owner authorizes production.
 
 - [x] Owner authorized; PR #402 code merged (`f7d1bc4` via #426) and setting on (Nov 27, section 4)
