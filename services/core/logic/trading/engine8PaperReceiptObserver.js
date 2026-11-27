@@ -20,12 +20,21 @@ export async function persistPrivateReceipt(root,receipt){
  const raw=JSON.stringify(receipt);if(Buffer.byteLength(raw)>8192)throw Error("RECEIPT_TOO_LARGE");
  const day=new Date(Date.parse(receipt.cycleTime)-7*3600000).toISOString().slice(0,10);
  const name=day+"-"+createHash("sha256").update(receipt.cycleId).digest("hex")+".json";
- // Bound directory growth without automatic deletion or truncation.
- const dir=await fs.opendir(root);let n=0;try{for await(const entry of dir){if(++n>=50000)throw Error("RECEIPT_CAP_REACHED");}}finally{await dir.close().catch(()=>{});}
- const tmp=path.join(root,"."+randomUUID()+".tmp"),dest=path.join(root,name);
+ // #412 (F-3): one subdirectory per Arizona day. Each write scans only that day's
+ // folder (never the whole archive), so cost and the cap no longer grow with history.
+ // No automatic deletion or truncation. Older flat files stay readable.
+ const dayDir=path.join(root,day);
+ try{await fs.mkdir(dayDir,{mode:0o700});}catch(e){if(e?.code!=="EEXIST")throw e;}
+ const ds=await fs.lstat(dayDir);if(ds.isSymbolicLink()||!ds.isDirectory()||(ds.mode&0o077)!==0)throw Error("UNSAFE_RECEIPT_DAY_DIR");
+ // Same receipt may already exist in the legacy flat layout: never write it twice.
+ if(await fs.lstat(path.join(root,name)).then(()=>true,()=>false))throw Error("RECEIPT_EXISTS");
+ const dir=await fs.opendir(dayDir);let n=0;try{for await(const entry of dir){if(++n>=RECEIPT_DAY_CAP)throw Error("RECEIPT_DAY_CAP_REACHED");}}finally{await dir.close().catch(()=>{});}
+ const tmp=path.join(dayDir,"."+randomUUID()+".tmp"),dest=path.join(dayDir,name);
  let file;
- try{file=await fs.open(tmp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);await file.writeFile(raw);await file.sync();await file.close();file=null;await fs.link(tmp,dest);const d=await fs.open(root,"r");try{await d.sync();}finally{await d.close();}}finally{if(file)await file.close().catch(()=>{});await fs.unlink(tmp).catch(()=>{});}
+ try{file=await fs.open(tmp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);await file.writeFile(raw);await file.sync();await file.close();file=null;await fs.link(tmp,dest);const d=await fs.open(dayDir,"r");try{await d.sync();}finally{await d.close();}}finally{if(file)await file.close().catch(()=>{});await fs.unlink(tmp).catch(()=>{});}
 }
+// About 480 slots x 4 receipts per Arizona day is ~1,920; the cap leaves 10x headroom.
+export const RECEIPT_DAY_CAP=20000;
 export async function observeCompletedPaperCycle({step,context,cycleTime,cycleId,root,now=()=>new Date().toISOString(),persist=persistPrivateReceipt,log=()=>{}}){
  try{const receipt=receiptFromCycle({step,context,cycleTime,cycleId,createdAt:now()});const validity=validatePrivatePaperReceipt(receipt,{now:receipt.receiptCreatedAt});await persist(root,receipt);log({event:"ENGINE8_PAPER_VERIFICATION_RECEIPT",status:validity.valid?"RECORDED":"UNKNOWN",...publicPaperReceipt(receipt)});return {status:validity.valid?"RECORDED":"UNKNOWN"};}
  catch{try{log({event:"ENGINE8_PAPER_VERIFICATION_RECEIPT",status:"UNKNOWN",reason:"OBSERVER_FAILED"});}catch{}return {status:"UNKNOWN"};}

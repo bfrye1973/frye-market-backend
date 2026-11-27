@@ -23,8 +23,11 @@ export function projectObservedPaperCoverage({date,receipts,now}={}){
   run.push(r);runs.set(r.schedulerRunId,run);
  }
  const runGaps=[];
- let completedObservedRuns=0;
+ let completedObservedRuns=0,skippedSlotsObserved=0;
  for(const [runId,rows] of runs){
+  // A skipped slot (scheduler busy) is its own run with one SCHEDULER_SKIPPED receipt:
+  // counted, never treated as a completed run, never as a gap of a real run.
+  if(rows.every(x=>x.cycleKind==="SCHEDULER_SKIPPED")){skippedSlotsObserved+=rows.length;continue;}
   const starts=rows.filter(x=>x.cycleKind==="SCHEDULER_START"),ends=rows.filter(x=>x.cycleKind==="SCHEDULER_END"),entries=rows.filter(x=>x.cycleKind==="ENTRY"),lifecycle=rows.filter(x=>x.cycleKind==="LIFECYCLE"&&x.reportedAction===null);
   const missing=[];
   for(const [name,group] of [["SCHEDULER_START",starts],["SCHEDULER_END",ends],["ENTRY_RECEIPT",entries],["LIFECYCLE_SUMMARY",lifecycle]]){
@@ -38,5 +41,5 @@ export function projectObservedPaperCoverage({date,receipts,now}={}){
  }
  const last=valid.map(r=>r.receiptCreatedAt).sort().at(-1)??null;
  const receiptSetHash=createHash("sha256").update(JSON.stringify(valid.map(r=>r.receiptHash).sort())).digest("hex");
- return {schemaVersion:"engine8.paperVerificationCoverage.v1",timezone:"America/Phoenix",date,intervalStart,intervalEnd,status:"INCOMPLETE",watermarkThrough:null,expectedCycles:null,observedCycles:valid.length,gaps:["TRUSTED_SCHEDULER_MANIFEST_UNAVAILABLE","DURABLE_RETENTION_COVERAGE_UNPROVEN"],duplicates,errors,receiptSetHash,schedulerRunsObserved:runs.size,completedObservedRuns,runGaps,latestReceiptCreatedAt:last,stores:{orders:"UNKNOWN",executions:"UNKNOWN",lifecycle:"UNKNOWN",ledger:"UNKNOWN",journal:"UNKNOWN"},originalApprovalEvidence:"UNKNOWN",latestObservedCycleTime:valid.map(r=>r.cycleTime).sort().at(-1)??null};
+ return {schemaVersion:"engine8.paperVerificationCoverage.v1",timezone:"America/Phoenix",date,intervalStart,intervalEnd,status:"INCOMPLETE",watermarkThrough:null,expectedCycles:null,observedCycles:valid.length,gaps:["TRUSTED_SCHEDULER_MANIFEST_UNAVAILABLE","DURABLE_RETENTION_COVERAGE_UNPROVEN"],duplicates,errors,receiptSetHash,schedulerRunsObserved:runs.size-(skippedSlotsObserved?[...runs.values()].filter(r=>r.every(x=>x.cycleKind==="SCHEDULER_SKIPPED")).length:0),completedObservedRuns,skippedSlotsObserved,runGaps,latestReceiptCreatedAt:last,stores:{orders:"UNKNOWN",executions:"UNKNOWN",lifecycle:"UNKNOWN",ledger:"UNKNOWN",journal:"UNKNOWN"},originalApprovalEvidence:"UNKNOWN",latestObservedCycleTime:valid.map(r=>r.cycleTime).sort().at(-1)??null};
 }

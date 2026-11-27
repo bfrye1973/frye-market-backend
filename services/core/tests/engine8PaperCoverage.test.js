@@ -15,3 +15,16 @@ test("missing entry and lifecycle are detected without assuming no trade",()=>{c
 test("interrupted and concurrent runs remain distinct",()=>{const rows=[runReceipt("SCHEDULER_START"),...["SCHEDULER_START","SCHEDULER_END","ENTRY","LIFECYCLE"].map(k=>runReceipt(k,"RUN2"))];const a=project({date,now,receipts:rows});assert.equal(a.schedulerRunsObserved,2);assert.equal(a.completedObservedRuns,1);assert.ok(a.runGaps[0].reasons.includes("MISSING_SCHEDULER_END"));});
 test("lifecycle action is not a duplicate lifecycle summary",()=>{const rows=["SCHEDULER_START","SCHEDULER_END","ENTRY","LIFECYCLE"].map(k=>runReceipt(k));rows.push(runReceipt("LIFECYCLE","RUN1",{cycleId:"ACTION1",reportedAction:"EXIT"}));assert.equal(project({date,now,receipts:rows}).completedObservedRuns,1);});
 test("unknown entry result prevents completed observation",()=>{const rows=["SCHEDULER_START","SCHEDULER_END","LIFECYCLE"].map(k=>runReceipt(k));rows.push(runReceipt("ENTRY","RUN1",{reportedOutcome:"UNKNOWN"}));assert.ok(project({date,now,receipts:rows}).runGaps[0].reasons.includes("OUTCOME_UNKNOWN"));});
+
+test("#412: a SCHEDULER_SKIPPED slot is counted separately, never as a completed run or a run gap", async () => {
+  const { buildPrivatePaperReceipt } = await import("../logic/trading/engine8PrivatePaperReceipt.js");
+  const { projectObservedPaperCoverage } = await import("../logic/trading/engine8PaperCoverage.js");
+  const skip = buildPrivatePaperReceipt({ mode: "PAPER", cycleKind: "SCHEDULER_SKIPPED", schedulerRunId: "skip-1", cycleId: "skip-1:SCHEDULER_SKIPPED", cycleTime: "2026-11-27T16:00:00.000Z", strategyId: "intraday_scalp@10m", reportedOutcome: "SKIPPED" }, "2026-11-27T16:00:01.000Z");
+  assert.equal(skip.cycleKind, "SCHEDULER_SKIPPED");
+  const c = projectObservedPaperCoverage({ date: "2026-11-27", receipts: [skip], now: "2026-11-27T17:00:00.000Z" });
+  assert.equal(c.skippedSlotsObserved, 1);
+  assert.equal(c.completedObservedRuns, 0);
+  assert.equal(c.schedulerRunsObserved, 0);
+  assert.deepEqual(c.runGaps, []);
+  assert.equal(c.status, "INCOMPLETE");
+});
