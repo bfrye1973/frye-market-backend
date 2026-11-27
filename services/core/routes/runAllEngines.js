@@ -2,6 +2,7 @@
 import express from "express";
 import {randomUUID} from "node:crypto";
 import {observeCompletedPaperCycle} from "../logic/trading/engine8PaperReceiptObserver.js";
+import {observeLifecycleOutcome} from "../logic/trading/engine8LifecycleReceiptObserver.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -183,9 +184,9 @@ function runStep({ name, cmd, args, cwd, env = {} }) {
 
 // Capture only scheduler skips that never enter the bridge; the bridge owns its own receipt.
 // Fire-and-forget after decision; no await, retry, or trading-state mutation.
-function observePaperSchedulerSkip(reason,cycleTime) {
+function observePaperSchedulerSkip(reason,cycleTime,runId) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
-  try { void observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}).catch(()=>{}); } catch { /* observational only */ }
+  try { void observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}).catch(()=>{}); } catch { /* observational only */ }
 }
 
 // ------------------------------
@@ -212,6 +213,7 @@ async function handle(req, res) {
   IS_RUNNING = true;
   const routeStartedMs = Date.now();
   const startedAt = nowIso();
+  const verificationRunId=randomUUID();
 
   console.log(`[run-all-engines] REQUEST START @ ${startedAt}`);
 
@@ -231,6 +233,9 @@ async function handle(req, res) {
       args: [ENGINE8_AUTO_PAPER_LIFECYCLE_JOB],
       cwd: CORE_DIR,
     });
+    if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
+      try { void observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR}).catch(()=>{}); } catch { /* diagnostic only */ }
+    }
 
     // ---------------------------------
     // STEP 1: Engine 1 + Shelves
@@ -243,7 +248,7 @@ async function handle(req, res) {
     });
 
     if (step1.code !== 0) {
-      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt);
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt,verificationRunId);
       const endedAt = nowIso();
       const totalElapsedMs = elapsedMs(routeStartedMs);
 
@@ -426,9 +431,10 @@ async function handle(req, res) {
         cmd: "node",
         args: [ENGINE8_AUTO_PAPER_EXECUTOR_JOB],
         cwd: CORE_DIR,
+        env: {ENGINE8_VERIFICATION_SCHEDULER_RUN_ID:verificationRunId},
       });
     } else {
-      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt);
+      observePaperSchedulerSkip("UPSTREAM_PIPELINE_NOT_COMPLETE",startedAt,verificationRunId);
     }
 
     // Optional non-authoritative diagnostic. Never gates or retries execution.
