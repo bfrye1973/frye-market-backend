@@ -18,3 +18,7 @@ test("duplicate execution or order identity is ambiguous",()=>{assert.equal(run(
 test("wrong quantity, price, status or fill time is not verified",()=>{for(const v of [{filledQty:2},{avgPrice:6001},{status:"pending"},{ts:"2026-11-27T08:00:00Z"}])assert.equal(run([order],[{...execution,...v}]).verifiedFillCount,0);});
 test("opening and exit counts distinct",()=>{const o={...order,action:"EXIT"},e={...execution,action:"EXIT"};const p=run([o],[e]);assert.equal(p.openingFillCount,0);assert.equal(p.exitFillCount,1);});
 test("invalid calendar date rejected",()=>assert.throws(()=>run([],[],"2026-02-30")));
+
+test("top-level and both legacy aliases cannot contradict identity",()=>{for(const x of [{candidateId:"OTHER"},{sourceSignal:{planId:"SYN-P1"},ourceSignal:{planId:"OTHER"}}])assert.equal(run([order],[{...execution,...x}]).verifiedFillCount,0);});
+test("explicit REAL/LIVE anywhere conflicts with PAPER order",()=>{for(const x of [{paper:false},{accountMode:"REAL"},{mode:"LIVE"},{sourceSignal:{mode:"REAL"}}])assert.equal(run([order],[{...execution,...x}]).verifiedFillCount,0);assert.equal(run([{...order,accountMode:"REAL"}],[execution]).verifiedFillCount,0);});
+test("different symbol or side cannot share same order identity",()=>{assert.equal(run([{...order,symbol:"MES",side:"BUY"}],[{...execution,symbol:"ES",side:"BUY"}]).verifiedFillCount,0);assert.equal(run([{...order,side:"BUY"}],[{...execution,side:"SELL"}]).verifiedFillCount,0);});
