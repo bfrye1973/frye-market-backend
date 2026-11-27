@@ -59,13 +59,7 @@ In all three, the step 4 reason was `ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED
 
 ### Background (what the fix does)
 
-**PR #402** (draft, head `018266d`): when the acceptance file is genuinely missing **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`, eligibility is allowed (`CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL`). A present but corrupt file still fails closed. Engine 8's manager passed it on Nov 25 (29/29 tests; full simulated campaigns; duplicate, kill-switch, operator-disable and stranded-lock safeguards kept). **It has not been merged.**
-
-**To make trades flow, both are needed (owner authorization; merge to `main` = production deploy):**
-1. Merge PR #402.
-2. Set `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1` in Render. Its current value is unknown: Render's API doesn't show setting values to this session.
-
-Then watch the next approval. The step 4 output should show `AUTO_PAPER_EXECUTION_COMPLETED`.
+**PR #402** (head `018266d`, released via #426): when the acceptance file is genuinely missing **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`, eligibility is allowed (`CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL`). A present but corrupt file still fails closed. Engine 8's manager passed it on Nov 25 (29/29 tests; full simulated campaigns; duplicate, kill-switch, operator-disable and stranded-lock safeguards kept). The code only allows orders while the setting is on; turning the setting off restores the old blocking behavior.
 
 ## 5. Design problems (why this stayed hidden)
 
@@ -113,7 +107,7 @@ This is **proposed**, not approved; it needs owner approval. It keeps every real
 
 - Why the durable store started without an acceptance file, and whether the old store held a completed-trial record
 - Every open Engine 8 PR, what it fixes, its tested head, and why it is unmerged
-- Production settings that affect PAPER execution (names only, never values) and whether `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED` is set
+- Production settings that affect PAPER execution (names only, never values)
 - Rules Engine 8 considers non-negotiable safety
 - Known stranded locks or reconciliation work pending
 
