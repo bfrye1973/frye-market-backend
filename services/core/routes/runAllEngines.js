@@ -1,5 +1,6 @@
 // services/core/routes/runAllEngines.js
 import express from "express";
+import { buildPaperCycleReceipt } from "../logic/trading/engine8PaperCycleReceipt.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -418,6 +419,9 @@ async function handle(req, res) {
         cwd: CORE_DIR,
       });
     }
+
+    // Diagnostic only: log sanitized outcome, not raw child stdout.
+    try { console.log(JSON.stringify(buildPaperCycleReceipt(step4, nowIso()))); } catch { /* diagnostics must not gate execution */ }
 
     // Optional non-authoritative diagnostic. Never gates or retries execution.
     if (process.env.ENGINE6E_FUNNEL_DIAGNOSTICS_ENABLED === "1" && step3a.code === 0) {
