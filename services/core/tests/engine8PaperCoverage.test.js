@@ -1,0 +1,10 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {projectObservedPaperCoverage as project} from "../logic/trading/engine8PaperCoverage.js";
+import {buildPrivatePaperReceipt as receipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
+const date="2026-11-27",now="2026-11-28T08:00:00Z",t="2026-11-27T15:00:00Z";
+const r=receipt({mode:"PAPER",cycleId:"CYCLE1",strategyId:"S1",cycleTime:t},t);
+test("valid observations alone never prove whole day coverage",()=>{const x=project({date,now,receipts:[r]});assert.equal(x.observedCycles,1);assert.equal(x.status,"INCOMPLETE");assert.equal(x.watermarkThrough,null);});
+test("missing receipts cannot imply zero activity",()=>{const x=project({date,now});assert.equal(x.status,"INCOMPLETE");assert.ok(x.errors.includes("RECEIPTS_UNAVAILABLE"));});
+test("duplicate and corrupt receipts flagged",()=>{const x=project({date,now,receipts:[r,r,{...r,orderCreated:true}]});assert.equal(x.observedCycles,1);assert.equal(x.duplicates.length,1);assert.ok(x.errors.includes("RECEIPT_HASH_OR_SCHEMA_MISMATCH"));});
+test("wrong Arizona date or future cycle rejected",()=>{assert.equal(project({date:"2026-11-28",now,receipts:[r]}).observedCycles,0);assert.equal(project({date,now:"2026-11-27T14:00:00Z",receipts:[r]}).observedCycles,0);});
