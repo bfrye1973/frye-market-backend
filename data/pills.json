@@ -1,41 +1,41 @@
 {
   "version": "5m-deltas-r12.8",
-  "deltasUpdatedAt": "2026-11-27T17:25:49.971223+00:00",
-  "sourceUpdatedAt": "2026-11-27T17:13:56Z",
+  "deltasUpdatedAt": "2026-11-27T17:30:49.991436+00:00",
+  "sourceUpdatedAt": "2026-11-27T17:23:26Z",
   "deltas": {
     "sectors": {
       "Information Technology": {
-        "netTilt": -23.65
+        "netTilt": -0.83
       },
       "Materials": {
-        "netTilt": 0.98
+        "netTilt": -12.23
       },
       "Health Care": {
-        "netTilt": -1.24
+        "netTilt": 9.15
       },
       "Communication Services": {
-        "netTilt": -5.1
+        "netTilt": -4.64
       },
       "Real Estate": {
-        "netTilt": 0.49
+        "netTilt": -33.12
       },
       "Energy": {
-        "netTilt": -5.81
+        "netTilt": -36.05
       },
       "Consumer Staples": {
-        "netTilt": 14.31
+        "netTilt": -12.55
       },
       "Consumer Discretionary": {
-        "netTilt": -6.55
+        "netTilt": -5.23
       },
       "Financials": {
-        "netTilt": -1.38
+        "netTilt": -27.0
       },
       "Utilities": {
-        "netTilt": 7.8
+        "netTilt": -43.81
       },
       "Industrials": {
-        "netTilt": -17.98
+        "netTilt": -19.59
       }
     }
   }
