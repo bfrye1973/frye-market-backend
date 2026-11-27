@@ -11,6 +11,7 @@ One file per engine: purpose, files, status, locked decisions, open work. Write 
 | Engine 4 | — | file not yet written |
 | Engine 6 | — | file not yet written |
 | Engine 7 | — | file not yet written |
+| Engine 8 — PAPER execution | [ENGINE8.md](./ENGINE8.md) | Blocked: acceptance lock (fix PR #402 + setting) |
 | Engine 9 | — | file not yet written |
 | Engine 11 (ES candles) | — | file not yet written |
 | Engine 12 | — | file not yet written |

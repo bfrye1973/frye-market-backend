@@ -14,3 +14,8 @@ Newest at the bottom. One short entry per work session.
 - Owner decision: Engine 18 uses **Rithmic only**; Ironbeam retired. Old Ironbeam research service (`frye-engine18-liquidity-research`) to be suspended by owner. Recorder standby worker kept for Rithmic recording.
 - Owner sent Rithmic tech support: login extension, second session, data-retention terms.
 - Next: Engine 18D re-audit request for PR #400 → live Step A/B → Rithmic recorder source.
+
+## 2026-11-27 — Engine 8 design review (Claude)
+- Done: traced three owner-flagged missed trades (Nov 25 8:01, 11:31 long; Nov 27 4:46 short) through scheduler logs. All were approved by Engine 6 and blocked by Engine 8 `DUPLICATE_ORDER_BLOCKED`. Root cause in code: the legacy one-time acceptance-trial lock. The acceptance file is missing in the new durable store, which deadlocks every order. Passover + design review: `docs/engines/ENGINE8.md`.
+- Waiting on owner: PR #402 merge **and** `ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED=1`.
+- Next: Engine 8 manager review of ENGINE8.md; agree on the section 6 redesign.
