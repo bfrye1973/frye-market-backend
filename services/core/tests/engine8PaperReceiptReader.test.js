@@ -1,0 +1,15 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import {buildPrivatePaperReceipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
+import {persistPrivateReceipt} from "../logic/trading/engine8PaperReceiptObserver.js";
+import {readPrivatePaperReceipts,projectObservedPaperAttempts} from "../logic/trading/engine8PaperReceiptReader.js";
+const date="2026-11-27",t="2026-11-27T15:00:00Z",now="2026-11-27T16:00:00Z";
+const receipt=(over={})=>buildPrivatePaperReceipt({mode:"PAPER",cycleId:"SYN1",strategyId:"S1",cycleTime:t,candidateId:"C1",planId:"P1",approvalSnapshotTime:t,approvalSnapshotHash:"a".repeat(64),engine6Permission:true,executorInvoked:false,engine8Executable:false,skipReason:"ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED",blockers:["PAPER_ACCEPTANCE_STATE_UNAVAILABLE"],...over},over.cycleTime??t);
+test("latest reported approval shows blocked attempt without any fill",()=>{const x=projectObservedPaperAttempts({date,now,receipts:[receipt()]});assert.equal(x.reportedApprovedCandidates,1);assert.equal(x.latestObservedApprovedCandidate.outcome,"APPROVAL_REPORTED_SKIPPED");assert.equal(x.latestObservedApprovedCandidate.independentVerification,"UNKNOWN");assert.deepEqual(x.latestObservedApprovedCandidate.latestReceipt.blockers,["PAPER_ACCEPTANCE_STATE_UNAVAILABLE"]);});
+test("repeated approval attempts deduplicate candidate and cycle; strategies isolated",()=>{const a=receipt(),b=receipt({cycleId:"SYN2"}),c=receipt({cycleId:"SYN3",strategyId:"S2"});const x=projectObservedPaperAttempts({date,now,receipts:[a,a,b,c]});assert.equal(x.reportedApprovedCandidates,2);assert.equal(x.reportedAttempts,3);assert.ok(x.issues.includes("DUPLICATE_CYCLE_ID"));});
+test("no receipts never proves no approvals",()=>{const x=projectObservedPaperAttempts({date,now,receipts:[]});assert.equal(x.coverage,"UNPROVEN");assert.equal(x.latestObservedApprovedCandidate,null);});
+test("reported order remains unverified",()=>{const x=projectObservedPaperAttempts({date,now,receipts:[receipt({executorInvoked:true,orderCreated:true,orderId:"O1",skipReason:null})]});assert.equal(x.latestObservedApprovedCandidate.outcome,"ORDER_REPORTED_NOT_INDEPENDENTLY_VERIFIED");});
+test("archive readback validates filename, integrity, mode and rejects unsafe file",async()=>{const root=await fs.mkdtemp(path.join(os.tmpdir(),"e8-reader-"));try{const r=receipt();await persistPrivateReceipt(root,r);await fs.symlink("/dev/null",path.join(root,date+"-"+"b".repeat(64)+".json"));const x=await readPrivatePaperReceipts({root,date,now});assert.deepEqual(x.receipts,[r]);assert.ok(x.issues.includes("UNSAFE_RECEIPT_FILE"));const file=(await fs.readdir(root)).find(n=>!n.includes("b".repeat(64)));await fs.writeFile(path.join(root,file),JSON.stringify({...r,orderCreated:true}));assert.equal((await readPrivatePaperReceipts({root,date,now})).receipts.length,0);}finally{await fs.rm(root,{recursive:true,force:true});}});
