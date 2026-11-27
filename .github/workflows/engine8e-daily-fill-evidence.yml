@@ -8,6 +8,8 @@ on:
       - 'services/core/tests/engine8DailyJournalEvidence.test.js'
       - 'services/core/logic/trading/engine8PrivatePaperReceipt.js'
       - 'services/core/tests/engine8PrivatePaperReceipt.test.js'
+      - 'services/core/logic/trading/engine8DailyEvidenceReader.js'
+      - 'services/core/tests/engine8DailyEvidenceReader.test.js'
       - '.github/workflows/engine8e-daily-fill-evidence.yml'
 permissions:
   contents: read
@@ -19,4 +21,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js
+      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js
