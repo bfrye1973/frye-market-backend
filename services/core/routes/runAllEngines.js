@@ -4,6 +4,7 @@ import {randomUUID} from "node:crypto";
 import {observeCompletedPaperCycle,persistPrivateReceipt} from "../logic/trading/engine8PaperReceiptObserver.js";
 import {buildPrivatePaperReceipt} from "../logic/trading/engine8PrivatePaperReceipt.js";
 import {observeLifecycleOutcome} from "../logic/trading/engine8LifecycleReceiptObserver.js";
+import {createInFlightLimiter} from "../logic/engine28a/boundedObserverDispatch.js";
 import { spawn } from "child_process";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -183,19 +184,24 @@ function runStep({ name, cmd, args, cwd, env = {} }) {
   });
 }
 
+// Engine 28A #412: every fire-and-forget verification write goes through one
+// bounded limiter. A hung filesystem cannot accumulate pending writes in this
+// process; writes beyond the cap are dropped and logged as UNKNOWN evidence.
+const OBSERVER_LIMITER=createInFlightLimiter({max:Number(process.env.ENGINE28A_OBSERVER_MAX_IN_FLIGHT)||undefined,log:r=>console.error(JSON.stringify(r))});
+
 // Record scheduler boundaries independently; these are not trading decisions.
 function observeSchedulerBoundary(kind,runId,startedAt,outcome=null) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
   try {
     const receipt=buildPrivatePaperReceipt({mode:"PAPER",cycleKind:kind,schedulerRunId:runId,cycleId:runId+":"+kind,cycleTime:startedAt,strategyId:"intraday_scalp@10m",reportedOutcome:outcome},nowIso());
-    void persistPrivateReceipt(process.env.ENGINE8_PAPER_VERIFICATION_DIR,receipt).catch(()=>{});
+    OBSERVER_LIMITER.dispatch(kind,()=>persistPrivateReceipt(process.env.ENGINE8_PAPER_VERIFICATION_DIR,receipt));
   } catch { /* diagnostic only */ }
 }
 // Capture only scheduler skips that never enter the bridge; the bridge owns its own receipt.
 // Fire-and-forget after decision; no await, retry, or trading-state mutation.
 function observePaperSchedulerSkip(reason,cycleTime,runId) {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED!=="1")return;
-  try { void observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}).catch(()=>{}); } catch { /* observational only */ }
+  try { OBSERVER_LIMITER.dispatch("SCHEDULER_SKIP_RECEIPT",()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify({ok:true,skipped:true,reason})},context:{executorInvoked:false,schedulerRunId:runId},cycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))})); } catch { /* observational only */ }
 }
 
 // ------------------------------
@@ -211,6 +217,9 @@ async function handle(req, res) {
   }
 
   if (IS_RUNNING) {
+    // Engine 28A #412: a skipped slot is otherwise invisible (200 before any
+    // receipt). Log it so coverage can mark the slot, not assume it ran.
+    try { console.log(`[run-all-engines] SLOT SKIPPED ALREADY_RUNNING @ ${nowIso()}`); } catch { /* diagnostic only */ }
     return res.json({
       ok: true,
       skipped: true,
@@ -245,7 +254,7 @@ async function handle(req, res) {
       cwd: CORE_DIR,
     });
     if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
-      try { void observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR}).catch(()=>{}); } catch { /* diagnostic only */ }
+      try { OBSERVER_LIMITER.dispatch("LIFECYCLE_RECEIPT",()=>observeLifecycleOutcome({step:step0,runId:verificationRunId,root:process.env.ENGINE8_PAPER_VERIFICATION_DIR})); } catch { /* diagnostic only */ }
     }
 
     // ---------------------------------

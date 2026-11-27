@@ -15,6 +15,7 @@
 import fs from "fs";
 import {createHash,randomUUID} from "node:crypto";
 import {observeCompletedPaperCycle} from "../logic/trading/engine8PaperReceiptObserver.js";
+import {runBounded} from "../logic/engine28a/boundedObserverDispatch.js";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -45,7 +46,9 @@ let verificationContext={executorInvoked:false,schedulerRunId};
 async function printAndExit(payload, code = 0) {
   console.log(JSON.stringify(payload, null, 2));
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
-    try { await observeCompletedPaperCycle({step:{stdout:JSON.stringify(payload)},context:verificationContext,cycleTime:verificationCycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}); } catch { /* observational only */ }
+    // Engine 28A #412: bounded observer. Slow, hung or failing receipt storage
+    // never delays this exit or changes its code; the gap is logged as UNKNOWN.
+    try { await runBounded(()=>observeCompletedPaperCycle({step:{stdout:JSON.stringify(payload)},context:verificationContext,cycleTime:verificationCycleTime,cycleId:randomUUID(),root:process.env.ENGINE8_PAPER_VERIFICATION_DIR,log:r=>console.error(JSON.stringify(r))}),{timeoutMs:process.env.ENGINE28A_OBSERVER_TIMEOUT_MS,label:"ENTRY_RECEIPT",log:r=>console.error(JSON.stringify(r))}); } catch { /* observational only */ }
   }
   process.exit(code);
 }

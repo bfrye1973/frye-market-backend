@@ -1,0 +1,24 @@
+name: Engine28A issue412 observer noninterference
+on:
+  pull_request:
+    paths:
+      - 'services/core/logic/engine28a/boundedObserverDispatch.js'
+      - 'services/core/tests/engine28aObserverNoninterference.test.js'
+      - 'services/core/jobs/autoExecuteCanonicalPaperTrade.js'
+      - 'services/core/routes/runAllEngines.js'
+      - 'services/core/logic/trading/engine8PaperReceiptObserver.js'
+      - 'services/core/logic/trading/engine8LifecycleReceiptObserver.js'
+      - '.github/workflows/engine28a-issue412-noninterference.yml'
+permissions:
+  contents: read
+jobs:
+  noninterference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test services/core/tests/engine28aObserverNoninterference.test.js
+      - run: node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
+      - run: node --check services/core/routes/runAllEngines.js
