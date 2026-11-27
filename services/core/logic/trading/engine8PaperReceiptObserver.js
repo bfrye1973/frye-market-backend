@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import {constants} from "node:fs";
 import {randomUUID,createHash} from "node:crypto";
-import {buildPrivatePaperReceipt,publicPaperReceipt} from "./engine8PrivatePaperReceipt.js";
+import {buildPrivatePaperReceipt,publicPaperReceipt,validatePrivatePaperReceipt} from "./engine8PrivatePaperReceipt.js";
 const bool=x=>typeof x==="boolean"?x:null;
 export function receiptFromCycle({step,context={},cycleTime,cycleId,createdAt}){
  let p=null;
@@ -27,6 +27,6 @@ export async function persistPrivateReceipt(root,receipt){
  try{file=await fs.open(tmp,constants.O_WRONLY|constants.O_CREAT|constants.O_EXCL|constants.O_NOFOLLOW,0o600);await file.writeFile(raw);await file.sync();await file.close();file=null;await fs.link(tmp,dest);const d=await fs.open(root,"r");try{await d.sync();}finally{await d.close();}}finally{if(file)await file.close().catch(()=>{});await fs.unlink(tmp).catch(()=>{});}
 }
 export async function observeCompletedPaperCycle({step,context,cycleTime,cycleId,root,now=()=>new Date().toISOString(),persist=persistPrivateReceipt,log=()=>{}}){
- try{const receipt=receiptFromCycle({step,context,cycleTime,cycleId,createdAt:now()});await persist(root,receipt);log({event:"ENGINE8_PAPER_VERIFICATION_RECEIPT",status:"RECORDED",...publicPaperReceipt(receipt)});return {status:"RECORDED"};}
+ try{const receipt=receiptFromCycle({step,context,cycleTime,cycleId,createdAt:now()});const validity=validatePrivatePaperReceipt(receipt,{now:receipt.receiptCreatedAt});await persist(root,receipt);log({event:"ENGINE8_PAPER_VERIFICATION_RECEIPT",status:validity.valid?"RECORDED":"UNKNOWN",...publicPaperReceipt(receipt)});return {status:validity.valid?"RECORDED":"UNKNOWN"};}
  catch{try{log({event:"ENGINE8_PAPER_VERIFICATION_RECEIPT",status:"UNKNOWN",reason:"OBSERVER_FAILED"});}catch{}return {status:"UNKNOWN"};}
 }
