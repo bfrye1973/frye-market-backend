@@ -15,6 +15,13 @@
 //   ENGINE8_PAPER_DATA_DIR           (default /var/data/replay/engine8-paper)
 //   TRADE_JOURNAL_DIR                (default /var/data/replay/journal)
 //
+// Browser sessions (dashboard): the access key never reaches the browser.
+//   POST /api/v1/trade-investigator/session/pairing   (X-Trade-Investigator-Access; server-side only)
+//   POST /api/v1/trade-investigator/session/redeem    ({ pairingCode }, allowed Origin) -> bearer token
+//   POST /api/v1/trade-investigator/session/revoke    (Authorization: Bearer <token>)
+//   GET  /api/v1/trade-investigator  accepts the access key OR a bearer token from its own origin.
+// Sessions are in memory only (no disk writes); a restart clears them.
+//
 // Status codes: 400 invalid query, 401 missing credential, 403 wrong credential,
 // 404 no evidence, 405 non-GET, 413 response too large, 429 rate limited,
 // 503 not configured / storage unavailable.
@@ -26,6 +33,7 @@ import { performance } from "node:perf_hooks";
 import { buildInvestigation } from "../logic/investigator/buildInvestigation.js";
 import { redactInvestigationPayload } from "../logic/investigator/redactInvestigationPayload.js";
 import { validateInvestigationQuery, LIMITS } from "../logic/investigator/validateInvestigationQuery.js";
+import { createSessionStore } from "../logic/investigator/browserSession.js";
 
 export const ACCESS_HEADER = "x-trade-investigator-access";
 
@@ -70,25 +78,68 @@ export function makeTradeInvestigatorRouter({
 } = {}) {
   const config = resolveInvestigatorConfig(settings);
   const allow = makeRateLimiter({ ...rateLimit, now });
+  const allowRedeem = makeRateLimiter({ limit: 10, windowMs: 60_000, now });
+  const sessions = createSessionStore({ now });
   const router = express.Router();
 
-  router.all("/trade-investigator", (req, res) => {
-    const started = performance.now();
-
-    // Do not rely on the project-wide reflective CORS policy.
+  // Do not rely on the project-wide reflective CORS policy.
+  function baseHeaders(req, res, methods) {
     res.removeHeader("Access-Control-Allow-Credentials");
     const origin = req.get("origin");
     if (origin && config.allowedOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
       res.setHeader("Vary", "Origin");
-      res.setHeader("Access-Control-Allow-Headers", "Accept, X-Trade-Investigator-Access");
-      res.setHeader("Access-Control-Allow-Methods", "GET");
+      res.setHeader("Access-Control-Allow-Headers", "Accept, Content-Type, Authorization, X-Trade-Investigator-Access");
+      res.setHeader("Access-Control-Allow-Methods", methods);
     } else {
       res.removeHeader("Access-Control-Allow-Origin");
     }
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Pragma", "no-cache");
     res.setHeader("X-Content-Type-Options", "nosniff");
+  }
+
+  const bearerOf = (req) => {
+    const h = String(req.get("authorization") || "");
+    return h.startsWith("Bearer ") ? h.slice(7) : "";
+  };
+
+  router.all("/trade-investigator/session/:action", (req, res) => {
+    baseHeaders(req, res, "POST");
+    const action = req.params.action;
+    const done = (status, body) => {
+      log({ route: "trade-investigator/session", action, status });
+      return res.status(status).json(body);
+    };
+    if (!["pairing", "redeem", "revoke"].includes(action)) return done(404, { ok: false, error: "NOT_FOUND" });
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return done(405, { ok: false, error: "METHOD_NOT_ALLOWED" });
+    }
+    if (!config.enabled) return done(503, { ok: false, error: "TRADE_INVESTIGATOR_NOT_CONFIGURED" });
+
+    if (action === "pairing") {
+      const provided = req.get(ACCESS_HEADER);
+      if (!provided) return done(401, { ok: false, error: "CREDENTIAL_REQUIRED" });
+      if (!equal(provided, config.key)) return done(403, { ok: false, error: "CREDENTIAL_REJECTED" });
+      return done(200, { ok: true, ...sessions.issuePairing() });
+    }
+    if (action === "redeem") {
+      const origin = req.get("origin");
+      if (!origin || !config.allowedOrigins.includes(origin)) return done(403, { ok: false, error: "ORIGIN_NOT_ALLOWED" });
+      if (!allowRedeem(req.ip || "unknown")) return done(429, { ok: false, error: "RATE_LIMITED" });
+      const r = sessions.redeem({ pairingCode: req.body?.pairingCode, origin });
+      return r.ok ? done(200, r) : done(401, { ok: false, error: r.error });
+    }
+    // revoke
+    const token = bearerOf(req);
+    if (!token) return done(401, { ok: false, error: "SESSION_REQUIRED" });
+    return done(200, { ok: true, revoked: sessions.revoke({ token }) });
+  });
+
+  router.all("/trade-investigator", (req, res) => {
+    const started = performance.now();
+    baseHeaders(req, res, "GET");
 
     const send = (status, body, meta = {}) => {
       const durationMs = Math.round((performance.now() - started) * 10) / 10;
@@ -104,8 +155,16 @@ export function makeTradeInvestigatorRouter({
     if (!config.enabled) return send(503, { ok: false, error: "TRADE_INVESTIGATOR_NOT_CONFIGURED" });
 
     const provided = req.get(ACCESS_HEADER);
-    if (!provided) return send(401, { ok: false, error: "CREDENTIAL_REQUIRED" });
-    if (!equal(provided, config.key)) return send(403, { ok: false, error: "CREDENTIAL_REJECTED" });
+    const bearer = bearerOf(req);
+    if (provided) {
+      if (!equal(provided, config.key)) return send(403, { ok: false, error: "CREDENTIAL_REJECTED" });
+    } else if (bearer) {
+      if (!sessions.verify({ token: bearer, origin: req.get("origin") })) {
+        return send(401, { ok: false, error: "SESSION_INVALID_OR_EXPIRED" });
+      }
+    } else {
+      return send(401, { ok: false, error: "CREDENTIAL_REQUIRED" });
+    }
 
     if (!allow(req.ip || "unknown")) return send(429, { ok: false, error: "RATE_LIMITED" });
 

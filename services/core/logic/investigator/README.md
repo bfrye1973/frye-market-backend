@@ -32,3 +32,17 @@ Engine `status` is one of `PASS | WAITING | BLOCKED | NOT_REACHED | INFERRED_PRO
 
 - `knownAtDecision` is built only from the selected Replay snapshot (at or before the requested time).
 - Engine 8 and Engine 10 events are split into `priorEvents` and `subsequentEvents` around Engine 8's `evaluatedAt`.
+
+## Browser sessions (dashboard)
+
+The access key never reaches the browser.
+
+1. **Issue a pairing code (server-side only).** From the Render Shell:
+   ```
+   curl -s -X POST -H "X-Trade-Investigator-Access: $TRADE_INVESTIGATOR_ACCESS_KEY" http://127.0.0.1:${PORT:-10000}/api/v1/trade-investigator/session/pairing
+   ```
+   This returns a one-time code valid for 5 minutes.
+2. **Redeem it.** Type the code into the dashboard. The dashboard calls `POST /api/v1/trade-investigator/session/redeem` from an allowed origin (`TRADE_INVESTIGATOR_ALLOWED_ORIGINS`) and receives a read-only bearer token, bound to that origin and valid for 4 hours.
+3. **Use it.** The token authorizes `GET /api/v1/trade-investigator` only. It cannot issue pairing codes. `POST .../session/revoke` ends it.
+
+Pairings and sessions are held **in memory only**: nothing is written to disk, and a restart clears them. The browser keeps the token in JavaScript memory only (never `localStorage`, `sessionStorage`, cookies or URLs).
