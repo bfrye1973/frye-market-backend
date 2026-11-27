@@ -20,6 +20,8 @@ on:
       - 'services/core/tests/engine8ObservedApprovalWindow.test.js'
       - 'services/core/logic/trading/engine8LifecycleReceiptObserver.js'
       - 'services/core/tests/engine8LifecycleReceiptObserver.test.js'
+      - 'services/core/logic/trading/engine8PaperObserverHealth.js'
+      - 'services/core/tests/engine8PaperObserverHealth.test.js'
       - 'services/core/jobs/autoExecuteCanonicalPaperTrade.js'
       - 'services/core/routes/runAllEngines.js'
       - '.github/workflows/engine8e-daily-fill-evidence.yml'
@@ -33,6 +35,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js services/core/tests/engine8PaperCoverage.test.js services/core/tests/engine8PaperReceiptObserver.test.js services/core/tests/engine8PaperReceiptReader.test.js services/core/tests/engine8ObservedApprovalWindow.test.js services/core/tests/engine8LifecycleReceiptObserver.test.js
+      - run: node --test services/core/tests/engine8DailyFillEvidence.test.js services/core/tests/engine8DailyJournalEvidence.test.js services/core/tests/engine8PrivatePaperReceipt.test.js services/core/tests/engine8DailyEvidenceReader.test.js services/core/tests/engine8PaperCoverage.test.js services/core/tests/engine8PaperReceiptObserver.test.js services/core/tests/engine8PaperReceiptReader.test.js services/core/tests/engine8ObservedApprovalWindow.test.js services/core/tests/engine8LifecycleReceiptObserver.test.js services/core/tests/engine8PaperObserverHealth.test.js
       - run: node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
       - run: node --check services/core/routes/runAllEngines.js
