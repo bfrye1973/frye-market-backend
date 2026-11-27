@@ -39,9 +39,11 @@ test("actual Engine8 preparation accepts fresh candidate and rejects old identit
   assert.equal(fresh.tradeId,null);
   fs.writeFileSync(path.join(dir,"engine8-paper-acceptance-state.json"),
     JSON.stringify({acceptanceTradeCompleted:true,newPaperOrdersAllowed:false}));
-  const locked=prepare(dir,"FRESH","FRESHPLAN");
-  assert.equal(locked.status,"DUPLICATE_ORDER_BLOCKED");
-  assert.equal(locked.orderCreated,false);
+  // Owner directive #425: the legacy one-time trial lock no longer stops an approved trade.
+  const formerlyLocked=prepare(dir,"FRESH","FRESHPLAN");
+  assert.equal(formerlyLocked.status,"READY_FOR_PAPER_EXECUTION_CALL");
+  assert.equal(formerlyLocked.orderCreated,false);
+  assert.equal(old.duplicateBlocked,true,"the same candidate is still never ordered twice");
   assert.equal(fs.readdirSync(dir).length,2);
  }finally{fs.rmSync(dir,{recursive:true,force:true});}
 });

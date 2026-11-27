@@ -129,7 +129,29 @@ async function runBridge(env) {
   return {code,payload,stderr:err};
 }
 
-test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/close, old A blocked, new B eligible",{
+// Starts the protected trading route in a SEPARATE node process (a restart):
+// only the on-disk durable PAPER/Engine 10 state carries over.
+async function startFreshServer(env){
+  const code=`
+    const express=(await import("express")).default;
+    const tradingRouter=(await import("./services/core/routes/trading.js")).default;
+    const app=express(); app.use(express.json()); app.use("/api/trading",tradingRouter);
+    const s=app.listen(0,"127.0.0.1",()=>console.log("PORT="+s.address().port));`;
+  const child=spawn(process.execPath,["--input-type=module","-e",code],{
+    cwd:repoRoot,env:{...process.env,...env},stdio:["ignore","pipe","pipe"],
+  });
+  let err="";
+  child.stderr.on("data",x=>err+=x.toString());
+  const port=await new Promise((resolve,reject)=>{
+    let out="";
+    const t=setTimeout(()=>reject(new Error("FRESH_SERVER_TIMEOUT "+err.slice(0,800))),20000);
+    child.stdout.on("data",x=>{out+=x.toString();const m=out.match(/PORT=(\d+)/);if(m){clearTimeout(t);resolve(Number(m[1]));}});
+    child.once("exit",c=>{clearTimeout(t);reject(new Error("FRESH_SERVER_EXIT "+c+" "+err.slice(0,800)));});
+  });
+  return {child,base:"http://127.0.0.1:"+port};
+}
+
+test("Owner directive #425: approved trades execute with no lock file, while another is open, after a prior trade and after a restart",{
   skip:process.env.CI!=="true",
   timeout:90000,
 },async()=>{
@@ -148,7 +170,8 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     ENGINE8_KILL_SWITCH:"0",
     ENGINE8_LIVE_TRADING_ENABLED:"0",
     ENGINE8_ALLOW_LIVE_FUTURES:"0",
-    ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"1",
+    // The legacy continuous flag is deliberately OFF: it no longer matters.
+    ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"0",
     ENGINE8_PAPER_OPERATOR_DISABLED:"0",
     REPLAY_MODE:"0",
     ENGINE12_REPLAY_MODE:"0",
@@ -186,20 +209,13 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     });
     assert.equal(response.status,401,"untrusted HTTP caller cannot execute");
 
-    // Verify the actual durable-state reader (not merely the synthetic READY fixture).
+    // Case 1 (owner directive): no acceptance file, continuous flag OFF, the actual
+    // durable-state reader reports no blockers and the approved trade executes.
     const {getEngine8DuplicateState}=await import("../logic/trading/engine8DuplicateState.js");
+    const {engine8ExecutionBlockers}=await import("../logic/trading/engine8ExecutionGuards.js");
     const identity={strategyId:"intraday_scalp@10m",candidateId:"CAND-A",planId:"PLAN-CAND-A"};
-    process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED="0";
-    assert.equal(getEngine8DuplicateState(identity).acceptanceEligibility.allowed,false);
-    const noAuth=await runBridge({...flags,CORE_BASE_URL:base,ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"0"});
-    assert.notEqual(noAuth.code,0);
-    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,0);
-    assert.equal(fs.existsSync(receiptPath),false);
-    process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED="1";
-    const eligibility=getEngine8DuplicateState(identity).acceptanceEligibility;
-    assert.equal(eligibility.allowed,true);
-    assert.equal(eligibility.reason,"CONTINUOUS_PAPER_AUTHORIZED_NO_LEGACY_TRIAL");
-    console.log("NOV25_MISSING_RECEIPT_REGRESSION",JSON.stringify({receiptPresent:false,unauthorizedOrderCount:0,authorizedEligibility:eligibility.reason}));
+    assert.deepEqual(engine8ExecutionBlockers(getEngine8DuplicateState(identity)),[]);
+    console.log("CASE1_NO_ACCEPTANCE_FILE",JSON.stringify({receiptPresent:fs.existsSync(receiptPath),continuousFlag:process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED}));
 
     const a=await runBridge({...flags,CORE_BASE_URL:base});
     assert.equal(a.code,0,JSON.stringify(a.payload));
@@ -240,13 +256,33 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     const duplicate=await runBridge({...flags,CORE_BASE_URL:base});
     assert.notEqual(duplicate.code,0);
     assert.equal(durable.readPaperStore("paper-orders.json",[]).length,1);
+    // Never silent: the refusal of an Engine 6-approved trade is logged with its exact reason.
+    assert.equal(duplicate.payload.approvedTradeNotOrdered,true,JSON.stringify(duplicate.payload));
+    assert.match(duplicate.stderr,/ENGINE8_APPROVED_TRADE_NOT_ORDERED/);
+    assert.match(duplicate.stderr,/IDEMPOTENCY_KEY_ALREADY_USED|PLAN_ALREADY_ORDERED|CANDIDATE_ALREADY_ORDERED/);
 
-    // A different candidate cannot open while A's authoritative Engine10
-    // PAPER Journal still reports an OPEN position.
-    writeSnapshot("CAND-B");
-    const activeConflict=await runBridge({...flags,CORE_BASE_URL:base});
-    assert.notEqual(activeConflict.code,0);
-    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,1);
+    // Adapter-level refusal (skip path) prints the exact blockers every cycle.
+    fs.writeFileSync(snapshotFile,JSON.stringify({ok:true,strategies:{"intraday_scalp@10m":{engine8PaperOrder:{
+      ...fixture("CAND-A"),status:"DUPLICATE_ORDER_BLOCKED",executable:false,
+      blocker:"PLAN_ALREADY_ORDERED",blockers:["PLAN_ALREADY_ORDERED","NO_ORDER_CREATED"],
+    }}}}));
+    const skipped=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.equal(skipped.code,0);
+    assert.equal(skipped.payload.status,"AUTO_PAPER_EXECUTION_SKIPPED");
+    assert.equal(skipped.payload.engine8.primaryBlocker,"PLAN_ALREADY_ORDERED");
+    assert.deepEqual(skipped.payload.engine8.blockers,["PLAN_ALREADY_ORDERED","NO_ORDER_CREATED"]);
+    assert.equal(skipped.payload.approvedTradeNotOrdered,true);
+    assert.match(skipped.stderr,/ENGINE8_APPROVED_TRADE_NOT_ORDERED/);
+
+    // Engine 6 owns overlap (owner decision, #425): a DIFFERENT approved candidate
+    // executes even while A is still OPEN in the Engine 10 Journal.
+    writeSnapshot("CAND-OVERLAP");
+    const overlap=await runBridge({...flags,CORE_BASE_URL:base});
+    assert.equal(overlap.code,0,JSON.stringify(overlap.payload));
+    assert.equal(overlap.payload.status,"AUTO_PAPER_EXECUTION_COMPLETED");
+    assert.equal(overlap.payload.execution.candidateId,"CAND-OVERLAP");
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,2);
+    assert.equal((await journal.getTradeById(tradeId)).trade.status,"OPEN","A still open");
 
     const common={
       tradeId,planId:"PLAN-CAND-A",candidateId:"CAND-A",zoneId:"ZONE-CAND-A",
@@ -289,9 +325,15 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     writeSnapshot("CAND-A");
     const repeatedClosed=await runBridge({...flags,CORE_BASE_URL:base});
     assert.notEqual(repeatedClosed.code,0);
+    // Case 2 + 3: after a prior completed trade, through a FRESH server process
+    // (a restart) that knows only the durable on-disk state.
     writeSnapshot("CAND-B");
-    const b=await runBridge({...flags,CORE_BASE_URL:base});
+    const restarted=await startFreshServer(flags);
+    let b;
+    try { b=await runBridge({...flags,CORE_BASE_URL:restarted.base}); }
+    finally { restarted.child.kill(); }
     assert.equal(b.code,0,JSON.stringify(b.payload));
+    assert.equal(b.payload.status,"AUTO_PAPER_EXECUTION_COMPLETED");
     assert.equal(b.payload.execution.journalCompleted,true);
     assert.equal(b.payload.execution.candidateId,"CAND-B");
     assert.notEqual(b.payload.execution.tradeId,tradeId);
@@ -301,8 +343,8 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     assert.equal(funnelB.firstFailedGate,null,JSON.stringify(funnelB));
     assert.equal(funnelB.gates[11].state,"PASS");
 
-    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,5,
-      "A entry/3 exits then B entry must persist unique orders");
+    assert.equal(durable.readPaperStore("paper-orders.json",[]).length,6,
+      "A entry, overlap entry, A's 3 exits, then B entry must persist unique orders");
 
     // Combined final midpoint: both remaining one-contract blocks may close
     // together at the exact same destination midpoint with a single
@@ -371,8 +413,9 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
     const life=durable.readPaperStore("engine8-paper-execution-state.json",{
       version:"engine8.paperExecutionState.v1",executions:{}
     });
+    // Same-trade pending Journal ack still blocks (true duplicate guard).
     life.executions["EXEC-PENDING-CI"]={
-      strategyId:"intraday_scalp@10m",candidateId:"CAND-UNRESOLVED",
+      strategyId:"intraday_scalp@10m",candidateId:"CAND-C",planId:"PLAN-CAND-C",
       status:"JOURNAL_PENDING",journalPending:true,executionSuccessful:true,
     };
     durable.writePaperStore("engine8-paper-execution-state.json",life);
@@ -428,7 +471,8 @@ test("P0: real protected HTTP bridge, Engine8 persisted fill, Engine10 OPEN/clos
       strandedLockDenied:stranded.code!==0,
       concurrentDuplicateSerialized:true,
       duplicateDenied:duplicate.code!==0,
-      openPositionDenied:activeConflict.code!==0,
+      overlapExecuted:overlap.code===0,
+      restartExecutedB:b.code===0,
       closedCandidateDenied:repeatedClosed.code!==0,
       realBrokerCalls:0,
     }));

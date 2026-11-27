@@ -1,4 +1,5 @@
 // services/core/logic/trading/engine8CanonicalPaperAdapter.js
+import { engine8ExecutionBlockers, engine8PrimaryStatus } from "./engine8ExecutionGuards.js";
 // Engine 8 — canonical paper-order eligibility adapter.
 //
 // READ-ONLY.
@@ -610,68 +611,6 @@ function validateEngine9Geometry(engine9) {
   return unique(errors);
 }
 
-function duplicateBlockers(duplicateState) {
-  const blockers = [];
-
-  if (
-    duplicateState?.candidateAlreadyOrdered === true
-  ) {
-    blockers.push("CANDIDATE_ALREADY_ORDERED");
-  }
-
-  if (
-    duplicateState?.idempotencyKeyAlreadyUsed === true
-  ) {
-    blockers.push("IDEMPOTENCY_KEY_ALREADY_USED");
-  }
-
-  if (
-    duplicateState?.openTradeForStrategy === true
-  ) {
-    blockers.push(
-      "OPEN_TRADE_ALREADY_EXISTS_FOR_STRATEGY"
-    );
-  }
-
-  if (
-    duplicateState?.activeTradeIdExists === true
-  ) {
-    blockers.push("ACTIVE_TRADE_ID_ALREADY_EXISTS");
-  }
-
-  if (
-    duplicateState?.orderExistsForPlanId === true
-  ) {
-    blockers.push("ORDER_ALREADY_EXISTS_FOR_PLAN_ID");
-  }
-
-  if (duplicateState?.journalPendingExecution === true) {
-    blockers.push("ENGINE10_JOURNAL_PENDING");
-  }
-
-  // Only the durable Engine 8 reader may authenticate that a legacy
-  // one-time trial has valid provenance and an independent opt-in.
-  // External/test callers without that evidence retain legacy fail-closed
-  // behavior; the trial completion alone is never a market veto.
-  if (duplicateState?.acceptanceEligibility) {
-    if (duplicateState.acceptanceEligibility.allowed !== true) {
-      blockers.push(
-        duplicateState.acceptanceEligibility.reason ||
-        "PAPER_ACCEPTANCE_AUTHORIZATION_UNVERIFIED"
-      );
-    }
-  } else {
-    if (duplicateState?.acceptanceTradeCompleted === true) {
-      blockers.push("ACCEPTANCE_TRADE_ALREADY_COMPLETED");
-    }
-    if (duplicateState?.newPaperOrdersAllowed === false) {
-      blockers.push("NEW_PAPER_ORDERS_DISABLED");
-    }
-  }
-
-  return blockers;
-}
-
 /**
  * Build the canonical read-only Engine 8 paper-order eligibility state.
  */
@@ -1086,18 +1025,22 @@ if (engine6Decision === "PAPER_STAND_DOWN") {
   }
 
   /*
-   * Duplicate and acceptance-lock gate.
+   * Execution guards (owner directive, #425): only the PAPER on/off switch and the
+   * true duplicate guard may stop an Engine 6-approved trade here. No acceptance
+   * lock, no "trade already open" refusal. One specific reason per blocker.
    */
-  const currentDuplicateBlockers =
-    duplicateBlockers(duplicateState);
+  const currentExecutionBlockers =
+    engine8ExecutionBlockers(duplicateState);
 
-  if (currentDuplicateBlockers.length > 0) {
+  if (currentExecutionBlockers.length > 0) {
     return finish(output, {
-      status: "DUPLICATE_ORDER_BLOCKED",
-      blockers: currentDuplicateBlockers,
-      duplicateBlocked: true,
+      status: engine8PrimaryStatus(currentExecutionBlockers),
+      blocker: currentExecutionBlockers[0],
+      blockers: currentExecutionBlockers,
+      duplicateBlocked:
+        currentExecutionBlockers[0] !== "PAPER_TRADING_DISABLED",
       reasonCodes: [
-        "ENGINE8_DUPLICATE_OR_ACCEPTANCE_LOCK",
+        currentExecutionBlockers[0],
         "NO_ORDER_CREATED",
       ],
     });

@@ -1,3 +1,6 @@
+// RETIRED (owner directive, #425, Nov 27, 2026): this legacy acceptance-trial resolver no
+// longer gates any order and is imported by no production code. Kept only so historical
+// tests and CI workflows that reference it still run. See engine8ExecutionGuards.js.
 // Engine 8 — additive, read-only resolution of the legacy one-time PAPER trial lock.
 //
 // The legacy acceptance record is immutable audit evidence. This module must

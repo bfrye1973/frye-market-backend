@@ -26,6 +26,7 @@
 //
 // Snapshot construction remains read-only.
 
+import { engine8ExecutionBlockers, engine8PrimaryStatus } from "./engine8ExecutionGuards.js";
 import crypto from "crypto";
 
 import {
@@ -783,41 +784,28 @@ export async function prepareEngine8PaperExecution({
   result.duplicateState =
     duplicateState;
 
+  // Same shared guard as the snapshot adapter (owner directive, #425): only the
+  // PAPER on/off switch and the true duplicate guard may refuse here.
+  const executionBlockers =
+    engine8ExecutionBlockers(duplicateState);
+
   const duplicateBlocked =
-    duplicateState
-      ?.candidateAlreadyOrdered ===
-      true ||
-    duplicateState
-      ?.idempotencyKeyAlreadyUsed ===
-      true ||
-    duplicateState
-      ?.openTradeForStrategy ===
-      true ||
-    duplicateState
-      ?.activeTradeIdExists ===
-      true ||
-    duplicateState
-      ?.orderExistsForPlanId ===
-      true ||
-    duplicateState
-      ?.journalPendingExecution ===
-      true ||
-    (duplicateState?.acceptanceEligibility
-      ? duplicateState.acceptanceEligibility.allowed !== true
-      : duplicateState?.acceptanceTradeCompleted === true ||
-        duplicateState?.newPaperOrdersAllowed === false);
+    executionBlockers.length > 0;
 
   if (duplicateBlocked) {
     return {
       ...reject(
         result,
-        "DUPLICATE_ORDER_BLOCKED",
-        "FINAL_DUPLICATE_CHECK_FAILED",
+        engine8PrimaryStatus(executionBlockers),
+        executionBlockers[0],
         "NO_EXECUTION_PREPARED"
       ),
 
+      blockers:
+        executionBlockers,
+
       duplicateBlocked:
-        true,
+        executionBlockers[0] !== "PAPER_TRADING_DISABLED",
 
       idempotencyKey,
     };
