@@ -23,8 +23,7 @@
 import fs from "fs";
 import path from "path";
 import crypto from "crypto";
-import { readPaperStore, writePaperStore, paperStorePath } from "./engine8PaperDurableStore.js";
-import { resolveEngine8PaperAcceptanceEligibility } from "./engine8PaperAcceptanceEligibility.js";
+import { readPaperStore, writePaperStore } from "./engine8PaperDurableStore.js";
 import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -1118,23 +1117,11 @@ export function getEngine8DuplicateState({
   const acceptanceState =
     getEngine8AcceptanceState();
 
-  // Do not allow a missing, corrupt, ambiguous, or explicitly disabled
-  // authorization record to masquerade as an ordinary open test state.
-  // This reads only the dedicated durable PAPER authority; the legacy
-  // completion file is retained for audit and is NOT merged or rewritten.
-  const acceptanceEligibility =
-    resolveEngine8PaperAcceptanceEligibility({
-      state: readJson(ACCEPTANCE_FILE, null),
-      storePresent: fs.existsSync(
-        paperStorePath("engine8-paper-acceptance-state.json")
-      ),
-      candidateId: normalizedCandidateId,
-      planId: normalizedPlanId,
-      continuousPaperAuthorized:
-        process.env.ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED === "1",
-      operatorPaperDisabled:
-        process.env.ENGINE8_PAPER_OPERATOR_DISABLED === "1",
-    });
+  // Owner directive (#425, Nov 27): the legacy one-time acceptance-trial record never
+  // gates an order. It stays readable as audit evidence only (fields below). The
+  // operator PAPER on/off switch is the only remaining operator gate here.
+  const paperTradingDisabled =
+    process.env.ENGINE8_PAPER_OPERATOR_DISABLED === "1";
 
   const lifecycleState =
     getEngine8ExecutionState();
@@ -1222,14 +1209,29 @@ export function getEngine8DuplicateState({
         )
     ) || null;
 
+  // True duplicate guard: only records for THIS candidate/plan/instruction block.
+  // (Previously ANY blocking record blocked every new order, including any OPEN
+  // trade, which was a hidden "trade already open" gate. Engine 6 owns overlap.)
+  const matchingLifecycleRecords =
+    lifecycleRecords.filter(
+      (record) =>
+        (normalizedCandidateId && text(record?.candidateId) === normalizedCandidateId) ||
+        (normalizedPlanId && text(record?.planId) === normalizedPlanId) ||
+        (canonicalIdempotencyKey && text(record?.idempotencyKey) === canonicalIdempotencyKey)
+    );
+
   const journalPendingExecution =
-    Boolean(
-      lifecycleRecords.some(
-        (record) =>
-          lifecycleRecordIsBlocking(
-            record
-          )
-      )
+    matchingLifecycleRecords.some(
+      (record) => lifecycleRecordIsBlocking(record)
+    );
+
+  // Informational only (never a blocker): another trade still awaiting its
+  // Journal acknowledgment or still open. Reported so it can be alerted on.
+  const otherTradeJournalPending =
+    lifecycleRecords.some(
+      (record) =>
+        !matchingLifecycleRecords.includes(record) &&
+        record?.journalPending === true
     );
 
   const openTradeForStrategy =
@@ -1275,12 +1277,16 @@ export function getEngine8DuplicateState({
         tradeIsOpen(trade)
     ) || null;
 
+  // Same-trade only: an active Engine 8 trade for THIS candidate/plan/instruction.
+  // An open trade for a different candidate is not a duplicate (Engine 6 owns overlap).
   const activeTradeIdExists =
     Boolean(
-      text(activeTrade?.tradeId) ||
       text(
         matchingLifecycleRecord
           ?.tradeId
+      ) &&
+      lifecycleRecordIsBlocking(
+        matchingLifecycleRecord
       )
     );
 
@@ -1309,11 +1315,14 @@ export function getEngine8DuplicateState({
 
     newPaperOrdersAllowed,
 
-    // Effective continuous-PAPER authorization is separate from the
-    // historical one-time acceptance trial audit flags above.
-    acceptanceEligibility,
+    // Audit only: acceptanceTradeCompleted / newPaperOrdersAllowed above
+    // never gate an order (owner directive, #425).
+    paperTradingDisabled,
 
     journalPendingExecution,
+
+    // Informational, never blockers:
+    otherTradeJournalPending,
 
     canonicalIdempotencyKey,
 

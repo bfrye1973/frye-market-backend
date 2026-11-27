@@ -42,20 +42,46 @@ function printAndExit(payload, code = 0) {
   process.exit(code);
 }
 
-function reject(reason, detail = null) {
+// Set once the snapshot is read, so any later refusal of an Engine 6-approved
+// trade is logged and alerted (owner directive #425: never fail silently).
+let currentEngine8PaperOrder = null;
+
+// Loaded lazily and guarded: the alert is observational, so a missing or broken
+// alert module can never stop this bridge or change its decision or exit code.
+async function alertIfApprovedNotOrdered(args) {
+  try {
+    const m = await import("../logic/trading/engine8ApprovedNotOrderedAlert.js");
+    return await m.alertIfApprovedNotOrdered(args);
+  } catch {
+    return null;
+  }
+}
+
+async function reject(reason, detail = null) {
+  const alert = await alertIfApprovedNotOrdered({
+    engine8PaperOrder: currentEngine8PaperOrder,
+    stage: "BRIDGE_REJECT",
+    reason,
+  });
   printAndExit(
     {
       ok: false,
       status: "AUTO_PAPER_EXECUTION_BRIDGE_ERROR",
       reason,
       detail,
+      approvedTradeNotOrdered: alert ? true : false,
       evaluatedAt: nowIso(),
     },
     1
   );
 }
 
-function skip(reason, engine8PaperOrder = null) {
+async function skip(reason, engine8PaperOrder = null) {
+  const alert = await alertIfApprovedNotOrdered({
+    engine8PaperOrder,
+    stage: "ADAPTER_NOT_READY",
+    reason,
+  });
   printAndExit({
     ok: true,
     skipped: true,
@@ -68,8 +94,18 @@ function skip(reason, engine8PaperOrder = null) {
           direction: engine8PaperOrder.direction ?? null,
           candidateId: engine8PaperOrder.candidateId ?? null,
           planId: engine8PaperOrder.planId ?? null,
+          // Exact reason, every cycle (owner directive #425).
+          primaryBlocker:
+            engine8PaperOrder.blocker ??
+            engine8PaperOrder.blockers?.[0] ??
+            null,
+          blockers: Array.isArray(engine8PaperOrder.blockers)
+            ? engine8PaperOrder.blockers.slice(0, 20)
+            : [],
+          engine6Decision: engine8PaperOrder.engine6?.decision ?? null,
         }
       : null,
+    approvedTradeNotOrdered: alert ? true : false,
     evaluatedAt: nowIso(),
   });
 }
@@ -77,11 +113,11 @@ function skip(reason, engine8PaperOrder = null) {
 if (
   process.env.ENGINE8_AUTO_PAPER_EXECUTION_ENABLED !== "1"
 ) {
-  skip("ENGINE8_AUTO_PAPER_EXECUTION_DISABLED");
+  await skip("ENGINE8_AUTO_PAPER_EXECUTION_DISABLED");
 }
 
 if (!fs.existsSync(SNAPSHOT_FILE)) {
-  reject("ES_STRATEGY_SNAPSHOT_NOT_FOUND", SNAPSHOT_FILE);
+  await reject("ES_STRATEGY_SNAPSHOT_NOT_FOUND", SNAPSHOT_FILE);
 }
 
 let snapshot;
@@ -91,7 +127,7 @@ try {
     fs.readFileSync(SNAPSHOT_FILE, "utf8")
   );
 } catch (error) {
-  reject(
+  await reject(
     "ES_STRATEGY_SNAPSHOT_UNREADABLE",
     String(error?.message || error)
   );
@@ -102,38 +138,40 @@ const engine8PaperOrder =
     ?.engine8PaperOrder || null;
 
 if (!engine8PaperOrder) {
-  reject("ENGINE8_CANONICAL_ADAPTER_NOT_FOUND");
+  await reject("ENGINE8_CANONICAL_ADAPTER_NOT_FOUND");
 }
+
+currentEngine8PaperOrder = engine8PaperOrder;
 
 // Validate the execution environment on every enabled cycle,
 // even when no trade is currently ready. This prevents a valid
 // future GO from discovering a missing safety/admin setting too late.
 if (process.env.ENGINE8_PAPER_ONLY !== "1") {
-  reject("ENGINE8_PAPER_ONLY_NOT_SET");
+  await reject("ENGINE8_PAPER_ONLY_NOT_SET");
 }
 
 if (
   process.env.ENGINE8_CANONICAL_EXECUTOR_ENABLED !== "1"
 ) {
-  reject("ENGINE8_CANONICAL_EXECUTOR_ENABLED_NOT_SET");
+  await reject("ENGINE8_CANONICAL_EXECUTOR_ENABLED_NOT_SET");
 }
 
 if (process.env.ENGINE8_KILL_SWITCH === "1") {
-  reject("ENGINE8_KILL_SWITCH_ACTIVE");
+  await reject("ENGINE8_KILL_SWITCH_ACTIVE");
 }
 
 if (
   process.env.ENGINE8_LIVE_TRADING_ENABLED === "1" ||
   process.env.ENGINE8_ALLOW_LIVE_FUTURES === "1"
 ) {
-  reject("LIVE_EXECUTION_FLAGS_PRESENT");
+  await reject("LIVE_EXECUTION_FLAGS_PRESENT");
 }
 
 if (
   process.env.REPLAY_MODE === "1" ||
   process.env.ENGINE12_REPLAY_MODE === "1"
 ) {
-  reject("REPLAY_EXECUTION_FORBIDDEN");
+  await reject("REPLAY_EXECUTION_FORBIDDEN");
 }
 
 const adminSecret = String(
@@ -141,14 +179,14 @@ const adminSecret = String(
 ).trim();
 
 if (!adminSecret) {
-  reject("ENGINE8_ADMIN_SECRET_NOT_CONFIGURED");
+  await reject("ENGINE8_ADMIN_SECRET_NOT_CONFIGURED");
 }
 
 if (
   upper(engine8PaperOrder.status) !== READY_STATUS ||
   engine8PaperOrder.executable !== true
 ) {
-  skip(
+  await skip(
     "ENGINE8_ADAPTER_NOT_READY_ENVIRONMENT_ARMED",
     engine8PaperOrder
   );
@@ -196,7 +234,7 @@ try {
 } catch (error) {
   clearTimeout(timeout);
 
-  reject(
+  await reject(
     "CANONICAL_PAPER_EXECUTION_REQUEST_FAILED",
     String(error?.message || error)
   );
@@ -205,7 +243,14 @@ try {
 }
 
 if (!response?.ok || payload?.ok !== true) {
-  reject(
+  // Carry the route's exact refusal reason into the log line and alert.
+  currentEngine8PaperOrder = {
+    ...currentEngine8PaperOrder,
+    blocker:
+      payload?.blockers?.[0] ?? payload?.status ?? null,
+    blockers: Array.isArray(payload?.blockers) ? payload.blockers : [],
+  };
+  await reject(
     "CANONICAL_PAPER_EXECUTION_REJECTED",
     {
       httpStatus: response?.status ?? null,

@@ -51,6 +51,7 @@ import path from "node:path";
 import {
   getEngine8DuplicateState, markEngine8AcceptanceTradeCompleted
 } from "./services/core/logic/trading/engine8DuplicateState.js";
+import { engine8ExecutionBlockers } from "./services/core/logic/trading/engine8ExecutionGuards.js";
 const query = (candidateId, planId) =>
   getEngine8DuplicateState({strategyId:"intraday_scalp@10m",candidateId,planId});
 const a = query("CAND-A", "PLAN-A");
@@ -64,7 +65,8 @@ const result = process.env.TEST_SECOND_CLOSE === "1" ?
 const original = JSON.parse(fs.readFileSync(
   path.join(process.env.ENGINE8_PAPER_DATA_DIR,"engine8-paper-acceptance-state.json"),"utf8"
 ));
-console.log(JSON.stringify({a,b,result,original}));
+console.log(JSON.stringify({a,b,result,original,
+  aBlockers: engine8ExecutionBlockers(a), bBlockers: engine8ExecutionBlockers(b)}));
 `;
 
 function run(dir, extraEnv = {}) {
@@ -87,24 +89,25 @@ function run(dir, extraEnv = {}) {
   return JSON.parse(child.stdout.trim());
 }
 
-test("isolated durable store: completed A blocked, distinct B eligible", () => {
+test("isolated durable store: completed A blocked as a true duplicate, distinct B executable", () => {
   const dir = tempPaperStore();
   try {
-    const {a,b} = run(dir);
+    const {a,b,aBlockers,bBlockers} = run(dir);
     assert.equal(a.candidateAlreadyOrdered, true);
-    assert.equal(a.acceptanceEligibility.allowed, false);
+    assert.ok(aBlockers.includes("CANDIDATE_ALREADY_ORDERED"));
+    assert.ok(aBlockers.includes("PLAN_ALREADY_ORDERED"));
     assert.equal(b.candidateAlreadyOrdered, false);
     assert.equal(b.journalPendingExecution, false);
-    assert.equal(b.acceptanceEligibility.allowed, true);
-    assert.equal(b.acceptanceEligibility.priorTrialProven, true);
+    assert.deepEqual(bBlockers, [], "a completed legacy trial never blocks a distinct approved trade");
+    assert.equal(b.acceptanceTradeCompleted, true, "trial record kept as audit evidence only");
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }
 });
 
-test("isolated durable store: operator disables B, regardless of completed A", () => {
+test("isolated durable store: operator PAPER switch blocks B; continuous flag no longer matters", () => {
   const dir = tempPaperStore();
   try {
-    assert.equal(run(dir, {ENGINE8_PAPER_OPERATOR_DISABLED:"1"}).b.acceptanceEligibility.allowed, false);
-    assert.equal(run(dir, {ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"0"}).b.acceptanceEligibility.allowed, false);
+    assert.deepEqual(run(dir, {ENGINE8_PAPER_OPERATOR_DISABLED:"1"}).bBlockers, ["PAPER_TRADING_DISABLED"]);
+    assert.deepEqual(run(dir, {ENGINE8_CONTINUOUS_PAPER_EXECUTION_AUTHORIZED:"0"}).bBlockers, []);
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }
 });
 
@@ -121,22 +124,35 @@ test("isolated durable store: later B close preserves first trial receipt and B 
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }
 });
 
-test("isolated durable store: pending Journal blocks fresh B despite valid eligibility", () => {
+test("pending Journal blocks only the SAME trade, never a fresh B (owner directive #425)", () => {
   const dir = tempPaperStore();
   try {
     const file=path.join(dir,"engine8-paper-execution-state.json");
     const lifecycle=JSON.parse(fs.readFileSync(file,"utf8"));
     lifecycle.executions["EXEC-UNRESOLVED"]={
-      strategyId:"intraday_scalp@10m",candidateId:"CAND-UNRESOLVED",
+      strategyId:"intraday_scalp@10m",candidateId:"CAND-UNRESOLVED",planId:"PLAN-UNRESOLVED",
+      status:"JOURNAL_PENDING",journalPending:true,executionSuccessful:true,
+    };
+    lifecycle.executions["EXEC-B-PENDING"]={
+      strategyId:"intraday_scalp@10m",candidateId:"CAND-B",planId:"PLAN-B",tradeId:"TRD-B",
       status:"JOURNAL_PENDING",journalPending:true,executionSuccessful:true,
     };
     fs.writeFileSync(file,JSON.stringify(lifecycle));
-    const {b}=run(dir);
-    assert.equal(b.journalPendingExecution,true);
+    const fresh = spawnSync(process.execPath, ["--input-type=module", "-e", script.replace('query("CAND-B", "PLAN-B")','query("CAND-C", "PLAN-C")')], {
+      cwd: repoRoot, encoding: "utf8", timeout: 15000,
+      env: {...process.env, ENGINE8_PAPER_DATA_DIR: dir, TRADE_JOURNAL_DIR: path.join(dir,"journal"), ENGINE8_PAPER_OPERATOR_DISABLED:"0"},
+    });
+    assert.equal(fresh.status, 0, fresh.stderr);
+    const c = JSON.parse(fresh.stdout.trim());
+    assert.deepEqual(c.bBlockers, [], "another trade's pending Journal never blocks a fresh approved trade");
+    assert.equal(c.b.otherTradeJournalPending, true, "but it is reported for alerting");
+    const {bBlockers}=run(dir);
+    assert.ok(bBlockers.includes("SAME_TRADE_JOURNAL_PENDING"), "the same trade is never sent twice");
+    assert.ok(bBlockers.includes("SAME_TRADE_ALREADY_ACTIVE"));
   } finally { fs.rmSync(dir, {recursive:true,force:true}); }
 });
 
-test("official Engine 10 PAPER OPEN prevents distinct candidate B", () => {
+test("an open Engine 10 PAPER trade no longer blocks distinct approved candidate B (Engine 6 owns overlap)", () => {
   const dir=tempPaperStore();
   try {
     const j=path.join(dir,"journal");
@@ -144,9 +160,10 @@ test("official Engine 10 PAPER OPEN prevents distinct candidate B", () => {
     fs.writeFileSync(path.join(j,"trade-journal.json"),JSON.stringify([
       {tradeId:"TRD-OPEN",strategyId:"intraday_scalp@10m",accountMode:"PAPER",status:"OPEN"}
     ]));
-    const {b}=run(dir);
-    assert.equal(b.openTradeForStrategy,true);
-    assert.equal(b.acceptanceEligibility.allowed,true, "authorization does not replace position lock");
+    const {b,bBlockers}=run(dir);
+    assert.equal(b.openTradeForStrategy,true, "still reported for information");
+    assert.equal(b.activeTradeIdExists,false);
+    assert.deepEqual(bBlockers,[]);
   } finally {fs.rmSync(dir,{recursive:true,force:true});}
 });
 

@@ -8,6 +8,10 @@ on:
       - "services/core/logic/trading/engine8DuplicateState.js"
       - "services/core/logic/trading/engine8CanonicalPaperAdapter.js"
       - "services/core/logic/trading/engine8PaperExecutor.js"
+      - "services/core/logic/trading/engine8ExecutionGuards.js"
+      - "services/core/logic/trading/engine8ApprovedNotOrderedAlert.js"
+      - "services/core/jobs/autoExecuteCanonicalPaperTrade.js"
+      - "services/core/tests/engine8ApprovedNotOrderedAlert.test.js"
       - "services/core/tests/engine8ContinuousPaperAcceptance.test.js"
       - "services/core/tests/engine8ContinuousPaperDurable.test.js"
       - "services/core/tests/engine8ContinuousPaperHttp.test.js"
@@ -40,6 +44,10 @@ jobs:
           node --check services/core/logic/trading/engine8DuplicateState.js
           node --check services/core/logic/trading/engine8CanonicalPaperAdapter.js
           node --check services/core/logic/trading/engine8PaperExecutor.js
+          node --check services/core/logic/trading/engine8ExecutionGuards.js
+          node --check services/core/logic/trading/engine8ApprovedNotOrderedAlert.js
+          node --check services/core/jobs/autoExecuteCanonicalPaperTrade.js
+          node --test services/core/tests/engine8ApprovedNotOrderedAlert.test.js
           node --test services/core/tests/engine8ContinuousPaperAcceptance.test.js
           node --test services/core/tests/engine8ContinuousPaperDurable.test.js
       - name: Simulated authorized fresh-store regression
