@@ -40,7 +40,8 @@ function upper(value) {
 }
 
 const verificationCycleTime=nowIso();
-let verificationContext={executorInvoked:false};
+const schedulerRunId=process.env.ENGINE8_VERIFICATION_SCHEDULER_RUN_ID||null;
+let verificationContext={executorInvoked:false,schedulerRunId};
 async function printAndExit(payload, code = 0) {
   console.log(JSON.stringify(payload, null, 2));
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
@@ -99,7 +100,7 @@ try {
   if(process.env.ENGINE8_PAPER_VERIFICATION_ENABLED==="1") {
     try {
       const lane=snapshot?.strategies?.[STRATEGY_ID];
-      verificationContext={executorInvoked:false,adapter:lane?.engine8PaperOrder,engine6Permission:typeof lane?.permission?.paper?.allowed==="boolean"?lane.permission.paper.allowed:null,approvalSnapshotTime:lane?.permission?.paper?.snapshotTime??snapshot?.now??null,approvalSnapshotHash:createHash("sha256").update(snapshotBytes).digest("hex")};
+      verificationContext={executorInvoked:false,schedulerRunId,adapter:lane?.engine8PaperOrder,engine6Permission:typeof lane?.permission?.paper?.allowed==="boolean"?lane.permission.paper.allowed:null,approvalSnapshotTime:lane?.permission?.paper?.snapshotTime??snapshot?.now??null,approvalSnapshotHash:createHash("sha256").update(snapshotBytes).digest("hex")};
     } catch { /* observational only */ }
   }
 } catch (error) {
