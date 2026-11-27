@@ -1,0 +1,12 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import {readDailyPaperEvidence as read} from "../logic/trading/engine8DailyEvidenceReader.js";
+const root="/synthetic";
+const opts={paperDir:root,journalDir:root};
+test("missing evidence stays null",()=>{const x=read({...opts,read:()=>({status:"UNAVAILABLE",reason:"FILE_NOT_FOUND"})});assert.equal(x.values.orders,null);assert.equal(x.coverage,"UNPROVEN");});
+test("changed store invalidates entire capture",()=>{let n=0;const x=read({...opts,read:()=>({status:"OK",sha256:String(n++),value:[]})});assert.equal(x.stability,"CHANGED");assert.ok(Object.values(x.values).every(v=>v===null));});
+test("invalid shape never becomes empty store",()=>{const x=read({...opts,read:()=>({status:"OK",sha256:"same",value:{}})});assert.equal(x.stores.orders.reason,"INVALID_STORE_SHAPE");assert.equal(x.values.orders,null);});
+test("bounded actual file capture is read only and rejects corrupt JSON and symlink",()=>{const d=fs.mkdtempSync(path.join(os.tmpdir(),"e8e-test-"));try{const o=path.join(d,"paper-orders.json");fs.writeFileSync(o,"[]");fs.writeFileSync(path.join(d,"paper-executions.json"),"{");fs.symlinkSync(o,path.join(d,"trade-journal.json"));const x=read({paperDir:d,journalDir:d});assert.deepEqual(x.values.orders,[]);assert.equal(x.stores.executions.reason,"JSON_PARSE_FAILED");assert.equal(x.stores.journal.reason,"UNSAFE_FILE");assert.equal(fs.readFileSync(o,"utf8"),"[]");assert.equal(read({paperDir:d,journalDir:d,maxBytes:1}).values.orders,null);}finally{fs.rmSync(d,{recursive:true,force:true});}});
