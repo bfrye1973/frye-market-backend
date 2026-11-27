@@ -14,3 +14,13 @@ Newest at the bottom. One short entry per work session.
 - Owner decision: Engine 18 uses **Rithmic only**; Ironbeam retired. Old Ironbeam research service (`frye-engine18-liquidity-research`) to be suspended by owner. Recorder standby worker kept for Rithmic recording.
 - Owner sent Rithmic tech support: login extension, second session, data-retention terms.
 - Next: Engine 18D re-audit request for PR #400 → live Step A/B → Rithmic recorder source.
+
+## 2026-11-27 — Engine 28 (Claude)
+- Done: Phase 0 read-only inventory (`docs/engine28/PHASE0_INVENTORY.md`) and Master Development Plan v1.0 draft (`docs/engine28/MASTER_PLAN.md`). PR #417 @ 09565bb 87/87 pass; PR #418 @ 057d314 70/70 pass; main 28A tests 97/97.
+- Key findings: observer exit code gates PAPER execution (F-1); executor awaits receipt storage with no timeout (F-2); receipt store stops at 50,000 files, about 4–5 weeks (F-3); #417/#418 edit the same files with different content.
+- Waiting on owner: decisions D-1…D-6 in the master plan; Replay archive for Nov 24–27 cases before 14-day retention.
+- Next: Manager review → assignment 28A-001 (observer non-interference).
+- Later (Nov 27): owner made #412 P0. E28A acknowledged the editor agreement (#412 7225818697). Draft PR #419 (bounded observers + noninterference tests, base 09565bb, CI green). Draft PR #420 (phone view `/paper-verification.html`, CI green). Checkpoint: #412 7225971453.
+- Waiting on: E8 review of #419; E12 restack + `perApproval`; E10B re-review; owner decisions on Step 4 gating, Render read secret, evidence preservation.
+- Later (Nov 27, ~12:45 AZ): owner made Claude lead programmer for all of #412; Engine 8 = independent reviewer. Answered E8 review of #419 (integrated executor + scheduler tests, limiter caps, coverage rules). Integrated head PR #422 `d638f1d` (producer F-3 per-day receipts, SCHEDULER_SKIPPED, E12 consumer restack + regressions 1–4, perApproval/health/Replay chronology, release plan). Phone view #420 updated. Evidence preservation script #423. All CI green. Status: #412 7226409440.
+- Waiting on: E8/E12/E10B review at `d638f1d`; owner: authorize #423 before Dec 7, Render read access (day-level NO), Pipeline Doctor gating, staged switch-on per `docs/engine28/ISSUE412_RELEASE_PLAN.md`.
